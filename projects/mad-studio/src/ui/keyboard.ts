@@ -1,0 +1,185 @@
+import { engine } from '../audio/engine';
+import { useStore } from '../store/store';
+import { runCommand, type CommandId } from './commands';
+import { closeDialog, closeMenu, useOverlays } from './overlays';
+
+/** Physical key → semitone offset (layout independent, so QWERTZ works too). */
+const TYPING_KEYS: Record<string, number> = {
+  KeyZ: 0, KeyS: 1, KeyX: 2, KeyD: 3, KeyC: 4, KeyV: 5, KeyG: 6, KeyB: 7, KeyH: 8, KeyN: 9, KeyJ: 10, KeyM: 11,
+  Comma: 12, KeyL: 13, Period: 14, Semicolon: 15, Slash: 16,
+  KeyQ: 12, Digit2: 13, KeyW: 14, Digit3: 15, KeyE: 16, KeyR: 17, Digit5: 18, KeyT: 19, Digit6: 20, KeyY: 21,
+  Digit7: 22, KeyU: 23, KeyI: 24, Digit9: 25, KeyO: 26, Digit0: 27, KeyP: 28,
+};
+const TYPING_BASE = 48; // C4 in this app's naming = MIDI 48
+
+type KeyHandler = (e: KeyboardEvent) => boolean;
+const windowHandlers = new Map<string, KeyHandler>();
+
+/** Editors register a handler that receives keys while their window is focused. */
+export function registerWindowKeys(windowId: string, handler: KeyHandler): () => void {
+  windowHandlers.set(windowId, handler);
+  return () => {
+    if (windowHandlers.get(windowId) === handler) windowHandlers.delete(windowId);
+  };
+}
+
+export function isTextInput(target: EventTarget | null): boolean {
+  const el = target as HTMLElement | null;
+  if (!el) return false;
+  const tag = el.tagName;
+  return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || el.isContentEditable;
+}
+
+const held = new Map<string, number>();
+
+function releaseAll(): void {
+  for (const handle of held.values()) engine.noteOff(handle);
+  held.clear();
+}
+
+function shortcutFor(e: KeyboardEvent): CommandId | null {
+  const mod = e.metaKey || e.ctrlKey;
+  if (mod) {
+    switch (e.code) {
+      case 'KeyZ':
+        return e.shiftKey ? 'redo' : 'undo';
+      case 'KeyY':
+        return 'redo';
+      case 'KeyS':
+        return e.shiftKey ? 'saveAs' : 'save';
+      case 'KeyO':
+        return 'open';
+      case 'KeyN':
+        return 'new';
+      case 'KeyR':
+        return 'export';
+      case 'KeyT':
+        return 'typingKeyboard';
+      case 'F4':
+        return 'newPattern';
+      default:
+        return null;
+    }
+  }
+  if (e.altKey) return null;
+  switch (e.code) {
+    case 'Space':
+      return 'playPause';
+    case 'KeyL':
+      return 'toggleMode';
+    case 'KeyR':
+      return 'record';
+    case 'KeyM':
+      return 'metronome';
+    case 'F1':
+      return 'shortcuts';
+    case 'F5':
+      return 'window:playlist';
+    case 'F6':
+      return 'window:channelRack';
+    case 'F7':
+      return 'window:pianoRoll';
+    case 'F8':
+      return 'toggleBrowser';
+    case 'F9':
+      return 'window:mixer';
+    case 'BracketLeft':
+    case 'NumpadSubtract':
+      return 'prevPattern';
+    case 'BracketRight':
+    case 'NumpadAdd':
+      return 'nextPattern';
+    default:
+      return null;
+  }
+}
+
+function onKeyDown(e: KeyboardEvent): void {
+  const overlays = useOverlays.getState();
+  if (e.key === 'Escape') {
+    if (overlays.menu) closeMenu();
+    else if (overlays.dialog) closeDialog();
+    return;
+  }
+  if (overlays.dialog || isTextInput(e.target)) return;
+
+  const s = useStore.getState();
+  const mod = e.metaKey || e.ctrlKey;
+
+  // Typing keyboard to piano takes letters and digits while enabled.
+  const semitone = TYPING_KEYS[e.code];
+  if (s.ui.typingKeyboard && !mod && !e.altKey && semitone !== undefined) {
+    e.preventDefault();
+    if (!e.repeat && !held.has(e.code) && s.ui.selectedChannelId) {
+      held.set(e.code, engine.noteOn(s.ui.selectedChannelId, TYPING_BASE + semitone));
+    }
+    return;
+  }
+
+  const focused = s.ui.focusedWindow;
+  const handler = focused ? windowHandlers.get(focused) : undefined;
+  if (handler?.(e)) {
+    e.preventDefault();
+    return;
+  }
+
+  const command = shortcutFor(e);
+  if (command) {
+    e.preventDefault();
+    void runCommand(command);
+  }
+}
+
+function onKeyUp(e: KeyboardEvent): void {
+  const handle = held.get(e.code);
+  if (handle !== undefined) {
+    engine.noteOff(handle);
+    held.delete(e.code);
+  }
+}
+
+export function installKeyboard(): void {
+  window.addEventListener('keydown', onKeyDown);
+  window.addEventListener('keyup', onKeyUp);
+  window.addEventListener('blur', releaseAll);
+}
+
+// ---------------------------------------------------------------------------
+// MIDI keyboards (Web MIDI: Chrome/Electron)
+
+let midiStarted = false;
+
+export async function enableMidi(): Promise<number> {
+  if (midiStarted) return -1;
+  if (!navigator.requestMIDIAccess) throw new Error('Web MIDI is not available in this browser.');
+  const access = await navigator.requestMIDIAccess();
+  midiStarted = true;
+  const notes = new Map<number, number>();
+  const attach = (input: MIDIInput) => {
+    input.onmidimessage = (msg) => {
+      const data = msg.data;
+      if (!data || data.length < 3) return;
+      const status = data[0] & 0xf0;
+      const key = data[1];
+      const vel = data[2];
+      const channelId = useStore.getState().ui.selectedChannelId;
+      if (status === 0x90 && vel > 0 && channelId) {
+        const prev = notes.get(key);
+        if (prev !== undefined) engine.noteOff(prev);
+        notes.set(key, engine.noteOn(channelId, key, vel / 127));
+      } else if (status === 0x80 || (status === 0x90 && vel === 0)) {
+        const h = notes.get(key);
+        if (h !== undefined) {
+          engine.noteOff(h);
+          notes.delete(key);
+        }
+      }
+    };
+  };
+  access.inputs.forEach(attach);
+  access.onstatechange = (ev) => {
+    const port = (ev as MIDIConnectionEvent).port;
+    if (port && port.type === 'input' && port.state === 'connected') attach(port as MIDIInput);
+  };
+  return access.inputs.size;
+}

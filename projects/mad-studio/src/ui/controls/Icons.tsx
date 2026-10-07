@@ -1,0 +1,169 @@
+import type { SVGProps } from 'react';
+
+type IconProps = SVGProps<SVGSVGElement> & { size?: number };
+
+function Svg({ size = 14, children, ...rest }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" aria-hidden {...rest}>
+      {children}
+    </svg>
+  );
+}
+
+export const IconPlay = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M4.5 3v10l8-5z" fill="currentColor" stroke="none" />
+  </Svg>
+);
+export const IconPause = (p: IconProps) => (
+  <Svg {...p}>
+    <rect x="4" y="3" width="3" height="10" fill="currentColor" stroke="none" />
+    <rect x="9" y="3" width="3" height="10" fill="currentColor" stroke="none" />
+  </Svg>
+);
+export const IconStop = (p: IconProps) => (
+  <Svg {...p}>
+    <rect x="4" y="4" width="8" height="8" fill="currentColor" stroke="none" />
+  </Svg>
+);
+export const IconRecord = (p: IconProps) => (
+  <Svg {...p}>
+    <circle cx="8" cy="8" r="4.5" fill="currentColor" stroke="none" />
+  </Svg>
+);
+export const IconMetronome = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M5.5 14h5L9 2.5H7z" />
+    <path d="M8 10l4-6" />
+  </Svg>
+);
+export const IconPlaylist = (p: IconProps) => (
+  <Svg {...p}>
+    <rect x="2" y="3" width="6" height="3" rx="0.5" />
+    <rect x="6" y="7" width="8" height="3" rx="0.5" />
+    <rect x="3" y="11" width="5" height="3" rx="0.5" />
+  </Svg>
+);
+export const IconRack = (p: IconProps) => (
+  <Svg {...p}>
+    <rect x="2" y="3" width="12" height="2.5" rx="0.5" />
+    <rect x="2" y="6.75" width="12" height="2.5" rx="0.5" />
+    <rect x="2" y="10.5" width="12" height="2.5" rx="0.5" />
+  </Svg>
+);
+export const IconPiano = (p: IconProps) => (
+  <Svg {...p}>
+    <rect x="2" y="2.5" width="12" height="11" rx="1" />
+    <path d="M5 2.5v6M8 2.5v11M11 2.5v6" />
+  </Svg>
+);
+export const IconMixer = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M4 2v12M8 2v12M12 2v12" />
+    <rect x="2.5" y="9" width="3" height="2" fill="currentColor" />
+    <rect x="6.5" y="5" width="3" height="2" fill="currentColor" />
+    <rect x="10.5" y="10" width="3" height="2" fill="currentColor" />
+  </Svg>
+);
+export const IconBrowser = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M2 4.5h4l1.5 1.5H14v7H2z" />
+  </Svg>
+);
+export const IconClose = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M4 4l8 8M12 4l-8 8" />
+  </Svg>
+);
+export const IconMaximize = (p: IconProps) => (
+  <Svg {...p}>
+    <rect x="3" y="3" width="10" height="10" rx="1" />
+  </Svg>
+);
+export const IconPlus = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M8 3v10M3 8h10" />
+  </Svg>
+);
+export const IconChevronLeft = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M10 3L5 8l5 5" />
+  </Svg>
+);
+export const IconChevronRight = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M6 3l5 5-5 5" />
+  </Svg>
+);
+export const IconChevronDown = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M3.5 6l4.5 4.5L12.5 6" />
+  </Svg>
+);
+export const IconPencil = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M10.5 2.5l3 3-8 8H2.5v-3z" />
+  </Svg>
+);
+export const IconBrush = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M13.5 2.5l-6 6" />
+    <path d="M7.5 8.5c-2 0-3 1.5-3 3 0 1-.7 1.6-2 2 3 1 6 0 6.5-2.5z" />
+  </Svg>
+);
+export const IconEraser = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M6 13.5h8M2.8 9.7l6.5-6.5 3.5 3.5-6.5 6.5H5z" />
+  </Svg>
+);
+export const IconSelect = (p: IconProps) => (
+  <Svg {...p}>
+    <rect x="2.5" y="2.5" width="11" height="11" strokeDasharray="2 2" />
+  </Svg>
+);
+export const IconMagnet = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M4 2.5v5.5a4 4 0 008 0V2.5" />
+    <path d="M4 5h2.5M9.5 5H12" />
+  </Svg>
+);
+export const IconWave = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M1.5 8h2l1.5-4 2 8 2-10 2 9 1.5-3h2" />
+  </Svg>
+);
+export const IconSpeaker = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M2.5 6h2.5l3.5-3v10L5 10H2.5z" />
+    <path d="M11 5.5a3.5 3.5 0 010 5" />
+  </Svg>
+);
+export const IconUndo = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M5 4L2 7l3 3" />
+    <path d="M2.5 7H10a3.5 3.5 0 010 7H7" />
+  </Svg>
+);
+export const IconRedo = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M11 4l3 3-3 3" />
+    <path d="M13.5 7H6a3.5 3.5 0 000 7h3" />
+  </Svg>
+);
+export const IconSave = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M3 2.5h8l2.5 2.5v8.5h-11z" />
+    <path d="M5 2.5v3.5h5V2.5M5 13.5v-4h6v4" />
+  </Svg>
+);
+export const IconKeyboard = (p: IconProps) => (
+  <Svg {...p}>
+    <rect x="1.5" y="4" width="13" height="8" rx="1" />
+    <path d="M4 6.5h.01M6.5 6.5h.01M9 6.5h.01M11.5 6.5h.01M4.5 9.5h7" />
+  </Svg>
+);
+export const IconGhost = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M3.5 14V7a4.5 4.5 0 019 0v7l-1.5-1.2L9.5 14 8 12.8 6.5 14 5 12.8z" />
+  </Svg>
+);

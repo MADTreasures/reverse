@@ -1,0 +1,105 @@
+{
+  "name": "mad-studio",
+  "productName": "MAD Studio",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Pattern-based music studio (DAW) for macOS in the style of classic step-sequencer workstations.",
+  "author": "MADTreasures",
+  "type": "module",
+  "main": "electron/main.cjs",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview --port 4173 --strictPort",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:e2e": "playwright test",
+    "check": "npm run typecheck && npm run test && npm run build",
+    "app": "npm run build && electron .",
+    "app:dev": "node scripts/electron-dev.mjs",
+    "app:smoke": "electron . --smoke-test",
+    "icon": "node scripts/make-icon.mjs",
+    "dist:mac": "npm run build && electron-builder --mac --publish never",
+    "dist:dir": "npm run build && electron-builder --dir --publish never"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.56.1",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "@vitejs/plugin-react": "6.1.2",
+    "electron": "44.7.0",
+    "electron-builder": "26.15.3",
+    "fflate": "0.8.3",
+    "immer": "11.1.21",
+    "react": "19.3.0",
+    "react-dom": "19.3.0",
+    "typescript": "7.0.2",
+    "vite": "8.3.3",
+    "vitest": "5.0.3",
+    "zustand": "5.0.15"
+  },
+  "build": {
+    "appId": "io.github.madtreasures.madstudio",
+    "productName": "MAD Studio",
+    "copyright": "Copyright © 2026 MADTreasures",
+    "directories": {
+      "output": "release",
+      "buildResources": "build"
+    },
+    "files": [
+      "dist/**/*",
+      "electron/**/*",
+      "package.json"
+    ],
+    "fileAssociations": [
+      {
+        "ext": "madstudio",
+        "name": "MAD Studio Project",
+        "role": "Editor"
+      }
+    ],
+    "mac": {
+      "category": "public.app-category.music",
+      "icon": "build/icon.png",
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "arm64",
+            "x64"
+          ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "arm64",
+            "x64"
+          ]
+        }
+      ],
+      "identity": "-",
+      "hardenedRuntime": false,
+      "gatekeeperAssess": false,
+      "darkModeSupport": true,
+      "extendInfo": {
+        "NSHighResolutionCapable": true
+      }
+    },
+    "dmg": {
+      "title": "MAD Studio ${version}"
+    },
+    "linux": {
+      "target": [
+        "AppImage"
+      ],
+      "category": "AudioVideo"
+    },
+    "win": {
+      "target": [
+        "nsis"
+      ]
+    },
+    "publish": null
+  }
+}

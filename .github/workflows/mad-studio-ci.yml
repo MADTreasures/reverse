@@ -1,0 +1,70 @@
+name: MAD Studio · CI
+
+on:
+  push:
+    paths:
+      - 'projects/mad-studio/**'
+      - '.github/workflows/mad-studio-ci.yml'
+  pull_request:
+    paths:
+      - 'projects/mad-studio/**'
+      - '.github/workflows/mad-studio-ci.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: mad-studio-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    working-directory: projects/mad-studio
+
+jobs:
+  test:
+    name: Typecheck · unit · build · e2e · Electron
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: projects/mad-studio/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Unit tests
+        run: npm test
+
+      - name: Build
+        run: npm run build
+
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: End-to-end tests
+        run: npx playwright test
+        env:
+          CI: 'true'
+
+      - name: Electron smoke test
+        run: |
+          npx electron --version
+          xvfb-run -a npx electron . --smoke-test --no-sandbox
+
+      - name: Upload Playwright report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mad-studio-playwright-report
+          path: projects/mad-studio/playwright-report
+          retention-days: 7
