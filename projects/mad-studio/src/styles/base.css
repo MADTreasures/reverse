@@ -65,6 +65,15 @@ button {
   cursor: pointer;
 }
 
+button:focus {
+  outline: none;
+}
+
+button:focus-visible {
+  outline: 1px solid var(--select);
+  outline-offset: 1px;
+}
+
 input[type='text'],
 input[type='number'],
 select {

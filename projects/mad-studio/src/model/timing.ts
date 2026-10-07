@@ -101,13 +101,13 @@ export function formatPosition(tick: number, beatsPerBar: number): string {
   return `${bar}:${String(step).padStart(2, '0')}:${String(sub).padStart(2, '0')}`;
 }
 
-/** Formats seconds as M:SS:CS (centiseconds). */
+/** Formats seconds as M:SS.CS (centiseconds). */
 export function formatClock(seconds: number): string {
   const s = Math.max(0, seconds);
   const m = Math.floor(s / 60);
   const sec = Math.floor(s % 60);
   const cs = Math.floor((s * 100) % 100);
-  return `${m}:${String(sec).padStart(2, '0')}:${String(cs).padStart(2, '0')}`;
+  return `${m}:${String(sec).padStart(2, '0')}.${String(cs).padStart(2, '0')}`;
 }
 
 const NOTE_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];

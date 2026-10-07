@@ -28,9 +28,19 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-node@v4
+      - name: Reject file names that collide on case-insensitive file systems (macOS)
+        working-directory: .
+        run: |
+          dupes=$(git ls-files | tr '[:upper:]' '[:lower:]' | sort | uniq -d)
+          if [ -n "$dupes" ]; then
+            echo "These paths differ only in letter case and break checkouts on macOS:"
+            echo "$dupes"
+            exit 1
+          fi
+
+      - uses: actions/setup-node@v5
         with:
           node-version: 22
           cache: npm
@@ -57,9 +67,10 @@ jobs:
           CI: 'true'
 
       - name: Electron smoke test
-        run: |
-          npx electron --version
-          xvfb-run -a npx electron . --smoke-test --no-sandbox
+        # GitHub's Ubuntu runners cannot use Chromium's setuid sandbox.
+        run: xvfb-run -a npx electron . --smoke-test --no-sandbox
+        env:
+          ELECTRON_DISABLE_SANDBOX: '1'
 
       - name: Upload Playwright report
         if: failure()

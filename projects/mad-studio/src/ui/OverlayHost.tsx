@@ -4,7 +4,7 @@ import { ExportDialog } from './dialogs/ExportDialog';
 import { AboutDialog, ShortcutsDialog } from './dialogs/InfoDialogs';
 
 /** Context menus, modal dialogs and toast notifications. */
-export function Overlays() {
+export function OverlayHost() {
   const menu = useOverlays((s) => s.menu);
   const dialog = useOverlays((s) => s.dialog);
   const toasts = useOverlays((s) => s.toasts);

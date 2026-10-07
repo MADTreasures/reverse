@@ -6,7 +6,7 @@ import { ChannelRack } from './ui/channelrack/ChannelRack';
 import { audioFilesFromDrop, hasFiles } from './ui/dnd';
 import { setHint } from './ui/hint';
 import { Mixer } from './ui/mixer/Mixer';
-import { Overlays } from './ui/Overlays';
+import { OverlayHost } from './ui/OverlayHost';
 import { toast } from './ui/overlays';
 import { PianoRoll } from './ui/pianoroll/PianoRoll';
 import { Playlist } from './ui/playlist/Playlist';
@@ -59,7 +59,7 @@ export function App() {
         {browserOpen && <Browser />}
         <Workspace />
       </div>
-      <Overlays />
+      <OverlayHost />
     </div>
   );
 }
