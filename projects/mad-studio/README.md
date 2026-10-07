@@ -69,7 +69,8 @@ npm ci
 npm run dev             # http://localhost:5173 in Chrome, Edge oder Safari öffnen
 ```
 
-MIDI-Keyboards funktionieren nur in Chromium-Browsern und in der Mac-App.
+MIDI-Keyboards funktionieren in der Mac-App automatisch, im Browser (nur Chrome/Edge) nach
+*Options → Enable MIDI keyboard input*.
 
 ## Kurzanleitung
 
