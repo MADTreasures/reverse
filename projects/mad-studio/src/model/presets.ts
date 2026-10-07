@@ -68,7 +68,7 @@ export const SYNTH_PRESETS: SynthPreset[] = [
       filter: { cutoff: 420, resonance: 3, envAmount: 0.45, keyTrack: 0.2 },
       ampEnv: env(0.003, 0.25, 0.65, 0.12),
       filterEnv: env(0.002, 0.22, 0.1, 0.15),
-      gain: 0.5,
+      gain: 0.36,
     }),
   },
   {
@@ -98,7 +98,7 @@ export const SYNTH_PRESETS: SynthPreset[] = [
       filter: { cutoff: 900, resonance: 1.5, envAmount: 0.15 },
       ampEnv: env(0.01, 0.3, 0.85, 0.2),
       lfo: { target: 'filter', rate: 0.3, depth: 0.25 },
-      gain: 0.45,
+      gain: 0.38,
     }),
   },
   {
@@ -113,7 +113,7 @@ export const SYNTH_PRESETS: SynthPreset[] = [
       filter: { cutoff: 380, resonance: 6, envAmount: 0.1, keyTrack: 0.1 },
       ampEnv: env(0.005, 0.2, 0.9, 0.15),
       lfo: { target: 'filter', rate: 2.2, depth: 0.7 },
-      gain: 0.45,
+      gain: 0.38,
     }),
   },
   {
@@ -246,7 +246,7 @@ export const SYNTH_PRESETS: SynthPreset[] = [
       filter: { enabled: false },
       ampEnv: env(0.002, 1.8, 0.15, 0.4),
       lfo: { target: 'amp', rate: 4, depth: 0.15 },
-      gain: 0.5,
+      gain: 0.42,
     }),
   },
   {
@@ -258,7 +258,7 @@ export const SYNTH_PRESETS: SynthPreset[] = [
       filter: { type: 'bandpass', cutoff: 400, resonance: 4, envAmount: 0.8, keyTrack: 0 },
       ampEnv: env(1.5, 0.5, 0.8, 1.0),
       filterEnv: env(2.0, 1.0, 0.6, 1.0),
-      gain: 0.35,
+      gain: 0.9,
     }),
   },
 ];

@@ -143,10 +143,14 @@ describe('patterns and playlist', () => {
 });
 
 describe('mixer', () => {
-  it('adds effects with default parameters', () => {
-    const id = addEffect(0, 'reverb');
-    const slot = state().project.mixer[0].effects[0];
-    expect(slot.id).toBe(id);
-    expect(slot.params.decay).toBeGreaterThan(0);
+  it('starts new projects with a limiter on the master', () => {
+    expect(state().project.mixer[0].effects.map((e) => e.type)).toEqual(['limiter']);
+  });
+
+  it('appends effects with default parameters', () => {
+    const id = addEffect(1, 'reverb');
+    const effects = state().project.mixer[1].effects;
+    expect(effects[effects.length - 1].id).toBe(id);
+    expect(effects[effects.length - 1].params.decay).toBeGreaterThan(0);
   });
 });

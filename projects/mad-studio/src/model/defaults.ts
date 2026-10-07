@@ -1,4 +1,5 @@
 import { paletteColor } from './colors';
+import { defaultEffectParams } from './effects';
 import { factorySampleId, factorySampleInfo, findFactorySample } from './factory';
 import { makeId } from './ids';
 import { defaultSynthParams } from './presets';
@@ -138,6 +139,8 @@ export function createEmptyProject(): Project {
   channels.forEach((ch, i) => {
     mixer[i + 1].name = ch.name;
   });
+  // A limiter on the master keeps chords and stacked sounds from clipping the output.
+  mixer[0].effects.push({ id: makeId('fx'), type: 'limiter', enabled: true, params: defaultEffectParams('limiter') });
   return {
     format: 'mad-studio',
     version: 1,

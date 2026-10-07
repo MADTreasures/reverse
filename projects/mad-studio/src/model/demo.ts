@@ -64,7 +64,7 @@ export function createDemoProject(): Project {
   openHat.pan = 0.15;
   rim.volume = 0.66;
   rim.pan = -0.25;
-  bass.volume = 0.6;
+  bass.volume = 0.7;
   chords.volume = 0.72;
   lead.volume = 0.92;
   if (lead.kind === 'synth') lead.synth.gain = 0.6;

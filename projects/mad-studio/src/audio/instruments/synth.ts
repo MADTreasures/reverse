@@ -69,6 +69,12 @@ export class SynthInstrument implements Instrument {
     const p = this.params;
     const nodes: AudioNode[] = [];
     const sources: AudioScheduledSourceNode[] = [];
+    // LFO connections into this voice; removed when the voice ends so they do not accumulate.
+    const lfoLinks: [GainNode, AudioParam][] = [];
+    const linkLfo = (lfo: GainNode, param: AudioParam) => {
+      lfo.connect(param);
+      lfoLinks.push([lfo, param]);
+    };
 
     const amp = ctx.createGain();
     amp.gain.value = 0;
@@ -88,13 +94,13 @@ export class SynthInstrument implements Instrument {
       head = filter;
       nodes.push(filter);
       if (envCents !== 0) scheduleEnvelope(filter.detune, p.filterEnv, t, 0, envCents, duration);
-      if (p.lfo.target === 'filter') this.lfoFilter.connect(filter.detune);
+      if (p.lfo.target === 'filter') linkLfo(this.lfoFilter, filter.detune);
     }
 
     if (p.lfo.target === 'amp' && p.lfo.depth > 0) {
       const trem = ctx.createGain();
       trem.gain.value = 1 - Math.min(1, p.lfo.depth) * 0.5;
-      this.lfoAmp.connect(trem.gain);
+      linkLfo(this.lfoAmp, trem.gain);
       amp.connect(trem);
       out = trem;
       nodes.push(trem);
@@ -121,7 +127,7 @@ export class SynthInstrument implements Instrument {
           o.type = osc.wave;
           o.frequency.value = midiToHz(key + osc.coarse);
           o.detune.value = osc.fine + spread * osc.detune;
-          if (p.lfo.target === 'pitch') this.lfoPitch.connect(o.detune);
+          if (p.lfo.target === 'pitch') linkLfo(this.lfoPitch, o.detune);
           src = o;
         }
         const pan = Math.max(-1, Math.min(1, osc.pan + spread * 0.6));
@@ -143,7 +149,17 @@ export class SynthInstrument implements Instrument {
       }
     }
 
+    const unlinkLfo = () => {
+      for (const [lfo, param] of lfoLinks) {
+        try {
+          lfo.disconnect(param);
+        } catch {
+          // Already disconnected.
+        }
+      }
+    };
     if (sources.length === 0) {
+      unlinkLfo();
       for (const n of nodes) n.disconnect();
       return null;
     }
@@ -159,7 +175,10 @@ export class SynthInstrument implements Instrument {
       return releaseEnvelope(amp.gain, env, t, 0, peak, at);
     });
     this.voices.add(voice);
-    voice.onEnd(() => this.voices.delete(voice));
+    voice.onEnd(() => {
+      this.voices.delete(voice);
+      unlinkLfo();
+    });
     enforcePolyphony(this.voices, MAX_VOICES, t);
     return voice;
   }
