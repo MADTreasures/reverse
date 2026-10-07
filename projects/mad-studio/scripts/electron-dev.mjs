@@ -2,6 +2,7 @@
 import { spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
 import net from 'node:net';
+import path from 'node:path';
 
 const require = createRequire(import.meta.url);
 const PORT = 5173;
@@ -26,10 +27,13 @@ function waitForPort(port, timeoutMs = 30000) {
   });
 }
 
-const vite = spawn(process.execPath, [require.resolve('vite/bin/vite.js'), '--port', String(PORT), '--strictPort'], { stdio: 'inherit' });
+// vite/bin is not in the package's "exports", so locate it via package.json.
+const viteBin = path.join(path.dirname(require.resolve('vite/package.json')), 'bin', 'vite.js');
+const vite = spawn(process.execPath, [viteBin, '--port', String(PORT), '--strictPort'], { stdio: 'inherit' });
 await waitForPort(PORT);
 const electronBinary = require('electron');
-const app = spawn(electronBinary, ['.'], { stdio: 'inherit', env: { ...process.env, MAD_DEV_URL: URL } });
+// Extra arguments (e.g. --smoke-test) are passed through to Electron.
+const app = spawn(electronBinary, ['.', ...process.argv.slice(2)], { stdio: 'inherit', env: { ...process.env, MAD_DEV_URL: URL } });
 app.on('exit', (code) => {
   vite.kill();
   process.exit(code ?? 0);

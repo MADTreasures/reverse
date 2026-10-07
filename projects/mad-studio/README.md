@@ -141,8 +141,8 @@ offline für den WAV-Export.
 npm run dev          # Browser-Version mit Hot Reload
 npm run app:dev      # Electron-Fenster mit Hot Reload
 npm run typecheck    # TypeScript prüfen
-npm test             # 41 Unit-Tests (Vitest): Timing, Timeline, Scheduler, Store, Dateiformat, WAV, Sounds
-npm run test:e2e     # 10 End-to-End-Tests (Playwright, Chromium)
+npm test             # Unit-Tests (Vitest): Timing, Timeline, Scheduler, Store, Dateiformat, WAV, Sounds
+npm run test:e2e     # End-to-End-Tests der laufenden App (Playwright, Chromium)
 npm run check        # Typecheck + Unit-Tests + Build
 npm run dist:mac     # macOS-App (DMG + ZIP, arm64 + x64) nach release/
 npm run icon         # App-Icon aus build/icon.svg neu erzeugen
