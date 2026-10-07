@@ -1,0 +1,38 @@
+# --- Allgemein ---------------------------------------------------------------
+.DS_Store
+Thumbs.db
+*.log
+.idea/
+.vscode/*
+!.vscode/extensions.json
+
+# --- Node / Web-Projekte -----------------------------------------------------
+node_modules/
+dist/
+release/
+coverage/
+test-results/
+playwright-report/
+.vite/
+
+# --- Reverse Engineering -----------------------------------------------------
+# Fremde Programme, Installer und Binärdateien niemals committen:
+# Analyse-Ziele gehören in einen "targets/"-Ordner (wird ignoriert).
+**/targets/
+*.dmg
+*.pkg
+*.exe
+*.msi
+*.ipa
+*.apk
+# Analyse-Datenbanken von Hopper, Ghidra und IDA
+*.hop
+*.gpr
+*.rep/
+*.idb
+*.i64
+*.id0
+*.id1
+*.id2
+*.nam
+*.til
