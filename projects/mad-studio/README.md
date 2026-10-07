@@ -38,8 +38,8 @@ Samples enthalten.
 
 1. Auf GitHub unter **Actions → „MAD Studio · macOS app“** den neuesten erfolgreichen Lauf öffnen
    (oder unter **Releases**, sobald ein Tag `mad-studio-v*` existiert).
-2. Artefakt **`MAD-Studio-macOS`** herunterladen und entpacken. Darin liegen DMG und ZIP für
-   Apple Silicon (`arm64`) und Intel (`x64`).
+2. Unten bei *Artifacts* **`MAD-Studio-macOS-Apple-Silicon`** (M1/M2/M3/M4) oder
+   **`MAD-Studio-macOS-Intel`** herunterladen und entpacken – darin liegt die DMG-Datei.
 3. DMG öffnen und **MAD Studio** in den Programme-Ordner ziehen.
 4. Die App ist nicht von Apple notarisiert. Beim ersten Start blockiert macOS sie deshalb.
    Abhilfe: *Systemeinstellungen → Datenschutz & Sicherheit → „Trotzdem öffnen“*, oder im Terminal:
@@ -55,7 +55,7 @@ Voraussetzung: [Node.js](https://nodejs.org/) 22.12 oder neuer.
 ```bash
 cd projects/mad-studio
 npm ci
-npm run dist:mac        # erzeugt release/MAD Studio-0.1.0-arm64.dmg (und x64)
+npm run dist:mac        # erzeugt release/MAD Studio-0.1.0-arm64.dmg und …-x64.dmg
 ```
 
 Selbst gebaute Apps sind nicht unter Quarantäne und starten direkt. Zum schnellen
@@ -144,14 +144,14 @@ npm run typecheck    # TypeScript prüfen
 npm test             # Unit-Tests (Vitest): Timing, Timeline, Scheduler, Store, Dateiformat, WAV, Sounds
 npm run test:e2e     # End-to-End-Tests der laufenden App (Playwright, Chromium)
 npm run check        # Typecheck + Unit-Tests + Build
-npm run dist:mac     # macOS-App (DMG + ZIP, arm64 + x64) nach release/
+npm run dist:mac     # macOS-App als DMG (arm64 + x64) nach release/
 npm run icon         # App-Icon aus build/icon.svg neu erzeugen
 ```
 
 CI: [`mad-studio-ci.yml`](../../.github/workflows/mad-studio-ci.yml) prüft jede Änderung unter
 Linux (Typecheck, Tests, Build, E2E, Electron-Start).
 [`mad-studio-macos.yml`](../../.github/workflows/mad-studio-macos.yml) baut die Mac-App auf
-einem macOS-Runner, startet sie testweise und stellt DMG/ZIP als Artefakt bereit. Bei einem Tag
+einem macOS-Runner, startet sie testweise und stellt die DMGs als Artefakte bereit. Bei einem Tag
 `mad-studio-v*` wird daraus ein GitHub-Release.
 
 ## Grenzen und nächste Schritte
