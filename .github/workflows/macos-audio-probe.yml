@@ -1,0 +1,133 @@
+name: macOS audio device probe (temporary diagnostic)
+
+# Lists the CoreAudio devices of a hosted macOS runner and checks whether the default output
+# device actually runs its IO callback (the desktop test's engine plays through it). Removed after use.
+
+on:
+  push:
+    paths:
+      - '.github/workflows/macos-audio-probe.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: macos-14
+    timeout-minutes: 10
+    steps:
+      - name: system_profiler
+        run: system_profiler SPAudioDataType 2>&1 | head -60 || true
+
+      - name: CoreAudio devices and IO callbacks
+        run: |
+          mkdir -p "$RUNNER_TEMP/probe" && cd "$RUNNER_TEMP/probe"
+          cat > audio-probe.c <<'EOF'
+          #include <CoreAudio/CoreAudio.h>
+          #include <stdio.h>
+          #include <stdlib.h>
+          #include <unistd.h>
+
+          static int channels (AudioObjectID dev, AudioObjectPropertyScope scope)
+          {
+              AudioObjectPropertyAddress a = { kAudioDevicePropertyStreamConfiguration, scope, kAudioObjectPropertyElementMain };
+              UInt32 size = 0;
+              if (AudioObjectGetPropertyDataSize (dev, &a, 0, NULL, &size) != noErr || size == 0)
+                  return 0;
+              AudioBufferList* list = (AudioBufferList*) malloc (size);
+              int n = 0;
+              if (AudioObjectGetPropertyData (dev, &a, 0, NULL, &size, list) == noErr)
+                  for (UInt32 i = 0; i < list->mNumberBuffers; ++i)
+                      n += (int) list->mBuffers[i].mNumberChannels;
+              free (list);
+              return n;
+          }
+
+          static void name (AudioObjectID dev, char* out, size_t len)
+          {
+              AudioObjectPropertyAddress a = { kAudioObjectPropertyName, kAudioObjectPropertyScopeGlobal, kAudioObjectPropertyElementMain };
+              CFStringRef s = NULL;
+              UInt32 size = sizeof (s);
+              out[0] = 0;
+              if (AudioObjectGetPropertyData (dev, &a, 0, NULL, &size, &s) == noErr && s != NULL)
+              {
+                  CFStringGetCString (s, out, (CFIndex) len, kCFStringEncodingUTF8);
+                  CFRelease (s);
+              }
+          }
+
+          static double rate (AudioObjectID dev)
+          {
+              AudioObjectPropertyAddress a = { kAudioDevicePropertyNominalSampleRate, kAudioObjectPropertyScopeGlobal, kAudioObjectPropertyElementMain };
+              Float64 r = 0;
+              UInt32 size = sizeof (r);
+              AudioObjectGetPropertyData (dev, &a, 0, NULL, &size, &r);
+              return r;
+          }
+
+          static UInt32 u32 (AudioObjectID dev, AudioObjectPropertySelector sel)
+          {
+              AudioObjectPropertyAddress a = { sel, kAudioObjectPropertyScopeGlobal, kAudioObjectPropertyElementMain };
+              UInt32 v = 0, size = sizeof (v);
+              AudioObjectGetPropertyData (dev, &a, 0, NULL, &size, &v);
+              return v;
+          }
+
+          static volatile int callbacks = 0;
+
+          static OSStatus ioProc (AudioObjectID dev, const AudioTimeStamp* now, const AudioBufferList* in, const AudioTimeStamp* inTime,
+                                  AudioBufferList* out, const AudioTimeStamp* outTime, void* ctx)
+          {
+              (void) dev; (void) now; (void) in; (void) inTime; (void) out; (void) outTime; (void) ctx;
+              ++callbacks;
+              return noErr;
+          }
+
+          int main (void)
+          {
+              AudioObjectPropertyAddress a = { kAudioHardwarePropertyDevices, kAudioObjectPropertyScopeGlobal, kAudioObjectPropertyElementMain };
+              UInt32 size = 0;
+              AudioObjectGetPropertyDataSize (kAudioObjectSystemObject, &a, 0, NULL, &size);
+              const int count = (int) (size / sizeof (AudioObjectID));
+              AudioObjectID* devs = (AudioObjectID*) calloc ((size_t) count + 1, sizeof (AudioObjectID));
+              AudioObjectGetPropertyData (kAudioObjectSystemObject, &a, 0, NULL, &size, devs);
+              printf ("%d devices\n", count);
+              for (int i = 0; i < count; ++i)
+              {
+                  char n[256];
+                  name (devs[i], n, sizeof (n));
+                  const UInt32 t = u32 (devs[i], kAudioDevicePropertyTransportType);
+                  printf ("  [%u] %s: in %d, out %d, %.0f Hz, alive %u, transport '%c%c%c%c'\n", (unsigned) devs[i], n,
+                          channels (devs[i], kAudioObjectPropertyScopeInput), channels (devs[i], kAudioObjectPropertyScopeOutput),
+                          rate (devs[i]), (unsigned) u32 (devs[i], kAudioDevicePropertyDeviceIsAlive),
+                          (char) (t >> 24), (char) (t >> 16), (char) (t >> 8), (char) t);
+              }
+
+              AudioObjectID out = 0;
+              AudioObjectPropertyAddress d = { kAudioHardwarePropertyDefaultOutputDevice, kAudioObjectPropertyScopeGlobal, kAudioObjectPropertyElementMain };
+              size = sizeof (out);
+              AudioObjectGetPropertyData (kAudioObjectSystemObject, &d, 0, NULL, &size, &out);
+              char n[256];
+              name (out, n, sizeof (n));
+              printf ("default output: [%u] %s\n", (unsigned) out, n);
+              if (out == 0)
+                  return 0;
+
+              AudioDeviceIOProcID proc = NULL;
+              OSStatus err = AudioDeviceCreateIOProcID (out, ioProc, NULL, &proc);
+              printf ("AudioDeviceCreateIOProcID: %d\n", (int) err);
+              err = AudioDeviceStart (out, proc);
+              printf ("AudioDeviceStart: %d\n", (int) err);
+              for (int s = 1; s <= 4; ++s)
+              {
+                  usleep (500000);
+                  printf ("after %.1f s: %d IO callbacks\n", s * 0.5, callbacks);
+              }
+              AudioDeviceStop (out, proc);
+              AudioDeviceDestroyIOProcID (out, proc);
+              return 0;
+          }
+          EOF
+          clang -O2 -Wall -o audio-probe audio-probe.c -framework CoreAudio -framework CoreFoundation
+          ./audio-probe
