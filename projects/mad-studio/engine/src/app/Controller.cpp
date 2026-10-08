@@ -254,7 +254,7 @@ void Controller::handle (const juce::String& type, const juce::var& msg, const j
     // ---- project state ------------------------------------------------------------------
     if (type == "project.sync")
     {
-        const auto& project = json::get (msg, "project");
+        const auto project = json::get (msg, "project");
         if (! project.isObject())
             return fail ("project.sync needs a \"project\" object");
         builder->setProject (parseProject (project));

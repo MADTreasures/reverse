@@ -75,7 +75,7 @@ std::array<float, synth::numParams> parseSynthParams (const juce::var& s)
 
     p[synth::gain] = num (s, "gain", p[synth::gain]);
 
-    const auto& filter = json::get (s, "filter");
+    const auto filter = json::get (s, "filter");
     p[synth::filterEnabled] = json::boolean (filter, "enabled", true) ? 1.0f : 0.0f;
     p[synth::filterType] = (float) filterTypeIndex (json::string (filter, "type", "lowpass"));
     p[synth::cutoff] = num (filter, "cutoff", p[synth::cutoff]);
@@ -88,12 +88,12 @@ std::array<float, synth::numParams> parseSynthParams (const juce::var& s)
     parseEnvelope (json::get (s, "ampEnv"), p.data() + synth::ampAttack, ampDefaults);
     parseEnvelope (json::get (s, "filterEnv"), p.data() + synth::filterAttack, filterDefaults);
 
-    const auto& lfo = json::get (s, "lfo");
+    const auto lfo = json::get (s, "lfo");
     p[synth::lfoTarget] = (float) lfoTargetIndex (json::string (lfo, "target", "off"));
     p[synth::lfoRate] = num (lfo, "rate", p[synth::lfoRate]);
     p[synth::lfoDepth] = num (lfo, "depth", p[synth::lfoDepth]);
 
-    const auto& oscs = json::get (s, "osc");
+    const auto oscs = json::get (s, "osc");
     for (int o = 0; o < 3; ++o)
     {
         const juce::var osc = oscs.isArray() && o < oscs.size() ? oscs[o] : juce::var();
@@ -119,7 +119,7 @@ PluginRef parsePluginRef (const juce::var& v)
     r.format = json::string (v, "format");
     r.fileOrIdentifier = json::string (v, "fileOrIdentifier");
     r.isInstrument = json::boolean (v, "isInstrument", false);
-    const auto& state = json::get (v, "state");
+    const auto state = json::get (v, "state");
     r.hasState = state.isString() && state.toString().isNotEmpty();
     r.state = r.hasState ? state.toString() : juce::String();
     return r;
@@ -226,7 +226,7 @@ ProjectModel parseProject (const juce::var& json)
                     }
                     else if (const auto* spec = findEffectSpec (fx.type))
                     {
-                        const auto& params = json::get (e, "params");
+                        const auto params = json::get (e, "params");
                         for (const auto& ps : spec->params)
                             fx.params.push_back (num (params, ps.key, ps.def));
                     }

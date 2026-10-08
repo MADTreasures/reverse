@@ -6,15 +6,14 @@
 namespace mad::json
 {
 
-const juce::var& get (const juce::var& obj, const juce::Identifier& key)
+juce::var get (const juce::var& obj, const juce::Identifier& key)
 {
-    static const juce::var none;
     if (auto* o = obj.getDynamicObject())
     {
         if (auto* p = o->getProperties().getVarPointer (key))
             return *p;
     }
-    return none;
+    return {};
 }
 
 bool has (const juce::var& obj, const juce::Identifier& key)

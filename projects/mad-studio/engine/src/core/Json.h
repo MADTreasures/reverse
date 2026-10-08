@@ -10,8 +10,9 @@
 namespace mad::json
 {
 
-/** Property of an object, or a void var when `obj` is not an object or lacks the key. */
-const juce::var& get (const juce::var& obj, const juce::Identifier& key);
+/** Property of an object, or a void var when `obj` is not an object or lacks the key.
+    (Returned by value: juce::var copies are reference counted and cheap.) */
+juce::var get (const juce::var& obj, const juce::Identifier& key);
 
 bool has (const juce::var& obj, const juce::Identifier& key);
 

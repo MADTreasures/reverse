@@ -198,7 +198,7 @@ private:
 
 } // namespace
 
-juce::AudioProcessor* JUCE_CALLTYPE createPluginFilter();
+// Declared by the JUCE plugin client headers.
 juce::AudioProcessor* JUCE_CALLTYPE createPluginFilter()
 {
    #if MAD_TEST_SYNTH

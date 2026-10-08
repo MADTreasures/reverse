@@ -43,6 +43,10 @@ void SynthInstrument::prepare (double rate, int maxBlock)
     sampleRate = rate;
     for (auto* s : { &lfoRate, &lfoPitchGain, &lfoFilterGain, &lfoAmpGain, &outputGain })
         s->prepare (rate, 0.01);
+    // An OscillatorNode starts at its default 440 Hz and is smoothed to the LFO rate
+    // (synth.ts update()); emulating that keeps the LFO phase identical to the browser.
+    lfoRate.reset (440.0);
+    lfoPhase = 0.0;
     for (auto* b : { &lfoBuffer, &ampGainBuffer, &outBuffer, &monoBuffer, &stereoL, &stereoR })
         b->assign ((size_t) maxBlock, 0.0f);
     noise = &dsp::noiseBuffer (rate);
@@ -347,10 +351,9 @@ bool SynthInstrument::render (const BlockContext& ctx, float* left, float* right
 
         if (idle)
         {
-            const double f = lfoRate.current();
-            lfoPhase += f * (double) (c1 - c0) / sampleRate;
+            lfoPhase += lfoRate.advanceSum (c1 - c0) / sampleRate;
             lfoPhase -= std::floor (lfoPhase);
-            for (auto* s : { &lfoRate, &lfoPitchGain, &lfoFilterGain, &lfoAmpGain, &outputGain })
+            for (auto* s : { &lfoPitchGain, &lfoFilterGain, &lfoAmpGain, &outputGain })
                 s->skip (c1 - c0);
             continue;
         }

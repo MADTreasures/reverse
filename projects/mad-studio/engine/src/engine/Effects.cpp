@@ -109,6 +109,8 @@ public:
         sampleRate = rate;
         for (auto* s : { &cutoff, &resonance, &lfoRate, &lfoGain })
             s->prepare (rate, effectTau);
+        lfoRate.reset (440.0); // OscillatorNode default frequency, smoothed to lfoRate
+        phase = 0.0;
     }
 
     void process (const BlockContext& ctx, float* left, float* right) noexcept override
@@ -117,29 +119,28 @@ public:
         {
             const int c0 = c * chunkSize, c1 = chunkEnd (ctx, c), len = c1 - c0;
             const int mode = (int) std::lround (param (0, ctx, c));
-            const auto type = mode == 1 ? dsp::BiquadType::highpass
-                            : mode == 2 ? dsp::BiquadType::bandpass
-                            : mode == 3 ? dsp::BiquadType::notch
-                                        : dsp::BiquadType::lowpass;
+            const auto filterType = mode == 1 ? dsp::BiquadType::highpass
+                                  : mode == 2 ? dsp::BiquadType::bandpass
+                                  : mode == 3 ? dsp::BiquadType::notch
+                                              : dsp::BiquadType::lowpass;
             cutoff.setTarget (param (1, ctx, c));
             resonance.setTarget (param (2, ctx, c));
             lfoRate.setTarget (param (3, ctx, c));
             lfoGain.setTarget ((double) param (4, ctx, c) * 2400.0);
 
             // Free-running sine LFO modulating detune; evaluated at the chunk centre.
-            const double f = lfoRate.current();
-            const double centrePhase = phase + f * (double) len * 0.5 / sampleRate;
+            const double centrePhase = phase + lfoRate.current() * (double) len * 0.5 / sampleRate;
             const double detune = std::sin (2.0 * pi * centrePhase) * lfoGain.current();
-            phase += f * (double) len / sampleRate;
+            phase += lfoRate.advanceSum (len) / sampleRate;
             phase -= std::floor (phase);
 
-            const auto coeffs = dsp::makeBiquad (type, sampleRate, cutoff.current(), resonance.current(), 0.0, detune);
+            const auto coeffs = dsp::makeBiquad (filterType, sampleRate, cutoff.current(), resonance.current(), 0.0, detune);
             for (int i = c0; i < c1; ++i)
             {
                 left[i] = stateL.process (coeffs, left[i]);
                 right[i] = stateR.process (coeffs, right[i]);
             }
-            for (auto* s : { &cutoff, &resonance, &lfoRate, &lfoGain })
+            for (auto* s : { &cutoff, &resonance, &lfoGain })
                 s->skip (len);
         }
         stateL.flushDenormals();
@@ -282,6 +283,8 @@ public:
         delayR.prepare ((int) std::ceil (0.1 * rate) + 4);
         for (auto* s : { &base, &rate_, &depth, &dry, &wet })
             s->prepare (rate, effectTau);
+        rate_.reset (440.0); // OscillatorNode default frequency, smoothed to the chorus rate
+        phase = 0.0;
     }
 
     void process (const BlockContext& ctx, float* left, float* right) noexcept override

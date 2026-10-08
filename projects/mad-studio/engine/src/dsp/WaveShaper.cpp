@@ -13,7 +13,7 @@ void WaveShaper::prepare (double sampleRate, int maxBlockSize, int oversampleLog
     if (oversampleLog2 > 0)
     {
         oversampler = std::make_unique<juce::dsp::Oversampling<float>> (
-            2, (size_t) oversampleLog2, juce::dsp::Oversampling<float>::filterHalfBandPolyphaseIIR, true, false);
+            2, (size_t) oversampleLog2, juce::dsp::Oversampling<float>::filterHalfBandFIREquiripple, true, true);
         oversampler->initProcessing ((size_t) maxBlockSize);
     }
 }

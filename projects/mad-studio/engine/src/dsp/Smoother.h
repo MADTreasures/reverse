@@ -19,11 +19,12 @@ public:
         keep = 1.0 - coeff;
     }
 
-    /** Jumps to `v` without smoothing. */
+    /** Jumps to `v` without smoothing (later targets are smoothed from there). */
     void reset (double v) noexcept
     {
         y = target = v;
         settledFlag = true;
+        initialised = true;
     }
 
     void setTarget (double t) noexcept
@@ -65,6 +66,25 @@ public:
             y = target;
             settledFlag = true;
         }
+    }
+
+    /** Advances n samples and returns the sum of the n values next() would have returned
+        (exact; used to integrate a smoothed frequency into a phase). */
+    double advanceSum (int n) noexcept
+    {
+        if (n <= 0)
+            return 0.0;
+        if (settledFlag)
+            return y * (double) n;
+        const double kn = std::pow (keep, (double) n);
+        const double sum = target * (double) n + (y - target) * keep * (1.0 - kn) / (1.0 - keep);
+        y = target + (y - target) * kn;
+        if (std::abs (target - y) <= 1.0e-7 * (1.0 + std::abs (target)))
+        {
+            y = target;
+            settledFlag = true;
+        }
+        return sum;
     }
 
     double current() const noexcept { return y; }
