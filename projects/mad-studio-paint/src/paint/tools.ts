@@ -1,6 +1,7 @@
 /** Tools, sub tools (presets) and their settings. Sub tools are user-editable and persisted. */
 import { LINEAR, sanitizeCurve01, type CurvePoint } from './curve';
 import { DEFAULT_TEXT_STYLE, sanitizeTextStyle, type BalloonShape, type TextStyle } from './text';
+import { sanitizeGradientStops, type GradientSpec } from './gradient';
 
 export type ToolId =
   | 'zoom'
@@ -30,7 +31,6 @@ export type BrushMode = 'paint' | 'erase' | 'blend';
 export type TipTexture = 'none' | 'grain';
 export type SelectShape = 'rect' | 'ellipse' | 'lasso' | 'polyline' | 'pen' | 'erase';
 export type FigureShape = 'line' | 'rect' | 'ellipse';
-export type GradientShape = 'linear' | 'radial';
 export type FillReference = 'layer' | 'all' | 'reference';
 
 export interface FillSettings {
@@ -127,9 +127,8 @@ export interface SubTool {
   brush?: BrushSettings;
   selectShape?: SelectShape;
   figureShape?: FigureShape;
-  gradientShape?: GradientShape;
-  /** Gradient fades from the main colour to transparent instead of to the sub colour. */
-  gradientToTransparent?: boolean;
+  /** Gradient tool: nodes, shape, edge rule, dithering; `layer` makes an editable gradient layer. */
+  gradient?: GradientSpec & { layer: boolean };
   /** Eyedropper: read the current layer instead of the displayed colour. */
   fromLayer?: boolean;
   /** Zoom tool: a click zooms out instead of in. */
@@ -441,9 +440,30 @@ export const DEFAULT_SUB_TOOLS: SubTool[] = [
   // Fill & gradient
   { id: 'fill-layer', tool: 'fill', name: 'Refer only to editing layer', fill: { ...FILL_LAYER } },
   { id: 'fill-others', tool: 'fill', name: 'Refer other layers', fill: { ...FILL_OTHERS } },
-  { id: 'grad-transparent', tool: 'gradient', name: 'Foreground to transparent', gradientShape: 'linear', gradientToTransparent: true },
-  { id: 'grad-background', tool: 'gradient', name: 'Foreground to background', gradientShape: 'linear' },
-  { id: 'grad-circle', tool: 'gradient', name: 'Circle: foreground to background', gradientShape: 'radial' },
+  {
+    id: 'grad-transparent',
+    tool: 'gradient',
+    name: 'Foreground to transparent',
+    gradient: { stops: [{ pos: 0, color: 'main', opacity: 1 }, { pos: 1, color: 'main', opacity: 0 }], shape: 'line', edge: 'none', dither: false, layer: false },
+  },
+  {
+    id: 'grad-background',
+    tool: 'gradient',
+    name: 'Foreground to background',
+    gradient: { stops: [{ pos: 0, color: 'main', opacity: 1 }, { pos: 1, color: 'sub', opacity: 1 }], shape: 'line', edge: 'none', dither: false, layer: false },
+  },
+  {
+    id: 'grad-circle',
+    tool: 'gradient',
+    name: 'Circle: foreground to background',
+    gradient: { stops: [{ pos: 0, color: 'main', opacity: 1 }, { pos: 1, color: 'sub', opacity: 1 }], shape: 'circle', edge: 'none', dither: false, layer: false },
+  },
+  {
+    id: 'grad-layer',
+    tool: 'gradient',
+    name: 'Gradient layer',
+    gradient: { stops: [{ pos: 0, color: 'main', opacity: 1 }, { pos: 1, color: 'sub', opacity: 1 }], shape: 'line', edge: 'none', dither: true, layer: true },
+  },
   // Figure
   { id: 'fig-line', tool: 'figure', name: 'Straight line', figureShape: 'line', brush: brush({ size: 3, sizePressure: false, stabilization: 0 }) },
   { id: 'fig-rect', tool: 'figure', name: 'Rectangle', figureShape: 'rect', brush: brush({ size: 3, sizePressure: false, stabilization: 0 }) },
@@ -506,6 +526,17 @@ export function mergeSubTools(saved: unknown): SubTool[] {
               shape: def.balloon.shape,
               lineWidth: typeof s.balloon.lineWidth === 'number' && Number.isFinite(s.balloon.lineWidth) ? Math.max(0, Math.min(100, s.balloon.lineWidth)) : def.balloon.lineWidth,
               fill: typeof s.balloon.fill === 'boolean' ? s.balloon.fill : def.balloon.fill,
+            },
+          }
+        : {}),
+      ...(def.gradient && s.gradient && typeof s.gradient === 'object'
+        ? {
+            gradient: {
+              stops: sanitizeGradientStops(s.gradient.stops) ?? def.gradient.stops,
+              shape: s.gradient.shape === 'circle' || s.gradient.shape === 'ellipse' || s.gradient.shape === 'line' ? s.gradient.shape : def.gradient.shape,
+              edge: s.gradient.edge === 'repeat' || s.gradient.edge === 'reverse' || s.gradient.edge === 'clear' || s.gradient.edge === 'none' ? s.gradient.edge : def.gradient.edge,
+              dither: typeof s.gradient.dither === 'boolean' ? s.gradient.dither : def.gradient.dither,
+              layer: typeof s.gradient.layer === 'boolean' ? s.gradient.layer : def.gradient.layer,
             },
           }
         : {}),

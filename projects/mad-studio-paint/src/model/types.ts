@@ -3,6 +3,7 @@ import type { LayerEffects } from '../paint/effects';
 import type { Ruler } from '../paint/rulers';
 import type { Correction } from '../paint/tonal';
 import type { FrameBorder } from '../paint/frames';
+import type { GradientFill } from '../paint/gradient';
 import type { Balloon, TextBox } from '../paint/text';
 import type { VectorStroke } from '../paint/vector';
 
@@ -125,7 +126,16 @@ export interface TextLayer extends LayerBase {
   rev: number;
 }
 
-export type Layer = RasterLayer | FolderLayer | CorrectionLayer | VectorLayer | TextLayer;
+/** Gradient layer: a gradient that stays editable (direction, colours, shape); rendered by the engine. */
+export interface GradientLayer extends LayerBase {
+  kind: 'gradient';
+  blend: BlendMode;
+  gradient: GradientFill;
+  /** Changes with every edit (never reused), so rendered pixels can be cached. */
+  rev: number;
+}
+
+export type Layer = RasterLayer | FolderLayer | CorrectionLayer | VectorLayer | TextLayer | GradientLayer;
 
 export interface PaperSettings {
   visible: boolean;

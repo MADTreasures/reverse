@@ -391,6 +391,11 @@ function LayerRow({ layer, depth, drag, setDrag, drop, setDrop }: RowsProps & { 
             <Icon name="vector" size={16} />
           </span>
         )}
+        {layer.kind === 'gradient' && (
+          <span className="vector-icon" title="Gradient layer" data-testid="gradient-icon">
+            <Icon name="gradient" size={16} />
+          </span>
+        )}
         {layer.kind === 'text' && (
           <span className="vector-icon" title={layer.balloons.length ? 'Balloon layer' : 'Text layer'} data-testid={layer.balloons.length ? 'balloon-icon' : 'text-icon'}>
             <Icon name={layer.balloons.length ? 'balloon' : 'text'} size={16} />

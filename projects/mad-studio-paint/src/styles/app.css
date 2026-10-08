@@ -1960,3 +1960,49 @@
   background: none;
   cursor: pointer;
 }
+
+.gradient-dialog {
+  width: 460px;
+}
+
+.gradient-list {
+  display: flex;
+  flex-direction: column;
+  max-height: 200px;
+  overflow: auto;
+  margin: 10px 0 6px;
+  border: 1px solid var(--line);
+  background: var(--well);
+}
+
+.gradient-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 6px;
+  border: none;
+  background: none;
+  color: var(--text);
+  text-align: left;
+}
+
+.gradient-item.on {
+  background: var(--select-row);
+}
+
+.gradient-swatch {
+  width: 120px;
+  height: 14px;
+  border: 1px solid var(--line);
+  background-size: 100% 100%, 10px 10px;
+}
+
+.gradient-list-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.prop-row .btn.small {
+  white-space: nowrap;
+}

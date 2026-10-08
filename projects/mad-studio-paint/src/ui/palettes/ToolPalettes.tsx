@@ -6,6 +6,9 @@ import { currentSubTool, drawingColor, getState, setState, useStore } from '../.
 import { pxToPt, setTextStyle, setTextWrap, textToolStyle } from '../../store/textActions';
 import { setFrameProps } from '../../store/frameActions';
 import type { Balloon } from '../../paint/text';
+import type { GradientEdge, GradientSpec } from '../../paint/gradient';
+import { GradientBar } from '../controls/GradientBar';
+import { openDialog } from '../overlays';
 import { entryForTool, PALETTE_ENTRIES, PALETTE_LAYOUT, subToolsOf, toolInfo, type FillReference, type SubTool, type ToolId } from '../../paint/tools';
 import { Icon } from '../controls/Icons';
 import { PropSlider } from '../controls/PropSlider';
@@ -263,19 +266,7 @@ export function ToolProperty() {
           </div>
         </div>
       )}
-      {sub.tool === 'gradient' && (
-        <div className="prop-row">
-          <span className="prop-label">Shape</span>
-          <div className="segmented">
-            <button className={sub.gradientShape !== 'radial' ? 'on' : ''} onClick={() => update({ gradientShape: 'linear' })}>
-              Straight line
-            </button>
-            <button className={sub.gradientShape === 'radial' ? 'on' : ''} onClick={() => update({ gradientShape: 'radial' })}>
-              Circle
-            </button>
-          </div>
-        </div>
-      )}
+      {sub.tool === 'gradient' && <GradientSettings sub={sub} update={update} />}
       {!b && !f && !['select', 'gradient', 'object', 'text', 'balloon', 'frame'].includes(sub.tool) && <div className="prop-note">{toolInfo(sub.tool).hint}</div>}
       <div className="prop-footer">
         <button className="icon-btn" title="Reset to the default settings" aria-label="Reset sub tool" onClick={() => actions.resetSubTool(sub.id)}>
@@ -343,8 +334,10 @@ function ObjectLineSettings({ sub, update }: { sub: SubTool; update: (patch: Par
     const sel = actions.selectedObjectsOf(s);
     return sel && sel.layer.kind === 'folder' ? sel.layer : null;
   });
+  const gradientLayer = useStore((s) => actions.activeLayer(s)?.kind === 'gradient');
   return (
     <>
+      {gradientLayer && <GradientSettings sub={null} update={update} />}
       {texts.length > 0 && <TextSettings />}
       {balloons.length > 0 && <BalloonObjectSettings balloons={balloons} />}
       {frame && <FrameObjectSettings folder={frame} />}
@@ -399,7 +392,7 @@ function ObjectLineSettings({ sub, update }: { sub: SubTool; update: (patch: Par
           </div>
         </>
       ) : (
-        texts.length + balloons.length === 0 && !frame && <div className="prop-note">{toolInfo('object').hint}</div>
+        texts.length + balloons.length === 0 && !frame && !gradientLayer && <div className="prop-note">{toolInfo('object').hint}</div>
       )}
       <label className="check prop-check">
         <input type="checkbox" checked={sub.scaleLineWidth !== false} onChange={(e) => update({ scaleLineWidth: e.target.checked })} />
@@ -536,6 +529,76 @@ function TextSettings() {
         </span>
       </div>
       <PropSlider label="Edge width" unit="px" value={st.edge} min={0} max={50} step={0.5} decimals={1} onChange={(v) => set({ edge: v })} />
+    </>
+  );
+}
+
+const EDGES: [GradientEdge, string][] = [
+  ['none', 'Do not repeat'],
+  ['repeat', 'Repeat'],
+  ['reverse', 'Reverse'],
+  ['clear', 'Do not draw'],
+];
+
+/** Gradient settings: of the selected gradient layer, else of the Gradient tool. */
+function GradientSettings({ sub, update }: { sub: SubTool | null; update: (patch: Partial<SubTool>) => void }) {
+  const layer = useStore((s) => {
+    const l = actions.activeLayer(s);
+    return l?.kind === 'gradient' && !s.maskEditing ? l : null;
+  });
+  const [main, subColor] = useStore(useShallow((s) => [s.colors.main, s.colors.sub]));
+  const spec = layer ? layer.gradient : sub?.gradient;
+  if (!spec) return null;
+  const set = (patch: Partial<GradientSpec> & { layer?: boolean }, key?: string) => {
+    if (layer) actions.setGradientFill(layer.id, patch, 'Edit gradient', key);
+    else if (sub?.gradient) update({ gradient: { ...sub.gradient, ...patch } });
+  };
+  return (
+    <>
+      {layer && <div className="prop-note">Gradient layer: drag on the canvas with the Gradient tool, or the handles with the Object tool, to change its direction.</div>}
+      <GradientBar stops={spec.stops} main={main} sub={subColor} onChange={(stops) => set({ stops }, 'gradient:stops')} />
+      <div className="prop-row">
+        <span className="prop-label" />
+        <button className="btn small" onClick={() => openDialog('gradient')}>
+          Advanced settings…
+        </button>
+      </div>
+      <div className="prop-row">
+        <span className="prop-label">Shape</span>
+        <div className="segmented" role="radiogroup" aria-label="Gradient shape">
+          {(
+            [
+              ['line', 'Line'],
+              ['circle', 'Circle'],
+              ['ellipse', 'Ellipse'],
+            ] as const
+          ).map(([id, label]) => (
+            <button key={id} role="radio" aria-checked={spec.shape === id} className={spec.shape === id ? 'on' : ''} onClick={() => set({ shape: id })}>
+              {label}
+            </button>
+          ))}
+        </div>
+      </div>
+      <div className="prop-row">
+        <span className="prop-label">Edge process</span>
+        <select className="prop-select" aria-label="Edge process" value={spec.edge} onChange={(e) => set({ edge: e.target.value as GradientEdge })}>
+          {EDGES.map(([id, label]) => (
+            <option key={id} value={id}>
+              {label}
+            </option>
+          ))}
+        </select>
+      </div>
+      <label className="check prop-check">
+        <input type="checkbox" checked={spec.dither} onChange={(e) => set({ dither: e.target.checked })} />
+        Dithering
+      </label>
+      {!layer && sub?.gradient && (
+        <label className="check prop-check">
+          <input type="checkbox" checked={sub.gradient.layer} onChange={(e) => set({ layer: e.target.checked })} />
+          Create gradient layer
+        </label>
+      )}
     </>
   );
 }

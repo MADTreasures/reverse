@@ -3,6 +3,7 @@ import { CanvasSizeDialog, GaussianBlurDialog } from './dialogs/AdjustDialogs';
 import { PressureDialog } from './dialogs/PressureDialog';
 import { DivideFrameDialog, NewFrameFolderDialog } from './dialogs/FrameDialogs';
 import { NewToneDialog } from './dialogs/ToneDialog';
+import { GradientDialog } from './dialogs/GradientDialog';
 import { TonalDialog } from './dialogs/TonalDialog';
 import { PreferencesDialog } from './dialogs/PreferencesDialog';
 import { ExportDialog } from './dialogs/ExportDialog';
@@ -61,6 +62,7 @@ export function OverlayHost() {
           {dialog.kind === 'custom' && dialog.id === 'newFrameFolder' && <NewFrameFolderDialog />}
           {dialog.kind === 'custom' && dialog.id === 'divideFrame' && <DivideFrameDialog />}
           {dialog.kind === 'custom' && dialog.id === 'newTone' && <NewToneDialog />}
+          {dialog.kind === 'custom' && dialog.id === 'gradient' && <GradientDialog />}
         </div>
       )}
       <div className="toasts" aria-live="polite">

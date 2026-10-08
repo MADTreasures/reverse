@@ -6,7 +6,9 @@
  * Settings changes colour, width, font and so on.
  */
 import { flatten, isEffectivelyVisible } from '../model/layers';
-import { contentBounds, contentOf, pickObject, transformContent, type Content } from '../paint/objects';
+import { contentBounds, contentOf, EMPTY_CONTENT, pickObject, transformContent, type Content } from '../paint/objects';
+import type { GradientFill } from '../paint/gradient';
+import type { GradientLayer } from '../model/types';
 import { union, type Rect } from '../paint/rect';
 import type { Affine } from '../paint/rulers';
 import { balloonBody, frameCorners, tailShapes } from '../paint/text';
@@ -174,10 +176,93 @@ function pickAt(p: PointerInfo): { layer: actions.ObjectLayer; id: string } | nu
   return null;
 }
 
+// ------------------------------------------------------------------ gradient layers
+
+/** The start (cross) or end (circle) handle of the active gradient layer under the pointer. */
+function gradientHandleAt(p: PointerInfo, view: OverlayView): { layer: GradientLayer; end: 'a' | 'b' } | null {
+  const s = getState();
+  const l = actions.activeLayer(s);
+  if (l?.kind !== 'gradient' || s.maskEditing) return null;
+  for (const end of ['b', 'a'] as const) {
+    const q = applyMatrix(view.matrix, l.gradient[end].x, l.gradient[end].y);
+    if (Math.hypot(q.x - p.sx, q.y - p.sy) <= HANDLE_PX + 2) return { layer: l, end };
+  }
+  return null;
+}
+
+/** Drags the start or end of a gradient layer's gradient (⇧: in 45° steps around the other end). */
+class GradientHandleSession implements ToolSession {
+  private fill: GradientFill;
+  readonly cursor = 'grabbing';
+
+  constructor(
+    private layer: GradientLayer,
+    private end: 'a' | 'b',
+  ) {
+    this.fill = layer.gradient;
+  }
+
+  private update(p: PointerInfo): void {
+    const other = this.layer.gradient[this.end === 'a' ? 'b' : 'a'];
+    let at = { x: p.x, y: p.y };
+    if (p.shift) {
+      const step = Math.PI / 4;
+      const a = Math.round(Math.atan2(at.y - other.y, at.x - other.x) / step) * step;
+      const len = Math.hypot(at.x - other.x, at.y - other.y);
+      at = { x: other.x + Math.cos(a) * len, y: other.y + Math.sin(a) * len };
+    }
+    this.fill = { ...this.layer.gradient, [this.end]: at };
+    actions.previewContent(this.layer, { ...EMPTY_CONTENT, gradient: this.fill }, null);
+  }
+
+  move(p: PointerInfo): void {
+    this.update(p);
+  }
+
+  up(p: PointerInfo): void {
+    this.update(p);
+    actions.commitTransform('Edit gradient', [], new Map([[this.layer.id, { ...EMPTY_CONTENT, gradient: this.fill }]]));
+  }
+
+  cancel(): void {
+    engine.resync();
+  }
+}
+
+/** The active gradient layer's direction: start (cross) to end (circle). */
+export function drawGradientHandles(ctx: CanvasRenderingContext2D, view: OverlayView): void {
+  const s = getState();
+  const l = actions.activeLayer(s);
+  if (l?.kind !== 'gradient' || s.maskEditing) return;
+  const a = applyMatrix(view.matrix, l.gradient.a.x, l.gradient.a.y);
+  const b = applyMatrix(view.matrix, l.gradient.b.x, l.gradient.b.y);
+  ctx.save();
+  ctx.lineWidth = 1.5;
+  ctx.strokeStyle = '#2f80ed';
+  ctx.fillStyle = '#ffffff';
+  ctx.beginPath();
+  ctx.moveTo(a.x, a.y);
+  ctx.lineTo(b.x, b.y);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(a.x - 6, a.y);
+  ctx.lineTo(a.x + 6, a.y);
+  ctx.moveTo(a.x, a.y - 6);
+  ctx.lineTo(a.x, a.y + 6);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.arc(b.x, b.y, 5, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.stroke();
+  ctx.restore();
+}
+
 let lastClick: { time: number; id: string } | null = null;
 
 /** Object tool: rulers, vector lines, text and balloons. */
 export function objectSession(p: PointerInfo, view: OverlayView): ToolSession | null {
+  const handle0 = gradientHandleAt(p, view);
+  if (handle0) return editable() ? new GradientHandleSession(handle0.layer, handle0.end) : null;
   if (hitRulerHandle(p, view)) return rulerObjectSession(p, view);
   const sel = selection();
   const handle = sel && hitObjectHandle(p, view, sel.box);

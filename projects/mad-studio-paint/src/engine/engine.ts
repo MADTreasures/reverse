@@ -3,7 +3,8 @@
  * The document structure (layer tree, flags) lives in the store; this module owns the pixels.
  */
 import { flatten, maskIds, pixelIds, renderedIds } from '../model/layers';
-import type { Id, PaintDocument, TextLayer, VectorLayer } from '../model/types';
+import type { GradientLayer, Id, PaintDocument, TextLayer, VectorLayer } from '../model/types';
+import { renderGradient, type GradientFill } from '../paint/gradient';
 import { HistoryStack } from '../paint/history';
 import type { Mask } from '../paint/mask';
 import { intersect, type Rect } from '../paint/rect';
@@ -38,6 +39,14 @@ export interface HistoryEntry {
 const maskBytes = (m: Mask | null | undefined) => (m ? m.data.byteLength : 0);
 
 const lineIds = (strokes: VectorStroke[]) => strokes.map((s) => s.id).join(',');
+
+/** A gradient layer's pixels (its colours are stored resolved). */
+function drawGradientFill(ctx: CanvasRenderingContext2D, fill: GradientFill): void {
+  const { width, height } = ctx.canvas;
+  const img = ctx.createImageData(width, height);
+  renderGradient(img.data, width, height, 0, 0, fill, fill.a, fill.b);
+  ctx.putImageData(img, 0, 0);
+}
 
 export const DEFAULT_UNDO_STEPS = 200;
 
@@ -106,7 +115,7 @@ class PaintEngine {
   /** Renders vector and text layers whose content changed (new lines, erasing, typing, undo …). */
   private syncVectors(doc: PaintDocument): void {
     for (const l of flatten(doc.layers)) {
-      if (l.kind !== 'vector' && l.kind !== 'text') continue;
+      if (l.kind !== 'vector' && l.kind !== 'text' && l.kind !== 'gradient') continue;
       const known = getSurface(l.id);
       const sized = known && known.width === doc.width && known.height === doc.height;
       if (sized && this.vectorRevs.get(l.id) === l.rev) continue;
@@ -120,7 +129,8 @@ class PaintEngine {
       const ctx = ctx2d(surface);
       ctx.clearRect(0, 0, surface.width, surface.height);
       if (l.kind === 'vector') for (const stroke of l.strokes) renderVectorStroke(ctx, stroke);
-      else renderTextLayer(ctx, l, this.hidden);
+      else if (l.kind === 'text') renderTextLayer(ctx, l, this.hidden);
+      else drawGradientFill(ctx, l.gradient);
       this.vectorRevs.set(l.id, l.rev);
       touch(l.id);
       this.compositor?.invalidate();
@@ -153,6 +163,18 @@ class PaintEngine {
   previewFrame(id: Id, panels: FramePanel[] | null): void {
     if (panels) this.compositor.framePreview.set(id, panels);
     else this.compositor.framePreview.delete(id);
+    this.invalidate();
+  }
+
+  /** Shows a gradient layer with another gradient while a tool changes it. */
+  previewGradient(layer: GradientLayer, fill: GradientFill): void {
+    const surface = getSurface(layer.id);
+    if (!surface) return;
+    const ctx = ctx2d(surface);
+    ctx.clearRect(0, 0, surface.width, surface.height);
+    drawGradientFill(ctx, fill);
+    this.vectorRevs.delete(layer.id);
+    touch(layer.id);
     this.invalidate();
   }
 

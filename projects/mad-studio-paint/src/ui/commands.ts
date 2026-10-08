@@ -119,6 +119,14 @@ export const COMMANDS: Command[] = [
   { id: 'newFrameFolder', label: 'New frame border folder…', run: () => openDialog('newFrameFolder') },
   { id: 'newTone', label: 'New tone layer…', run: () => openDialog('newTone') },
   {
+    id: 'newGradientLayer',
+    label: 'New gradient layer…',
+    run: () => {
+      actions.newGradientLayer();
+      openDialog('gradient');
+    },
+  },
+  {
     id: 'divideFrame',
     label: 'Divide frame border equally…',
     run: () => openDialog('divideFrame'),

@@ -6,6 +6,7 @@ import {
   cloneLayer,
   createCorrectionLayer,
   createFolder,
+  createGradientLayer,
   createLayerMask,
   createRasterLayer,
   createVectorLayer,
@@ -26,7 +27,7 @@ import {
   shiftLayer as shiftLayerInTree,
   type DropPosition,
 } from '../model/layers';
-import type { FolderLayer, Id, Layer, LayerMask, PaintDocument, RasterLayer, RulerRange, TextLayer, VectorLayer } from '../model/types';
+import type { FolderLayer, GradientLayer, Id, Layer, LayerMask, PaintDocument, RasterLayer, RulerRange, TextLayer, VectorLayer } from '../model/types';
 import { defaultPerspective, type Affine, type Ruler, type RulerInput } from '../paint/rulers';
 import { eraseWhere, keepWhere, type VectorStroke } from '../paint/vector';
 import type { Rect } from '../paint/rect';
@@ -37,6 +38,7 @@ import { fitTextBox } from '../engine/textRender';
 import { sanitizeCurve01 } from '../paint/curve';
 import type { LayerEffects } from '../paint/effects';
 import { defaultTone, DOT_SHAPES, type ToneEffect } from '../paint/tone';
+import type { GradientFill } from '../paint/gradient';
 import { applyCorrection, correctionLabel, type Correction } from '../paint/tonal';
 import { combine, createMask, expandMask, invertMask, isMaskEmpty, isSelected, maskBounds, rectMask, type Mask, type SelectionOp } from '../paint/mask';
 import { mergeSubTools, type SubTool, type ToolId } from '../paint/tools';
@@ -222,7 +224,10 @@ export const editingMask = (s: PaintState = getState()): boolean => editTarget(s
 export function editBlocker(s: PaintState = getState()): string | null {
   const l = activeLayer(s);
   if (!l) return 'No layer selected';
-  if (!editTarget(s)) return l.kind === 'text' ? 'Text layers cannot be drawn on (Layer > Rasterize converts the layer)' : 'Select a raster layer to draw on (folders cannot be drawn on)';
+  if (!editTarget(s)) {
+    if (l.kind === 'text' || l.kind === 'gradient') return `${l.kind === 'text' ? 'Text' : 'Gradient'} layers cannot be drawn on (Layer > Rasterize converts the layer)`;
+    return 'Select a raster layer to draw on (folders cannot be drawn on)';
+  }
   if (isEffectivelyLocked(s.doc.layers, l.id)) return 'The layer is locked';
   if (!l.visible) return 'The layer is hidden';
   return null;
@@ -230,7 +235,8 @@ export function editBlocker(s: PaintState = getState()): string | null {
 
 /** Why the active layer cannot be moved, flipped or transformed, or null. Text layers can be, although they cannot be drawn on. */
 export function transformBlocker(s: PaintState = getState()): string | null {
-  return activeLayer(s)?.kind === 'text' && !s.maskEditing ? objectBlocker(s) : editBlocker(s);
+  const kind = activeLayer(s)?.kind;
+  return (kind === 'text' || kind === 'gradient') && !s.maskEditing ? objectBlocker(s) : editBlocker(s);
 }
 
 /** Selects a layer; with `mask`, its mask thumbnail (the mask becomes the drawing target). */
@@ -252,7 +258,7 @@ export function movingSurfaces(s: PaintState = getState()): Id[] {
   const ids: Id[] = [];
   for (const x of flatten([l])) {
     if (isEffectivelyLocked(s.doc.layers, x.id)) continue;
-    if (x.kind === 'raster' || x.kind === 'vector' || x.kind === 'text') ids.push(x.id);
+    if (x.kind === 'raster' || x.kind === 'vector' || x.kind === 'text' || x.kind === 'gradient') ids.push(x.id);
     if (x.mask?.linked) ids.push(x.mask.id);
   }
   return ids;
@@ -600,9 +606,9 @@ export function soloLayer(id: Id): void {
 export type FrameFolder = FolderLayer & { frame: FrameBorder };
 export const isFrameFolder = (l: Layer | null | undefined): l is FrameFolder => l?.kind === 'folder' && Boolean(l.frame);
 
-/** Layers with objects for the Object tool: vector lines, text boxes and balloons, frame panels. */
-export type ObjectLayer = VectorLayer | TextLayer | FrameFolder;
-export const isObjectLayer = (l: Layer | null | undefined): l is ObjectLayer => l?.kind === 'vector' || l?.kind === 'text' || isFrameFolder(l);
+/** Layers with objects for the Object tool: vector lines, text boxes and balloons, frame panels, a gradient. */
+export type ObjectLayer = VectorLayer | TextLayer | FrameFolder | GradientLayer;
+export const isObjectLayer = (l: Layer | null | undefined): l is ObjectLayer => l?.kind === 'vector' || l?.kind === 'text' || l?.kind === 'gradient' || isFrameFolder(l);
 
 export function addVectorLayer(): Id {
   const layer = createVectorLayer(nextLayerName(getState().doc));
@@ -637,6 +643,9 @@ function setContentIn(l: Layer, c: Content): void {
   } else if (l.kind === 'folder' && l.frame) {
     if (c.panels.length) l.frame = { ...l.frame, panels: c.panels };
     else delete l.frame;
+  } else if (l.kind === 'gradient' && c.gradient) {
+    l.gradient = c.gradient;
+    l.rev = nextRev();
   }
 }
 
@@ -777,11 +786,13 @@ export function objectsToMove(l: ObjectLayer, selection: Mask | null): Set<strin
 export function previewContent(l: ObjectLayer, c: Content, r: Rect | null): void {
   if (l.kind === 'vector') engine.renderVectorLines(l.id, c.strokes, r);
   else if (l.kind === 'text') engine.previewText(l, c);
-  else engine.previewFrame(l.id, c.panels);
+  else if (l.kind === 'gradient') {
+    if (c.gradient) engine.previewGradient(l, c.gradient);
+  } else engine.previewFrame(l.id, c.panels);
 }
 
-/** Vector and text layers: their pixels are rendered from their objects. */
-export const isRenderedLayer = (l: Layer | null | undefined): l is VectorLayer | TextLayer => l?.kind === 'vector' || l?.kind === 'text';
+/** Vector, text and gradient layers: their pixels are rendered from their content. */
+export const isRenderedLayer = (l: Layer | null | undefined): l is VectorLayer | TextLayer | GradientLayer => l?.kind === 'vector' || l?.kind === 'text' || l?.kind === 'gradient';
 
 /** Layer > Rasterize: a vector or text layer becomes a raster layer with the same pixels. */
 export function rasterizeLayer(id: Id = getState().activeLayerId): void {
@@ -993,6 +1004,41 @@ export function addToneLayer(tone: Pick<ToneEffect, 'frequency' | 'value' | 'sha
   });
   setState({ maskEditing: false });
   return layer.id;
+}
+
+/** A new gradient layer (gradient tool with "Gradient layer", Layer > New gradient layer), masked to the selection. */
+export function addGradientLayer(fill: GradientFill): Id {
+  const s = getState();
+  const layer = createGradientLayer(nextLayerName(s.doc, 'Gradient'), fill, { mask: maskFromSelection() });
+  changeDoc('New gradient layer', (doc) => {
+    insertNew(doc, layer, s.activeLayerId);
+    return layer.id;
+  });
+  setState({ maskEditing: false });
+  return layer.id;
+}
+
+/** Layer > New gradient layer: from the main to the sub colour, top to bottom across the canvas. */
+export function newGradientLayer(): Id {
+  const { doc, colors } = getState();
+  return addGradientLayer({
+    stops: [
+      { pos: 0, color: colors.main, opacity: 1 },
+      { pos: 1, color: colors.sub, opacity: 1 },
+    ],
+    shape: 'line',
+    edge: 'none',
+    dither: true,
+    a: { x: doc.width / 2, y: 0 },
+    b: { x: doc.width / 2, y: doc.height },
+  });
+}
+
+/** Changes a gradient layer's gradient (colours, shape, edge rule); `key` merges slider drags. */
+export function setGradientFill(id: Id, patch: Partial<GradientFill>, label = 'Edit gradient', key?: string): void {
+  const l = findLayer(getState().doc.layers, id);
+  if (l?.kind !== 'gradient' || blocked(objectBlocker())) return;
+  setLayerContent(id, { ...EMPTY_CONTENT, gradient: { ...l.gradient, ...patch } }, label, key);
 }
 
 /** Changes a correction layer's settings without an undo entry (dialog preview). */

@@ -1,7 +1,7 @@
 /** Press-drag-release interactions for every tool. */
 import { hexToRgb } from '../model/color';
 import { findLayer, flatten, isEffectivelyVisible } from '../model/layers';
-import type { Id, VectorLayer } from '../model/types';
+import type { GradientLayer, Id, VectorLayer } from '../model/types';
 import { CLOSE_GAP_STEPS, floodFillMask } from '../paint/fill';
 import { combine, ellipseMask, expandMask, isSelected, maskBounds, polygonMask, rectMask, translateMask, type Mask, type SelectionOp } from '../paint/mask';
 import { fromPoints, union, type Rect } from '../paint/rect';
@@ -10,7 +10,8 @@ import { ellipsePoints, rectPoints, snapAngle, type StrokePoint } from '../paint
 import { evalPressureCurve } from '../paint/curve';
 import { type FillReference, type SubTool } from '../paint/tools';
 import { eraseAt, linesBounds, newStrokeId, transformStrokes, type VectorEraseMode, type VectorStroke } from '../paint/vector';
-import { contentBounds, contentOf, pickContent, transformContent, type Content } from '../paint/objects';
+import { contentBounds, contentOf, EMPTY_CONTENT, pickContent, transformContent, type Content } from '../paint/objects';
+import { renderGradient, resolveStops, type GradientFill, type GradientSpec } from '../paint/gradient';
 import { newObjectId } from '../paint/text';
 import { newPanelId, panelEdges } from '../paint/frames';
 import { apply as applyMatrix, normalizeAngle } from '../paint/viewMath';
@@ -495,84 +496,131 @@ export function autoSelectAt(sub: SubTool, p: PointerInfo): void {
 
 // ------------------------------------------------------------------ gradient
 
+/**
+ * Gradient tool: drag the gradient's start and end. On a raster layer it is drawn into the pixels
+ * (inside the selection); with "Gradient layer" it becomes a new, editable gradient layer; on a
+ * gradient layer the drag gives that gradient a new direction.
+ */
 export class GradientSession implements ToolSession {
-  private edit: LayerEdit;
+  private edit: LayerEdit | null = null;
+  private layer: GradientLayer | null = null;
   private start: PointerInfo;
   private end: PointerInfo;
+  private mods: Modifiers;
   readonly cursor = 'crosshair';
 
   static create(sub: SubTool, p: PointerInfo): GradientSession | null {
+    const active = actions.activeLayer();
+    if (active?.kind === 'gradient' && !getState().maskEditing) return blocked(actions.objectBlocker()) ? null : new GradientSession(sub, p, null, active);
+    if (sub.gradient?.layer) return blocked(actions.objectBlocker()) ? null : new GradientSession(sub, p, null, null);
     const target = rasterTarget();
-    return target ? new GradientSession(sub, p, target) : null;
+    return target ? new GradientSession(sub, p, target, null) : null;
   }
 
   private constructor(
     private sub: SubTool,
     p: PointerInfo,
-    target: StrokeTarget,
+    target: StrokeTarget | null,
+    layer: GradientLayer | null,
   ) {
     const s = getState();
-    this.edit = new LayerEdit(target.layerId, target.layer, {
-      mode: s.colors.transparent ? 'erase' : 'paint',
-      opacity: 1,
-      lockAlpha: target.lockAlpha,
-      selection: target.selection,
-      onChange: target.onChange,
-    });
+    this.layer = layer;
+    if (target) {
+      this.edit = new LayerEdit(target.layerId, target.layer, {
+        mode: s.colors.transparent ? 'erase' : 'paint',
+        opacity: 1,
+        lockAlpha: target.lockAlpha,
+        selection: target.selection,
+        onChange: target.onChange,
+      });
+    }
     this.start = p;
     this.end = p;
+    this.mods = p;
   }
 
-  private render(m: Modifiers): void {
-    const { doc, colors } = getState();
-    let { x: x1, y: y1 } = this.end;
+  private spec(): GradientSpec {
+    return this.sub.gradient ?? { stops: [{ pos: 0, color: 'main', opacity: 1 }, { pos: 1, color: 'sub', opacity: 1 }], shape: 'line', edge: 'none', dither: false };
+  }
+
+  /** End point, in 45° steps with ⇧. */
+  private endPoint(): { x: number; y: number } {
     const { x: x0, y: y0 } = this.start;
-    if (m.shift) ({ x: x1, y: y1 } = snapAngle(x0, y0, x1, y1));
+    let { x: x1, y: y1 } = this.end;
+    if (this.mods.shift) ({ x: x1, y: y1 } = snapAngle(x0, y0, x1, y1));
+    return { x: x1, y: y1 };
+  }
+
+  /** The gradient with colours resolved (gradient layers keep fixed colours). */
+  private fill(): GradientFill {
+    const { colors } = getState();
+    const base = this.layer ? this.layer.gradient : { ...this.spec(), stops: resolveStops(this.spec().stops, colors.main, colors.sub) };
+    return { ...base, a: { x: this.start.x, y: this.start.y }, b: this.endPoint() };
+  }
+
+  private render(): void {
+    const fill = this.fill();
+    if (this.layer) {
+      actions.previewContent(this.layer, { ...EMPTY_CONTENT, gradient: fill }, null);
+      return;
+    }
+    if (!this.edit) return;
+    const { doc, selection } = getState();
+    // Only the selected area can change.
+    const area = (selection && maskBounds(selection)) || { x: 0, y: 0, w: doc.width, h: doc.height };
     const ctx = this.edit.bufferCtx;
     ctx.clearRect(0, 0, doc.width, doc.height);
-    const g =
-      this.sub.gradientShape === 'radial'
-        ? ctx.createRadialGradient(x0, y0, 0, x0, y0, Math.max(1, Math.hypot(x1 - x0, y1 - y0)))
-        : ctx.createLinearGradient(x0, y0, x1, y1);
-    // Main colour → sub colour (or → transparent).
-    g.addColorStop(0, colors.main);
-    if (this.sub.gradientToTransparent) {
-      const rgb = hexToRgb(colors.main) ?? { r: 0, g: 0, b: 0 };
-      g.addColorStop(1, `rgba(${rgb.r},${rgb.g},${rgb.b},0)`);
-    } else g.addColorStop(1, colors.sub);
-    ctx.globalAlpha = 1;
-    ctx.globalCompositeOperation = 'source-over';
-    ctx.fillStyle = g;
-    ctx.fillRect(0, 0, doc.width, doc.height);
+    const img = ctx.createImageData(area.w, area.h);
+    renderGradient(img.data, area.w, area.h, area.x, area.y, fill, fill.a, fill.b);
+    ctx.putImageData(img, area.x, area.y);
     this.edit.update({ x: 0, y: 0, w: doc.width, h: doc.height });
+  }
+
+  private dragged(): boolean {
+    return Math.hypot(this.end.sx - this.start.sx, this.end.sy - this.start.sy) >= DRAG_THRESHOLD;
   }
 
   move(p: PointerInfo): void {
     this.end = p;
-    this.render(p);
+    this.mods = p;
+    if (this.dragged()) this.render();
   }
 
   modifiers(m: Modifiers): void {
-    this.render(m);
+    this.mods = m;
+    if (this.dragged()) this.render();
   }
 
   up(p: PointerInfo): void {
     this.end = p;
-    if (Math.hypot(p.sx - this.start.sx, p.sy - this.start.sy) < DRAG_THRESHOLD) {
-      this.edit.cancel();
+    this.mods = p;
+    if (!this.dragged()) {
+      this.cancel();
       return;
     }
-    this.render(p);
+    const fill = this.fill();
+    if (this.layer) {
+      actions.commitTransform('Edit gradient', [], new Map([[this.layer.id, { ...EMPTY_CONTENT, gradient: fill }]]));
+      return;
+    }
+    if (!this.edit) {
+      actions.addGradientLayer(fill);
+      return;
+    }
+    this.render();
     actions.commitPixels(`Gradient: ${this.sub.name}`, [this.edit.commit()]);
   }
 
   cancel(): void {
-    this.edit.cancel();
+    this.edit?.cancel();
+    if (this.layer) engine.resync();
   }
 
   overlay(ctx: CanvasRenderingContext2D, view: OverlayView): void {
+    if (!this.dragged()) return;
+    const e = this.endPoint();
     const a = applyMatrix(view.matrix, this.start.x, this.start.y);
-    const b = applyMatrix(view.matrix, this.end.x, this.end.y);
+    const b = applyMatrix(view.matrix, e.x, e.y);
     ctx.lineWidth = 1;
     ctx.strokeStyle = '#2f80ed';
     ctx.beginPath();

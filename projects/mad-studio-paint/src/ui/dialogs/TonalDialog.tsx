@@ -3,11 +3,12 @@
  * Layer > New correction layer and the settings of an existing correction layer. Every change is
  * previewed on the canvas; OK records one undo step, Cancel restores everything.
  */
-import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { CurveEditor } from '../controls/CurveEditor';
 import { findLayer } from '../../model/layers';
 import type { Id } from '../../model/types';
-import { GRADIENT_PRESETS, resolveStops, sampleGradient, type GradientStop } from '../../paint/gradient';
+import { GRADIENT_PRESETS, resolveStops } from '../../paint/gradient';
+import { GradientBar } from '../controls/GradientBar';
 import {
   CHANNELS,
   correctionLabel,
@@ -337,112 +338,6 @@ function GradientMapControls({ c, onChange }: { c: Extract<Correction, { type: '
       </select>
       <label />
       <GradientBar stops={c.stops} onChange={(stops) => onChange({ ...c, stops })} />
-    </div>
-  );
-}
-
-/**
- * Gradient nodes on a colour bar: drag a node sideways to move it, down out of the bar to delete
- * it, click below the bar to add one. The selected node's colour, opacity and position are editable.
- */
-export function GradientBar({ stops, onChange }: { stops: GradientStop[]; onChange: (s: GradientStop[]) => void }) {
-  const [selected, setSelected] = useState(0);
-  const bar = useRef<HTMLDivElement>(null);
-  const sel = stops[Math.min(selected, stops.length - 1)];
-  const css = `linear-gradient(to right, ${[...stops]
-    .sort((a, b) => a.pos - b.pos)
-    .map((s) => {
-      const [r, g, b, a] = sampleGradient([s], 0);
-      return `rgba(${r},${g},${b},${a}) ${(s.pos * 100).toFixed(1)}%`;
-    })
-    .join(', ')})`;
-
-  const posAt = (clientX: number) => {
-    const r = bar.current!.getBoundingClientRect();
-    return Math.min(1, Math.max(0, (clientX - r.left) / r.width));
-  };
-
-  const drag = (index: number, list: GradientStop[]) => (e: ReactPointerEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setSelected(index);
-    const startY = e.clientY;
-    const move = (ev: PointerEvent) => {
-      const next = list.map((s) => ({ ...s }));
-      if (ev.clientY - startY > 40 && next.length > 2) {
-        next.splice(index, 1);
-        setSelected(0);
-      } else next[index].pos = Number(posAt(ev.clientX).toFixed(3));
-      onChange(next);
-    };
-    const up = () => {
-      window.removeEventListener('pointermove', move);
-      window.removeEventListener('pointerup', up);
-    };
-    window.addEventListener('pointermove', move);
-    window.addEventListener('pointerup', up);
-  };
-
-  const add = (e: ReactPointerEvent) => {
-    const pos = Number(posAt(e.clientX).toFixed(3));
-    const [r, g, b, a] = sampleGradient(stops, pos);
-    const hex = `#${[r, g, b].map((v) => Math.round(v).toString(16).padStart(2, '0')).join('')}`;
-    const next = [...stops, { pos, color: hex, opacity: Number(a.toFixed(2)) }];
-    onChange(next);
-    setSelected(next.length - 1);
-  };
-
-  return (
-    <div className="gradient-editor">
-      <div className="gradient-bar" ref={bar} style={{ backgroundImage: `${css}, conic-gradient(#ccc 0 25%, #fff 0 50%, #ccc 0 75%, #fff 0)` }} />
-      <div className="gradient-nodes" onPointerDown={add} title="Click to add a node">
-        {stops.map((s, i) => (
-          <span
-            key={i}
-            className={`gradient-node ${s === sel ? 'on' : ''}`}
-            style={{ left: `${s.pos * 100}%`, background: s.color.startsWith('#') ? s.color : '#888' }}
-            onPointerDown={drag(i, stops)}
-            data-testid="gradient-node"
-          />
-        ))}
-      </div>
-      {sel && (
-        <div className="gradient-node-props">
-          <label>
-            Color{' '}
-            <input
-              type="color"
-              value={sel.color.startsWith('#') ? sel.color : '#000000'}
-              onChange={(e) => onChange(stops.map((s) => (s === sel ? { ...s, color: e.target.value } : s)))}
-            />
-          </label>
-          <label>
-            Opacity{' '}
-            <input
-              type="number"
-              min={0}
-              max={100}
-              value={Math.round(sel.opacity * 100)}
-              onChange={(e) => onChange(stops.map((s) => (s === sel ? { ...s, opacity: Math.max(0, Math.min(100, Number(e.target.value) || 0)) / 100 } : s)))}
-            />
-            %
-          </label>
-          <label>
-            Position{' '}
-            <input
-              type="number"
-              min={0}
-              max={100}
-              value={Math.round(sel.pos * 100)}
-              onChange={(e) => onChange(stops.map((s) => (s === sel ? { ...s, pos: Math.max(0, Math.min(100, Number(e.target.value) || 0)) / 100 } : s)))}
-            />
-            %
-          </label>
-          <button type="button" className="btn" onClick={() => onChange(stops.map((s) => ({ ...s, pos: 1 - s.pos })))}>
-            Reverse
-          </button>
-        </div>
-      )}
     </div>
   );
 }

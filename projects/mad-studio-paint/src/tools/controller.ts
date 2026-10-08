@@ -27,7 +27,7 @@ import {
   ZoomSession,
 } from './sessions';
 import { drawRulers, rulerSession } from './rulerTool';
-import { drawLineSelection, lineHandleCursor, objectSession } from './objectTool';
+import { drawGradientHandles, drawLineSelection, lineHandleCursor, objectSession } from './objectTool';
 import { balloonSession, textSession } from './textTool';
 import { frameSession } from './frameTool';
 import { confirmTransform, drawTransformOverlay, hitHandle, isTransforming, transformCursor, TransformSession } from './transform';
@@ -203,6 +203,7 @@ class Controller {
     drawRulers(ctx, this.view);
     // The Object tool (also ⌘ with drawing tools) shows the selected vector lines.
     if (!this.session?.overlay && this.current() === 'object') drawLineSelection(ctx, this.view);
+    if (!this.session && (this.current() === 'object' || this.current() === 'gradient')) drawGradientHandles(ctx, this.view);
     drawTransformOverlay(ctx, this.view);
     PolylineSelect.overlay(ctx, this.view);
     if (this.session?.overlay) {

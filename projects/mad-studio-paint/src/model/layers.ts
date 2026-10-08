@@ -1,6 +1,7 @@
 import { uid } from './ids';
 import type { Correction } from '../paint/tonal';
-import type { CorrectionLayer, FolderLayer, Id, Layer, LayerMask, PaintDocument, RasterLayer, TextLayer, VectorLayer } from './types';
+import type { CorrectionLayer, FolderLayer, GradientLayer, Id, Layer, LayerMask, PaintDocument, RasterLayer, TextLayer, VectorLayer } from './types';
+import type { GradientFill } from '../paint/gradient';
 
 export function createRasterLayer(name: string, patch: Partial<RasterLayer> = {}): RasterLayer {
   return {
@@ -73,6 +74,24 @@ export function createTextLayer(name: string, patch: Partial<TextLayer> = {}): T
     draft: false,
     texts: [],
     balloons: [],
+    rev: nextRev(),
+    ...patch,
+  };
+}
+
+export function createGradientLayer(name: string, gradient: GradientFill, patch: Partial<GradientLayer> = {}): GradientLayer {
+  return {
+    id: uid('g'),
+    kind: 'gradient',
+    name,
+    visible: true,
+    opacity: 1,
+    blend: 'normal',
+    clip: false,
+    locked: false,
+    reference: false,
+    draft: false,
+    gradient,
     rev: nextRev(),
     ...patch,
   };
@@ -162,8 +181,8 @@ export function pixelIds(layers: Layer[]): Id[] {
   return ids;
 }
 
-/** Ids of vector and text layers (their pixels are rendered from lines, text and balloons). */
-export const renderedIds = (layers: Layer[]): Id[] => flatten(layers).flatMap((l) => (l.kind === 'vector' || l.kind === 'text' ? [l.id] : []));
+/** Ids of vector, text and gradient layers (their pixels are rendered from their content). */
+export const renderedIds = (layers: Layer[]): Id[] => flatten(layers).flatMap((l) => (l.kind === 'vector' || l.kind === 'text' || l.kind === 'gradient' ? [l.id] : []));
 
 /** Ids of all layer masks. */
 export const maskIds = (layers: Layer[]): Id[] => flatten(layers).flatMap((l) => (l.mask ? [l.mask.id] : []));
@@ -287,13 +306,14 @@ export function cloneLayer(layer: Layer, idMap: Map<Id, Id> = new Map()): { copy
     return { ...m, id };
   };
   const copyOne = (l: Layer): Layer => {
-    const id = uid(l.kind === 'folder' ? 'f' : l.kind === 'correction' ? 'c' : l.kind === 'vector' ? 'v' : l.kind === 'text' ? 't' : 'l');
+    const id = uid(l.kind === 'folder' ? 'f' : l.kind === 'correction' ? 'c' : l.kind === 'vector' ? 'v' : l.kind === 'text' ? 't' : l.kind === 'gradient' ? 'g' : 'l');
     idMap.set(l.id, id);
     const mask = copyMask(l.mask);
     if (l.kind === 'folder') return { ...l, id, mask, children: l.children.map(copyOne) };
     // Lines are never changed in place, so the copy can share them.
     if (l.kind === 'vector') return { ...l, id, mask, strokes: [...l.strokes], rev: nextRev() };
     if (l.kind === 'text') return { ...l, id, mask, texts: [...l.texts], balloons: [...l.balloons], rev: nextRev() };
+    if (l.kind === 'gradient') return { ...l, id, mask, rev: nextRev() };
     return { ...l, id, mask };
   };
   return { copy: copyOne(layer), idMap };

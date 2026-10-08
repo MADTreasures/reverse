@@ -1312,3 +1312,55 @@ test('screentones: the Tone effect turns grey into dots; New tone makes a masked
   expect(back).toMatchObject({ enabled: true, density: 'fixed', value: 20 });
   expect(errors).toEqual([]);
 });
+
+/** Displayed RGB at a point. */
+const rgbAt = (page: Page, x: number, y: number) => page.evaluate(([px, py]) => window.__madPaint.engine.sampleDisplayed(px, py, '#ffffff').slice(0, 3), [x, y]);
+
+test('gradients: shapes and edge rules, the Edit gradient dialog, editable gradient layers', async ({ page }) => {
+  const errors = await boot(page);
+  await page.evaluate(() => window.__madPaint.actions.setColor({ main: '#ff0000', sub: '#0000ff' }));
+  // Circle, "Do not draw": only inside the dragged radius.
+  await useSubTool(page, 'gradient', 'grad-circle');
+  await page.getByRole('button', { name: 'Tool Settings', exact: true }).click();
+  await page.getByLabel('Edge process').selectOption('clear');
+  await drag(page, [200, 150], [260, 150], 6);
+  expect(await layerAlpha(page, 200, 150)).toBe(255);
+  expect(await layerAlpha(page, 300, 150)).toBe(0);
+  expect((await rgbAt(page, 201, 150))[0]).toBeGreaterThan(200);
+  await page.keyboard.press('ControlOrMeta+z');
+  // Edit gradient: load a preset from the list.
+  await useSubTool(page, 'gradient', 'grad-background');
+  await page.getByRole('button', { name: 'Advanced settings…' }).click();
+  const dlg = page.getByRole('dialog', { name: 'Edit gradient' });
+  await dlg.getByRole('option', { name: 'Moonlight' }).click();
+  await dlg.getByRole('button', { name: 'Load to gradient bar' }).click();
+  await dlg.getByRole('button', { name: 'OK' }).click();
+  const stops = await page.evaluate(() => window.__madPaint.useStore.getState().subTools.find((t: any) => t.id === 'grad-background').gradient.stops);
+  expect(stops).toHaveLength(3);
+  // A gradient layer: drawn with the tool, its direction changed by dragging again.
+  await useSubTool(page, 'gradient', 'grad-layer');
+  await drag(page, [0, 150], [400, 150], 6);
+  let l = (await state(page)).layers[0];
+  expect(l.kind).toBe('gradient');
+  await expect(page.getByTestId('gradient-icon')).toHaveCount(1);
+  const leftBefore = await rgbAt(page, 5, 150);
+  expect(leftBefore[0]).toBeGreaterThan(200);
+  await drag(page, [400, 150], [0, 150], 6);
+  l = (await state(page)).layers[0];
+  expect(l.gradient.a.x).toBeGreaterThan(390);
+  expect((await rgbAt(page, 5, 150))[2]).toBeGreaterThan(200);
+  // Object tool: drag the end handle; undo restores it.
+  await selectTool(page, 'object');
+  await drag(page, [0, 150], [0, 50], 6);
+  expect((await state(page)).layers[0].gradient.b.y).toBeLessThan(60);
+  await page.keyboard.press('ControlOrMeta+z');
+  expect((await state(page)).layers[0].gradient.b.y).toBeCloseTo(150, 0);
+  // Saved and opened again.
+  const back = await page.evaluate(async () => {
+    const m = window.__madPaint;
+    await m.openFileBytes({ name: 'gradient.madpaint', data: await m.buildDocumentBytes() });
+    return m.useStore.getState().doc.layers[0].kind;
+  });
+  expect(back).toBe('gradient');
+  expect(errors).toEqual([]);
+});
