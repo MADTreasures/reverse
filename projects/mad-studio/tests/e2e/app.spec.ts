@@ -569,3 +569,21 @@ test('mute switches: right-click solos a mixer track, opens the channel menu in 
   expect(channels[1].muted).toBe(false);
   expect(channels.filter((c: any) => !c.muted).length).toBe(1);
 });
+
+test('channel menu: copy a channel\'s steps and paste them into another channel', async ({ page }) => {
+  await boot(page);
+  const before = await state(page);
+  const pattern = before.project.patterns.find((p: any) => p.id === before.ui.selectedPatternId);
+  const [src, dst] = before.project.channels;
+  const srcNotes = pattern.notes[src.id] ?? [];
+  expect(srcNotes.length).toBeGreaterThan(0);
+  await page.locator('.rack-row').nth(0).locator('.channel-name').click({ button: 'right' });
+  await page.getByRole('menuitem', { name: 'Copy', exact: true }).click();
+  await page.locator('.rack-row').nth(1).locator('.channel-name').click({ button: 'right' });
+  await page.getByRole('menuitem', { name: 'Paste', exact: true }).click();
+  const after = await state(page);
+  const pasted = after.project.patterns.find((p: any) => p.id === before.ui.selectedPatternId).notes[dst.id];
+  const strip = (list: any[]) => list.map((n: any) => [n.key, n.start, n.length]);
+  expect(strip(pasted)).toEqual(strip(srcNotes));
+  expect(after.pastLabels[after.pastLabels.length - 1]).toBe('channel rack paste');
+});

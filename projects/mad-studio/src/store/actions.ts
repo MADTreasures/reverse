@@ -538,6 +538,15 @@ export function legatoNotes(patternId: Id, channelId: Id, selected: ReadonlySet<
   }, { label: 'piano roll legato' });
 }
 
+/** Replaces a channel's notes in a pattern (FL Studio: channel menu › Paste). */
+export function replaceChannelNotes(patternId: Id, channelId: Id, notes: Omit<Note, 'id'>[]): void {
+  edit((d) => {
+    const p = patternOf(d, patternId);
+    if (!p) return;
+    p.notes[channelId] = notes.map((n) => ({ ...n, id: makeId('n') })).sort((a, b) => a.start - b.start || a.key - b.key);
+  }, { label: 'channel rack paste' });
+}
+
 export function clearChannelNotes(patternId: Id, channelId: Id): void {
   edit((d) => {
     const p = patternOf(d, patternId);

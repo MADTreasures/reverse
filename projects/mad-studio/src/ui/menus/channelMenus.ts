@@ -3,8 +3,8 @@ import { createSamplerChannel } from '../../model/defaults';
 import { FACTORY_SAMPLES } from '../../model/factory';
 import { findPattern, patternSteps } from '../../model/patterns';
 import { SYNTH_PRESETS } from '../../model/presets';
-import type { Channel } from '../../model/types';
-import { addSamplerChannelFor, importSamplesDialog } from '../../project/projectIO';
+import type { Channel, Note } from '../../model/types';
+import { addSamplerChannelFor, assignSampleToChannel, importSamplesDialog } from '../../project/projectIO';
 import {
   addChannel,
   addFactoryChannel,
@@ -15,6 +15,7 @@ import {
   fillSteps,
   firstFreeInsert,
   moveChannel,
+  replaceChannelNotes,
   rotateSteps,
   setChannelProps,
   soloChannel,
@@ -76,11 +77,20 @@ export function addChannelMenu(): MenuItem[] {
   ];
 }
 
+/** Notes copied with the channel menu's Cut/Copy (FL Studio), pasted into any channel. */
+let channelClipboard: Omit<Note, 'id'>[] | null = null;
+
+function randomColor(current: string): string {
+  const choices = PALETTE.filter((c) => c !== current);
+  return choices[Math.floor(Math.random() * choices.length)] ?? PALETTE[0];
+}
+
 export function channelContextMenu(channel: Channel): MenuItem[] {
   const s = useStore.getState();
   const patternId = s.ui.selectedPatternId;
   const pattern = findPattern(s.project, patternId);
   const steps = pattern ? patternSteps(pattern, s.project.beatsPerBar) : 16;
+  const notes = pattern?.notes[channel.id] ?? [];
   if (channel.kind === 'automation') {
     return [
       { label: channel.name, header: true },
@@ -120,12 +130,42 @@ export function channelContextMenu(channel: Channel): MenuItem[] {
       label: 'Color',
       submenu: PALETTE.map((c, i) => ({ label: PALETTE_NAMES[i], swatch: c, onClick: () => setChannelProps(channel.id, { color: c }) })),
     },
+    { label: 'Random color', onClick: () => setChannelProps(channel.id, { color: randomColor(channel.color) }) },
+    ...(channel.kind === 'sampler'
+      ? [
+          {
+            label: 'Load sample…',
+            onClick: async () => {
+              const [first] = await importSamplesDialog();
+              if (first) assignSampleToChannel(channel.id, first.info);
+            },
+          },
+        ]
+      : []),
     { label: 'Clone', onClick: () => cloneChannel(channel.id) },
     { label: 'Move up', onClick: () => moveChannel(channel.id, -1) },
     { label: 'Move down', onClick: () => moveChannel(channel.id, 1) },
     { separator: true },
     { label: 'Solo', onClick: () => soloChannel(channel.id) },
     { label: 'Route to free mixer track', onClick: () => setChannelProps(channel.id, { mixerTrack: firstFreeInsert(useStore.getState().project) || channel.mixerTrack }) },
+    { separator: true },
+    // FL Studio: Cut / Copy / Paste act on this channel's notes in the current pattern.
+    {
+      label: 'Cut',
+      disabled: notes.length === 0,
+      onClick: () => {
+        channelClipboard = notes.map(({ id: _id, ...n }) => n);
+        clearChannelNotes(patternId, channel.id);
+      },
+    },
+    { label: 'Copy', disabled: notes.length === 0, onClick: () => void (channelClipboard = notes.map(({ id: _id, ...n }) => n)) },
+    {
+      label: 'Paste',
+      disabled: !channelClipboard?.length,
+      onClick: () => {
+        if (channelClipboard) replaceChannelNotes(patternId, channel.id, channelClipboard);
+      },
+    },
     { separator: true },
     { label: 'Fill each 2 steps', onClick: () => fillSteps(patternId, channel.id, 2, steps) },
     { label: 'Fill each 4 steps', onClick: () => fillSteps(patternId, channel.id, 4, steps) },
