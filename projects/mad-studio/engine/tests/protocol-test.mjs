@@ -328,7 +328,14 @@ async function testPlayback(engine) {
   near(later.tick - first.tick, 0.7 * 192, 60, 'transport advances in real time');
   check(later.cpu >= 0 && later.cpu < 1, 'status.cpu in 0..1');
   const meters = engine.messages.slice(since).filter((m) => m.type === 'meters');
-  check(meters.length >= 10, `meters arrive while playing (${meters.length} in ~0.8 s)`);
+  // Rate of the 30 Hz status/meter timer after the start-up work (graph build, impulse responses)
+  // is done: at least half the nominal rate over one second.
+  const windowStart = engine.messages.length;
+  await sleep(1000);
+  const inWindow = engine.messages.slice(windowStart);
+  const meterRate = inWindow.filter((m) => m.type === 'meters').length;
+  const statusRate = inWindow.filter((m) => m.type === 'status').length;
+  check(meterRate >= 15, `meters arrive while playing (${meterRate}/s, status ${statusRate}/s; ${meters.length} in the first ~0.8 s)`);
   const last = meters.at(-1);
   check(last && last.peaks.length === 4 && last.waveform.length === 256, 'meters: one [l,r] per mixer track, 256 waveform samples');
   check(meters.some((m) => m.peaks[0][0] > 0.01), 'master meter shows signal');
