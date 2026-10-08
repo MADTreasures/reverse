@@ -2,6 +2,7 @@ import { useStore } from '../store/store';
 import { muteChannelByIndex, runCommand, type CommandId } from './commands';
 import { liveNoteOff, liveNoteOn } from './liveInput';
 import { closeDialog, closeMenu, useOverlays } from './overlays';
+import { windowHandlers } from './windowKeys';
 import { closeWindow } from './workspace/windows';
 
 /** Physical key → semitone offset (layout independent, so QWERTZ works too). */
@@ -13,16 +14,7 @@ const TYPING_KEYS: Record<string, number> = {
 };
 const TYPING_BASE = 48; // C4 in this app's naming = MIDI 48
 
-type KeyHandler = (e: KeyboardEvent) => boolean;
-const windowHandlers = new Map<string, KeyHandler>();
-
-/** Editors register a handler that receives keys while their window is focused. */
-export function registerWindowKeys(windowId: string, handler: KeyHandler): () => void {
-  windowHandlers.set(windowId, handler);
-  return () => {
-    if (windowHandlers.get(windowId) === handler) windowHandlers.delete(windowId);
-  };
-}
+export { registerWindowKeys } from './windowKeys';
 
 export function isTextInput(target: EventTarget | null): boolean {
   const el = target as HTMLElement | null;
@@ -60,7 +52,8 @@ function shortcutFor(e: KeyboardEvent): CommandId | null {
   if (mod) {
     switch (e.code) {
       case 'KeyZ':
-        return e.altKey ? 'undo' : e.shiftKey ? 'redo' : 'undoToggle';
+        // FL Studio 26: Ctrl+Z undoes step by step, Ctrl+Alt+Z redoes (Ctrl+Shift+Z / Ctrl+Y too).
+        return e.altKey || e.shiftKey ? 'redo' : 'undo';
       case 'KeyY':
         return 'redo';
       case 'KeyS':

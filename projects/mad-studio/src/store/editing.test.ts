@@ -5,6 +5,9 @@ import { PPQ, TICKS_PER_STEP, formatDuration, gridLineTicks, snapTicks } from '.
 import {
   addNotes,
   addPattern,
+  redo,
+  setBpm,
+  undo,
   cloneTrack,
   findFirstEmptyPattern,
   insertPattern,
@@ -196,5 +199,23 @@ describe('slice tool', () => {
       [0, 24, 0.5],
       [24, 72, 0.5],
     ]);
+  });
+});
+
+describe('named undo steps (FL Studio: "Undo piano roll add note", "Level 2/34")', () => {
+  it('records labels, merges coalesced edits and reports the level', () => {
+    const { ui, project } = state();
+    const ch = project.channels[0].id;
+    addNotes(ui.selectedPatternId, ch, [{ key: 60, start: 0, length: 24, velocity: 0.8 }], { coalesce: 'g1' });
+    addNotes(ui.selectedPatternId, ch, [{ key: 62, start: 24, length: 24, velocity: 0.8 }], { coalesce: 'g1' });
+    setBpm(140);
+    expect(state().pastLabels).toEqual(['piano roll add note', 'tempo']);
+    expect(undo()).toEqual({ label: 'tempo', level: 2, total: 3 });
+    expect(state().futureLabels).toEqual(['tempo']);
+    expect(undo()).toEqual({ label: 'piano roll add note', level: 3, total: 3 });
+    expect(undo()).toBeNull();
+    expect(redo()).toEqual({ label: 'piano roll add note', level: 2, total: 3 });
+    expect(redo()).toEqual({ label: 'tempo', level: 1, total: 3 });
+    expect(state().project.bpm).toBe(140);
   });
 });

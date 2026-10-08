@@ -112,7 +112,10 @@ export interface TransportState {
 export interface AppState {
   project: Project;
   past: Project[];
+  /** Undo step names, parallel to `past` / `future`. */
+  pastLabels: string[];
   future: Project[];
+  futureLabels: string[];
   /** Consecutive edits with the same key merge into one undo step (knob drags etc.). */
   coalesceKey: string | null;
   dirty: boolean;
@@ -176,7 +179,9 @@ function initialState(): AppState {
   return {
     project,
     past: [],
+    pastLabels: [],
     future: [],
+    futureLabels: [],
     coalesceKey: null,
     dirty: false,
     fileName: null,

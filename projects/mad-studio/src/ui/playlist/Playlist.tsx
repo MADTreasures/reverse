@@ -455,9 +455,12 @@ export function Playlist() {
         // Shift+drag duplicates the selection and drags the copies.
         const copyIds = new Map([...orig.keys()].map((id) => [id, makeId('clip')]));
         const copies = [...orig.values()].map((c) => ({ ...c, id: copyIds.get(c.id)! }));
-        updateClips((list) => {
-          for (const c of copies) list.push({ ...c });
-        }, { coalesce: key });
+        updateClips(
+          (list) => {
+            for (const c of copies) list.push({ ...c });
+          },
+          { coalesce: key, label: 'playlist clone clip' },
+        );
         orig = new Map(copies.map((c) => [c.id, c]));
         anchor = copyIds.get(hit.clip.id)!;
         sel = new Set(copies.map((c) => c.id));
@@ -641,7 +644,7 @@ export function Playlist() {
               c.trackId = project.tracks[oi + dr]?.id ?? o.trackId;
             }
           },
-          { coalesce: d.key },
+          { coalesce: d.key, label: 'playlist move clip' },
         );
         break;
       }
@@ -666,7 +669,7 @@ export function Playlist() {
               }
             }
           },
-          { coalesce: d.key },
+          { coalesce: d.key, label: 'playlist resize clip' },
         );
         break;
       }
@@ -805,9 +808,12 @@ export function Playlist() {
           const at = lastClick.current?.tick ?? 0;
           const min = Math.min(...clipboard.map((c) => c.start));
           const copies = clipboard.map((c) => ({ ...c, id: makeId('clip'), start: c.start - min + at }));
-          updateClips((list) => {
-            for (const c of copies) list.push(c);
-          });
+          updateClips(
+            (list) => {
+              for (const c of copies) list.push(c);
+            },
+            { label: 'playlist paste' },
+          );
           setSelected(new Set(copies.map((c) => c.id)));
           return true;
         }
@@ -815,9 +821,12 @@ export function Playlist() {
           const min = Math.min(...chosen.map((c) => c.start));
           const max = Math.max(...chosen.map((c) => c.start + c.length));
           const copies = chosen.map((c) => ({ ...c, id: makeId('clip'), start: c.start + (max - min) }));
-          updateClips((list) => {
-            for (const c of copies) list.push(c);
-          });
+          updateClips(
+            (list) => {
+              for (const c of copies) list.push(c);
+            },
+            { label: 'playlist duplicate' },
+          );
           setSelected(new Set(copies.map((c) => c.id)));
           return true;
         }

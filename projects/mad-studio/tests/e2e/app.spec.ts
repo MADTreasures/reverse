@@ -532,3 +532,23 @@ test('slice tool (C) cuts a playlist clip and a piano roll note', async ({ page 
     [48, 48],
   ]);
 });
+
+test('undo names the step like FL Studio: Ctrl+Z undoes, Ctrl+Alt+Z redoes', async ({ page }) => {
+  await boot(page);
+  const roll = await openLeadInPianoRoll(page);
+  const count = (await roll.notes()).length;
+  const p = roll.at(96 + 4, 59);
+  await page.mouse.click(p.x, p.y);
+  expect((await roll.notes()).length).toBe(count + 1);
+
+  await page.locator('.menubar .menu-btn', { hasText: /^Edit$/i }).click();
+  await expect(page.getByRole('menuitem', { name: 'Undo piano roll add note' })).toBeVisible();
+  await page.keyboard.press('Escape');
+
+  await page.keyboard.press('ControlOrMeta+z');
+  expect((await roll.notes()).length).toBe(count);
+  await expect(page.locator('.hint-bar')).toContainText('Undone: piano roll add note · Level 2/');
+  await page.keyboard.press('ControlOrMeta+Alt+z');
+  expect((await roll.notes()).length).toBe(count + 1);
+  await expect(page.locator('.hint-bar')).toContainText('Redone: piano roll add note · Level 1/');
+});

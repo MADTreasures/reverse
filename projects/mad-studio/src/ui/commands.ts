@@ -20,10 +20,13 @@ import {
   stepPattern,
   togglePlayMode,
   undo,
+  type HistoryStep,
 } from '../store/actions';
 import { createAutomationClip } from '../store/automationActions';
 import { useStore } from '../store/store';
+import { setHint } from './hint';
 import { clearScoreLog, dumpScoreLog } from './liveInput';
+import { sendToFocusedEditor } from './windowKeys';
 import { confirmDialog, openDialog, promptDialog, toast } from './overlays';
 import { closeWindow, focusWindow, openWindow, toggleMaximize, toggleWindow } from './workspace/windows';
 
@@ -39,7 +42,9 @@ export type CommandId =
   | 'saveNewVersion'
   | 'undo'
   | 'redo'
-  | 'undoToggle'
+  | 'cut'
+  | 'copy'
+  | 'paste'
   | 'playPause'
   | 'pause'
   | 'stop'
@@ -94,9 +99,11 @@ export const SHORTCUTS: Partial<Record<CommandId, string>> = {
   saveAs: `${shift}${mod}S`,
   saveNewVersion: `${mod}N`,
   export: `${mod}R`,
-  undoToggle: `${mod}Z`,
-  undo: `${alt}${mod}Z`,
-  redo: `${shift}${mod}Z`,
+  undo: `${mod}Z`,
+  redo: `${alt}${mod}Z`,
+  cut: `${mod}X`,
+  copy: `${mod}C`,
+  paste: `${mod}V`,
   playPause: 'Space',
   // macOS reserves ⌘Space (Spotlight) and ⌘H (Hide); the Control key works there.
   pause: isMac ? '⌃Space' : 'Ctrl+Space',
@@ -132,8 +139,10 @@ export const SHORTCUTS: Partial<Record<CommandId, string>> = {
   shortcuts: 'F1',
 };
 
-/** Ctrl/Cmd+Z in FL Studio undoes the last edit, pressed again it redoes it. */
-let toggledUndo = false;
+/** FL Studio shows what was undone in the hint bar: "Undone: piano roll move note · Level 2/34". */
+function showHistoryStep(verb: 'Undone' | 'Redone', step: HistoryStep | null): void {
+  setHint(step ? `${verb}: ${step.label} · Level ${step.level}/${step.total}` : verb === 'Undone' ? 'Nothing to undo' : 'Nothing to redo');
+}
 
 /** Mute (or with `solo` solo) the n-th channel of the rack (FL: keys 1–0, Ctrl+1–0). */
 export function muteChannelByIndex(index: number, solo: boolean): void {
@@ -173,18 +182,18 @@ export async function runCommand(id: CommandId): Promise<void> {
       return;
     }
     case 'undo':
-      toggledUndo = false;
-      return undo();
+      return showHistoryStep('Undone', undo());
     case 'redo':
-      toggledUndo = false;
-      return redo();
-    case 'undoToggle':
-      if (toggledUndo && s.future.length > 0) {
-        toggledUndo = false;
-        return redo();
-      }
-      toggledUndo = s.past.length > 0;
-      return undo();
+      return showHistoryStep('Redone', redo());
+    case 'cut':
+      sendToFocusedEditor('KeyX', 'x');
+      return;
+    case 'copy':
+      sendToFocusedEditor('KeyC', 'c');
+      return;
+    case 'paste':
+      sendToFocusedEditor('KeyV', 'v');
+      return;
     case 'playPause':
       return engine.togglePlay();
     case 'pause': {

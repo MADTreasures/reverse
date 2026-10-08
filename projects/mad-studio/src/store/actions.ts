@@ -39,6 +39,8 @@ import { MAX_UNDO, initialUi, useStore, type AppState, type PlayMode, type Trans
 export interface EditOptions {
   /** Edits sharing a key merge into one undo step until endCoalesce() is called. */
   coalesce?: string;
+  /** Name of the undo step, shown as “Undo <label>” (FL Studio style, e.g. "piano roll move note"). */
+  label?: string;
 }
 
 /** Applies an undoable change to the project. */
@@ -50,10 +52,20 @@ export function edit(recipe: (draft: Draft<Project>) => void, opts: EditOptions 
   useStore.setState({
     project: next,
     past: merge ? s.past : [...s.past.slice(-(MAX_UNDO - 1)), s.project],
+    pastLabels: merge ? s.pastLabels : [...s.pastLabels.slice(-(MAX_UNDO - 1)), opts.label ?? 'edit'],
     future: [],
+    futureLabels: [],
     coalesceKey: opts.coalesce ?? null,
     dirty: true,
   });
+}
+
+/** What undo() / redo() did, for the hint bar ("Undone: … · Level 2/34"). */
+export interface HistoryStep {
+  label: string;
+  /** 1 = the latest state; grows with every undo. */
+  level: number;
+  total: number;
 }
 
 export function endCoalesce(): void {
@@ -67,32 +79,40 @@ export function gestureKey(prefix: string): string {
   return `${prefix}#${gestureCounter}`;
 }
 
-export function undo(): void {
+export function undo(): HistoryStep | null {
   const s = useStore.getState();
   const prev = s.past[s.past.length - 1];
-  if (!prev) return;
+  if (!prev) return null;
+  const label = s.pastLabels[s.pastLabels.length - 1] ?? 'edit';
   useStore.setState({
     project: prev,
     past: s.past.slice(0, -1),
+    pastLabels: s.pastLabels.slice(0, -1),
     future: [s.project, ...s.future],
+    futureLabels: [label, ...s.futureLabels],
     coalesceKey: null,
     dirty: true,
     ui: reconcileUi(s.ui, prev),
   });
+  return { label, level: s.future.length + 2, total: s.past.length + s.future.length + 1 };
 }
 
-export function redo(): void {
+export function redo(): HistoryStep | null {
   const s = useStore.getState();
   const next = s.future[0];
-  if (!next) return;
+  if (!next) return null;
+  const label = s.futureLabels[0] ?? 'edit';
   useStore.setState({
     project: next,
     past: [...s.past, s.project],
+    pastLabels: [...s.pastLabels, label],
     future: s.future.slice(1),
+    futureLabels: s.futureLabels.slice(1),
     coalesceKey: null,
     dirty: true,
     ui: reconcileUi(s.ui, next),
   });
+  return { label, level: s.future.length, total: s.past.length + s.future.length + 1 };
 }
 
 export function setUi(recipe: (draft: Draft<UiState>) => void): void {
@@ -135,7 +155,9 @@ export function loadProject(project: Project, fileName: string | null = null): v
   useStore.setState({
     project,
     past: [],
+    pastLabels: [],
     future: [],
+    futureLabels: [],
     coalesceKey: null,
     dirty: false,
     fileName,
@@ -193,13 +215,13 @@ export function setBpm(bpm: number, opts?: EditOptions): void {
   const v = Math.round(Math.min(MAX_BPM, Math.max(MIN_BPM, bpm)) * 1000) / 1000;
   edit((d) => {
     d.bpm = v;
-  }, opts);
+  }, { label: 'tempo', ...opts });
 }
 
 export function setSwing(swing: number, opts?: EditOptions): void {
   edit((d) => {
     d.swing = Math.min(1, Math.max(0, swing));
-  }, opts);
+  }, { label: 'swing', ...opts });
 }
 
 export function setBeatsPerBar(beats: number): void {
@@ -207,13 +229,13 @@ export function setBeatsPerBar(beats: number): void {
   edit((d) => {
     d.beatsPerBar = b;
     for (const p of d.patterns) p.minLength = Math.max(ticksPerBar(b), Math.ceil(p.minLength / ticksPerBar(b)) * ticksPerBar(b));
-  });
+  }, { label: 'time signature' });
 }
 
 export function renameProject(name: string): void {
   edit((d) => {
     d.name = name.trim() || 'Untitled';
-  });
+  }, { label: 'project name' });
 }
 
 // ---------------------------------------------------------------------------
@@ -222,7 +244,7 @@ export function renameProject(name: string): void {
 export function registerSample(info: SampleInfo): void {
   edit((d) => {
     d.samples[info.id] = info;
-  });
+  }, { label: 'add sample' });
 }
 
 // ---------------------------------------------------------------------------
@@ -241,7 +263,7 @@ export function addChannel(channel: Channel, opts: { select?: boolean; autoMixer
       track.name = ch.name;
       track.color = ch.color;
     }
-  });
+  }, { label: 'add channel' });
   if (opts.select !== false) selectChannel(ch.id);
   return ch.id;
 }
@@ -277,7 +299,7 @@ export function deleteChannel(id: Id): void {
     d.channels = d.channels.filter((c) => c.id !== id);
     for (const p of d.patterns) delete p.notes[id];
     d.clips = d.clips.filter((c) => !((c.kind === 'audio' || c.kind === 'automation') && c.channelId === id));
-  });
+  }, { label: 'delete channel' });
   const s = useStore.getState();
   useStore.setState({ ui: reconcileUi(s.ui, s.project) });
 }
@@ -295,7 +317,7 @@ export function cloneChannel(id: Id): Id | null {
       const notes = p.notes[id];
       if (notes) p.notes[copy.id] = notes.map((n) => ({ ...n, id: makeId('n') }));
     }
-  });
+  }, { label: 'clone channel' });
   selectChannel(copy.id);
   return copy.id;
 }
@@ -307,7 +329,7 @@ export function moveChannel(id: Id, delta: number): void {
     if (i < 0 || j < 0 || j >= d.channels.length) return;
     const [ch] = d.channels.splice(i, 1);
     d.channels.splice(j, 0, ch);
-  });
+  }, { label: 'move channel' });
 }
 
 type ChannelPatch = Partial<Pick<Channel, 'name' | 'color' | 'volume' | 'pan' | 'muted' | 'mixerTrack'>>;
@@ -322,7 +344,7 @@ export function setChannelProps(id: Id, patch: ChannelPatch, opts?: EditOptions)
     if (patch.pan !== undefined) ch.pan = Math.min(1, Math.max(-1, patch.pan));
     if (patch.muted !== undefined) ch.muted = patch.muted;
     if (patch.mixerTrack !== undefined) ch.mixerTrack = Math.min(d.mixer.length - 1, Math.max(0, Math.round(patch.mixerTrack)));
-  }, opts);
+  }, { label: 'channel settings', ...opts });
 }
 
 export function toggleChannelMute(id: Id): void {
@@ -336,21 +358,21 @@ export function soloChannel(id: Id): void {
     const others = d.channels.filter((c) => c.id !== id);
     const alreadySolo = others.every((c) => c.muted) && !channelOf(d, id)?.muted;
     for (const c of d.channels) c.muted = alreadySolo ? false : c.id !== id;
-  });
+  }, { label: 'channel solo' });
 }
 
 export function updateSynth(id: Id, recipe: (p: Draft<SynthParams>) => void, opts?: EditOptions): void {
   edit((d) => {
     const ch = channelOf(d, id);
     if (ch && ch.kind === 'synth') recipe(ch.synth);
-  }, opts);
+  }, { label: 'synth settings', ...opts });
 }
 
 export function updateSampler(id: Id, recipe: (p: Draft<SamplerParams>) => void, opts?: EditOptions): void {
   edit((d) => {
     const ch = channelOf(d, id);
     if (ch && ch.kind === 'sampler') recipe(ch.sampler);
-  }, opts);
+  }, { label: 'sampler settings', ...opts });
 }
 
 export function applySynthPreset(id: Id, presetId: string): void {
@@ -359,7 +381,7 @@ export function applySynthPreset(id: Id, presetId: string): void {
   edit((d) => {
     const ch = channelOf(d, id);
     if (ch && ch.kind === 'synth') ch.synth = structuredClone(preset.params);
-  });
+  }, { label: 'synth preset' });
 }
 
 /** Points a sampler channel at another sample (registering the sample info). */
@@ -376,7 +398,7 @@ export function setChannelSample(id: Id, info: SampleInfo, rootKey?: number): vo
       for (const p of d.patterns) for (const n of p.notes[id] ?? []) if (n.key === oldKey) n.key = rootKey;
     }
     if (/^(Sampler|Empty)/.test(ch.name)) ch.name = info.name;
-  });
+  }, { label: 'channel sample' });
 }
 
 // ---------------------------------------------------------------------------
@@ -398,7 +420,7 @@ export function setStep(patternId: Id, channelId: Id, step: number, on: boolean,
     } else if (!on && existing >= 0) {
       notes.splice(existing, 1);
     }
-  }, opts);
+  }, { label: 'channel rack step', ...opts });
 }
 
 export function isStepOn(project: Project, patternId: Id, channelId: Id, step: number): boolean {
@@ -430,7 +452,7 @@ export function fillSteps(patternId: Id, channelId: Id, every: number, stepCount
     kept.sort((a, b) => a.start - b.start || a.key - b.key);
     const p = patternOf(d, patternId);
     if (p) p.notes[channelId] = kept;
-  });
+  }, { label: 'channel rack fill steps' });
 }
 
 /** Shifts all notes of a channel by whole steps, wrapping around the pattern (FL: Rotate left/right). */
@@ -444,7 +466,7 @@ export function rotateSteps(patternId: Id, channelId: Id, delta: number): void {
     if (!notes) return;
     for (const n of notes) n.start = (((n.start + delta * TICKS_PER_STEP) % len) + len) % len;
     notes.sort((a, b) => a.start - b.start || a.key - b.key);
-  });
+  }, { label: 'channel rack rotate steps' });
 }
 
 export function addNotes(patternId: Id, channelId: Id, notes: Omit<Note, 'id'>[], opts?: EditOptions): Id[] {
@@ -454,7 +476,7 @@ export function addNotes(patternId: Id, channelId: Id, notes: Omit<Note, 'id'>[]
     if (!list) return;
     notes.forEach((n, i) => list.push({ ...n, id: ids[i] }));
     list.sort((a, b) => a.start - b.start || a.key - b.key);
-  }, opts);
+  }, { label: 'piano roll add note', ...opts });
   return ids;
 }
 
@@ -475,7 +497,7 @@ export function updateNotes(
       n.velocity = Math.min(1, Math.max(0, n.velocity));
     }
     list.sort((a, b) => a.start - b.start || a.key - b.key);
-  }, opts);
+  }, { label: 'piano roll edit note', ...opts });
 }
 
 export function deleteNotes(patternId: Id, channelId: Id, ids: Id[], opts?: EditOptions): void {
@@ -485,7 +507,7 @@ export function deleteNotes(patternId: Id, channelId: Id, ids: Id[], opts?: Edit
     const p = patternOf(d, patternId);
     if (!p || !p.notes[channelId]) return;
     p.notes[channelId] = p.notes[channelId].filter((n) => !set.has(n.id));
-  }, opts);
+  }, { label: 'piano roll delete note', ...opts });
 }
 
 /** Cuts notes at `tick` (FL Studio's slice tool in the piano roll). */
@@ -501,7 +523,7 @@ export function sliceNotes(patternId: Id, channelId: Id, ids: Id[], tick: number
       n.length = cut;
     }
     list.sort((a, b) => a.start - b.start || a.key - b.key);
-  }, opts);
+  }, { label: 'piano roll slice note', ...opts });
 }
 
 /** FL Studio's quick legato (Ctrl+L): each note (of the selection, or all) lasts until the next note starts. */
@@ -513,14 +535,14 @@ export function legatoNotes(patternId: Id, channelId: Id, selected: ReadonlySet<
       const next = starts.find((t) => t > n.start);
       if (next !== undefined) n.length = next - n.start;
     }
-  });
+  }, { label: 'piano roll legato' });
 }
 
 export function clearChannelNotes(patternId: Id, channelId: Id): void {
   edit((d) => {
     const p = patternOf(d, patternId);
     if (p) delete p.notes[channelId];
-  });
+  }, { label: 'clear notes' });
 }
 
 // ---------------------------------------------------------------------------
@@ -538,7 +560,7 @@ export function addPattern(): Id {
   const pattern = createPattern(name, paletteColor(project.patterns.length + 5), project.beatsPerBar);
   edit((d) => {
     d.patterns.push(pattern);
-  });
+  }, { label: 'new pattern' });
   selectPattern(pattern.id);
   return pattern.id;
 }
@@ -560,7 +582,7 @@ export function insertPattern(beforeId: Id): Id {
   const pattern = createPattern(name, paletteColor(project.patterns.length + 5), project.beatsPerBar);
   edit((d) => {
     d.patterns.splice(index, 0, pattern);
-  });
+  }, { label: 'insert pattern' });
   selectPattern(pattern.id);
   return pattern.id;
 }
@@ -573,7 +595,7 @@ export function movePattern(id: Id, delta: number): void {
     if (i < 0 || j < 0 || j >= d.patterns.length) return;
     const [p] = d.patterns.splice(i, 1);
     d.patterns.splice(j, 0, p);
-  });
+  }, { label: 'move pattern' });
 }
 
 /** Transposes every note of a pattern (FL Studio: Patterns › Transpose); keys stay within 0..127. */
@@ -582,7 +604,7 @@ export function transposePattern(id: Id, semitones: number): void {
     const p = patternOf(d, id);
     if (!p) return;
     for (const list of Object.values(p.notes)) for (const n of list) n.key = Math.min(127, Math.max(0, n.key + Math.round(semitones)));
-  });
+  }, { label: 'transpose pattern' });
 }
 
 export function clonePattern(id: Id): Id | null {
@@ -598,7 +620,7 @@ export function clonePattern(id: Id): Id | null {
   const index = project.patterns.findIndex((p) => p.id === id);
   edit((d) => {
     d.patterns.splice(index + 1, 0, copy);
-  });
+  }, { label: 'clone pattern' });
   selectPattern(copy.id);
   return copy.id;
 }
@@ -611,7 +633,7 @@ export function deletePattern(id: Id): void {
     d.patterns.splice(index, 1);
     d.clips = d.clips.filter((c) => !(c.kind === 'pattern' && c.patternId === id));
     if (d.patterns.length === 0) d.patterns.push(createPattern('Pattern 1', paletteColor(5), d.beatsPerBar));
-  });
+  }, { label: 'delete pattern' });
   const after = useStore.getState().project;
   selectPattern(after.patterns[Math.min(index, after.patterns.length - 1)].id);
 }
@@ -620,14 +642,14 @@ export function renamePattern(id: Id, name: string): void {
   edit((d) => {
     const p = patternOf(d, id);
     if (p && name.trim()) p.name = name.trim();
-  });
+  }, { label: 'rename pattern' });
 }
 
 export function setPatternColor(id: Id, color: string): void {
   edit((d) => {
     const p = patternOf(d, id);
     if (p) p.color = color;
-  });
+  }, { label: 'pattern color' });
 }
 
 /** Sets the minimum pattern length in bars. */
@@ -635,7 +657,7 @@ export function setPatternBars(id: Id, bars: number): void {
   edit((d) => {
     const p = patternOf(d, id);
     if (p) p.minLength = Math.max(1, Math.round(bars)) * ticksPerBar(d.beatsPerBar);
-  });
+  }, { label: 'pattern length' });
 }
 
 export function stepPattern(delta: number): void {
@@ -656,7 +678,7 @@ export function addClip(clip: NewClip, opts?: EditOptions): Id {
   const id = makeId('clip');
   edit((d) => {
     d.clips.push({ ...clip, id } as Draft<Clip>);
-  }, opts);
+  }, { label: 'playlist add clip', ...opts });
   return id;
 }
 
@@ -676,7 +698,7 @@ export function updateClips(recipe: (clips: Draft<Clip>[]) => void, opts?: EditO
       c.length = Math.max(1, Math.round(c.length));
       c.offset = Math.max(0, Math.round(c.offset));
     }
-  }, opts);
+  }, { label: 'playlist edit clip', ...opts });
 }
 
 export function deleteClips(ids: Id[], opts?: EditOptions): void {
@@ -684,7 +706,7 @@ export function deleteClips(ids: Id[], opts?: EditOptions): void {
   const set = new Set(ids);
   edit((d) => {
     d.clips = d.clips.filter((c) => !set.has(c.id));
-  }, opts);
+  }, { label: 'playlist delete clip', ...opts });
 }
 
 /** Mutes or unmutes clips; without `muted` each clip toggles. */
@@ -698,7 +720,7 @@ export function setClipsMuted(ids: Id[], muted?: boolean, opts?: EditOptions): v
       if (next) c.muted = true;
       else delete c.muted;
     }
-  }, opts);
+  }, { label: 'playlist mute clip', ...opts });
 }
 
 /** Cuts clips at `tick` (FL Studio's slice tool); returns the ids of the new right-hand parts. */
@@ -714,7 +736,7 @@ export function sliceClips(ids: Id[], tick: number, opts?: EditOptions): Id[] {
       c.length = cut;
       created.push(id);
     }
-  }, opts);
+  }, { label: 'playlist slice clip', ...opts });
   return created;
 }
 
@@ -726,7 +748,7 @@ export function setClipPattern(clipId: Id, patternId: Id): void {
   edit((d) => {
     const c = d.clips.find((x) => x.id === clipId);
     if (c?.kind === 'pattern') c.patternId = patternId;
-  });
+  }, { label: 'playlist clip source' });
 }
 
 /** Gives a pattern clip its own copy of the pattern (FL Studio: clip menu › Make unique). */
@@ -747,7 +769,7 @@ export function makeClipUnique(clipId: Id): Id | null {
     d.patterns.splice(index + 1, 0, copy);
     const c = d.clips.find((x) => x.id === clipId);
     if (c?.kind === 'pattern') c.patternId = copy.id;
-  });
+  }, { label: 'playlist make unique' });
   selectPattern(copy.id);
   return copy.id;
 }
@@ -756,21 +778,21 @@ export function toggleTrackMute(trackId: Id): void {
   edit((d) => {
     const t = d.tracks.find((x) => x.id === trackId);
     if (t) t.muted = !t.muted;
-  });
+  }, { label: 'playlist track mute' });
 }
 
 export function renameTrack(trackId: Id, name: string): void {
   edit((d) => {
     const t = d.tracks.find((x) => x.id === trackId);
     if (t && name.trim()) t.name = name.trim();
-  });
+  }, { label: 'playlist track name' });
 }
 
 export function addTracks(count: number): void {
   edit((d) => {
     const start = d.tracks.length;
     for (let i = 0; i < count; i++) d.tracks.push(createPlaylistTrack(start + i));
-  });
+  }, { label: 'playlist add tracks' });
 }
 
 /** Inserts an empty playlist track at `index` (FL Studio: track menu › Insert one). */
@@ -781,7 +803,7 @@ export function insertTrack(index: number): void {
     const track = createPlaylistTrack(d.tracks.length);
     track.name = uniqueName(names, `Track ${at + 1}`);
     d.tracks.splice(at, 0, track);
-  });
+  }, { label: 'playlist insert track' });
 }
 
 /** Removes a playlist track and its clips; at least one track stays. */
@@ -792,7 +814,7 @@ export function deleteTrack(trackId: Id): void {
     d.tracks.splice(i, 1);
     d.clips = d.clips.filter((c) => c.trackId !== trackId);
     if (d.tracks.length === 0) d.tracks.push(createPlaylistTrack(0));
-  });
+  }, { label: 'playlist delete track' });
 }
 
 /** Copies a playlist track with its clips below the original (FL Studio: track menu › Clone). */
@@ -804,7 +826,7 @@ export function cloneTrack(trackId: Id): void {
     const copy = { ...createPlaylistTrack(d.tracks.length), name: uniqueName(d.tracks.map((t) => t.name), src.name), muted: src.muted };
     d.tracks.splice(i + 1, 0, copy);
     for (const c of d.clips.filter((x) => x.trackId === trackId)) d.clips.push({ ...c, id: makeId('clip'), trackId: copy.id });
-  });
+  }, { label: 'playlist clone track' });
 }
 
 export function moveTrack(trackId: Id, delta: number): void {
@@ -814,7 +836,7 @@ export function moveTrack(trackId: Id, delta: number): void {
     if (i < 0 || j < 0 || j >= d.tracks.length) return;
     const [t] = d.tracks.splice(i, 1);
     d.tracks.splice(j, 0, t);
-  });
+  }, { label: 'playlist move track' });
 }
 
 /** Mutes or unmutes every clip on a track (FL Studio: Mute all clips / Unmute all clips). */
@@ -838,7 +860,7 @@ export function setMixerTrackProps(index: number, patch: MixerPatch, opts?: Edit
     if (patch.pan !== undefined) t.pan = Math.min(1, Math.max(-1, patch.pan));
     if (patch.muted !== undefined) t.muted = patch.muted;
     if (patch.solo !== undefined && index > 0) t.solo = patch.solo;
-  }, opts);
+  }, { label: 'mixer track settings', ...opts });
 }
 
 export function selectMixerTrack(index: number): void {
@@ -853,7 +875,7 @@ export function addMixerTrack(): number {
   const index = project.mixer.length;
   edit((d) => {
     d.mixer.push(createMixerTrack(index));
-  });
+  }, { label: 'mixer add track' });
   return index;
 }
 
@@ -866,7 +888,7 @@ export function addEffect(trackIndex: number, type: EffectType): Id | null {
   const id = makeId('fx');
   edit((d) => {
     d.mixer[trackIndex].effects.push({ id, type, enabled: true, params: defaultEffectParams(type) });
-  });
+  }, { label: 'mixer add effect' });
   return id;
 }
 
@@ -878,7 +900,7 @@ export function replaceEffect(trackIndex: number, slotId: Id, type: EffectType):
       slot.params = defaultEffectParams(type);
       delete slot.plugin;
     }
-  });
+  }, { label: 'mixer replace effect' });
 }
 
 /** Adds a third-party effect plugin (hosted by the native engine) to a mixer track. */
@@ -888,7 +910,7 @@ export function addPluginEffect(trackIndex: number, plugin: PluginInstanceData):
   const id = makeId('fx');
   edit((d) => {
     d.mixer[trackIndex].effects.push({ id, type: 'plugin', enabled: true, params: {}, plugin: structuredClone(plugin) });
-  });
+  }, { label: 'mixer add plugin' });
   return id;
 }
 
@@ -899,7 +921,7 @@ export function replaceEffectWithPlugin(trackIndex: number, slotId: Id, plugin: 
     slot.type = 'plugin';
     slot.params = {};
     slot.plugin = structuredClone(plugin);
-  });
+  }, { label: 'mixer replace effect' });
 }
 
 /** Adds a plugin instrument as a new channel (routed to a free mixer track). */
@@ -939,27 +961,27 @@ export function setTrackInput(index: number, input: TrackInput | null): void {
     if (!t || index === 0) return;
     t.input = input;
     t.armed = input !== null;
-  });
+  }, { label: 'mixer track input' });
 }
 
 export function setTrackArmed(index: number, armed: boolean): void {
   edit((d) => {
     const t = d.mixer[index];
     if (t && index > 0) t.armed = armed;
-  });
+  }, { label: 'mixer arm track' });
 }
 
 export function disarmAllTracks(): void {
   edit((d) => {
     for (const t of d.mixer) t.armed = false;
-  });
+  }, { label: 'mixer disarm tracks' });
 }
 
 export function removeEffect(trackIndex: number, slotId: Id): void {
   edit((d) => {
     const t = d.mixer[trackIndex];
     if (t) t.effects = t.effects.filter((e) => e.id !== slotId);
-  });
+  }, { label: 'mixer remove effect' });
   const s = useStore.getState();
   useStore.setState({ ui: reconcileUi(s.ui, s.project) });
 }
@@ -968,7 +990,7 @@ export function toggleEffect(trackIndex: number, slotId: Id): void {
   edit((d) => {
     const slot = d.mixer[trackIndex]?.effects.find((e) => e.id === slotId);
     if (slot) slot.enabled = !slot.enabled;
-  });
+  }, { label: 'mixer effect on/off' });
 }
 
 export function moveEffect(trackIndex: number, slotId: Id, delta: number): void {
@@ -980,14 +1002,14 @@ export function moveEffect(trackIndex: number, slotId: Id, delta: number): void 
     if (i < 0 || j < 0 || j >= list.length) return;
     const [slot] = list.splice(i, 1);
     list.splice(j, 0, slot);
-  });
+  }, { label: 'mixer move effect' });
 }
 
 export function setEffectParam(trackIndex: number, slotId: Id, key: string, value: number, opts?: EditOptions): void {
   edit((d) => {
     const slot = d.mixer[trackIndex]?.effects.find((e) => e.id === slotId);
     if (slot) slot.params[key] = value;
-  }, opts);
+  }, { label: 'effect parameter', ...opts });
 }
 
 // ---------------------------------------------------------------------------

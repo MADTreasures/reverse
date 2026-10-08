@@ -173,7 +173,7 @@ export function PianoRoll() {
           if (Math.abs(n.start - tick) <= tol) n.velocity = vel;
         }
       },
-      { coalesce: key },
+      { coalesce: key, label: 'piano roll velocity' },
     );
     setHint(`Velocity: ${Math.round(vel * 127)}`);
   };
@@ -381,7 +381,7 @@ export function PianoRoll() {
           if (dt === 0 && dk === 0) break;
           // First movement of a Shift+drag: the originals stay, the copies follow the mouse.
           const originals = [...d.orig.values()];
-          const ids = addNotes(patternId, channel.id, originals.map(({ id: _id, ...n }) => n), { coalesce: d.key });
+          const ids = addNotes(patternId, channel.id, originals.map(({ id: _id, ...n }) => n), { coalesce: d.key, label: 'piano roll clone note' });
           d.orig = new Map(originals.map((n, i) => [ids[i], { ...n, id: ids[i] }]));
           d.anchor = ids[originals.findIndex((n) => n.id === d.anchor)];
           d.clone = false;
@@ -398,7 +398,7 @@ export function PianoRoll() {
               n.key = o.key + dk;
             }
           },
-          { coalesce: d.key },
+          { coalesce: d.key, label: 'piano roll move note' },
         );
         const newKey = anchor.key + dk;
         if (newKey !== d.lastKey) {
@@ -422,7 +422,7 @@ export function PianoRoll() {
               if (o) n.length = Math.max(Math.min(g, o.length), o.length + delta);
             }
           },
-          { coalesce: d.key },
+          { coalesce: d.key, label: 'piano roll resize note' },
         );
         setHint(`${formatPosition(anchor.start, beatsPerBar)} for ${formatDuration(anchor.length + delta, beatsPerBar)}`);
         break;
@@ -478,7 +478,7 @@ export function PianoRoll() {
               shown = n.velocity;
             }
           },
-          { coalesce: 'pianoroll-wheel-velocity' },
+          { coalesce: 'pianoroll-wheel-velocity', label: 'piano roll velocity' },
         );
         setHint(`Velocity: ${Math.round(shown * 127)}`);
       } else {
@@ -531,7 +531,7 @@ export function PianoRoll() {
         }
         if (mod && !e.shiftKey && e.code === 'KeyV' && clipboard.length) {
           const at = lastClick.current ?? 0;
-          const ids = addNotes(pid, ch.id, clipboard.map((n) => ({ ...n, start: n.start + at })));
+          const ids = addNotes(pid, ch.id, clipboard.map((n) => ({ ...n, start: n.start + at })), { label: 'piano roll paste' });
           setSelected(new Set(ids));
           return true;
         }
@@ -539,7 +539,7 @@ export function PianoRoll() {
           const min = Math.min(...chosen.map((n) => n.start));
           const max = Math.max(...chosen.map((n) => n.start + n.length));
           const shift = Math.max(PPQ, Math.ceil((max - min) / PPQ) * PPQ);
-          const ids = addNotes(pid, ch.id, chosen.map(({ id: _id, ...n }) => ({ ...n, start: n.start + shift })));
+          const ids = addNotes(pid, ch.id, chosen.map(({ id: _id, ...n }) => ({ ...n, start: n.start + shift })), { label: 'piano roll duplicate' });
           setSelected(new Set(ids));
           return true;
         }
@@ -561,9 +561,14 @@ export function PianoRoll() {
             // FL Studio: Shift+Up/Down transposes by a semitone, Ctrl+Up/Down by an octave
             // (Shift+Ctrl+Up/Down moves the pattern in the pattern list).
             const dk = dir * (mod ? 12 : 1);
-            updateNotes(pid, ch.id, (l) => {
-              for (const n of l) if (sel.has(n.id)) n.key += dk;
-            });
+            updateNotes(
+              pid,
+              ch.id,
+              (l) => {
+                for (const n of l) if (sel.has(n.id)) n.key += dk;
+              },
+              { label: 'piano roll transpose note' },
+            );
             return true;
           }
           if (plain) {
@@ -575,9 +580,14 @@ export function PianoRoll() {
           const dir = e.key === 'ArrowRight' ? 1 : -1;
           if (e.shiftKey && !mod && !e.altKey && chosen.length) {
             // Shift+Left/Right moves the selection by the snap.
-            updateNotes(pid, ch.id, (l) => {
-              for (const n of l) if (sel.has(n.id)) n.start = Math.max(0, n.start + dir * g);
-            });
+            updateNotes(
+              pid,
+              ch.id,
+              (l) => {
+                for (const n of l) if (sel.has(n.id)) n.start = Math.max(0, n.start + dir * g);
+              },
+              { label: 'piano roll move note' },
+            );
             return true;
           }
           if (plain) {
@@ -671,7 +681,12 @@ export function PianoRoll() {
 }
 
 function quantize(patternId: string, channelId: string, selected: Set<string>, grid: number): void {
-  updateNotes(patternId, channelId, (list) => {
-    for (const n of list) if (selected.size === 0 || selected.has(n.id)) n.start = snapRound(n.start, grid);
-  });
+  updateNotes(
+    patternId,
+    channelId,
+    (list) => {
+      for (const n of list) if (selected.size === 0 || selected.has(n.id)) n.start = snapRound(n.start, grid);
+    },
+    { label: 'piano roll quantize' },
+  );
 }

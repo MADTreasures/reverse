@@ -133,9 +133,8 @@ function buildMenu() {
     {
       label: 'Edit',
       submenu: [
-        item('Undo / Redo Last Edit', 'undoToggle', 'CmdOrCtrl+Z'),
-        item('Undo Step', 'undo', 'Alt+CmdOrCtrl+Z'),
-        item('Redo Step', 'redo', 'Shift+CmdOrCtrl+Z'),
+        item('Undo', 'undo', 'CmdOrCtrl+Z'),
+        item('Redo', 'redo', 'Alt+CmdOrCtrl+Z'),
         sep,
         { role: 'cut' },
         { role: 'copy' },

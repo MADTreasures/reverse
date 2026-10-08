@@ -64,7 +64,7 @@ export function createAutomationClip(target: string, range?: { start: number; en
   edit((d) => {
     d.channels.push(channel);
     d.clips.push({ id: clipId, kind: 'automation', channelId: channel.id, trackId: freeTrack(d, start, start + length), start, length, offset: 0 });
-  });
+  }, { label: 'create automation clip' });
   selectChannel(channel.id);
   // FL Studio switches the channel rack to the automation group and picks the new clip.
   setUi((u) => {
@@ -85,7 +85,7 @@ export function updateAutomation(channelId: Id, recipe: (a: Draft<AutomationData
     if (!a) return;
     recipe(a);
     normalize(a);
-  }, opts);
+  }, { label: 'automation edit', ...opts });
 }
 
 /** Adds a point (keeping the shape of the segment it splits); returns its index. */
@@ -100,9 +100,7 @@ export function addAutomationPoint(channelId: Id, tick: number, value: number, o
       a.points.push(pt);
       a.points.sort((x, y) => x.tick - y.tick);
       index = a.points.findIndex((p) => p === pt || (p.tick === t && p.value === value));
-    },
-    opts,
-  );
+    }, { label: 'automation add point', ...opts });
   return index;
 }
 
@@ -123,9 +121,7 @@ export function moveAutomationPoint(channelId: Id, index: number, tick: number, 
       const lo = prev ? prev.tick : 0;
       const hi = next ? next.tick : Infinity;
       p.tick = Math.min(hi, Math.max(lo, Math.round(tick)));
-    },
-    opts,
-  );
+    }, { label: 'automation move point', ...opts });
 }
 
 /** Deletes a point; the first point (the clip start) always stays. */
@@ -133,7 +129,7 @@ export function deleteAutomationPoint(channelId: Id, index: number): void {
   updateAutomation(channelId, (a) => {
     if (index <= 0 || index >= a.points.length) return;
     a.points.splice(index, 1);
-  });
+  }, { label: 'automation delete point' });
 }
 
 export function setPointTension(channelId: Id, index: number, tension: number, opts?: EditOptions): void {
@@ -142,9 +138,7 @@ export function setPointTension(channelId: Id, index: number, tension: number, o
     (a) => {
       const p = a.points[index];
       if (p && index > 0) p.tension = tension;
-    },
-    opts,
-  );
+    }, { label: 'automation tension', ...opts });
 }
 
 export function setPointMode(channelId: Id, index: number, mode: CurveMode): void {
@@ -154,14 +148,14 @@ export function setPointMode(channelId: Id, index: number, mode: CurveMode): voi
       p.mode = mode;
       if (mode === 'hold' || mode === 'smooth') p.tension = 0;
     }
-  });
+  }, { label: 'automation curve mode' });
 }
 
 export function setPointValue(channelId: Id, index: number, value: number): void {
   updateAutomation(channelId, (a) => {
     const p = a.points[index];
     if (p) p.value = value;
-  });
+  }, { label: 'automation point value' });
 }
 
 export function setAutomationTarget(channelId: Id, target: string | null): void {
@@ -171,7 +165,7 @@ export function setAutomationTarget(channelId: Id, target: string | null): void 
     ch.automation.target = target;
     const info = target ? describeTarget(d as Project, target) : null;
     if (info && /^Automation( \d+)?$|^\(unlinked\)$/.test(ch.name)) ch.name = info.label;
-  });
+  }, { label: 'automation target' });
 }
 
 /** Replaces the curve with a flat line at the target's current value. */
@@ -183,13 +177,13 @@ export function resetAutomation(channelId: Id): void {
   const v = info && ch.automation.target ? targetValue(project, ch.automation.target) : null;
   updateAutomation(channelId, (a) => {
     a.points = flatAutomation(info && v !== null ? toNorm(info, v) : 0.5, a.length);
-  });
+  }, { label: 'automation reset' });
 }
 
 export function flipAutomation(channelId: Id): void {
   updateAutomation(channelId, (a) => {
     for (const p of a.points) p.value = 1 - p.value;
-  });
+  }, { label: 'automation flip' });
 }
 
 /** Places a clip of an automation channel at `start` on `trackId`, sized to its data. */
@@ -199,7 +193,7 @@ export function placeAutomationClip(channelId: Id, trackId: Id, start: number, o
   const id = makeId('clip');
   edit((d) => {
     d.clips.push({ id, kind: 'automation', channelId, trackId, start: Math.max(0, Math.round(start)), length: ch.automation.length, offset: 0 });
-  }, opts);
+  }, { label: 'playlist add clip', ...opts });
   return id;
 }
 
@@ -259,9 +253,7 @@ export function recordAutomationValue(target: string, value: number, tick: numbe
       if (existing) existing.value = norm;
       else a.points.push({ tick: local, value: norm, tension: 0, mode: 'single' });
       if (local === 0) a.points[0].value = norm;
-    },
-    { coalesce: take.key },
-  );
+    }, { label: 'record automation', coalesce: take.key });
   take.lastLocal = local;
   take.lastValue = norm;
 }

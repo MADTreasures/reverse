@@ -61,12 +61,18 @@ function fileMenu(): MenuItem[] {
   ];
 }
 
+/** FL Studio's EDIT menu: undo and redo name the step. */
 function editMenu(): MenuItem[] {
   const s = useStore.getState();
+  const undoLabel = s.pastLabels[s.pastLabels.length - 1];
+  const redoLabel = s.futureLabels[0];
   return [
-    cmd('Undo / redo last edit', 'undoToggle', { disabled: s.past.length === 0 && s.future.length === 0 }),
-    cmd('Undo step', 'undo', { disabled: s.past.length === 0 }),
-    cmd('Redo step', 'redo', { disabled: s.future.length === 0 }),
+    cmd(undoLabel ? `Undo ${undoLabel}` : 'Undo', 'undo', { disabled: s.past.length === 0 }),
+    cmd(redoLabel ? `Redo ${redoLabel}` : 'Redo', 'redo', { disabled: s.future.length === 0 }),
+    { separator: true },
+    cmd('Cut', 'cut'),
+    cmd('Copy', 'copy'),
+    cmd('Paste', 'paste'),
   ];
 }
 
