@@ -3,6 +3,7 @@
  * RGBA bytes; alpha is left alone. The reference documents the controls but not the formulas, so
  * the maths here is our own (standard image-processing definitions).
  */
+import { monotoneCurve, type CurvePoint } from './curve';
 import { gradientLut, type GradientStop } from './gradient';
 
 export type Channel = 'rgb' | 'r' | 'g' | 'b';
@@ -24,7 +25,7 @@ export interface Levels {
 }
 
 /** Tone curve control point [input, output], 0..255. */
-export type CurvePoint = [number, number];
+export type { CurvePoint };
 /** Cyan–Red, Magenta–Green, Yellow–Blue, each −100..100. */
 export type Balance = [number, number, number];
 
@@ -122,53 +123,10 @@ export function levelsTable(l: Levels): Uint8ClampedArray {
   });
 }
 
-/**
- * Smooth curve through the control points (monotone cubic Hermite: no overshoot between points).
- * Points outside 0..255 are clamped; before the first / after the last point the curve is flat.
- */
+/** Tone curve as a table: smooth through the control points (0..255), flat beyond the first and last. */
 export function curveTable(points: CurvePoint[]): Uint8ClampedArray {
-  const pts = points
-    .map(([x, y]) => [Math.min(255, Math.max(0, x)), Math.min(255, Math.max(0, y))] as CurvePoint)
-    .sort((a, b) => a[0] - b[0])
-    .filter((p, i, all) => i === 0 || p[0] > all[i - 1][0]);
-  if (pts.length === 0) return tableOf((v) => v);
-  if (pts.length === 1) return tableOf(() => pts[0][1]);
-  const n = pts.length;
-  const d: number[] = [];
-  for (let i = 0; i < n - 1; i++) d.push((pts[i + 1][1] - pts[i][1]) / (pts[i + 1][0] - pts[i][0]));
-  const m: number[] = new Array(n);
-  m[0] = d[0];
-  m[n - 1] = d[n - 2];
-  for (let i = 1; i < n - 1; i++) m[i] = d[i - 1] * d[i] <= 0 ? 0 : (d[i - 1] + d[i]) / 2;
-  // Fritsch–Carlson: limit the tangents so each piece stays monotone.
-  for (let i = 0; i < n - 1; i++) {
-    if (d[i] === 0) {
-      m[i] = 0;
-      m[i + 1] = 0;
-      continue;
-    }
-    const a = m[i] / d[i];
-    const b = m[i + 1] / d[i];
-    const s = a * a + b * b;
-    if (s > 9) {
-      const t = 3 / Math.sqrt(s);
-      m[i] = t * a * d[i];
-      m[i + 1] = t * b * d[i];
-    }
-  }
-  return tableOf((v) => {
-    if (v <= pts[0][0]) return pts[0][1];
-    if (v >= pts[n - 1][0]) return pts[n - 1][1];
-    let i = 0;
-    while (v > pts[i + 1][0]) i++;
-    const [x0, y0] = pts[i];
-    const [x1, y1] = pts[i + 1];
-    const h = x1 - x0;
-    const t = (v - x0) / h;
-    const t2 = t * t;
-    const t3 = t2 * t;
-    return (2 * t3 - 3 * t2 + 1) * y0 + (t3 - 2 * t2 + t) * h * m[i] + (-2 * t3 + 3 * t2) * y1 + (t3 - t2) * h * m[i + 1];
-  });
+  const f = monotoneCurve(points.map(([x, y]) => [Math.min(255, Math.max(0, x)), Math.min(255, Math.max(0, y))] as CurvePoint));
+  return tableOf(f);
 }
 
 export function posterizeTable(levels: number): Uint8ClampedArray {

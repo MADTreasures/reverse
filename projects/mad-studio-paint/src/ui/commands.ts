@@ -78,6 +78,7 @@ export const COMMANDS: Command[] = [
   { id: 'importImage', label: 'Import image as layer…', run: () => importImages() },
   { id: 'export', label: 'Export (single layer)…', run: () => openDialog('export') },
   { id: 'preferences', label: 'Preferences…', keys: ['Mod+k'], run: () => openDialog('preferences') },
+  { id: 'pressureSettings', label: 'Pen pressure settings…', run: () => openDialog('pressure') },
   { id: 'renameCanvas', label: 'Canvas name…', run: () => renameCanvas() },
   // Edit
   { id: 'undo', label: 'Undo', keys: ['Mod+z'], run: () => actions.undo(), enabled: () => getState().canUndo && notTransforming() },

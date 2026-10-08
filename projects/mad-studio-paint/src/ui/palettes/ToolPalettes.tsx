@@ -1,10 +1,11 @@
 import { useState } from 'react';
 import { BRUSH_SIZE_PRESETS } from '../../store/actions';
 import * as actions from '../../store/actions';
-import { currentSubTool, useStore } from '../../store/store';
+import { currentSubTool, setState, useStore } from '../../store/store';
 import { entryForTool, PALETTE_ENTRIES, PALETTE_LAYOUT, subToolsOf, toolInfo, type FillReference, type SubTool, type ToolId } from '../../paint/tools';
 import { Icon } from '../controls/Icons';
 import { PropSlider } from '../controls/PropSlider';
+import { DynamicsPopover, dynamicsOn, type DynamicsKind } from './BrushSettingsPanels';
 import { ColorIcons } from './ColorWheel';
 
 /** Last tool used per palette button (for buttons that hold several tools). */
@@ -125,7 +126,13 @@ const AA_LEVELS = ['None', 'Weak', 'Medium', 'Strong'];
 /** Settings of the selected sub tool. */
 export function ToolProperty() {
   const sub = useStore((s) => currentSubTool(s));
+  const advanced = useStore((s) => s.advancedToolSettings);
   const [more, setMore] = useState(false);
+  const [dyn, setDyn] = useState<{ kind: DynamicsKind; at: { x: number; y: number } } | null>(null);
+  const openDynamics = (kind: DynamicsKind) => (e: React.MouseEvent<HTMLButtonElement>) => {
+    const r = e.currentTarget.getBoundingClientRect();
+    setDyn({ kind, at: { x: r.right + 6, y: r.top - 8 } });
+  };
   const update = (patch: Partial<SubTool>) => actions.updateSubTool(sub.id, patch);
   const b = sub.brush;
   const f = sub.fill;
@@ -146,8 +153,8 @@ export function ToolProperty() {
             step={0.1}
             decimals={1}
             onChange={(v) => actions.setBrushSize(v)}
-            pressure={b.sizePressure}
-            onPressure={() => update({ brush: { ...b, sizePressure: !b.sizePressure } })}
+            pressure={dynamicsOn(b, 'size')}
+            onPressure={openDynamics('size')}
           />
           {b.mode !== 'blend' && (
             <PropSlider
@@ -187,29 +194,9 @@ export function ToolProperty() {
             min={1}
             max={100}
             onChange={(v) => update({ brush: { ...b, flow: v / 100 } })}
-            pressure={b.opacityPressure}
-            onPressure={() => update({ brush: { ...b, opacityPressure: !b.opacityPressure } })}
+            pressure={dynamicsOn(b, 'density')}
+            onPressure={openDynamics('density')}
           />
-          {more && (
-            <>
-              {b.sizePressure && <PropSlider label="Min. size (pressure)" value={Math.round(b.minSize * 100)} min={0} max={100} onChange={(v) => update({ brush: { ...b, minSize: v / 100 } })} />}
-              <PropSlider label="Hardness" value={Math.round(b.hardness * 100)} min={0} max={100} onChange={(v) => update({ brush: { ...b, hardness: v / 100 } })} />
-              <PropSlider label="Spacing" value={Math.round(b.spacing * 100)} min={1} max={100} onChange={(v) => update({ brush: { ...b, spacing: v / 100 } })} />
-              {b.mode === 'paint' && sub.tool !== 'figure' && (
-                <div className="prop-row">
-                  <span className="prop-label">Texture</span>
-                  <div className="segmented">
-                    <button className={b.texture === 'none' ? 'on' : ''} onClick={() => update({ brush: { ...b, texture: 'none' } })}>
-                      None
-                    </button>
-                    <button className={b.texture === 'grain' ? 'on' : ''} onClick={() => update({ brush: { ...b, texture: 'grain' } })}>
-                      Grain
-                    </button>
-                  </div>
-                </div>
-              )}
-            </>
-          )}
         </>
       )}
       {f && (
@@ -257,12 +244,24 @@ export function ToolProperty() {
         <button className="icon-btn" title="Reset to the default settings" aria-label="Reset sub tool" onClick={() => actions.resetSubTool(sub.id)}>
           <Icon name="resetRotation" size={15} />
         </button>
-        {(b || f) && (
-          <button className={`icon-btn ${more ? 'on' : ''}`} title="Advanced tool settings" aria-label="Advanced tool settings" aria-pressed={more} onClick={() => setMore((m) => !m)}>
+        {b && (
+          <button
+            className={`icon-btn ${advanced ? 'on' : ''}`}
+            title="Advanced Tool Settings"
+            aria-label="Advanced tool settings"
+            aria-pressed={advanced}
+            onClick={() => setState((s) => ({ advancedToolSettings: !s.advancedToolSettings }))}
+          >
+            <Icon name="wrench" size={15} />
+          </button>
+        )}
+        {f && (
+          <button className={`icon-btn ${more ? 'on' : ''}`} title="More fill settings" aria-label="Advanced tool settings" aria-pressed={more} onClick={() => setMore((m) => !m)}>
             <Icon name="wrench" size={15} />
           </button>
         )}
       </div>
+      {dyn && b && <DynamicsPopover kind={dyn.kind} at={dyn.at} onClose={() => setDyn(null)} />}
     </div>
   );
 }

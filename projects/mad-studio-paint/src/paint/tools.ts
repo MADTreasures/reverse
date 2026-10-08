@@ -1,4 +1,5 @@
 /** Tools, sub tools (presets) and their settings. Sub tools are user-editable and persisted. */
+import { LINEAR, sanitizeCurve01, type CurvePoint } from './curve';
 
 export type ToolId =
   | 'zoom'
@@ -64,6 +65,51 @@ export interface BrushSettings {
   mode: BrushMode;
   /** Blend tool only: 'blur' softens, 'smudge' drags colour along the stroke. */
   blendStyle: 'blur' | 'smudge';
+
+  // Brush dynamics
+  /** Pen pressure graphs (0..1 → 0..1) for size and density. */
+  sizeCurve: CurvePoint[];
+  densityCurve: CurvePoint[];
+  /** Density at zero pressure (fraction), when density follows pressure. */
+  minDensity: number;
+  /** Tilting the pen widens the stroke / makes it lighter (shading with the side of a pencil). */
+  sizeTilt: boolean;
+  densityTilt: boolean;
+  /** Random variation per dab, 0..1. */
+  sizeRandom: number;
+  densityRandom: number;
+
+  // Brush tip
+  /** 1 = round … 0.05 = flat. */
+  thickness: number;
+  /** Degrees. */
+  angle: number;
+  /** What turns the tip: nothing, the direction of the line, or the direction the pen leans. */
+  angleSource: 'fixed' | 'line' | 'tilt';
+
+  // Starting and ending
+  /** Taper lengths in px (0 = off). */
+  taperStart: number;
+  taperEnd: number;
+  taperSize: boolean;
+  taperDensity: boolean;
+
+  // Ink: color mixing
+  mixing: 'none' | 'blend' | 'running';
+  /** 0..1: how much of the drawing colour each dab keeps. */
+  paintAmount: number;
+  /** 0..1: how much of the brush's opacity each dab keeps (low values pick up transparency). */
+  paintDensity: number;
+  /** 0..1: how long the pure drawing colour lasts from the start of a stroke. */
+  colorStretch: number;
+
+  // Watercolor edge (applied when the stroke ends)
+  watercolorEdge: boolean;
+  /** px */
+  edgeRange: number;
+  /** 0..1 */
+  edgeOpacity: number;
+  edgeDarkness: number;
 }
 
 export interface SubTool {
@@ -103,6 +149,28 @@ export const DEFAULT_BRUSH: BrushSettings = {
   scatter: 0,
   mode: 'paint',
   blendStyle: 'blur',
+  sizeCurve: LINEAR,
+  densityCurve: LINEAR,
+  minDensity: 0,
+  sizeTilt: false,
+  densityTilt: false,
+  sizeRandom: 0,
+  densityRandom: 0,
+  thickness: 1,
+  angle: 0,
+  angleSource: 'fixed',
+  taperStart: 0,
+  taperEnd: 0,
+  taperSize: true,
+  taperDensity: false,
+  mixing: 'none',
+  paintAmount: 0.6,
+  paintDensity: 0.8,
+  colorStretch: 0.2,
+  watercolorEdge: false,
+  edgeRange: 5,
+  edgeOpacity: 0.6,
+  edgeDarkness: 0.4,
 };
 
 const brush = (patch: Partial<BrushSettings>): BrushSettings => ({ ...DEFAULT_BRUSH, ...patch });
@@ -155,6 +223,13 @@ export const DEFAULT_SUB_TOOLS: SubTool[] = [
   { id: 'pen-real-g', tool: 'pen', group: 'Pen', name: 'Real G-pen', brush: brush({ size: 10, minSize: 0.05, hardness: 0.95, texture: 'grain', flow: 0.95, stabilization: 6 }) },
   { id: 'pen-mapping', tool: 'pen', group: 'Pen', name: 'Mapping pen', brush: brush({ size: 5, minSize: 0.05, hardness: 1, stabilization: 8 }) },
   { id: 'pen-turnip', tool: 'pen', group: 'Pen', name: 'Turnip pen', brush: brush({ size: 15, minSize: 0.35, hardness: 1, stabilization: 6 }) },
+  {
+    id: 'pen-calligraphy',
+    tool: 'pen',
+    group: 'Pen',
+    name: 'Calligraphy',
+    brush: brush({ size: 16, minSize: 0.6, hardness: 1, thickness: 0.25, angle: 45, stabilization: 6, spacing: 0.04 }),
+  },
   { id: 'pen-milli', tool: 'pen', group: 'Marker', name: 'Milli pen', brush: brush({ size: 6, sizePressure: false, hardness: 1, stabilization: 4 }) },
   { id: 'pen-felt', tool: 'pen', group: 'Marker', name: 'Felt pen', brush: brush({ size: 20, sizePressure: false, opacity: 0.85, hardness: 0.85, stabilization: 3 }) },
   { id: 'pen-dot', tool: 'pen', group: 'Marker', name: 'Dot pen', brush: brush({ size: 1, sizePressure: false, hardness: 1, antiAlias: 0, stabilization: 0, spacing: 0.3 }) },
@@ -163,7 +238,8 @@ export const DEFAULT_SUB_TOOLS: SubTool[] = [
     id: 'pencil',
     tool: 'pencil',
     name: 'Pencil',
-    brush: brush({ size: 10, minSize: 0.5, opacity: 0.9, opacityPressure: true, flow: 0.85, hardness: 0.6, texture: 'grain', stabilization: 5, spacing: 0.12 }),
+    // Leaning the pen shades wider and lighter, like the side of a pencil lead.
+    brush: brush({ size: 10, minSize: 0.5, opacity: 0.9, opacityPressure: true, flow: 0.85, hardness: 0.6, texture: 'grain', stabilization: 5, spacing: 0.12, sizeTilt: true, densityTilt: true }),
   },
   {
     id: 'pencil-mech',
@@ -191,7 +267,37 @@ export const DEFAULT_SUB_TOOLS: SubTool[] = [
     name: 'Round watercolor brush',
     brush: brush({ size: 40, minSize: 0.3, opacity: 0.8, opacityPressure: true, flow: 0.35, hardness: 0.3, stabilization: 3, spacing: 0.05 }),
   },
-  { id: 'brush-pen', tool: 'brush', group: 'Watercolor', name: 'Brush pen', brush: brush({ size: 20, minSize: 0.05, hardness: 1, stabilization: 8 }) },
+  {
+    id: 'brush-transparent-wc',
+    tool: 'brush',
+    group: 'Watercolor',
+    name: 'Transparent watercolor',
+    brush: brush({
+      size: 50,
+      minSize: 0.4,
+      opacity: 0.9,
+      opacityPressure: true,
+      flow: 0.45,
+      hardness: 0.45,
+      stabilization: 3,
+      spacing: 0.05,
+      mixing: 'running',
+      paintAmount: 0.85,
+      paintDensity: 0.7,
+      colorStretch: 0.3,
+      watercolorEdge: true,
+      edgeRange: 6,
+    }),
+  },
+  {
+    id: 'brush-opaque-wc',
+    tool: 'brush',
+    group: 'Watercolor',
+    name: 'Opaque watercolor',
+    brush: brush({ size: 40, minSize: 0.4, opacityPressure: true, flow: 0.8, hardness: 0.6, stabilization: 3, spacing: 0.05, mixing: 'running', paintAmount: 0.75, paintDensity: 0.95, colorStretch: 0.3 }),
+  },
+  // Starting and ending taper the stroke even without pen pressure.
+  { id: 'brush-pen', tool: 'brush', group: 'Watercolor', name: 'Brush pen', brush: brush({ size: 20, minSize: 0.05, hardness: 1, stabilization: 8, taperStart: 25, taperEnd: 45 }) },
   {
     id: 'brush-dry-ink',
     tool: 'brush',
@@ -207,6 +313,32 @@ export const DEFAULT_SUB_TOOLS: SubTool[] = [
     brush: brush({ size: 40, minSize: 0.4, opacityPressure: true, flow: 0.7, hardness: 0.8, stabilization: 3, spacing: 0.06 }),
   },
   {
+    id: 'brush-oil',
+    tool: 'brush',
+    group: 'Thick paint',
+    name: 'Oil paint',
+    brush: brush({
+      size: 40,
+      minSize: 0.5,
+      flow: 0.9,
+      hardness: 0.85,
+      texture: 'grain',
+      stabilization: 3,
+      spacing: 0.06,
+      mixing: 'blend',
+      paintAmount: 0.55,
+      paintDensity: 1,
+      colorStretch: 0.5,
+    }),
+  },
+  {
+    id: 'brush-flat',
+    tool: 'brush',
+    group: 'Thick paint',
+    name: 'Flat brush',
+    brush: brush({ size: 40, minSize: 0.6, flow: 0.9, hardness: 0.9, thickness: 0.3, angle: 90, angleSource: 'line', stabilization: 3, spacing: 0.04, mixing: 'running', paintAmount: 0.7, paintDensity: 1, colorStretch: 0.4 }),
+  },
+  {
     id: 'brush-soft',
     tool: 'brush',
     group: 'Thick paint',
@@ -220,7 +352,7 @@ export const DEFAULT_SUB_TOOLS: SubTool[] = [
     name: 'Soft',
     brush: brush({ size: 120, sizePressure: false, opacityPressure: true, flow: 0.2, hardness: 0, stabilization: 0, spacing: 0.04 }),
   },
-  { id: 'air-spray', tool: 'airbrush', name: 'Spray', brush: brush({ size: 3, sizePressure: false, flow: 0.8, hardness: 0.9, scatter: 12, spacing: 0.15, stabilization: 0 }) },
+  { id: 'air-spray', tool: 'airbrush', name: 'Spray', brush: brush({ size: 3, sizePressure: false, flow: 0.8, hardness: 0.9, scatter: 12, spacing: 0.15, stabilization: 0, sizeRandom: 0.6 }) },
   { id: 'air-droplet', tool: 'airbrush', name: 'Droplet', brush: brush({ size: 8, sizePressure: false, flow: 0.9, hardness: 0.95, scatter: 6, spacing: 0.5, stabilization: 0 }) },
   // Eraser
   { id: 'eraser-hard', tool: 'eraser', name: 'Hard', brush: brush({ size: 30, sizePressure: false, hardness: 1, mode: 'erase', stabilization: 0 }) },
@@ -305,12 +437,33 @@ export function mergeSubTools(saved: unknown): SubTool[] {
   });
 }
 
-/** Older settings stored anti-aliasing as on/off. */
+/** Older settings stored anti-aliasing as on/off; newer settings are validated (they come from storage). */
 function migrateBrush(b: BrushSettings): BrushSettings {
   const aa = b.antiAlias as unknown;
-  if (typeof aa === 'boolean') return { ...b, antiAlias: aa ? 2 : 0 };
-  if (typeof aa !== 'number' || !Number.isFinite(aa)) return { ...b, antiAlias: 2 };
-  return { ...b, antiAlias: Math.max(0, Math.min(3, Math.round(aa))) };
+  const antiAlias = typeof aa === 'boolean' ? (aa ? 2 : 0) : typeof aa === 'number' && Number.isFinite(aa) ? Math.max(0, Math.min(3, Math.round(aa))) : 2;
+  const n = (v: unknown, fallback: number, min: number, max: number) => (typeof v === 'number' && Number.isFinite(v) ? Math.min(max, Math.max(min, v)) : fallback);
+  const d = DEFAULT_BRUSH;
+  return {
+    ...b,
+    antiAlias,
+    sizeCurve: sanitizeCurve01(b.sizeCurve) ?? LINEAR,
+    densityCurve: sanitizeCurve01(b.densityCurve) ?? LINEAR,
+    minDensity: n(b.minDensity, d.minDensity, 0, 1),
+    sizeRandom: n(b.sizeRandom, 0, 0, 1),
+    densityRandom: n(b.densityRandom, 0, 0, 1),
+    thickness: n(b.thickness, 1, 0.05, 1),
+    angle: n(b.angle, 0, -360, 360),
+    angleSource: b.angleSource === 'line' || b.angleSource === 'tilt' ? b.angleSource : 'fixed',
+    taperStart: n(b.taperStart, 0, 0, 2000),
+    taperEnd: n(b.taperEnd, 0, 0, 2000),
+    mixing: b.mixing === 'blend' || b.mixing === 'running' ? b.mixing : 'none',
+    paintAmount: n(b.paintAmount, d.paintAmount, 0, 1),
+    paintDensity: n(b.paintDensity, d.paintDensity, 0, 1),
+    colorStretch: n(b.colorStretch, d.colorStretch, 0, 1),
+    edgeRange: n(b.edgeRange, d.edgeRange, 0.5, 100),
+    edgeOpacity: n(b.edgeOpacity, d.edgeOpacity, 0, 1),
+    edgeDarkness: n(b.edgeDarkness, d.edgeDarkness, 0, 1),
+  };
 }
 
 /** Next tool for a shortcut key: cycles through the tools sharing that key. */

@@ -1,5 +1,7 @@
 import { useEffect, useRef } from 'react';
+import { evalPressureCurve } from '../../paint/curve';
 import { maskOutline, type Mask } from '../../paint/mask';
+import { penTilt } from '../../paint/stroke';
 import { invert, apply as applyMatrix, viewMatrix, type Matrix } from '../../paint/viewMath';
 import { findLayer } from '../../model/layers';
 import { createCanvas, ctx2d } from '../../engine/canvas';
@@ -156,12 +158,16 @@ export function CanvasView() {
       const sy = e.clientY - r.top;
       const p = applyMatrix(inverse, sx, sy);
       const pen = e.pointerType === 'pen';
+      const { tilt, azimuth } = pen ? penTilt(e) : { tilt: 0, azimuth: 0 };
       return {
         x: p.x,
         y: p.y,
         sx,
         sy,
-        pressure: pen ? Math.max(0.01, e.pressure || 0) : 1,
+        // File > Pen pressure settings applies to every tool.
+        pressure: pen ? Math.max(0.01, evalPressureCurve(getState().prefs.pressureCurve, e.pressure || 0)) : 1,
+        tilt,
+        azimuth,
         button: e.button,
         pointerType: e.pointerType,
         time: e.timeStamp,

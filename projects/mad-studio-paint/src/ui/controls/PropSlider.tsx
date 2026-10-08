@@ -13,7 +13,7 @@ interface PropSliderProps {
   onChange: (v: number) => void;
   /** Pen pressure ("dynamics") toggle at the far right; omitted = no button. */
   pressure?: boolean;
-  onPressure?: () => void;
+  onPressure?: (e: React.MouseEvent<HTMLButtonElement>) => void;
   testId?: string;
 }
 
@@ -84,7 +84,7 @@ export function PropSlider({ label, value, min, max, step = 1, log, decimals = 0
         </span>
       </div>
       {onPressure ? (
-        <button className={`ps-dyn ${pressure ? 'on' : ''}`} title="Pen pressure" aria-label={`${label}: pen pressure`} aria-pressed={pressure} onClick={onPressure}>
+        <button className={`ps-dyn ${pressure ? 'on' : ''}`} title="Dynamics (pen pressure, tilt, random)" aria-label={`${label}: dynamics`} aria-pressed={pressure} onClick={onPressure}>
           <Icon name="pressure" size={13} />
         </button>
       ) : (

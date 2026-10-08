@@ -5,6 +5,10 @@ export interface StrokePoint {
   y: number;
   /** 0..1; mice report 0.5 while a button is held and are mapped to 1 by the caller. */
   pressure: number;
+  /** How far the pen leans: 0 upright … 1 lying flat (≤ 30° above the surface). */
+  tilt?: number;
+  /** Direction the pen leans, radians (0 = right, clockwise like canvas coordinates). */
+  azimuth?: number;
 }
 
 export interface Dab extends StrokePoint {
@@ -33,7 +37,8 @@ export function interpolateDabs(
   if (dist === 0) return { dabs, carry };
   while (t <= dist) {
     const f = t / dist;
-    dabs.push({ x: from.x + dx * f, y: from.y + dy * f, pressure: from.pressure + (to.pressure - from.pressure) * f, angle });
+    const tilt = from.tilt !== undefined && to.tilt !== undefined ? from.tilt + (to.tilt - from.tilt) * f : to.tilt;
+    dabs.push({ x: from.x + dx * f, y: from.y + dy * f, pressure: from.pressure + (to.pressure - from.pressure) * f, tilt, azimuth: to.azimuth, angle });
     t += step;
   }
   return { dabs, carry: dist - (t - step) };
@@ -70,7 +75,8 @@ export class Stabilizer {
       sp += q.pressure * w;
       sw += w;
     });
-    return (this.last = { x: sx / sw, y: sy / sw, pressure: sp / sw });
+    // Tilt is not averaged: it follows the pen directly.
+    return (this.last = { x: sx / sw, y: sy / sw, pressure: sp / sw, tilt: p.tilt, azimuth: p.azimuth });
   }
 
   /** Points that close the lag between the smoothed line and the last raw point (pen-up). */
@@ -133,3 +139,49 @@ export function dabAlpha(density: number, spacing: number, scattered: boolean): 
 
 /** Number of samples the stabilizer averages for a stabilization level of 0..100. */
 export const stabilizerWindow = (level: number): number => Math.round(Math.max(0, Math.min(100, level)) / 2);
+
+/**
+ * Pen tilt from pointer events: the altitude/azimuth angles when the browser has them, otherwise
+ * from tiltX / tiltY (degrees). Returns how far the pen leans (0..1) and in which direction.
+ */
+export function penTilt(e: { tiltX?: number; tiltY?: number; altitudeAngle?: number; azimuthAngle?: number }): { tilt: number; azimuth: number } {
+  let altitude: number;
+  let azimuth: number;
+  if (typeof e.altitudeAngle === 'number' && typeof e.azimuthAngle === 'number' && (e.tiltX || e.tiltY || e.altitudeAngle < Math.PI / 2)) {
+    altitude = e.altitudeAngle;
+    azimuth = e.azimuthAngle;
+  } else {
+    const tx = Math.tan(((e.tiltX ?? 0) * Math.PI) / 180);
+    const ty = Math.tan(((e.tiltY ?? 0) * Math.PI) / 180);
+    const len = Math.hypot(tx, ty);
+    altitude = len === 0 ? Math.PI / 2 : Math.atan(1 / len);
+    azimuth = len === 0 ? 0 : Math.atan2(ty, tx);
+  }
+  const flat = Math.PI / 6;
+  const tilt = Math.min(1, Math.max(0, (Math.PI / 2 - altitude) / (Math.PI / 2 - flat)));
+  return { tilt, azimuth };
+}
+
+/**
+ * Starting and ending: size/density factor at distance `d` along a stroke of length `total`
+ * (unknown while drawing: Infinity). Eases in over `start` px and out over the last `end` px.
+ */
+export function taperFactor(d: number, total: number, start: number, end: number): number {
+  const ease = (t: number) => Math.sin((Math.min(1, Math.max(0, t)) * Math.PI) / 2);
+  let f = 1;
+  if (start > 0) f *= ease(d / start);
+  if (end > 0 && Number.isFinite(total)) f *= ease((total - d) / end);
+  return f;
+}
+
+/** Small fast PRNG (mulberry32) so a stroke can be redrawn identically (tapering at pen-up). */
+export function seededRandom(seed: number): () => number {
+  let a = seed >>> 0;
+  return () => {
+    a = (a + 0x6d2b79f5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}

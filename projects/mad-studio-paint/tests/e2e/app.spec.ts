@@ -744,3 +744,96 @@ test('Layer Property palette: border effect and layer colour change the display,
   expect(fx.border).toMatchObject({ enabled: true, kind: 'edge', color: '#ff0000' });
   expect(fx.layerColor).toMatchObject({ enabled: true, color: '#0000ff' });
 });
+
+/** Opaque pixels of the active layer in a vertical (or horizontal) line of `n` pixels. */
+const thickness = (page: Page, x: number, y: number, n = 60, vertical = true) =>
+  page.evaluate(
+    ([px, py, len, vert]) => {
+      const m = window.__madPaint;
+      const id = m.useStore.getState().activeLayerId;
+      let count = 0;
+      for (let i = -len / 2; i < len / 2; i++) {
+        const a = vert ? m.engine.sampleLayer(id, px, py + i) : m.engine.sampleLayer(id, px + i, py);
+        if (a && a[3] > 100) count++;
+      }
+      return count;
+    },
+    [x, y, n, vertical ? 1 : 0] as [number, number, number, number],
+  );
+
+const useSubTool = (page: Page, tool: string, id: string) =>
+  page.evaluate(([t, s]) => window.__madPaint.actions.setSubTool(t, s), [tool, id]);
+
+test('starting and ending taper a brush pen stroke even with a mouse', async ({ page }) => {
+  await boot(page);
+  await useSubTool(page, 'brush', 'brush-pen');
+  await page.evaluate(() => window.__madPaint.actions.setBrushSize(20));
+  await drag(page, [40, 150], [360, 150], 24);
+  const middle = await thickness(page, 200, 150);
+  const nearStart = await thickness(page, 45, 150);
+  const nearEnd = await thickness(page, 355, 150);
+  expect(middle).toBeGreaterThanOrEqual(17);
+  expect(nearStart).toBeLessThan(middle / 2);
+  expect(nearEnd).toBeLessThan(middle / 2);
+});
+
+test('colour mixing: oil paint carries the colour it passes over', async ({ page }) => {
+  await boot(page);
+  await page.evaluate(() => {
+    const a = window.__madPaint.actions;
+    a.setDrawingColor('#ff0000');
+    a.setSelection({ width: 400, height: 300, data: new Uint8Array(400 * 300).map((_: number, i: number) => (i % 400 < 150 ? 255 : 0)) });
+    a.fillWithColor();
+    a.deselect();
+    a.setDrawingColor('#0000ff');
+    a.setSubTool('brush', 'brush-oil');
+  });
+  await drag(page, [60, 150], [300, 150], 30);
+  const px = await page.evaluate(() => {
+    const m = window.__madPaint;
+    return m.engine.sampleLayer(m.useStore.getState().activeLayerId, 250, 150);
+  });
+  // Beyond the red area the stroke is still reddish-violet, not pure blue.
+  expect(px[3]).toBeGreaterThan(100);
+  expect(px[0]).toBeGreaterThan(40);
+  expect(px[2]).toBeLessThan(250);
+});
+
+test('a flat brush tip (calligraphy) is thin along its angle and wide across it', async ({ page }) => {
+  await boot(page);
+  await useSubTool(page, 'pen', 'pen-calligraphy');
+  await page.evaluate(() => window.__madPaint.actions.setBrushSize(24));
+  // The tip leans at 45°: a stroke along 45° is thin, one along −45° is wide.
+  await drag(page, [60, 60], [140, 140], 16);
+  await drag(page, [260, 140], [340, 60], 16);
+  const along = await thickness(page, 100, 100, 60, false);
+  const across = await thickness(page, 300, 100, 60, false);
+  expect(across).toBeGreaterThan(along * 2);
+});
+
+test('brush dynamics popover, pen pressure settings and Advanced Tool Settings', async ({ page }) => {
+  await boot(page);
+  await selectTool(page, 'pen');
+  await page.getByRole('button', { name: 'Tool Settings', exact: true }).click();
+  await page.getByRole('button', { name: 'Brush Size: dynamics' }).click();
+  const pop = page.getByRole('dialog', { name: 'Brush size dynamics' });
+  await expect(pop.getByTestId('size-curve')).toBeVisible();
+  await pop.getByLabel('Tilt').check();
+  await page.keyboard.press('Escape');
+  await expect(pop).toHaveCount(0);
+  expect(await page.evaluate(() => window.__madPaint.useStore.getState().subTools.find((t: any) => t.id === 'pen-g').brush.sizeTilt)).toBe(true);
+  // File > Pen pressure settings: "Stronger" bends the graph for every tool.
+  await page.getByRole('navigation', { name: 'Main menu' }).getByRole('button', { name: 'File', exact: true }).dispatchEvent('pointerdown');
+  await page.locator('[data-command=pressureSettings]').click();
+  const dlg = page.getByRole('dialog', { name: 'Pen pressure settings' });
+  await dlg.getByRole('button', { name: 'Stronger' }).click();
+  await dlg.getByRole('button', { name: 'Done' }).click();
+  const curve = await page.evaluate(() => window.__madPaint.useStore.getState().prefs.pressureCurve);
+  expect(curve.length).toBeGreaterThan(2);
+  // Advanced Tool Settings: Starting and ending.
+  await page.getByRole('button', { name: 'Advanced tool settings' }).click();
+  const adv = page.getByRole('dialog', { name: 'Advanced Tool Settings' });
+  await adv.getByRole('button', { name: 'Starting and ending' }).click();
+  await adv.getByRole('spinbutton', { name: 'Starting' }).fill('20');
+  expect(await page.evaluate(() => window.__madPaint.useStore.getState().subTools.find((t: any) => t.id === 'pen-g').brush.taperStart)).toBe(20);
+});

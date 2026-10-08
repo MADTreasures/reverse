@@ -17,6 +17,9 @@ export interface PointerInfo extends Modifiers {
   sx: number;
   sy: number;
   pressure: number;
+  /** Pen tilt: 0 upright … 1 flat, and the direction it leans (radians). */
+  tilt: number;
+  azimuth: number;
   button: number;
   pointerType: string;
   time: number;

@@ -1601,43 +1601,45 @@
 
 .curve-box {
   position: relative;
-  width: 256px;
-  height: 256px;
+  flex: none;
 }
 
 .curve-box .histogram {
   position: absolute;
   inset: 0;
-  width: 256px;
-  height: 256px;
+  width: 100%;
+  height: 100%;
   opacity: 0.45;
 }
 
 .curve {
   position: absolute;
   inset: 0;
-  width: 256px;
-  height: 256px;
+  width: 100%;
+  height: 100%;
   cursor: crosshair;
   touch-action: none;
+  background: transparent;
+  border: 1px solid var(--line);
 }
 
 .curve .diagonal {
   stroke: var(--line);
-  stroke-dasharray: 3 3;
+  stroke-dasharray: 2 2;
+  stroke-width: 0.6;
   fill: none;
 }
 
 .curve .line {
   stroke: var(--text);
-  stroke-width: 1.5;
+  stroke-width: 1;
   fill: none;
 }
 
 .curve circle {
   fill: var(--bg-1);
   stroke: var(--text);
-  stroke-width: 1.5;
+  stroke-width: 0.8;
 }
 
 .gradient-editor {
@@ -1744,4 +1746,129 @@
 .palette-note {
   margin: 6px 8px;
   color: var(--text-dim);
+}
+
+/* ------------------------------------------------------------------ brush dynamics & advanced tool settings */
+
+.popover {
+  position: fixed;
+  z-index: 70;
+  width: 230px;
+  background: var(--bg-1);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  box-shadow: var(--shadow);
+  padding: 8px;
+}
+
+.popover h4 {
+  margin: 0 0 6px;
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+.dynamics {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.dynamics .curve-box {
+  align-self: center;
+}
+
+.floating-palette {
+  position: fixed;
+  z-index: 60;
+  background: var(--bg-1);
+  border: 1px solid var(--line);
+  box-shadow: var(--shadow);
+  display: flex;
+  flex-direction: column;
+}
+
+.floating-palette > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 24px;
+  padding: 0 4px 0 8px;
+  background: var(--bg-2);
+  border-bottom: 1px solid var(--line);
+  cursor: move;
+  user-select: none;
+}
+
+.floating-palette > footer {
+  display: flex;
+  justify-content: flex-end;
+  padding: 2px 4px;
+  border-top: 1px solid var(--line);
+}
+
+.advanced-settings {
+  width: 470px;
+  max-height: 70vh;
+}
+
+.advanced-body {
+  display: flex;
+  min-height: 300px;
+  overflow: hidden;
+}
+
+.advanced-categories {
+  display: flex;
+  flex-direction: column;
+  width: 150px;
+  flex: none;
+  border-right: 1px solid var(--line);
+  overflow: auto;
+}
+
+.advanced-categories button {
+  text-align: left;
+  padding: 5px 8px;
+}
+
+.advanced-categories button.on {
+  background: var(--select-row);
+  color: #fff;
+}
+
+.advanced-settings-body {
+  flex: 1;
+  overflow: auto;
+  padding: 6px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.pressure-layout {
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
+}
+
+.pressure-graph,
+.pressure-test {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.pressure-buttons {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.pressure-canvas {
+  width: 300px;
+  height: 180px;
+  background: #fff;
+  border: 1px solid var(--line);
+  touch-action: none;
+  cursor: crosshair;
 }

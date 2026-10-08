@@ -76,6 +76,27 @@ export class LayerEdit {
     return this.touched;
   }
 
+  /** Average colour (straight, alpha 0..1) of the layer before the edit, around (x, y). */
+  sampleBackup(x: number, y: number, radius: number): { r: number; g: number; b: number; a: number } {
+    const h = Math.max(1, Math.min(6, Math.round(radius)));
+    const r = intersect({ x: Math.round(x) - h, y: Math.round(y) - h, w: 2 * h + 1, h: 2 * h + 1 }, this.bounds);
+    if (!r) return { r: 0, g: 0, b: 0, a: 0 };
+    const d = this.backupCtx.getImageData(r.x, r.y, r.w, r.h).data;
+    let sr = 0;
+    let sg = 0;
+    let sb = 0;
+    let sa = 0;
+    for (let p = 0; p < d.length; p += 4) {
+      const a = d[p + 3];
+      sr += d[p] * a;
+      sg += d[p + 1] * a;
+      sb += d[p + 2] * a;
+      sa += a;
+    }
+    if (sa === 0) return { r: 0, g: 0, b: 0, a: 0 };
+    return { r: sr / sa, g: sg / sa, b: sb / sa, a: sa / (255 * (d.length / 4)) };
+  }
+
   setOptions(patch: Partial<EditOptions>): void {
     this.opts = { ...this.opts, ...patch };
   }

@@ -81,11 +81,15 @@ Status: ✅ gleich · 🟡 ähnlich/vereinfacht · ❌ fehlt (noch)
 | Bereich | Clip Studio Paint (Doku) | MAD Studio Paint | Status | Test |
 | ------- | ------------------------ | ---------------- | ------ | ---- |
 | Untertools Pen | G-pen, Real G-pen, Mapping pen, Turnip pen, … Marker: Milli pen, Felt pen, Dot pen [T4846] | G-pen, Real G-pen, Mapping pen, Turnip pen · Milli pen, Felt pen, Dot pen (eigene Werte) | 🟡 | `, and . step …` |
-| Untertools Pencil, Brush, Airbrush, Eraser, Blend | Pencil, Mechanical pencil, Charcoal, Crayon, … · Watercolor/Ink/Thick paint · Soft, Spray, Droplet … · Hard, Soft, Kneaded, Rough … · Blend, Blur, Finger tip … [T4846, PB] | je eine Auswahl mit denselben Namen; keine Farbmischung (Watercolor-Kanten, Ölfarbe) | 🟡 | – |
+| Untertools Pencil, Brush, Airbrush, Eraser, Blend | Pencil, Mechanical pencil, Charcoal, Crayon, … · Watercolor/Ink/Thick paint · Soft, Spray, Droplet … · Hard, Soft, Kneaded, Rough … · Blend, Blur, Finger tip … [T4846, PB] | je eine Auswahl mit denselben Namen, dazu Transparent/Opaque watercolor, Oil paint, Flat brush, Calligraphy (eigene Werte) | 🟡 | `colour mixing: …`, `a flat brush tip …` |
 | Standardwerte | G-pen 10 px, Stabilisierung 6, Kantenglättung „Middle“; Pencil Deckkraft 90 % mit Druck; Straight line 3 px [Screenshots] | gleich | ✅ | – |
 | Deckkraft vs. Dichte | Deckkraft begrenzt den ganzen Strich, „Brush density“ wirkt pro Tupfer [GL-I, T563] | gleich (Strichpuffer) | ✅ | `blend mode and opacity …` |
 | Kantenglättung | 4 Stufen: None, Weak, Middle, Strong [GL-A] | 4 Stufen | ✅ | – |
-| Stiftdruck | Druck auf Grösse/Dichte, Kurve und Mindestwert [DYN] | Druck auf Grösse und Dichte, linear mit Mindestwert; keine Neigung, keine freie Kurve, keine globale Druckeinstellung | 🟡 | Unit: `pressureCurve` |
+| Stiftdruck | Dynamik je Einstellung: Druck (Mindestwert + Kurve), Neigung, Tempo, Zufall; globale Druckeinstellung (File > Pen Pressure Settings: Zeichnen, „Stronger/Lighter“, Kurve) [DYN, PEN] | Druck mit Mindestwert und Kurve (monoton kubisch), Neigung, Zufall für Grösse und Dichte; globale Kurve mit Testfeld, Stärker/Leichter und „Adjust from drawing“ (Perzentile); Tempo fehlt; Wirkung der Neigung eigenes Modell | 🟡 | Unit: `pressure graphs`, `brush dynamics`; `brush dynamics popover …` |
+| Pinselspitze | Härte, Dicke, Richtung, Winkel (fest, Stiftrichtung, Linienrichtung, Zufall); Materialspitzen [GL-B] | Härte, Dicke, Winkel fest / Linienrichtung / Stiftrichtung; keine Materialspitzen | 🟡 | `a flat brush tip …` |
+| Ein- und Auslaufen | „Starting and ending“ [GL-S] | Länge in px für Anfang und Ende, wirkt auf Grösse und/oder Dichte; der Strich wird beim Absetzen mit bekannter Länge neu gezeichnet | 🟡 | `starting and ending taper …`, Unit: `taperFactor` |
+| Farbmischung | Ink > Color mixing: Blend, Running color (Smear), Amount/Density of paint, Color stretch [GL-I] | Blend und Running color mit Farbmenge, Farbdichte, Farbdehnung (Formeln eigenes Modell); Smear fehlt | 🟡 | `colour mixing: …`, Unit: `color mixing` |
+| Aquarellkante (Pinsel) | Watercolor edge: Bereich, Deckkraft, Dunkelheit [GL-W] | gleich, beim Absetzen auf den Strich angewendet | 🟡 | – |
 | Stabilisierung | 0–100 (Bereich nicht dokumentiert), wirkt ab Stiftkontakt [GL-C] | gleitender Mittelwert, 0–100, holt am Strichende auf | 🟡 | Unit: `Stabilizer` |
 | Füllen | Untertools „Refer only to editing layer“ / „Refer other layers“; Einstellungen: nur verbundene Pixel, Lücke schliessen (5 Stufen), Toleranz, Bereichsvergrösserung, Mehrfachreferenz (alle / Referenzebene …); Entwurfsebenen und Papier werden nicht referenziert; ⇧-Klick schaltet Mehrfachreferenz um [FILL, GL-F, GL-R] | alles davon; „To darkest pixel“, „Enclose and fill“, „Lasso fill“ fehlen | 🟡 | `fill tool fills …`, Unit: `closes small gaps …` |
 | Auto select | wie Füllen + Auswahlmodus; ⌘-Klick schaltet Mehrfachreferenz um [AUTO] | gleich | ✅ | – |
@@ -211,8 +215,8 @@ vergleichen. Abweichungen bitte als Issue oder Nachricht melden – mit dem Punk
   (nur Screenshot: 200). Eigene, plausible Werte gewählt.
 - **Glow dodge / Add (Glow):** offiziell nur „stärker bei halbtransparenten Pixeln“; Formel nach
   einem Community-Modell (niedrige Konfidenz).
-- **Farbmischung** (Blend, Running color, Watercolor-Kanten), Neigung, Druckkurven, Vektorebenen,
-  Lineale, Text, Comic-Rahmen, Animation und 3D sind nicht umgesetzt.
+- **Pinsel:** Materialspitzen, Texturen, Doppelpinsel, Tempo-Dynamik und „Smear“ fehlen.
+- **Vektorebenen, Lineale, Text, Comic-Rahmen, Animation und 3D** sind nicht umgesetzt.
 - **Mehrfaches Drücken** einer geteilten Werkzeugtaste (Zyklus) belegt nur die Celsys-Tutorialseite
   „Art Rocket“, nicht das Handbuch.
 
@@ -227,6 +231,7 @@ Präfix `M/` = `https://help.clip-studio.com/en-us/manual_en/` (Handbuch Ver. 5.
 | NEW | `M/030_new/030_new.htm` |
 | PAL, CMD, HIDE | `M/690_interface/Palettes.htm`, `…/Command_Bar.htm`, `…/Hide_Title_Bar_and_Menu_Bar.htm` |
 | TOOLPAL, USE, CUST | `M/150_tools/The_Tool_palette.htm`, `…/How_to_use_tools.htm`, `…/Customizing_the_Tool_and_Tool_Group_palettes.htm` |
+| PEN | `M/240_brushes/Adjusting_pen_pressure.htm` |
 | DYN, BS, TS, PB | `M/240_brushes/Customizing_brush_tools.htm`, `…/Brush_Size_palette.htm`, `…/Tool_Sliders_palette.htm`, `…/Drawing_and_painting.htm` |
 | SEL, CW, CS, CSET, CH, EYE | `M/300_color/Selecting_colors.htm`, `…/Color_Wheel_palette.htm`, `…/Color_Slider_palette.htm`, `…/Color_Set_palette.htm`, `…/Color_History_palette.htm`, `…/Eyedropper_Tool.htm` |
 | NAV, CANVAS | `M/270_canvas/Navigating_the_canvas.htm`, `…/Canvas_window.htm` |

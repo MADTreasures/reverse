@@ -41,7 +41,7 @@ export function strokeTarget(): StrokeTarget | null {
   };
 }
 
-const toStroke = (p: PointerInfo): StrokePoint => ({ x: p.x, y: p.y, pressure: p.pressure });
+const toStroke = (p: PointerInfo): StrokePoint => ({ x: p.x, y: p.y, pressure: p.pressure, tilt: p.tilt, azimuth: p.azimuth });
 
 /** Selection combine mode from modifier keys (Shift adds, Option subtracts, both intersect). */
 export function selectionOpFor(m: Modifiers): SelectionOp {

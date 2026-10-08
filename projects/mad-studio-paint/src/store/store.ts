@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { createDocument } from '../model/document';
 import type { Id, PaintDocument } from '../model/types';
 import type { Mask, SelectionOp } from '../paint/mask';
+import { LINEAR, type CurvePoint } from '../paint/curve';
 import { DEFAULT_SUB_TOOLS, type SubTool, type ToolId, type WorkspaceId } from '../paint/tools';
 
 export interface ViewState {
@@ -34,9 +35,11 @@ export interface Preferences {
   undoLevels: number;
   /** Holding a tool key longer than this (ms) switches back on release. */
   holdMs: number;
+  /** File > Pen pressure settings: maps the pen's raw pressure for all tools (0..1 graph). */
+  pressureCurve: CurvePoint[];
 }
 
-export const DEFAULT_PREFS: Preferences = { theme: 'dark', rotationStep: 5, undoLevels: 200, holdMs: 500 };
+export const DEFAULT_PREFS: Preferences = { theme: 'dark', rotationStep: 5, undoLevels: 200, holdMs: 500, pressureCurve: LINEAR };
 
 export interface PaintState {
   doc: PaintDocument;
@@ -75,6 +78,8 @@ export interface PaintState {
   workspace: WorkspaceId;
   /** Shift+Tab hides the menu bar. */
   menuHidden: boolean;
+  /** The Advanced Tool Settings palette is open. */
+  advancedToolSettings: boolean;
   prefs: Preferences;
 }
 
@@ -109,6 +114,7 @@ function initialState(): PaintState {
     showSelectionBorder: true,
     workspace: 'default',
     menuHidden: false,
+    advancedToolSettings: false,
     prefs: { ...DEFAULT_PREFS },
   };
 }

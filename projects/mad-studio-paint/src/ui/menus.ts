@@ -11,7 +11,7 @@ export type MenuItem = string | MenuSpec;
 const TONAL = ['brightnessContrast', 'levels', 'toneCurve', 'hsl', 'colorBalance', 'reverse', 'posterize', 'binarize', 'gradientMap'];
 
 export const MENUS: MenuSpec[] = [
-  { label: 'File', items: ['new', 'open', '-', 'save', 'saveAs', '-', 'importImage', 'export', '-', 'renameCanvas', '-', 'preferences'] },
+  { label: 'File', items: ['new', 'open', '-', 'save', 'saveAs', '-', 'importImage', 'export', '-', 'renameCanvas', '-', 'pressureSettings', 'preferences'] },
   {
     label: 'Edit',
     items: [

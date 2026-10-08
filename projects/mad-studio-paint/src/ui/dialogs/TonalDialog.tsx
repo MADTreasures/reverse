@@ -4,13 +4,13 @@
  * previewed on the canvas; OK records one undo step, Cancel restores everything.
  */
 import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
+import { CurveEditor } from '../controls/CurveEditor';
 import { findLayer } from '../../model/layers';
 import type { Id } from '../../model/types';
 import { GRADIENT_PRESETS, resolveStops, sampleGradient, type GradientStop } from '../../paint/gradient';
 import {
   CHANNELS,
   correctionLabel,
-  curveTable,
   defaultCorrection,
   histogram,
   type Channel,
@@ -262,67 +262,22 @@ function LevelsControls({ c, onChange, pixels }: { c: Extract<Correction, { type
   );
 }
 
-const CURVE_PX = 256;
-
-/** Tone curve graph: click to add a point, drag to move, drag out of the graph to delete. */
+/** Tone curve graph over the histogram: click to add a point, drag to move, drag out of the graph to delete. */
 function CurveControls({ c, onChange, pixels }: { c: Extract<Correction, { type: 'toneCurve' }>; onChange: (c: Correction) => void; pixels: ImageData | null }) {
   const [channel, setChannel] = useState<Channel>('rgb');
-  const points = c.curves[channel];
-  const svg = useRef<SVGSVGElement>(null);
-  const setPoints = (pts: CurvePoint[]) => onChange({ ...c, curves: { ...c.curves, [channel]: pts } });
-  const table = useMemo(() => curveTable(points), [points]);
-  const path = useMemo(() => [...table].map((v, x) => `${x === 0 ? 'M' : 'L'}${x} ${255 - v}`).join(''), [table]);
-
-  const toValue = (e: { clientX: number; clientY: number }) => {
-    const r = svg.current!.getBoundingClientRect();
-    return { x: ((e.clientX - r.left) / r.width) * 255, y: 255 - ((e.clientY - r.top) / r.height) * 255 };
-  };
-
-  const drag = (index: number, start: CurvePoint[]) => {
-    const move = (ev: PointerEvent) => {
-      const { x, y } = toValue(ev);
-      const outside = x < -24 || x > 279 || y < -24 || y > 279;
-      const next = start.map((p) => [...p] as CurvePoint);
-      // Dragged out of the graph: the point is deleted (two points always stay).
-      if (outside && next.length > 2) next.splice(index, 1);
-      else next[index] = [Math.round(Math.min(255, Math.max(0, x))), Math.round(Math.min(255, Math.max(0, y)))];
-      setPoints(next);
-    };
-    const up = () => {
-      window.removeEventListener('pointermove', move);
-      window.removeEventListener('pointerup', up);
-    };
-    window.addEventListener('pointermove', move);
-    window.addEventListener('pointerup', up);
-  };
-
-  const down = (e: ReactPointerEvent<SVGSVGElement>) => {
-    e.preventDefault();
-    const { x, y } = toValue(e);
-    const hit = points.findIndex(([px, py]) => Math.hypot(px - x, py - y) < 10);
-    if (hit >= 0) {
-      drag(hit, points);
-      return;
-    }
-    const next = [...points, [Math.round(x), Math.round(table[Math.max(0, Math.min(255, Math.round(x)))])] as CurvePoint].sort((a, b) => a[0] - b[0]);
-    setPoints(next);
-    drag(next.findIndex((p) => p[0] === Math.round(x)), next);
-  };
-
   return (
     <div className="form-grid">
       <ChannelSelect value={channel} onChange={setChannel} />
       <label />
-      <div className="curve-box">
-        <Histogram pixels={pixels} channel={channel} width={CURVE_PX} height={CURVE_PX} />
-        <svg ref={svg} className="curve" viewBox="-4 -4 263 263" data-testid="tone-curve" onPointerDown={down}>
-          <path d="M0 255L255 0" className="diagonal" />
-          <path d={path} className="line" />
-          {points.map(([x, y], i) => (
-            <circle key={i} cx={x} cy={255 - y} r={5} />
-          ))}
-        </svg>
-      </div>
+      <CurveEditor
+        label="Tone curve"
+        testId="tone-curve"
+        max={255}
+        size={256}
+        points={c.curves[channel]}
+        onChange={(pts: CurvePoint[]) => onChange({ ...c, curves: { ...c.curves, [channel]: pts } })}
+        background={<Histogram pixels={pixels} channel={channel} width={256} height={256} />}
+      />
       <label />
       <span className="muted">Click to add a point · drag a point out of the graph to delete it</span>
     </div>

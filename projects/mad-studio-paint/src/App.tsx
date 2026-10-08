@@ -11,6 +11,7 @@ import { ColorSet } from './ui/palettes/ColorSet';
 import { ColorHistory, ColorSliders, ColorWheelPanel } from './ui/palettes/ColorWheel';
 import { HistoryPalette } from './ui/palettes/HistoryPalette';
 import { LayerActionBar, LayerFlagBar, LayerList, LayerPropertyBar } from './ui/palettes/LayerPalette';
+import { AdvancedToolSettings } from './ui/palettes/BrushSettingsPanels';
 import { LayerPropertyPalette } from './ui/palettes/LayerPropertyPalette';
 import { Navigator } from './ui/palettes/Navigator';
 import { ToolSliders } from './ui/palettes/ToolSliders';
@@ -159,6 +160,7 @@ export function App() {
         {!hidden && <RightDock />}
       </div>
       {dragOver && <div className="drop-hint">Drop on the canvas to open · drop images on the Layer palette to add them as layers</div>}
+      <AdvancedToolSettings />
       <OverlayHost />
     </div>
   );

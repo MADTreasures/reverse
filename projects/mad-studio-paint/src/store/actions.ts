@@ -23,6 +23,7 @@ import {
   type DropPosition,
 } from '../model/layers';
 import type { FolderLayer, Id, Layer, LayerMask, PaintDocument, RasterLayer } from '../model/types';
+import { sanitizeCurve01 } from '../paint/curve';
 import type { LayerEffects } from '../paint/effects';
 import { applyCorrection, correctionLabel, type Correction } from '../paint/tonal';
 import { combine, createMask, expandMask, invertMask, isMaskEmpty, maskBounds, rectMask, type Mask, type SelectionOp } from '../paint/mask';
@@ -1359,6 +1360,8 @@ export function restorePreferences(): void {
     if (typeof p.rotationStep === 'number' && p.rotationStep > 0 && p.rotationStep <= 90) clean.rotationStep = p.rotationStep;
     if (typeof p.undoLevels === 'number' && p.undoLevels >= 1 && p.undoLevels <= 500) clean.undoLevels = Math.round(p.undoLevels);
     if (typeof p.holdMs === 'number' && p.holdMs >= 100 && p.holdMs <= 3000) clean.holdMs = p.holdMs;
+    const curve = sanitizeCurve01(p.pressureCurve);
+    if (curve) clean.pressureCurve = curve;
     setPreferences(clean);
   } catch {
     setPreferences({});

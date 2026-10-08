@@ -1,8 +1,11 @@
 /** Turns pointer input into dabs on a layer: pens, pencils, brushes, airbrush, eraser and blend tools. */
 import { hexToRgb, type RGB } from '../model/color';
 import type { Id } from '../model/types';
-import { circleBounds, union, type Rect } from '../paint/rect';
-import { dabAlpha, interpolateDabs, pressureCurve, Stabilizer, stabilizerWindow, type Dab, type StrokePoint } from '../paint/stroke';
+import { evalPressureCurve } from '../paint/curve';
+import { applyWatercolorEdge } from '../paint/effects';
+import { amountAt, densityFactor, nextDab, type Paint } from '../paint/mixing';
+import { circleBounds, inflate, intersect, union, type Rect } from '../paint/rect';
+import { dabAlpha, interpolateDabs, pressureCurve, seededRandom, Stabilizer, stabilizerWindow, taperFactor, type Dab, type StrokePoint } from '../paint/stroke';
 import type { BrushSettings } from '../paint/tools';
 import { createCanvas, ctx2d, type Ctx } from './canvas';
 import { DirectEdit, LayerEdit, type PixelPatch } from './edit';
@@ -17,8 +20,11 @@ class Tips {
   /** Soft tips by quantised hardness (grain variants for the brush's own hardness). */
   private soft = new Map<number, HTMLCanvasElement[]>();
   private aliased = new Map<number, HTMLCanvasElement>();
+  private tint: HTMLCanvasElement | null = null;
   private readonly hard: boolean;
   private readonly aa: number;
+  /** Random source of the stroke (grain variants). */
+  rand: () => number = Math.random;
 
   constructor(
     private brush: BrushSettings,
@@ -86,14 +92,33 @@ class Tips {
     return c;
   }
 
-  /** Draws one dab; returns the touched rect. */
-  draw(ctx: Ctx, x: number, y: number, radius: number, alpha: number): Rect {
-    if (this.aa === 0) {
+  /** `tip` recoloured to `color` (colour mixing), on a reused scratch canvas. */
+  private tinted(tip: HTMLCanvasElement, color: Paint): HTMLCanvasElement {
+    const t = this.tint && this.tint.width >= tip.width && this.tint.height >= tip.height ? this.tint : (this.tint = createCanvas(tip.width, tip.height));
+    const ctx = ctx2d(t);
+    ctx.globalCompositeOperation = 'copy';
+    ctx.drawImage(tip, 0, 0);
+    ctx.globalCompositeOperation = 'source-in';
+    ctx.fillStyle = paintCss(color);
+    ctx.fillRect(0, 0, tip.width, tip.height);
+    ctx.globalCompositeOperation = 'source-over';
+    return t;
+  }
+
+  /**
+   * Draws one dab; returns the touched rect. `thickness` < 1 squashes the tip across `angle`
+   * (radians); `color` overrides the stroke colour (colour mixing).
+   */
+  draw(ctx: Ctx, x: number, y: number, radius: number, alpha: number, angle = 0, thickness = 1, color: Paint | null = null): Rect {
+    const squash = Math.max(0.05, Math.min(1, thickness));
+    const shaped = squash < 1;
+    if (this.aa === 0 && !shaped) {
       const d = Math.max(1, Math.round(radius * 2));
       const left = Math.round(x - d / 2);
       const top = Math.round(y - d / 2);
+      const tip = this.aliasedTip(d);
       ctx.globalAlpha = alpha;
-      ctx.drawImage(this.aliasedTip(d), left, top);
+      ctx.drawImage(color ? this.tinted(tip, color) : tip, 0, 0, d, d, left, top, d, d);
       return { x: left, y: top, w: d, h: d };
     }
     let r = radius;
@@ -105,22 +130,40 @@ class Tips {
     }
     ctx.globalAlpha = a;
     if (this.hard && this.aa === 1) {
-      ctx.fillStyle = `rgb(${this.rgb.r},${this.rgb.g},${this.rgb.b})`;
+      ctx.fillStyle = color ? paintCss(color) : `rgb(${this.rgb.r},${this.rgb.g},${this.rgb.b})`;
       ctx.beginPath();
-      ctx.arc(x, y, r, 0, Math.PI * 2);
+      ctx.ellipse(x, y, r, r * squash, angle, 0, Math.PI * 2);
       ctx.fill();
+      return circleBounds(x, y, r);
+    }
+    let tip: HTMLCanvasElement;
+    let rr: number;
+    if (this.aa === 0) {
+      const d = Math.max(1, Math.round(r * 2));
+      tip = this.aliasedTip(d);
+      rr = d / 2;
     } else {
       // Hard tips get a soft edge of a fixed pixel width; soft tips keep their own falloff.
       const hardness = this.hard ? Math.max(0, Math.min(0.97, 1 - AA_EDGE[this.aa] / Math.max(r, 0.5))) : this.brush.hardness;
       const tips = this.softTips(hardness);
-      const tip = tips[(Math.random() * tips.length) | 0];
-      const rr = this.hard ? r + AA_EDGE[this.aa] / 2 : r;
-      ctx.drawImage(tip, x - rr, y - rr, rr * 2, rr * 2);
-      return circleBounds(x, y, rr);
+      tip = tips[(this.rand() * tips.length) | 0];
+      rr = this.hard ? r + AA_EDGE[this.aa] / 2 : r;
     }
-    return circleBounds(x, y, r);
+    const src = color ? this.tinted(tip, color) : tip;
+    if (shaped || angle !== 0) {
+      ctx.save();
+      ctx.translate(x, y);
+      ctx.rotate(angle);
+      ctx.scale(1, squash);
+      ctx.imageSmoothingEnabled = this.aa > 0;
+      ctx.drawImage(src, 0, 0, tip.width, tip.height, -rr, -rr, rr * 2, rr * 2);
+      ctx.restore();
+    } else ctx.drawImage(src, 0, 0, tip.width, tip.height, x - rr, y - rr, rr * 2, rr * 2);
+    return circleBounds(x, y, rr);
   }
 }
+
+const paintCss = (c: Paint) => `rgb(${Math.round(c.r)},${Math.round(c.g)},${Math.round(c.b)})`;
 
 export interface StrokeTarget {
   layerId: Id;
@@ -140,7 +183,12 @@ export interface Stroke {
   cancel(): void;
 }
 
-/** Brush strokes for paint and erase modes (buffered: no opacity build-up within a stroke). */
+/**
+ * Brush strokes for paint and erase modes (buffered: no opacity build-up within a stroke).
+ * Dynamics (pressure graphs, tilt, random), tip shape, starting and ending, colour mixing and the
+ * watercolor edge are applied per dab. The stroke keeps its points and random seed, so it can be
+ * redrawn identically once its length is known (ending taper) at pen-up.
+ */
 export class BrushStroke implements Stroke {
   private edit: LayerEdit;
   private tips: Tips;
@@ -148,6 +196,16 @@ export class BrushStroke implements Stroke {
   private last: StrokePoint | null = null;
   private start: StrokePoint | null = null;
   private carry = 0;
+  /** Distance travelled along the stroke (px), for starting/ending and colour stretch. */
+  private travel = 0;
+  /** Smoothed points drawn so far (for redrawing). */
+  private trail: StrokePoint[] = [];
+  private readonly seed = (Math.random() * 2 ** 32) >>> 0;
+  private rand: () => number;
+  private readonly erase: boolean;
+  private readonly brushPaint: Paint;
+  /** Paint carried by a "Blend" colour-mixing brush. */
+  private carried: Paint;
 
   constructor(
     private brush: BrushSettings,
@@ -155,10 +213,16 @@ export class BrushStroke implements Stroke {
     erase: boolean,
     target: StrokeTarget,
   ) {
-    this.tips = new Tips(brush, hexToRgb(color) ?? { r: 0, g: 0, b: 0 });
+    const rgb = hexToRgb(color) ?? { r: 0, g: 0, b: 0 };
+    this.tips = new Tips(brush, rgb);
+    this.rand = seededRandom(this.seed);
+    this.tips.rand = this.rand;
+    this.brushPaint = { ...rgb, a: 1 };
+    this.carried = { ...this.brushPaint };
     this.stabilizer = new Stabilizer(stabilizerWindow(brush.stabilization));
+    this.erase = erase || brush.mode === 'erase';
     this.edit = new LayerEdit(target.layerId, target.layer, {
-      mode: erase || brush.mode === 'erase' ? 'erase' : 'paint',
+      mode: this.erase ? 'erase' : 'paint',
       opacity: brush.opacity,
       lockAlpha: target.lockAlpha,
       selection: target.selection,
@@ -166,35 +230,90 @@ export class BrushStroke implements Stroke {
     });
   }
 
-  private radius(p: StrokePoint): number {
-    return (this.brush.size / 2) * pressureCurve(p.pressure, this.brush.minSize, this.brush.sizePressure);
+  private get mixing(): 'blend' | 'running' | null {
+    return this.brush.mixing !== 'none' && !this.erase ? this.brush.mixing : null;
   }
 
-  private alpha(p: StrokePoint): number {
-    const density = this.brush.flow * pressureCurve(p.pressure, 0, this.brush.opacityPressure);
-    return dabAlpha(density, this.brush.spacing, this.brush.scatter > 0);
+  /** Random variation 1 − amount … 1. */
+  private jitter(amount: number): number {
+    return amount > 0 ? 1 - amount * this.rand() : 1;
   }
 
-  private dab(d: StrokePoint): Rect {
+  private radius(p: StrokePoint, d: number, total: number): number {
+    const b = this.brush;
+    let f = b.sizePressure ? b.minSize + (1 - b.minSize) * evalPressureCurve(b.sizeCurve, p.pressure) : 1;
+    if (b.sizeTilt) f *= 1 + (p.tilt ?? 0);
+    if (b.taperSize) f *= taperFactor(d, total, b.taperStart, b.taperEnd);
+    return (b.size / 2) * f * this.jitter(b.sizeRandom);
+  }
+
+  private alpha(p: StrokePoint, d: number, total: number): number {
+    const b = this.brush;
+    let density = b.flow * (b.opacityPressure ? b.minDensity + (1 - b.minDensity) * evalPressureCurve(b.densityCurve, p.pressure) : 1);
+    if (b.densityTilt) density *= 1 - 0.7 * (p.tilt ?? 0);
+    if (b.taperDensity) density *= taperFactor(d, total, b.taperStart, b.taperEnd);
+    density *= this.jitter(b.densityRandom);
+    return dabAlpha(density, b.spacing, b.scatter > 0);
+  }
+
+  private tipAngle(p: Dab | StrokePoint): number {
+    const b = this.brush;
+    const base = (b.angle * Math.PI) / 180;
+    if (b.angleSource === 'line') return base + ((p as Dab).angle ?? 0);
+    if (b.angleSource === 'tilt') return base + (p.azimuth ?? 0);
+    return base;
+  }
+
+  private dab(p: Dab | StrokePoint, d: number, total: number): Rect | null {
     const ctx = this.edit.bufferCtx;
-    let x = d.x;
-    let y = d.y;
+    let x = p.x;
+    let y = p.y;
     if (this.brush.scatter > 0) {
-      const a = Math.random() * Math.PI * 2;
-      const s = Math.sqrt(Math.random()) * this.brush.scatter * this.brush.size;
+      const a = this.rand() * Math.PI * 2;
+      const s = Math.sqrt(this.rand()) * this.brush.scatter * this.brush.size;
       x += Math.cos(a) * s;
       y += Math.sin(a) * s;
     }
-    return this.tips.draw(ctx, x, y, this.radius(d), this.alpha(d));
+    const r = this.radius(p, d, total);
+    let alpha = this.alpha(p, d, total);
+    let color: Paint | null = null;
+    const mixing = this.mixing;
+    if (mixing) {
+      const under = this.edit.sampleBackup(x, y, r);
+      const keep = amountAt(d, this.brush.size, this.brush.colorStretch, this.brush.paintAmount);
+      const next = nextDab(mixing, this.brushPaint, this.carried, under, keep);
+      this.carried = next.carried;
+      color = next.color;
+      alpha *= densityFactor(under.a, this.brush.paintDensity);
+    }
+    if (r <= 0 || alpha <= 0) return null;
+    return this.tips.draw(ctx, x, y, r, alpha, this.tipAngle(p), this.brush.thickness, color);
   }
 
-  private segment(from: StrokePoint, to: StrokePoint): Rect | null {
-    const spacing = Math.max(0.5, this.brush.spacing * this.radius(from) * 2);
+  /** Dabs between two points; `total` is the stroke length when known (ending taper). */
+  private segment(from: StrokePoint, to: StrokePoint, total: number): Rect | null {
+    const thin = Math.max(0.1, Math.min(1, this.brush.thickness));
+    const spacing = Math.max(0.5, this.brush.spacing * this.radius(from, this.travel, total) * 2 * thin);
     const { dabs, carry } = interpolateDabs(from, to, spacing, this.carry);
     this.carry = carry;
     let r: Rect | null = null;
-    for (const d of dabs) r = union(r, this.dab(d));
+    for (const dab of dabs) r = union(r, this.dab(dab, this.travel + Math.hypot(dab.x - from.x, dab.y - from.y), total));
+    this.travel += Math.hypot(to.x - from.x, to.y - from.y);
     return r;
+  }
+
+  /** Clears the stroke and draws `points` again from the same random seed. */
+  private redraw(points: StrokePoint[], total: number): void {
+    this.edit.reset();
+    this.rand = seededRandom(this.seed);
+    this.tips.rand = this.rand;
+    this.carried = { ...this.brushPaint };
+    this.carry = 0;
+    this.travel = 0;
+    if (points.length === 0) return;
+    let r = this.dab({ ...points[0], angle: 0 }, 0, total);
+    for (let i = 1; i < points.length; i++) r = union(r, this.segment(points[i - 1], points[i], total));
+    if (r) this.edit.update(r);
   }
 
   add(raw: StrokePoint): void {
@@ -202,11 +321,14 @@ export class BrushStroke implements Stroke {
     if (!this.start) {
       this.start = raw;
       this.last = p;
-      this.edit.update(this.dab({ ...p, angle: 0 } as Dab));
+      this.trail.push(p);
+      const r = this.dab({ ...p, angle: 0 }, 0, Infinity);
+      if (r) this.edit.update(r);
       return;
     }
-    const r = this.segment(this.last!, p);
+    const r = this.segment(this.last!, p, Infinity);
     this.last = p;
+    this.trail.push(p);
     if (r) this.edit.update(r);
   }
 
@@ -217,29 +339,55 @@ export class BrushStroke implements Stroke {
   }
 
   path(points: StrokePoint[]): void {
-    this.edit.reset();
-    if (points.length === 0) return;
-    this.carry = 0;
-    let r: Rect | null = this.dab(points[0] as Dab);
-    for (let i = 1; i < points.length; i++) r = union(r, this.segment(points[i - 1], points[i]));
-    this.last = points[points.length - 1];
-    if (r) this.edit.update(r);
+    this.trail = [...points];
+    this.last = points[points.length - 1] ?? null;
+    this.redraw(points, pathLength(points));
   }
 
   end(): PixelPatch | null {
     let r: Rect | null = null;
     for (const p of this.stabilizer.finish()) {
-      if (this.last) r = union(r, this.segment(this.last, p));
+      if (this.last) r = union(r, this.segment(this.last, p, Infinity));
       this.last = p;
+      this.trail.push(p);
     }
     if (r) this.edit.update(r);
+    // Now that the length is known, the end of the stroke can taper.
+    if (this.brush.taperEnd > 0 && (this.brush.taperSize || this.brush.taperDensity)) this.redraw(this.trail, pathLength(this.trail));
+    if (this.brush.watercolorEdge && !this.erase) this.applyWatercolorEdge();
     return this.edit.commit();
+  }
+
+  /** Denser, darker paint along the border of the finished stroke. */
+  private applyWatercolorEdge(): void {
+    const touched = this.edit.touchedRect;
+    if (!touched) return;
+    const { width, height } = this.edit.buffer;
+    const range = Math.max(0.5, this.brush.edgeRange);
+    const r = intersect(inflate(touched, Math.ceil(range) + 1), { x: 0, y: 0, w: width, h: height });
+    if (!r) return;
+    const ctx = this.edit.bufferCtx;
+    const img = ctx.getImageData(r.x, r.y, r.w, r.h);
+    applyWatercolorEdge(img.data, r.w, r.h, {
+      enabled: true,
+      kind: 'watercolor',
+      width: 0,
+      color: '#000000',
+      range,
+      opacity: this.brush.edgeOpacity * 100,
+      darkness: this.brush.edgeDarkness * 100,
+      blur: range / 2,
+    });
+    ctx.putImageData(img, r.x, r.y);
+    this.edit.update(r);
   }
 
   cancel(): void {
     this.edit.cancel();
   }
 }
+
+const pathLength = (pts: StrokePoint[]) => pts.reduce((n, p, i) => (i ? n + Math.hypot(p.x - pts[i - 1].x, p.y - pts[i - 1].y) : 0), 0);
 
 /** Blend tool: blur or smudge directly on the layer pixels. */
 export class BlendStroke implements Stroke {
