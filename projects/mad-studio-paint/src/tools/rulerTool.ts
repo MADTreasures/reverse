@@ -4,21 +4,26 @@
  */
 import { findLayer } from '../model/layers';
 import type { Id } from '../model/types';
+import { offsetPath, simplifyPolyline, smoothPolyline, translatePoints, type CurveSpec } from '../paint/curves';
 import {
+  curveMiddle,
+  curveSamples,
   distanceToRuler,
   eyeLevel,
   isSpecial,
   moveHandle,
   rulerHandles,
+  rulerPath,
   translateRuler,
   type Pt,
   type Ruler,
   type RulerInput,
 } from '../paint/rulers';
-import type { SubTool } from '../paint/tools';
+import { isSpecialCurve, type SubTool } from '../paint/tools';
 import { apply as applyMatrix } from '../paint/viewMath';
 import * as actions from '../store/actions';
 import { getState, setState } from '../store/store';
+import { CurveInput } from './curveInput';
 import type { Modifiers, OverlayView, PointerInfo, ToolSession } from './types';
 
 const HANDLE_PX = 9;
@@ -120,16 +125,95 @@ export function rulerObjectSession(p: PointerInfo, view: OverlayView): ToolSessi
   return null;
 }
 
-/** Ruler tool: drag to create the sub tool's ruler; dragging a handle edits an existing one. */
+/**
+ * Ruler tool: drag to create the sub tool's ruler (curves: click their points; the ruler pen: draw
+ * it); dragging a handle edits an existing one.
+ */
 export function rulerSession(sub: SubTool, p: PointerInfo, view: OverlayView): ToolSession | null {
-  const hit = hitHandle(p, view);
-  if (hit) return new HandleSession(hit);
+  const curve = sub.rulerKind === 'curve' || (sub.rulerKind === 'special' && isSpecialCurve(sub.specialRuler));
+  // While a curve is being placed, clicks add its points.
+  if (!(curve && CurveInput.active)) {
+    const hit = hitHandle(p, view);
+    if (hit) return new HandleSession(hit);
+  }
   if (actions.editBlocker() === 'No layer selected') return null;
   if (sub.rulerKind === 'perspective') {
     addVanishingPoint(p);
     return null;
   }
+  if (curve) return curvePress(sub, p);
+  if (sub.rulerKind === 'pen') return new PenRulerSession(p, view.zoom);
   return new CreateRulerSession(sub, p);
+}
+
+/** Curve ruler, parallel / multiple / radial curve: one more point (or the end) of the curve. */
+function curvePress(sub: SubTool, p: PointerInfo): ToolSession | null {
+  const kind = sub.rulerKind === 'curve' ? 'curve' : (sub.specialRuler ?? 'parallelCurve');
+  return CurveInput.press(p, `${sub.id}:${kind}`, sub.curveType ?? 'spline', (spec) => {
+    const layerId = getState().activeLayerId;
+    if (kind === 'radialCurve') actions.addRuler({ kind: 'radialCurve', ...spec, center: spec.points[0] }, layerId);
+    else if (kind === 'multiCurve') actions.addRuler({ kind: 'multiCurve', ...spec, angle: multiCurveAngle(spec) }, layerId);
+    else if (kind === 'parallelCurve') actions.addRuler({ kind: 'parallelCurve', ...spec }, layerId);
+    else actions.addRuler({ kind: 'curve', ...spec }, layerId);
+  });
+}
+
+/** A new multiple curve's lines are moved across the curve (square to the line from its start to its end). */
+function multiCurveAngle(spec: CurveSpec): number {
+  const a = spec.points[0];
+  const b = spec.points[spec.points.length - 1];
+  return Math.atan2(b.y - a.y, b.x - a.x) + Math.PI / 2;
+}
+
+/** Bends sharper than this (radians) stay corners of a ruler pen ruler. */
+const PEN_CORNER = 1;
+
+/** Ruler pen: a ruler along a line drawn by hand (smoothed, then a spline through few points). */
+class PenRulerSession implements ToolSession {
+  readonly cursor = 'crosshair';
+  private points: Pt[];
+
+  constructor(
+    p: PointerInfo,
+    private zoom: number,
+  ) {
+    this.points = [{ x: p.x, y: p.y }];
+  }
+
+  move(p: PointerInfo, coalesced: PointerInfo[]): void {
+    for (const q of coalesced.length ? coalesced : [p]) this.points.push({ x: q.x, y: q.y });
+  }
+
+  up(p: PointerInfo): void {
+    this.points.push({ x: p.x, y: p.y });
+    const pts = simplifyPolyline(smoothPolyline(this.points), Math.max(0.25, 1.5 / this.zoom));
+    let length = 0;
+    for (let i = 1; i < pts.length; i++) length += Math.hypot(pts[i].x - pts[i - 1].x, pts[i].y - pts[i - 1].y);
+    if (pts.length < 2 || length * this.zoom < 4) return;
+    const corners: number[] = [];
+    for (let i = 1; i < pts.length - 1; i++) {
+      const a = Math.atan2(pts[i].y - pts[i - 1].y, pts[i].x - pts[i - 1].x);
+      const b = Math.atan2(pts[i + 1].y - pts[i].y, pts[i + 1].x - pts[i].x);
+      if (Math.abs(Math.atan2(Math.sin(b - a), Math.cos(b - a))) > PEN_CORNER) corners.push(i);
+    }
+    actions.addRuler({ kind: 'curve', curve: 'spline', points: pts, ...(corners.length ? { corners } : {}) }, getState().activeLayerId, 'Ruler pen');
+  }
+
+  cancel(): void {}
+
+  overlay(ctx: CanvasRenderingContext2D, view: OverlayView): void {
+    ctx.save();
+    ctx.strokeStyle = '#2f80ed';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    this.points.forEach((q, i) => {
+      const s = applyMatrix(view.matrix, q.x, q.y);
+      if (i) ctx.lineTo(s.x, s.y);
+      else ctx.moveTo(s.x, s.y);
+    });
+    ctx.stroke();
+    ctx.restore();
+  }
 }
 
 /**
@@ -197,6 +281,31 @@ class CreateRulerSession implements ToolSession {
         if (type === 'parallel') return { kind: 'parallel', origin: a, angle: Math.atan2(dy, dx) };
         return { kind: 'concentric', center: a, rx: Math.max(1, Math.abs(dx)), ry: Math.max(1, Math.abs(dy)), angle: 0 };
       }
+      case 'figure': {
+        if (!dragged) return null;
+        let { x: x0, y: y0 } = a;
+        let { x: x1, y: y1 } = b;
+        if (m.shift) {
+          // Square / circle.
+          const d = Math.max(Math.abs(dx), Math.abs(dy));
+          x1 = x0 + Math.sign(dx || 1) * d;
+          y1 = y0 + Math.sign(dy || 1) * d;
+        }
+        if (m.alt) {
+          // From the centre.
+          x0 -= x1 - x0;
+          y0 -= y1 - y0;
+        }
+        return {
+          kind: 'figure',
+          shape: this.sub.rulerFigure ?? 'ellipse',
+          center: { x: (x0 + x1) / 2, y: (y0 + y1) / 2 },
+          rx: Math.max(1, Math.abs(x1 - x0) / 2),
+          ry: Math.max(1, Math.abs(y1 - y0) / 2),
+          angle: 0,
+          corners: this.sub.polygonCorners ?? 6,
+        };
+      }
       default:
         return null;
     }
@@ -247,6 +356,19 @@ function drawRuler(ctx: CanvasRenderingContext2D, view: OverlayView, r: Ruler, s
   };
   const through = (a: Pt, ang: number, alpha = 1) =>
     line({ x: a.x - Math.cos(ang) * far, y: a.y - Math.sin(ang) * far }, { x: a.x + Math.cos(ang) * far, y: a.y + Math.sin(ang) * far }, alpha);
+  const poly = (pts: Pt[], alpha = 1) => {
+    ctx.globalAlpha = alpha;
+    ctx.beginPath();
+    pts.forEach((q, i) => {
+      const s = P(q.x, q.y);
+      if (i) ctx.lineTo(s.x, s.y);
+      else ctx.moveTo(s.x, s.y);
+    });
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+  };
+  /** Space between the guide copies of special curve rulers: 10 screen px. */
+  const gap = 10 / Math.max(0.01, view.zoom);
   ctx.save();
   ctx.lineWidth = selected ? 1.5 : 1;
   ctx.strokeStyle = color;
@@ -254,6 +376,42 @@ function drawRuler(ctx: CanvasRenderingContext2D, view: OverlayView, r: Ruler, s
     case 'linear':
       line(r.a, r.b);
       break;
+    case 'curve':
+      poly(curveSamples(r));
+      break;
+    case 'figure':
+      poly(rulerPath(r).pts);
+      break;
+    case 'parallelCurve': {
+      const pts = curveSamples(r);
+      poly(pts);
+      poly(offsetPath(pts, gap), 0.45);
+      poly(offsetPath(pts, -gap), 0.45);
+      break;
+    }
+    case 'multiCurve': {
+      const pts = curveSamples(r);
+      poly(pts);
+      for (const k of [-gap, gap]) poly(translatePoints(pts, Math.cos(r.angle) * k * 1.2, Math.sin(r.angle) * k * 1.2), 0.45);
+      if (selected) {
+        const m = curveMiddle(r);
+        line(m, { x: m.x + Math.cos(r.angle) * 80, y: m.y + Math.sin(r.angle) * 80 });
+      }
+      break;
+    }
+    case 'radialCurve': {
+      poly(curveSamples(r));
+      // The centre, like a small burst of focus lines.
+      const c = P(r.center.x, r.center.y);
+      ctx.beginPath();
+      for (let k = 0; k < 12; k++) {
+        const t = (k * Math.PI) / 6;
+        ctx.moveTo(c.x + Math.cos(t) * 4, c.y + Math.sin(t) * 4);
+        ctx.lineTo(c.x + Math.cos(t) * 10, c.y + Math.sin(t) * 10);
+      }
+      ctx.stroke();
+      break;
+    }
     case 'guide':
       if (r.vertical) line({ x: r.pos, y: -far }, { x: r.pos, y: far });
       else line({ x: -far, y: r.pos }, { x: far, y: r.pos });
@@ -297,6 +455,13 @@ function drawRuler(ctx: CanvasRenderingContext2D, view: OverlayView, r: Ruler, s
       through(a, Math.atan2(dir.y, dir.x));
       for (const vp of r.vps) for (let k = 0; k < 12; k++) through(vp, (k * Math.PI) / 12, 0.22);
       break;
+    }
+  }
+  // Direction points of a selected cubic Bezier curve.
+  if (selected && 'curve' in r && r.curve === 'cubic') {
+    for (let i = 0; i + 1 < r.points.length; i += 3) {
+      line(r.points[i], r.points[i + 1], 0.6);
+      if (i + 3 < r.points.length) line(r.points[i + 2], r.points[i + 3], 0.6);
     }
   }
   if (selected || r.kind === 'perspective' || r.kind === 'symmetry') {

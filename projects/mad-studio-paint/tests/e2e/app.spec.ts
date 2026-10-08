@@ -929,6 +929,168 @@ test('perspective ruler: strokes run towards the closest vanishing point; rulers
   expect(await page.evaluate(() => window.__madPaint.actions.activeRulers().length)).toBe(0);
 });
 
+/** Clicks document points (with a pause, so they are not double-clicks); `last` is double-clicked. */
+async function clickPoints(page: Page, points: [number, number][], last?: [number, number]) {
+  for (const [x, y] of points) {
+    const at = await docToScreen(page, x, y);
+    await page.mouse.click(at.x, at.y);
+    await page.waitForTimeout(400);
+  }
+  if (last) {
+    const at = await docToScreen(page, ...last);
+    await page.mouse.dblclick(at.x, at.y);
+  }
+}
+
+/** A pen stroke through document points. */
+async function strokeThrough(page: Page, points: [number, number][], steps = 6) {
+  const [first, ...rest] = points;
+  let prev = await docToScreen(page, ...first);
+  await page.mouse.move(prev.x, prev.y);
+  await page.mouse.down();
+  for (const pt of rest) {
+    const next = await docToScreen(page, ...pt);
+    for (let i = 1; i <= steps; i++) await page.mouse.move(prev.x + ((next.x - prev.x) * i) / steps, prev.y + ((next.y - prev.y) * i) / steps);
+    prev = next;
+  }
+  await page.mouse.up();
+}
+
+test('curve ruler: clicked points make a spline that strokes follow; its points edit with the Object tool', async ({ page }) => {
+  await boot(page);
+  await useSubTool(page, 'ruler', 'ruler-curve');
+  // Backspace removes the last point, Esc cancels the curve.
+  await clickPoints(page, [
+    [40, 40],
+    [120, 40],
+  ]);
+  expect((await state(page)).hint).toContain('double-click');
+  await page.keyboard.press('Backspace');
+  await page.keyboard.press('Escape');
+  await page.waitForTimeout(400);
+  expect((await state(page)).layers[0].rulers).toBeUndefined();
+  await clickPoints(page, [
+    [60, 200],
+    [200, 80],
+  ], [340, 200]);
+  const ruler = (await state(page)).layers[0].rulers.items[0];
+  expect(ruler).toMatchObject({ kind: 'curve', curve: 'spline' });
+  expect(ruler.points.map((p: any) => [Math.round(p.x), Math.round(p.y)])).toEqual([
+    [60, 200],
+    [200, 80],
+    [340, 200],
+  ]);
+  // A stroke that starts near the curve follows it over the top, wherever the pointer goes.
+  await thinPen(page);
+  await strokeThrough(page, [
+    [64, 196],
+    [150, 140],
+    [200, 110],
+    [250, 140],
+  ]);
+  expect(await layerAlpha(page, 200, 80)).toBeGreaterThan(150);
+  expect(await layerAlpha(page, 200, 110)).toBe(0);
+  expect(await layerAlpha(page, 150, 140)).toBe(0);
+  // A stroke elsewhere is free.
+  await drag(page, [100, 270], [300, 270], 8);
+  expect(await layerAlpha(page, 200, 270)).toBeGreaterThan(150);
+  // Object tool: drag the middle point up.
+  await selectTool(page, 'object');
+  await drag(page, [200, 80], [200, 50], 6);
+  const moved = (await state(page)).layers[0].rulers.items[0].points[1];
+  expect([Math.round(moved.x), Math.round(moved.y)]).toEqual([200, 50]);
+});
+
+test('figure ruler and ruler pen: strokes go round the figure; rulers are saved with the canvas', async ({ page }) => {
+  await boot(page);
+  await useSubTool(page, 'ruler', 'ruler-figure');
+  await page.getByRole('button', { name: 'Tool Settings', exact: true }).click();
+  await page.getByRole('radio', { name: 'Rectangle' }).click();
+  await drag(page, [100, 100], [300, 200], 8);
+  const fig = (await state(page)).layers[0].rulers.items[0];
+  expect(fig).toMatchObject({ kind: 'figure', shape: 'rect' });
+  expect([fig.center.x, fig.center.y, fig.rx, fig.ry].map(Math.round)).toEqual([200, 150, 100, 50]);
+  await thinPen(page);
+  // Along the top edge and round the corner down the right side.
+  await strokeThrough(page, [
+    [120, 104],
+    [290, 106],
+    [306, 150],
+    [304, 190],
+  ]);
+  expect(await layerAlpha(page, 200, 100)).toBeGreaterThan(150);
+  expect(await layerAlpha(page, 300, 150)).toBeGreaterThan(150);
+  expect(await layerAlpha(page, 290, 108)).toBe(0);
+  // The ruler pen keeps a hand-drawn line as a curve ruler.
+  await useSubTool(page, 'ruler', 'ruler-pen');
+  await strokeThrough(page, [
+    [40, 260],
+    [120, 230],
+    [200, 270],
+    [280, 230],
+    [360, 260],
+  ]);
+  const pen = (await state(page)).layers[0].rulers.items[1];
+  expect(pen.kind).toBe('curve');
+  expect(pen.points.length).toBeGreaterThanOrEqual(4);
+  expect([Math.round(pen.points[0].x), Math.round(pen.points[0].y)]).toEqual([40, 260]);
+  // Layer > Ruler/Frame > Draw along ruler: the selected (figure) ruler, as a line of the chosen width.
+  await page.evaluate(() => window.__madPaint.actions.deleteLayerRulers());
+  await page.keyboard.press('ControlOrMeta+Shift+n');
+  await useSubTool(page, 'ruler', 'ruler-figure');
+  await drag(page, [60, 40], [160, 90], 8);
+  await page.getByRole('navigation', { name: 'Main menu' }).getByRole('button', { name: 'Layer', exact: true }).dispatchEvent('pointerdown');
+  await page.getByRole('menuitem', { name: 'Ruler/Frame' }).hover();
+  await page.locator('[data-command=drawAlongRuler]').click();
+  const along = page.getByRole('dialog', { name: 'Draw along ruler' });
+  await along.getByLabel('Line width').fill('5');
+  await along.getByRole('button', { name: 'OK' }).click();
+  expect(await layerAlpha(page, 110, 40)).toBeGreaterThan(200);
+  expect(await layerAlpha(page, 160, 65)).toBeGreaterThan(200);
+  expect(await layerAlpha(page, 110, 65)).toBe(0);
+  const saved = await page.evaluate(async () => {
+    const m = window.__madPaint;
+    await m.openFileBytes({ name: 'curves.madpaint', data: await m.buildDocumentBytes() });
+    return m.useStore.getState().doc.layers.flatMap((l: any) => l.rulers?.items.map((r: any) => r.kind) ?? []);
+  });
+  expect(saved).toEqual(['figure']);
+});
+
+test('special curve rulers: parallel curves keep their distance, radial curves turn around the centre', async ({ page }) => {
+  await boot(page);
+  await useSubTool(page, 'ruler', 'ruler-special');
+  await page.getByRole('button', { name: 'Tool Settings', exact: true }).click();
+  await page.getByRole('radio', { name: 'Parallel curve' }).click();
+  await page.getByRole('radio', { name: 'Polyline' }).click();
+  await clickPoints(page, [
+    [40, 100],
+    [200, 100],
+  ], [360, 100]);
+  expect((await state(page)).layers[0].rulers.items[0]).toMatchObject({ kind: 'parallelCurve', curve: 'polyline' });
+  await thinPen(page);
+  // 50 px below the ruler, the stroke stays 50 px below it.
+  await drag(page, [100, 150], [300, 190], 10);
+  expect(await layerAlpha(page, 290, 150)).toBeGreaterThan(150);
+  expect(await layerAlpha(page, 290, 186)).toBe(0);
+  await page.keyboard.press('ControlOrMeta+z');
+  await page.keyboard.press('ControlOrMeta+z');
+  // Radial curve: the centre first, then the curve's points.
+  await useSubTool(page, 'ruler', 'ruler-special');
+  await page.getByRole('radio', { name: 'Radial curve' }).click();
+  await clickPoints(page, [
+    [200, 150],
+    [300, 150],
+  ], [350, 180]);
+  const radial = (await state(page)).layers[0].rulers.items[0];
+  expect(radial.kind).toBe('radialCurve');
+  expect([Math.round(radial.center.x), Math.round(radial.center.y)]).toEqual([200, 150]);
+  await thinPen(page);
+  // 50 px above the centre: the curve turned a quarter round, up from the centre.
+  await drag(page, [200, 100], [206, 60], 8);
+  expect(await layerAlpha(page, 200, 64)).toBeGreaterThan(150);
+  expect(await layerAlpha(page, 206, 62)).toBe(0);
+});
+
 /** Lines of the active (vector) layer. */
 const lines = (page: Page) =>
   page.evaluate(() => {

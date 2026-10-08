@@ -2,6 +2,7 @@
 import { LINEAR, sanitizeCurve01, type CurvePoint } from './curve';
 import { DEFAULT_TEXT_STYLE, sanitizeTextStyle, type BalloonShape, type TextStyle } from './text';
 import { sanitizeGradientStops, type GradientSpec } from './gradient';
+import { CURVE_TYPES, type CurveType, type RulerFigure } from './curves';
 
 export type ToolId =
   | 'zoom'
@@ -31,6 +32,10 @@ export type BrushMode = 'paint' | 'erase' | 'blend';
 export type TipTexture = 'none' | 'grain';
 export type SelectShape = 'rect' | 'ellipse' | 'lasso' | 'polyline' | 'pen' | 'erase';
 export type FigureShape = 'line' | 'rect' | 'ellipse';
+export type SpecialRuler = 'parallel' | 'parallelCurve' | 'multiCurve' | 'radial' | 'radialCurve' | 'concentric';
+export const SPECIAL_RULERS: readonly SpecialRuler[] = ['parallel', 'parallelCurve', 'multiCurve', 'radial', 'radialCurve', 'concentric'];
+/** Special rulers that are made of a curve (placed point by point). */
+export const isSpecialCurve = (s: SpecialRuler | undefined) => s === 'parallelCurve' || s === 'multiCurve' || s === 'radialCurve';
 export type FillReference = 'layer' | 'all' | 'reference';
 
 export interface FillSettings {
@@ -138,10 +143,15 @@ export interface SubTool {
   /** Rectangle / ellipse start from the centre. */
   fromCenter?: boolean;
 
-  /** Ruler tool: which ruler a drag creates. */
-  rulerKind?: 'linear' | 'special' | 'guide' | 'perspective' | 'symmetry';
+  /** Ruler tool: which ruler a drag (or clicks, for curves) creates; the ruler pen draws one by hand. */
+  rulerKind?: 'linear' | 'curve' | 'figure' | 'pen' | 'special' | 'guide' | 'perspective' | 'symmetry';
   /** Special ruler type. */
-  specialRuler?: 'parallel' | 'radial' | 'concentric';
+  specialRuler?: SpecialRuler;
+  /** Curve rulers (and the special curve rulers): how the clicked points make the line. */
+  curveType?: CurveType;
+  /** Figure ruler: its shape, and the corners of a polygon (3–32). */
+  rulerFigure?: RulerFigure;
+  polygonCorners?: number;
   /** Symmetrical ruler: number of lines (2–32) and line symmetry (mirroring). */
   symmetryLines?: number;
   symmetryMirror?: boolean;
@@ -235,7 +245,7 @@ export const TOOLS: ToolInfo[] = [
   { id: 'gradient', label: 'Gradient', key: 'G', hint: 'Drag to draw a gradient with the drawing colour' },
   { id: 'figure', label: 'Figure', key: 'U', hint: 'Drag to draw · ⇧ snaps lines to 45° and makes squares / circles' },
   { id: 'frame', label: 'Frame border', key: 'U', hint: 'Drag to make a comic frame (it snaps to the canvas and other frames) · divide: drag across a frame' },
-  { id: 'ruler', label: 'Ruler', key: 'U', hint: 'Drag to create a ruler · drag a handle to edit it · strokes snap to rulers (⌘1 / ⌘2)' },
+  { id: 'ruler', label: 'Ruler', key: 'U', hint: 'Drag to create a ruler (curves: click points, double-click to finish) · drag a handle to edit it · strokes snap to rulers (⌘1 / ⌘2)' },
   { id: 'object', label: 'Object', key: 'O', hint: 'Click a vector line, text, balloon or ruler to select it · drag to move, handles to scale and rotate · Delete removes it' },
   { id: 'text', label: 'Text', key: 'T', hint: 'Click to type, drag to type in a frame (the text wraps at it) · click text to edit it · ⌘Enter or a click outside confirms' },
   { id: 'balloon', label: 'Balloon', key: 'T', hint: 'Drag to draw a speech balloon · balloon tail: drag from inside a balloon' },
@@ -474,7 +484,10 @@ export const DEFAULT_SUB_TOOLS: SubTool[] = [
   { id: 'frame-divide', tool: 'frame', name: 'Divide frame border', frameShape: 'divide', gutterTopBottom: 4, gutterLeftRight: 2, divideFolder: true },
   // Ruler
   { id: 'ruler-linear', tool: 'ruler', name: 'Linear ruler', rulerKind: 'linear' },
-  { id: 'ruler-special', tool: 'ruler', name: 'Special ruler', rulerKind: 'special', specialRuler: 'parallel' },
+  { id: 'ruler-curve', tool: 'ruler', name: 'Curve ruler', rulerKind: 'curve', curveType: 'spline' },
+  { id: 'ruler-figure', tool: 'ruler', name: 'Figure ruler', rulerKind: 'figure', rulerFigure: 'ellipse', polygonCorners: 6 },
+  { id: 'ruler-pen', tool: 'ruler', name: 'Ruler pen', rulerKind: 'pen' },
+  { id: 'ruler-special', tool: 'ruler', name: 'Special ruler', rulerKind: 'special', specialRuler: 'parallel', curveType: 'spline' },
   { id: 'ruler-guide', tool: 'ruler', name: 'Guide', rulerKind: 'guide' },
   { id: 'ruler-perspective', tool: 'ruler', name: 'Perspective ruler', rulerKind: 'perspective' },
   { id: 'ruler-symmetry', tool: 'ruler', name: 'Symmetrical ruler', rulerKind: 'symmetry', symmetryLines: 2, symmetryMirror: true },
@@ -515,7 +528,10 @@ export function mergeSubTools(saved: unknown): SubTool[] {
       fill: def.fill ? { ...def.fill, ...(s.fill ?? {}) } : undefined,
       ...(def.symmetryLines !== undefined && typeof s.symmetryLines === 'number' ? { symmetryLines: Math.max(2, Math.min(32, Math.round(s.symmetryLines))) } : {}),
       ...(def.symmetryMirror !== undefined && typeof s.symmetryMirror === 'boolean' ? { symmetryMirror: s.symmetryMirror } : {}),
-      ...(def.specialRuler && (s.specialRuler === 'parallel' || s.specialRuler === 'radial' || s.specialRuler === 'concentric') ? { specialRuler: s.specialRuler } : {}),
+      ...(def.specialRuler && SPECIAL_RULERS.includes(s.specialRuler as SpecialRuler) ? { specialRuler: s.specialRuler } : {}),
+      ...(def.curveType && CURVE_TYPES.includes(s.curveType as CurveType) ? { curveType: s.curveType } : {}),
+      ...(def.rulerFigure && (s.rulerFigure === 'rect' || s.rulerFigure === 'ellipse' || s.rulerFigure === 'polygon') ? { rulerFigure: s.rulerFigure } : {}),
+      ...(def.polygonCorners !== undefined && typeof s.polygonCorners === 'number' && Number.isFinite(s.polygonCorners) ? { polygonCorners: Math.max(3, Math.min(32, Math.round(s.polygonCorners))) } : {}),
       ...(def.tool === 'eraser' && (s.vectorErase === 'touched' || s.vectorErase === 'intersection' || s.vectorErase === 'whole') ? { vectorErase: s.vectorErase } : {}),
       ...(def.tool === 'eraser' && typeof s.vectorReferAll === 'boolean' ? { vectorReferAll: s.vectorReferAll } : {}),
       ...(def.scaleLineWidth !== undefined && typeof s.scaleLineWidth === 'boolean' ? { scaleLineWidth: s.scaleLineWidth } : {}),

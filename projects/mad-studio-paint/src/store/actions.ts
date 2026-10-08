@@ -30,7 +30,7 @@ import {
   type DropPosition,
 } from '../model/layers';
 import type { FolderLayer, GradientLayer, Id, Layer, LayerMask, PaintDocument, RasterLayer, RulerRange, TextLayer, VectorLayer } from '../model/types';
-import { defaultPerspective, type Affine, type Ruler, type RulerInput } from '../paint/rulers';
+import { defaultPerspective, rulerLine, type Affine, type Ruler, type RulerInput } from '../paint/rulers';
 import { eraseWhere, keepWhere, type VectorStroke } from '../paint/vector';
 import type { Rect } from '../paint/rect';
 import { contentOf, EMPTY_CONTENT, idsTouching, objectIds, removeObjects, transformContent, type Content } from '../paint/objects';
@@ -928,6 +928,14 @@ export function deleteLayerRulers(layerId: Id = getState().activeLayerId): void 
     if (l) delete l.rulers;
   });
   setState({ selectedRuler: null });
+}
+
+/** The ruler Draw along ruler uses: the selected one, else the only applicable one it can draw. */
+export function rulerToDrawAlong(s: PaintState = getState()): Ruler | null {
+  const size = { w: s.doc.width, h: s.doc.height };
+  const list = activeRulers(s).filter((x) => rulerLine(x.ruler, size) !== null);
+  const selected = list.find((x) => x.ruler.id === s.selectedRuler?.rulerId);
+  return selected?.ruler ?? (list.length === 1 ? list[0].ruler : null);
 }
 
 /** Layer > Ruler/Frame > Create perspective ruler: 1, 2 or 3 vanishing points at default places. */

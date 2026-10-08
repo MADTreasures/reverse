@@ -9,7 +9,7 @@ import type { Balloon } from '../../paint/text';
 import type { GradientEdge, GradientSpec } from '../../paint/gradient';
 import { GradientBar } from '../controls/GradientBar';
 import { openDialog } from '../overlays';
-import { entryForTool, PALETTE_ENTRIES, PALETTE_LAYOUT, subToolsOf, toolInfo, type FillReference, type SubTool, type ToolId } from '../../paint/tools';
+import { entryForTool, isSpecialCurve, PALETTE_ENTRIES, PALETTE_LAYOUT, subToolsOf, toolInfo, type FillReference, type SubTool, type ToolId } from '../../paint/tools';
 import { Icon } from '../controls/Icons';
 import { PropSlider } from '../controls/PropSlider';
 import { DynamicsPopover, dynamicsOn, type DynamicsKind } from './BrushSettingsPanels';
@@ -249,22 +249,47 @@ export function ToolProperty() {
         </>
       )}
       {sub.tool === 'ruler' && sub.rulerKind === 'special' && (
-        <div className="prop-row column">
-          <span className="prop-label">Special ruler</span>
-          <div className="segmented wrap" role="radiogroup" aria-label="Special ruler">
-            {(
-              [
-                ['parallel', 'Parallel line'],
-                ['radial', 'Radial line'],
-                ['concentric', 'Concentric circle'],
-              ] as const
-            ).map(([id, label]) => (
-              <button key={id} role="radio" aria-checked={sub.specialRuler === id} className={sub.specialRuler === id ? 'on' : ''} onClick={() => update({ specialRuler: id })}>
-                {label}
-              </button>
-            ))}
-          </div>
-        </div>
+        <Segmented
+          label="Special ruler"
+          value={sub.specialRuler ?? 'parallel'}
+          options={[
+            ['parallel', 'Parallel line'],
+            ['parallelCurve', 'Parallel curve'],
+            ['multiCurve', 'Multiple curve'],
+            ['radial', 'Radial line'],
+            ['radialCurve', 'Radial curve'],
+            ['concentric', 'Concentric circle'],
+          ]}
+          onChange={(specialRuler) => update({ specialRuler })}
+        />
+      )}
+      {sub.tool === 'ruler' && (sub.rulerKind === 'curve' || (sub.rulerKind === 'special' && isSpecialCurve(sub.specialRuler))) && (
+        <Segmented
+          label="Curve"
+          value={sub.curveType ?? 'spline'}
+          options={[
+            ['polyline', 'Polyline'],
+            ['spline', 'Spline'],
+            ['quadratic', 'Quadratic Bezier'],
+            ['cubic', 'Cubic Bezier'],
+          ]}
+          onChange={(curveType) => update({ curveType })}
+        />
+      )}
+      {sub.tool === 'ruler' && sub.rulerKind === 'figure' && (
+        <>
+          <Segmented
+            label="Figure"
+            value={sub.rulerFigure ?? 'ellipse'}
+            options={[
+              ['rect', 'Rectangle'],
+              ['ellipse', 'Ellipse'],
+              ['polygon', 'Polygon'],
+            ]}
+            onChange={(rulerFigure) => update({ rulerFigure })}
+          />
+          {sub.rulerFigure === 'polygon' && <PropSlider label="Number of corners" value={sub.polygonCorners ?? 6} min={3} max={32} onChange={(v) => update({ polygonCorners: v })} />}
+        </>
       )}
       {sub.tool === 'gradient' && <GradientSettings sub={sub} update={update} />}
       {!b && !f && !['select', 'gradient', 'object', 'text', 'balloon', 'frame'].includes(sub.tool) && <div className="prop-note">{toolInfo(sub.tool).hint}</div>}
@@ -604,6 +629,22 @@ function GradientSettings({ sub, update }: { sub: SubTool | null; update: (patch
 }
 
 /** Frame tools: border width; dividing: gutters and folders. */
+/** A labelled row of choices (a radio group of buttons). */
+function Segmented<T extends string>({ label, value, options, onChange }: { label: string; value: T; options: [T, string][]; onChange: (v: T) => void }) {
+  return (
+    <div className="prop-row column">
+      <span className="prop-label">{label}</span>
+      <div className="segmented wrap" role="radiogroup" aria-label={label}>
+        {options.map(([id, text]) => (
+          <button key={id} role="radio" aria-checked={value === id} className={value === id ? 'on' : ''} onClick={() => onChange(id)}>
+            {text}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function FrameToolSettings({ sub, update }: { sub: SubTool; update: (patch: Partial<SubTool>) => void }) {
   if (sub.frameShape === 'divide') {
     return (

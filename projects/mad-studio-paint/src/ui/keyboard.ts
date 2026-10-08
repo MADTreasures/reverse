@@ -7,6 +7,7 @@ import { getState } from '../store/store';
 import { pasteImage, copy, cut } from '../store/clipboard';
 import { controller } from '../tools/controller';
 import { PolylineSelect } from '../tools/sessions';
+import { CurveInput } from '../tools/curveInput';
 import { cancelTransform, isTransforming } from '../tools/transform';
 import { commandForShortcut, isEnabled } from './commands';
 import { closeMenu, isModalOpen, useOverlays } from './overlays';
@@ -72,6 +73,15 @@ export function installKeyboard(): void {
         if (e.key === 'Enter') PolylineSelect.finish();
         else if (e.key === 'Escape') PolylineSelect.cancel();
         else PolylineSelect.undoPoint();
+        controller.leave();
+        return;
+      }
+      // Curve ruler being placed: Enter finishes, Esc cancels, Backspace removes the last point.
+      if (CurveInput.active && ['Enter', 'Escape', 'Backspace', 'Delete'].includes(e.key)) {
+        e.preventDefault();
+        if (e.key === 'Enter') CurveInput.finish();
+        else if (e.key === 'Escape') CurveInput.cancel();
+        else CurveInput.undoPoint();
         controller.leave();
         return;
       }

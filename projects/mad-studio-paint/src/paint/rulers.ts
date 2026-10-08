@@ -1,7 +1,27 @@
 /**
- * Rulers: guides that strokes snap to (linear ruler, guide, special rulers, symmetry, perspective).
- * Geometry only – pure functions, unit tested. Points are in document pixels.
+ * Rulers: guides that strokes snap to (linear, curve and figure rulers, guides, special rulers,
+ * symmetry, perspective). Geometry only – pure functions, unit tested. Points are in document pixels.
  */
+import {
+  CURVE_TYPES,
+  extendPath,
+  figureOutline,
+  followPath,
+  makePath,
+  nearestOnPath,
+  offsetPath,
+  rotatePoints,
+  sampleCurve,
+  shiftThrough,
+  sideOffset,
+  translatePoints,
+  turnThrough,
+  pointAt,
+  type CurveSpec,
+  type CurveType,
+  type Path,
+  type RulerFigure,
+} from './curves';
 
 export interface Pt {
   x: number;
@@ -25,15 +45,29 @@ export type Ruler =
   /** Symmetrical ruler: `lines` rays from the centre; strokes repeat in every sector. */
   | { kind: 'symmetry'; id: string; center: Pt; angle: number; lines: number; mirror: boolean }
   /** Perspective ruler with 1–3 vanishing points; the first two lie on the eye level. */
-  | { kind: 'perspective'; id: string; vps: Pt[] };
+  | { kind: 'perspective'; id: string; vps: Pt[] }
+  /** Curve ruler (also what the ruler pen makes); strokes that start near it follow it. */
+  | ({ kind: 'curve'; id: string } & CurveSpec)
+  /** Figure ruler: a rectangle, ellipse or regular polygon outline strokes can follow. */
+  | { kind: 'figure'; id: string; shape: RulerFigure; center: Pt; rx: number; ry: number; angle: number; corners: number }
+  /** Special ruler: every stroke runs parallel to the curve, at the distance it starts at. */
+  | ({ kind: 'parallelCurve'; id: string } & CurveSpec)
+  /** Special ruler: every stroke is the curve moved along `angle` to where the stroke starts. */
+  | ({ kind: 'multiCurve'; id: string; angle: number } & CurveSpec)
+  /** Special ruler: every stroke is the curve turned around `center` to where the stroke starts. */
+  | ({ kind: 'radialCurve'; id: string; center: Pt } & CurveSpec);
 
 export type RulerKind = Ruler['kind'];
 
 /** A ruler before it has an id. */
 export type RulerInput = { [K in RulerKind]: Omit<Extract<Ruler, { kind: K }>, 'id'> & { id?: string } }[RulerKind];
 
-/** Linear rulers and guides snap with "Snap to ruler"; the others are special rulers. */
-export const isSpecial = (r: Ruler) => r.kind !== 'linear' && r.kind !== 'guide';
+/** Linear, curve and figure rulers and guides snap with "Snap to ruler"; the others are special rulers. */
+export const isSpecial = (r: Ruler) => r.kind !== 'linear' && r.kind !== 'guide' && r.kind !== 'curve' && r.kind !== 'figure';
+
+/** Rulers made of a curve. */
+export type CurveRuler = Extract<Ruler, { kind: 'curve' | 'parallelCurve' | 'multiCurve' | 'radialCurve' }>;
+export const isCurveRuler = (r: Ruler): r is CurveRuler => r.kind === 'curve' || r.kind === 'parallelCurve' || r.kind === 'multiCurve' || r.kind === 'radialCurve';
 
 export const RULER_LABELS: Record<RulerKind, string> = {
   linear: 'Linear ruler',
@@ -43,6 +77,11 @@ export const RULER_LABELS: Record<RulerKind, string> = {
   concentric: 'Concentric circle',
   symmetry: 'Symmetrical ruler',
   perspective: 'Perspective ruler',
+  curve: 'Curve ruler',
+  figure: 'Figure ruler',
+  parallelCurve: 'Parallel curve',
+  multiCurve: 'Multiple curve',
+  radialCurve: 'Radial curve',
 };
 
 const sub = (a: Pt, b: Pt): Pt => ({ x: a.x - b.x, y: a.y - b.y });
@@ -150,7 +189,130 @@ export function rulerConstraint(r: Ruler, start: Pt, snapDistance = SNAP_DISTANC
     case 'symmetry':
     case 'perspective':
       return null;
+    case 'curve':
+    case 'figure': {
+      const path = rulerPath(r);
+      if (path.pts.length < 2 || nearestOnPath(path, start).dist > snapDistance) return null;
+      return followPath(path, start);
+    }
+    case 'parallelCurve':
+    case 'multiCurve':
+    case 'radialCurve':
+      if (curveSamples(r).length < 2) return null;
+      return followPath(makePath(specialCurvePath(r, start)), start);
   }
+}
+
+// ------------------------------------------------------------------ curve and figure rulers
+
+/** How far special curve rulers continue straight beyond their ends (px). */
+const FAR = 100000;
+
+const sampleCache = new WeakMap<object, Pt[]>();
+const pathCache = new WeakMap<object, Path>();
+
+/** The line of a curve ruler as dense points (cached per ruler). */
+export function curveSamples(r: CurveRuler): Pt[] {
+  let s = sampleCache.get(r);
+  if (!s) sampleCache.set(r, (s = sampleCurve(r)));
+  return s;
+}
+
+/** The line of a curve or figure ruler as a path (cached per ruler). */
+export function rulerPath(r: CurveRuler | Extract<Ruler, { kind: 'figure' }>): Path {
+  let p = pathCache.get(r);
+  if (!p) pathCache.set(r, (p = r.kind === 'figure' ? makePath(figureOutline(r), true) : makePath(curveSamples(r))));
+  return p;
+}
+
+/**
+ * The line a stroke that starts at `start` follows on a special curve ruler. The curve goes on
+ * straight beyond its ends; the curve itself is preferred to those extensions.
+ */
+export function specialCurvePath(r: Extract<Ruler, { kind: 'parallelCurve' | 'multiCurve' | 'radialCurve' }>, start: Pt): Pt[] {
+  const curve = curveSamples(r);
+  const base = extendPath(curve, FAR);
+  switch (r.kind) {
+    case 'parallelCurve':
+      return offsetPath(base, sideOffset(makePath(base), start));
+    case 'multiCurve': {
+      const dir = { x: Math.cos(r.angle), y: Math.sin(r.angle) };
+      const s = shiftThrough(curve, dir, start) ?? shiftThrough(base, dir, start) ?? 0;
+      return translatePoints(base, dir.x * s, dir.y * s);
+    }
+    case 'radialCurve': {
+      const c = r.center;
+      let angle = turnThrough(curve, c, start) ?? turnThrough(base, c, start);
+      if (angle === null) {
+        // Nowhere as far from the centre: turn the nearest point there.
+        const q = nearestOnPath(makePath(base), start).point;
+        angle = Math.atan2(start.y - c.y, start.x - c.x) - Math.atan2(q.y - c.y, q.x - c.x);
+      }
+      return rotatePoints(base, c, angle);
+    }
+  }
+}
+
+/** The line Layer > Ruler/Frame > Draw along ruler draws: linear, curve and figure rulers and guides. */
+export function rulerLine(r: Ruler, canvas: { w: number; h: number }): Pt[] | null {
+  switch (r.kind) {
+    case 'linear':
+      return [r.a, r.b];
+    case 'guide':
+      return r.vertical
+        ? [
+            { x: r.pos, y: 0 },
+            { x: r.pos, y: canvas.h },
+          ]
+        : [
+            { x: 0, y: r.pos },
+            { x: canvas.w, y: r.pos },
+          ];
+    case 'curve':
+      return curveSamples(r);
+    case 'figure':
+      return rulerPath(r).pts;
+    default:
+      return null;
+  }
+}
+
+/** The middle of a curve ruler (where the multiple curve's direction handle starts). */
+export function curveMiddle(r: CurveRuler): Pt {
+  const path = rulerPath(r);
+  return pointAt(path, path.at[path.at.length - 1] / 2);
+}
+
+/** A figure ruler's local coordinates (unrotated, around its centre) in the document. */
+function figurePoint(r: Extract<Ruler, { kind: 'figure' }>, u: number, v: number): Pt {
+  const cos = Math.cos(r.angle);
+  const sin = Math.sin(r.angle);
+  return { x: r.center.x + u * cos - v * sin, y: r.center.y + u * sin + v * cos };
+}
+
+/** A curve's points with point `i` moved; cubic anchors take their direction points along, and smooth anchors stay smooth. */
+function movePoint(r: CurveSpec, i: number, p: Pt): Pt[] {
+  const pts = r.points.slice();
+  if (r.curve !== 'cubic') {
+    pts[i] = p;
+    return pts;
+  }
+  if (i % 3 === 0) {
+    const d = sub(p, pts[i]);
+    for (const k of [i - 1, i, i + 1]) if (k >= 0 && k < pts.length) pts[k] = { x: pts[k].x + d.x, y: pts[k].y + d.y };
+    return pts;
+  }
+  const anchor = r.points[i % 3 === 1 ? i - 1 : i + 1];
+  const other = i % 3 === 1 ? i - 2 : i + 2;
+  pts[i] = p;
+  if (other >= 0 && other < pts.length) {
+    const before = sub(r.points[i], anchor);
+    const o = sub(r.points[other], anchor);
+    const smooth = len(before) > 1e-6 && len(o) > 1e-6 && Math.abs(before.x * o.y - before.y * o.x) < 1e-3 * len(before) * len(o) && dot(before, o) < 0;
+    const u = sub(p, anchor);
+    if (smooth && len(u) > 1e-6) pts[other] = { x: anchor.x - (u.x / len(u)) * len(o), y: anchor.y - (u.y / len(u)) * len(o) };
+  }
+  return pts;
 }
 
 /**
@@ -222,8 +384,25 @@ export function rulerHandles(r: Ruler, canvas: { w: number; h: number }): Handle
       ];
     case 'perspective':
       return r.vps.map((vp, i) => ({ key: `vp${i}`, at: vp }));
+    case 'curve':
+    case 'parallelCurve':
+      return pointHandles(r.points);
+    case 'multiCurve': {
+      const m = curveMiddle(r);
+      return [...pointHandles(r.points), { key: 'rotate', at: { x: m.x + Math.cos(r.angle) * 80, y: m.y + Math.sin(r.angle) * 80 } }];
+    }
+    case 'radialCurve':
+      return [{ key: 'center', at: r.center }, ...pointHandles(r.points)];
+    case 'figure':
+      return [
+        { key: 'center', at: r.center },
+        { key: 'size', at: figurePoint(r, r.rx, r.ry) },
+        { key: 'rotate', at: figurePoint(r, 0, -r.ry - 40) },
+      ];
   }
 }
+
+const pointHandles = (pts: Pt[]): Handle[] => pts.map((at, i) => ({ key: `p${i}`, at }));
 
 /** The ruler with one handle moved to `p` (`shift` keeps linear rulers at 45° steps). */
 export function moveHandle(r: Ruler, key: string, p: Pt, shift = false): Ruler {
@@ -257,6 +436,34 @@ export function moveHandle(r: Ruler, key: string, p: Pt, shift = false): Ruler {
       if ((i === 0 || i === 1) && vps.length >= 2) vps[1 - i] = { ...vps[1 - i], y: p.y };
       return { ...r, vps };
     }
+    case 'curve':
+    case 'parallelCurve':
+    case 'multiCurve':
+    case 'radialCurve': {
+      if (key === 'rotate' && r.kind === 'multiCurve') {
+        const m = curveMiddle(r);
+        return { ...r, angle: Math.atan2(p.y - m.y, p.x - m.x) };
+      }
+      if (key === 'center' && r.kind === 'radialCurve') {
+        // The curve's first point moves along while it sits on the centre.
+        const linked = r.points.length > 0 && len(sub(r.points[0], r.center)) < 1e-6;
+        return { ...r, center: p, points: linked ? [p, ...r.points.slice(1)] : r.points };
+      }
+      const i = Number(key.slice(1));
+      if (!key.startsWith('p') || !Number.isInteger(i) || i < 0 || i >= r.points.length) return r;
+      return { ...r, points: movePoint(r, i, p) };
+    }
+    case 'figure': {
+      if (key === 'center') return { ...r, center: p };
+      if (key === 'rotate') return { ...r, angle: Math.atan2(p.y - r.center.y, p.x - r.center.x) + Math.PI / 2 };
+      const d = sub(p, r.center);
+      const u = d.x * Math.cos(r.angle) + d.y * Math.sin(r.angle);
+      const v = -d.x * Math.sin(r.angle) + d.y * Math.cos(r.angle);
+      let rx = Math.max(1, Math.abs(u));
+      let ry = Math.max(1, Math.abs(v));
+      if (shift) rx = ry = Math.max(rx, ry);
+      return { ...r, rx, ry };
+    }
   }
 }
 
@@ -276,6 +483,14 @@ export function translateRuler(r: Ruler, dx: number, dy: number): Ruler {
       return { ...r, center: t(r.center) };
     case 'perspective':
       return { ...r, vps: r.vps.map(t) };
+    case 'curve':
+    case 'parallelCurve':
+    case 'multiCurve':
+      return { ...r, points: r.points.map(t) };
+    case 'radialCurve':
+      return { ...r, center: t(r.center), points: r.points.map(t) };
+    case 'figure':
+      return { ...r, center: t(r.center) };
   }
 }
 
@@ -312,6 +527,13 @@ export function distanceToRuler(r: Ruler, p: Pt): number {
     }
     case 'perspective':
       return Math.min(...r.vps.map((vp) => len(sub(p, vp))), distanceToLine(p, eyeLevel(r).a, eyeLevel(r).dir));
+    case 'curve':
+    case 'parallelCurve':
+    case 'multiCurve':
+    case 'figure':
+      return nearestOnPath(rulerPath(r), p).dist;
+    case 'radialCurve':
+      return Math.min(len(sub(p, r.center)), nearestOnPath(rulerPath(r), p).dist);
   }
 }
 
@@ -355,7 +577,41 @@ export function sanitizeRuler(raw: unknown): Ruler | null {
       const vps = Array.isArray(r.vps) ? r.vps.slice(0, 3).map(pt) : [];
       return vps.length ? { kind: 'perspective', id, vps } : null;
     }
+    case 'curve':
+    case 'parallelCurve':
+    case 'multiCurve':
+    case 'radialCurve': {
+      const spec = sanitizeCurve(r);
+      if (!spec) return null;
+      if (r.kind === 'multiCurve') return { kind: 'multiCurve', id, ...spec, angle: num(r.angle, Math.PI / 2) };
+      if (r.kind === 'radialCurve') return { kind: 'radialCurve', id, ...spec, center: r.center ? pt(r.center) : spec.points[0] };
+      return r.kind === 'curve' ? { kind: 'curve', id, ...spec } : { kind: 'parallelCurve', id, ...spec };
+    }
+    case 'figure':
+      return {
+        kind: 'figure',
+        id,
+        shape: r.shape === 'rect' || r.shape === 'polygon' ? r.shape : 'ellipse',
+        center: pt(r.center),
+        rx: Math.max(1, num(r.rx, 100)),
+        ry: Math.max(1, num(r.ry, 100)),
+        angle: num(r.angle),
+        corners: Math.max(3, Math.min(32, Math.round(num(r.corners, 6)))),
+      };
     default:
       return null;
   }
+}
+
+/** Most points a curve ruler keeps from a file. */
+const MAX_CURVE_POINTS = 2000;
+
+function sanitizeCurve(r: Record<string, unknown>): CurveSpec | null {
+  const curve: CurveType = CURVE_TYPES.includes(r.curve as CurveType) ? (r.curve as CurveType) : 'spline';
+  let points = Array.isArray(r.points) ? r.points.slice(0, MAX_CURVE_POINTS).map(pt) : [];
+  // Cubic Bezier curves are anchors with two direction points between each pair.
+  if (curve === 'cubic') points = points.slice(0, Math.max(0, Math.floor((points.length - 1) / 3) * 3 + 1));
+  if (points.length < 2) return null;
+  const corners = Array.isArray(r.corners) ? [...new Set(r.corners.filter((i): i is number => Number.isInteger(i) && i > 0 && i < points.length - 1))].sort((a, b) => a - b) : [];
+  return corners.length ? { curve, points, corners } : { curve, points };
 }

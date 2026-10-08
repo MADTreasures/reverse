@@ -27,6 +27,7 @@ import {
   ZoomSession,
 } from './sessions';
 import { drawRulers, rulerSession } from './rulerTool';
+import { CurveInput } from './curveInput';
 import { drawGradientHandles, drawLineSelection, lineHandleCursor, objectSession } from './objectTool';
 import { balloonSession, textSession } from './textTool';
 import { frameSession } from './frameTool';
@@ -105,7 +106,9 @@ class Controller {
     }
     const tool = effectiveTool(getState().tool, p, p.button);
     const sub = currentSubTool();
-    if (getState().hint) setState({ hint: '' });
+    if (getState().hint && !CurveInput.active) setState({ hint: '' });
+    // A curve being placed ends when another tool is chosen.
+    if (CurveInput.active && getState().tool !== 'ruler') CurveInput.cancel();
     const double = this.isDoubleClick(p, tool);
     switch (tool) {
       case 'hand':
@@ -176,6 +179,7 @@ class Controller {
     this.hover = p;
     if (this.session) this.session.move(p, coalesced);
     else if (PolylineSelect.active) PolylineSelect.active.hover = { x: p.x, y: p.y };
+    else if (CurveInput.active) CurveInput.active.hover = { x: p.x, y: p.y };
     this.changed();
   }
 
@@ -206,6 +210,7 @@ class Controller {
     if (!this.session && (this.current() === 'object' || this.current() === 'gradient')) drawGradientHandles(ctx, this.view);
     drawTransformOverlay(ctx, this.view);
     PolylineSelect.overlay(ctx, this.view);
+    CurveInput.overlay(ctx, this.view);
     if (this.session?.overlay) {
       this.session.overlay(ctx, this.view);
       if (!(this.session instanceof SelectionPenSession)) return;

@@ -5,10 +5,10 @@ import type { GradientLayer, Id, VectorLayer } from '../model/types';
 import { CLOSE_GAP_STEPS, floodFillMask } from '../paint/fill';
 import { combine, ellipseMask, expandMask, isSelected, maskBounds, polygonMask, rectMask, translateMask, type Mask, type SelectionOp } from '../paint/mask';
 import { fromPoints, union, type Rect } from '../paint/rect';
-import { distanceToRuler, isSpecial, perspectiveConstraint, rulerConstraint, symmetryTransforms, type Affine, type Constraint, type Pt, type Ruler } from '../paint/rulers';
+import { distanceToRuler, isSpecial, perspectiveConstraint, rulerConstraint, rulerLine, symmetryTransforms, type Affine, type Constraint, type Pt, type Ruler } from '../paint/rulers';
 import { ellipsePoints, rectPoints, snapAngle, type StrokePoint } from '../paint/stroke';
 import { evalPressureCurve } from '../paint/curve';
-import { type FillReference, type SubTool } from '../paint/tools';
+import { DEFAULT_BRUSH, type FillReference, type SubTool } from '../paint/tools';
 import { eraseAt, linesBounds, newStrokeId, transformStrokes, type VectorEraseMode, type VectorStroke } from '../paint/vector';
 import { contentBounds, contentOf, EMPTY_CONTENT, pickContent, transformContent, type Content } from '../paint/objects';
 import { renderGradient, resolveStops, type GradientFill, type GradientSpec } from '../paint/gradient';
@@ -109,41 +109,44 @@ interface Snap {
 }
 
 /**
- * Ruler snapping (View > Snap): one special ruler (symmetry, perspective, parallel, radial,
- * concentric) or a linear ruler / guide the stroke starts near.
+ * Ruler snapping (View > Snap): a linear, curve or figure ruler, guide or frame border the stroke
+ * starts near ("Snap to ruler"), else one special ruler (parallel, radial, concentric, the curve
+ * ones, perspective). A symmetrical ruler repeats the stroke either way.
  */
 export function rulerSnap(start: Pt): Snap {
   const s = getState();
   const none: Snap = { copies: null, constrain: null, perspective: null };
   const rulers = actions.activeRulers(s).map((x) => x.ruler);
-  if (s.snapSpecial) {
-    const special = rulers.find(isSpecial);
-    if (special?.kind === 'symmetry') return { ...none, copies: symmetryTransforms(special) };
-    if (special?.kind === 'perspective') return { ...none, perspective: special };
-    const c = special ? rulerConstraint(special, start) : null;
-    if (c) return { ...none, constrain: c };
+  const near = s.snapRuler ? nearRuler(rulers, start) : null;
+  const special = s.snapSpecial ? rulers.find(isSpecial) : undefined;
+  if (special?.kind === 'symmetry') return { ...none, copies: symmetryTransforms(special), constrain: near };
+  if (near) return { ...none, constrain: near };
+  if (special?.kind === 'perspective') return { ...none, perspective: special };
+  const c = special ? rulerConstraint(special, start) : null;
+  return c ? { ...none, constrain: c } : none;
+}
+
+/** The constraint of the ruler or frame border a stroke starts near (within about 16 screen pixels). */
+function nearRuler(rulers: Ruler[], start: Pt): Constraint | null {
+  const s = getState();
+  const reach = 16 / Math.max(0.01, s.view.zoom);
+  for (const r of rulers) {
+    if (isSpecial(r)) continue;
+    const c = rulerConstraint(r, start, reach);
+    if (c) return c;
   }
-  if (s.snapRuler) {
-    // Within about 16 screen pixels.
-    const reach = 16 / Math.max(0.01, s.view.zoom);
-    for (const r of rulers) {
-      if (isSpecial(r)) continue;
-      const c = rulerConstraint(r, start, reach);
-      if (c) return { ...none, constrain: c };
-    }
-    // Comic frame borders work as rulers too, for strokes that start near the border itself (not
-    // along its extension, which crosses the other frames of the page).
-    for (const l of flatten(s.doc.layers)) {
-      if (!actions.isFrameFolder(l) || !isEffectivelyVisible(s.doc.layers, l.id)) continue;
-      for (const [a, b] of panelEdges(l.frame.panels)) {
-        const edge: Ruler = { kind: 'linear', id: 'frame', a, b };
-        if (distanceToRuler(edge, start) > reach) continue;
-        const c = rulerConstraint(edge, start, reach);
-        if (c) return { ...none, constrain: c };
-      }
+  // Comic frame borders work as rulers too, for strokes that start near the border itself (not
+  // along its extension, which crosses the other frames of the page).
+  for (const l of flatten(s.doc.layers)) {
+    if (!actions.isFrameFolder(l) || !isEffectivelyVisible(s.doc.layers, l.id)) continue;
+    for (const [a, b] of panelEdges(l.frame.panels)) {
+      const edge: Ruler = { kind: 'linear', id: 'frame', a, b };
+      if (distanceToRuler(edge, start) > reach) continue;
+      const c = rulerConstraint(edge, start, reach);
+      if (c) return c;
     }
   }
-  return none;
+  return null;
 }
 
 /** Screen distance a stroke travels before a perspective direction is chosen. */
@@ -349,6 +352,32 @@ export class FigureSession implements ToolSession {
   cancel(): void {
     this.stroke.cancel();
   }
+}
+
+// ------------------------------------------------------------------ draw along ruler
+
+/**
+ * Layer > Ruler/Frame > Draw along ruler: the whole line of the ruler (the selected one, or the only
+ * one there is) in the drawing colour, `width` px wide; a vector line on vector layers.
+ */
+export function drawAlongRuler(width: number, antiAlias: number): boolean {
+  const s = getState();
+  const ruler = actions.rulerToDrawAlong(s);
+  const points = ruler ? rulerLine(ruler, { w: s.doc.width, h: s.doc.height }) : null;
+  const target = points ? strokeTarget() : null;
+  if (!points || !target) return false;
+  const sub: SubTool = {
+    id: 'draw-along-ruler',
+    tool: 'pen',
+    name: 'Draw along ruler',
+    brush: { ...DEFAULT_BRUSH, size: Math.max(0.5, width), sizePressure: false, hardness: 1, spacing: 0.05, stabilization: 0, antiAlias: Math.max(0, Math.min(3, Math.round(antiAlias))) },
+  };
+  const stroke = new BrushStroke(sub.brush!, drawingColor(s.colors), s.colors.transparent, target);
+  stroke.path(points.map((p) => ({ x: p.x, y: p.y, pressure: 1 })));
+  const layer = vectorTarget();
+  if (layer) actions.addVectorLines(layer.id, strokeLines(sub, stroke, s.colors.transparent), sub.name);
+  else actions.commitPixels(sub.name, [stroke.end()]);
+  return true;
 }
 
 // ------------------------------------------------------------------ vector eraser

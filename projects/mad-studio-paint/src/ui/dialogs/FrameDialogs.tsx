@@ -1,4 +1,4 @@
-/** Layer > New frame border folder, Layer > Ruler/Frame > Divide frame border equally and Frame templates. */
+/** Layer > New frame border folder, Layer > Ruler/Frame > Divide frame border equally, Frame templates and Draw along ruler. */
 import { useState } from 'react';
 import { flatten } from '../../model/layers';
 import { mmToPx, polygonBounds } from '../../paint/frames';
@@ -6,6 +6,7 @@ import { FRAME_TEMPLATES, sanitizeTemplate, templateFromPanels, templatePanels, 
 import { getState } from '../../store/store';
 import { addFrameFolder, addFrameTemplate, divideFrameEqually, pageFrame } from '../../store/frameActions';
 import { closeDialog, toast } from '../overlays';
+import { drawAlongRuler } from '../../tools/sessions';
 
 function DialogForm({ title, onOk, children }: { title: string; onOk: () => void; children: React.ReactNode }) {
   return (
@@ -217,5 +218,26 @@ export function FrameTemplateDialog() {
         </button>
       </div>
     </form>
+  );
+}
+
+/** Layer > Ruler/Frame > Draw along ruler: the line width and anti-aliasing of the line. */
+export function DrawAlongRulerDialog() {
+  const [width, setWidth] = useState(3);
+  const [antiAlias, setAntiAlias] = useState(2);
+  return (
+    <DialogForm title="Draw along ruler" onOk={() => drawAlongRuler(width, antiAlias)}>
+      <label htmlFor="along-width">Line width</label>
+      <span className="with-unit">
+        <input id="along-width" type="number" min={0.5} max={500} step={0.5} value={width} onChange={(e) => setWidth(Math.max(0.5, Math.min(500, Number(e.target.value) || 0.5)))} /> px
+      </span>
+      <label htmlFor="along-aa">Anti-aliasing</label>
+      <select id="along-aa" value={antiAlias} onChange={(e) => setAntiAlias(Number(e.target.value))}>
+        <option value={0}>None</option>
+        <option value={1}>Weak</option>
+        <option value={2}>Medium</option>
+        <option value={3}>Strong</option>
+      </select>
+    </DialogForm>
   );
 }
