@@ -178,6 +178,9 @@ public:
         switch (gArgs.mode)
         {
             case CommandLine::Mode::stdio:
+                // The engine is a windowless agent app: without this macOS puts it into App Nap and
+                // throttles its message-thread timers (status and meter messages, plugin loading).
+                keepAwake = std::make_unique<juce::ScopedLowPowerModeDisabler>();
                 controller = std::make_unique<Controller> (gArgs);
                 controller->onQuit = [] { juce::MessageManager::callAsync ([] { quit(); }); };
                 controller->start();
@@ -193,6 +196,7 @@ public:
                 break;
 
             case CommandLine::Mode::render:
+                keepAwake = std::make_unique<juce::ScopedLowPowerModeDisabler>();
                 worker = std::thread ([this]
                 {
                     const int code = runRenderJob (gArgs, renderProvider);
@@ -224,9 +228,11 @@ public:
         if (worker.joinable())
             worker.join();
         renderProvider.reset();
+        keepAwake.reset();
     }
 
 private:
+    std::unique_ptr<juce::ScopedLowPowerModeDisabler> keepAwake;
     std::unique_ptr<Controller> controller;
     std::unique_ptr<PluginScanJob> scanJob;
     std::thread worker;
