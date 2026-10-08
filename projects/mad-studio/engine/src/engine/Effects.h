@@ -42,10 +42,23 @@ public:
     virtual void service() {}
 
 protected:
-    /** Value of parameter `i` in chunk `c` (falls back to the spec default for safety). */
+    /** Value of parameter `i` in chunk `c`, clamped to the model's range (EFFECT_SPECS), so
+        out-of-range project or automation values cannot destabilise the DSP. */
     float param (int i, const BlockContext& ctx, int c) const noexcept
     {
-        return i < (int) params.size() ? params[(size_t) i].value (ctx, c) : 0.0f;
+        if (i >= (int) params.size())
+            return 0.0f;
+        const auto& range = spec->params[(size_t) i];
+        return std::clamp (params[(size_t) i].value (ctx, c), range.min, range.max);
+    }
+
+    /** The project value of parameter `i`, clamped like param(). */
+    float baseParam (int i) const noexcept
+    {
+        if (i >= (int) params.size())
+            return 0.0f;
+        const auto& range = spec->params[(size_t) i];
+        return std::clamp (params[(size_t) i].getBase(), range.min, range.max);
     }
 };
 

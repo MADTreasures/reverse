@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // End-to-end test of the MAD Engine stdio protocol (Node >= 20, no dependencies).
 //
-//   node engine/tests/protocol-test.mjs [--engine <path>] [--plugins <dir>] [--keep] [--verbose]
+//   node engine/tests/protocol-test.mjs [--engine <path>] [--plugins <dir>] [--keep] [--verbose] [--seed <n>]
 //
 // Defaults: the engine from engine/build/Release (or $MAD_ENGINE) and the test plugins from
 // engine/build/Release/plugins (built with -DMAD_BUILD_TEST_PLUGINS=ON; skipped if missing).
@@ -28,6 +28,7 @@ const option = (name) => {
 const flag = (name) => argv.includes(name);
 const verbose = flag('--verbose');
 const keep = flag('--keep');
+const stressSeed = Number(option('--seed') ?? 20251008) >>> 0; // stress section PRNG seed
 
 const defaultEngine = isMac
   ? join(engineRoot, 'build/Release/MAD Engine.app/Contents/MacOS/MAD Engine')
@@ -60,6 +61,7 @@ const near = (actual, expected, tolerance, what) =>
 class Engine {
   constructor(args) {
     this.messages = [];
+    this.sent = []; // { index: messages received before it, type } for failure diagnostics
     this.waiters = [];
     this.stderr = '';
     this.proc = spawn(enginePath, args, { stdio: ['pipe', 'pipe', 'pipe'] });
@@ -90,6 +92,7 @@ class Engine {
 
   send(msg) {
     if (verbose) console.log('  ->', JSON.stringify(msg).slice(0, 300));
+    this.sent.push({ index: this.messages.length, type: msg.type });
     this.proc.stdin.write(`${JSON.stringify(msg)}\n`);
   }
 
@@ -569,6 +572,7 @@ async function testPlugins(engine) {
   check(gone.type === 'error', 'plugins are released when removed from the project');
 
   if (isMac) await testAudioUnits(engine);
+  return { synth, gain };
 }
 
 async function testAudioUnits(engine) {
@@ -608,6 +612,272 @@ async function testAudioUnits(engine) {
   engine.send({ type: 'project.sync', project: baseProject() });
 }
 
+// Random project edits (structural and parameter changes), timeline/automation updates, sample
+// reloads, live notes, previews, seeks and device restarts while the transport plays and while an
+// offline render runs. Checks that the engine stays responsive, its output stays finite and the
+// master limiter keeps it bounded. Most useful with sanitizer builds (ASan/TSan).
+const STRESS_EFFECTS = {
+  eq: { lowGain: [-18, 18], lowFreq: [30, 1000], midGain: [-18, 18], midFreq: [150, 8000], midQ: [0.2, 8], highGain: [-18, 18], highFreq: [1500, 16000] },
+  filter: { mode: [0, 3, true], cutoff: [20, 20000], resonance: [0.1, 18], lfoRate: [0.05, 20], lfoDepth: [0, 1] },
+  compressor: { threshold: [-60, 0], ratio: [1, 20], attack: [0.0005, 0.3], release: [0.02, 1.5], knee: [0, 30], makeup: [0, 24] },
+  distortion: { drive: [0, 1], tone: [500, 16000], output: [-24, 6], mix: [0, 1] },
+  chorus: { rate: [0.05, 8], depth: [0, 1], delay: [2, 30], mix: [0, 1] },
+  delay: { time: [0, 10, true], feedback: [0, 0.95], tone: [500, 16000], pingPong: [0, 1, true], mix: [0, 1] },
+  reverb: { decay: [0.3, 3], predelay: [0, 0.2], damping: [0, 1], lowCut: [20, 1000], mix: [0, 1] },
+  limiter: { gain: [0, 18], ceiling: [-12, 0], release: [0.01, 1] },
+};
+
+async function testStress(engine, plugins) {
+  console.log('stress: edits while playing and rendering');
+  let seed = stressSeed;
+  const rnd = () => (seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0) / 4294967296;
+  const pick = (a) => a[Math.floor(rnd() * a.length)];
+  const range = (lo, hi) => lo + rnd() * (hi - lo);
+  const value = ([lo, hi, int]) => (int ? Math.round(range(lo, hi)) : range(lo, hi));
+
+  let sampleFiles = 0;
+  const snareFile = () => writeRawSample(`stress-snare-${sampleFiles++}.f32`, 2, 12000, (i, c) => (rnd() * 2 - 1) * Math.exp(-i / 2500) * (c ? 0.4 : 0.5));
+  const loadSnare = () => ({ type: 'samples.loadRaw', id: 'test:snare', path: snareFile(), sampleRate: 44100, channels: 2, frames: 12000 });
+  const loaded = await engine.request(loadSnare(), (m) => (m.type === 'samples.loaded' && m.id === 'test:snare') || (m.type === 'error' && m.request === 'samples.loadRaw'), 5000, 'stress sample');
+  check(loaded.type === 'samples.loaded', 'stress: 44.1 kHz stereo sample loads');
+
+  let nextId = 1;
+  const newEffect = (type = pick(Object.keys(STRESS_EFFECTS))) => {
+    const params = {};
+    for (const [key, spec] of Object.entries(STRESS_EFFECTS[type])) params[key] = value(spec);
+    return { id: `fx_s${nextId++}`, type, enabled: true, params };
+  };
+  const pluginRef = (p) => ({ uid: p.uid, name: p.name, vendor: p.vendor, format: p.format, fileOrIdentifier: p.fileOrIdentifier, isInstrument: p.isInstrument, state: null });
+
+  // Every playable channel carries synth and sampler parameters so its kind can flip. The master
+  // keeps only its limiter at unity gain, so the output stays bounded.
+  const project = baseProject();
+  project.samples['test:snare'] = { id: 'test:snare', name: 'Snare', source: 'factory' };
+  project.channels[0].sampler = samplerParams('test:kick');
+  project.channels[1].synth = synthParams();
+  project.channels.push({ id: 'ch_snare', kind: 'sampler', volume: 0.8, pan: 0, muted: false, mixerTrack: 3, synth: synthParams(), sampler: samplerParams('test:snare', { oneShot: false }) });
+  const playable = () => project.channels.filter((c) => c.kind === 'synth' || c.kind === 'sampler' || c.kind === 'plugin');
+  const insert = () => project.mixer[1 + Math.floor(rnd() * (project.mixer.length - 1))];
+  const internalEffects = () => project.mixer.slice(1).flatMap((t) => t.effects.filter((fx) => fx.type !== 'plugin'));
+
+  const mutate = () => {
+    switch (Math.floor(rnd() * (plugins ? 14 : 12))) {
+      case 0: { // parameter change of an existing effect (smoothing only, no rebuild)
+        const fx = internalEffects();
+        if (fx.length > 0) {
+          const e = pick(fx);
+          const [key, spec] = pick(Object.entries(STRESS_EFFECTS[e.type]));
+          e.params[key] = value(spec);
+        }
+        break;
+      }
+      case 1: {
+        const t = insert();
+        if (t.effects.length < 4) t.effects.push(newEffect());
+        break;
+      }
+      case 2: {
+        const t = insert();
+        if (t.effects.length > 0) t.effects.splice(Math.floor(rnd() * t.effects.length), 1);
+        break;
+      }
+      case 3:
+        insert().effects.reverse();
+        break;
+      case 4: {
+        const fx = internalEffects();
+        if (fx.length > 0) {
+          const e = pick(fx);
+          e.enabled = !e.enabled;
+        }
+        break;
+      }
+      case 5: {
+        const c = pick(playable());
+        if (c.kind !== 'plugin') c.kind = c.kind === 'synth' ? 'sampler' : 'synth';
+        break;
+      }
+      case 6: {
+        const c = pick(playable());
+        if (c.sampler) {
+          Object.assign(c.sampler, {
+            sampleId: pick(['test:kick', 'test:snare']), reverse: rnd() < 0.4, loop: rnd() < 0.3, oneShot: rnd() < 0.5,
+            start: rnd() * 0.5, chokeGroup: Math.floor(rnd() * 3), cutSelf: rnd() < 0.5, fine: range(-100, 100),
+          });
+        }
+        break;
+      }
+      case 7:
+        pick(playable()).mixerTrack = Math.floor(rnd() * project.mixer.length);
+        break;
+      case 8: {
+        Object.assign(insert(), { volume: rnd(), pan: range(-1, 1), muted: rnd() < 0.15, solo: rnd() < 0.15 });
+        Object.assign(pick(playable()), { volume: rnd(), pan: range(-1, 1), muted: rnd() < 0.1 });
+        break;
+      }
+      case 9: {
+        const c = pick(playable());
+        if (c.synth) {
+          Object.assign(pick(c.synth.osc), { wave: pick(['sine', 'square', 'sawtooth', 'triangle', 'noise']), unison: 1 + Math.floor(rnd() * 7), pan: range(-1, 1), level: rnd() });
+          Object.assign(c.synth.filter, { enabled: rnd() < 0.8, cutoff: range(40, 18000), resonance: range(0, 20), type: pick(['lowpass', 'highpass', 'bandpass', 'notch']) });
+          c.synth.lfo = { target: pick(['off', 'filter', 'pitch', 'amp']), rate: range(0.1, 12), depth: rnd() };
+        }
+        break;
+      }
+      case 10:
+        project.bpm = range(60, 200);
+        project.swing = rnd();
+        break;
+      case 11: {
+        const i = project.channels.findIndex((c) => c.id === 'ch_extra');
+        if (i >= 0) project.channels.splice(i, 1);
+        else project.channels.push({ id: 'ch_extra', kind: 'synth', volume: 0.8, pan: 0, muted: false, mixerTrack: 3, synth: synthParams({ gain: 0.4 }), sampler: samplerParams('test:kick') });
+        break;
+      }
+      case 12: { // a plugin effect appears or disappears (asynchronous instance creation while playing)
+        const t = insert();
+        const i = t.effects.findIndex((fx) => fx.type === 'plugin');
+        if (i >= 0) t.effects.splice(i, 1);
+        else t.effects.push({ id: `fx_p${nextId++}`, type: 'plugin', enabled: true, params: {}, plugin: pluginRef(plugins.gain) });
+        break;
+      }
+      default: { // a plugin instrument channel appears or disappears
+        const i = project.channels.findIndex((c) => c.kind === 'plugin');
+        if (i >= 0) project.channels.splice(i, 1);
+        else project.channels.push({ id: `ch_p${nextId++}`, kind: 'plugin', volume: 0.8, pan: 0, muted: false, mixerTrack: 1, plugin: pluginRef(plugins.synth) });
+        break;
+      }
+    }
+  };
+
+  const randomTimeline = () => {
+    const events = [];
+    for (const c of playable()) {
+      for (let n = 0; n < 6; n++) {
+        const clip = rnd() < 0.2 ? { audioClip: true, sampleOffset: Math.floor(rnd() * 48) } : {};
+        events.push({ tick: Math.floor(rnd() * 32) * 24, length: 12 + Math.floor(rnd() * 200), channelId: c.id, key: 36 + Math.floor(rnd() * 48), velocity: 0.3 + rnd() * 0.7, ...clip });
+      }
+    }
+    events.sort((a, b) => a.tick - b.tick);
+    return { type: 'timeline.set', mode: rnd() < 0.8 ? 'song' : 'pattern', loopStart: 0, loopEnd: 768, events };
+  };
+
+  const randomAutomation = () => {
+    const targets = [['proj:bpm', 60, 200], ['proj:swing', 0, 1]];
+    for (const c of playable()) {
+      targets.push([`ch:${c.id}:volume`, 0, 1], [`ch:${c.id}:pan`, -1, 1]);
+      if (c.kind === 'synth') targets.push([`ch:${c.id}:synth.filter.cutoff`, 100, 12000], [`ch:${c.id}:synth.osc.0.level`, 0, 1], [`ch:${c.id}:synth.lfo.rate`, 0.1, 12]);
+      if (c.kind === 'sampler') targets.push([`ch:${c.id}:sampler.fine`, -100, 100], [`ch:${c.id}:sampler.gain`, 0, 1]);
+    }
+    for (let i = 1; i < project.mixer.length; i++) targets.push([`mx:${i}:volume`, 0, 1], [`mx:${i}:pan`, -1, 1]);
+    for (const fx of internalEffects()) {
+      const [key, [lo, hi]] = pick(Object.entries(STRESS_EFFECTS[fx.type]));
+      targets.push([`fx:${fx.id}:${key}`, lo, hi]);
+    }
+    const lanes = [];
+    for (let n = 0; n < 4; n++) {
+      const [target, lo, hi] = pick(targets);
+      const points = [];
+      for (let t = 0; t <= 768; t += 96 + Math.floor(rnd() * 96)) points.push([t, range(lo, hi)]);
+      lanes.push({ target, points });
+    }
+    return { type: 'automation.set', lanes };
+  };
+
+  let handle = 1000;
+  const openHandles = [];
+  let snareLoaded = true; // preview.sample of an unloaded sample is an error
+  const extras = (allowDevice) => {
+    if (rnd() < 0.15) engine.send(randomTimeline());
+    if (rnd() < 0.1) engine.send(randomAutomation());
+    if (rnd() < 0.06) engine.send({ type: 'transport.seek', tick: Math.floor(rnd() * 768) });
+    if (rnd() < 0.12) {
+      openHandles.push(++handle);
+      engine.send({ type: 'live.noteOn', handle, channelId: pick(playable()).id, key: 40 + Math.floor(rnd() * 40), velocity: rnd() });
+    }
+    if (openHandles.length > 0 && rnd() < 0.12) engine.send({ type: 'live.noteOff', handle: openHandles.shift() });
+    if (rnd() < 0.04) engine.send({ type: 'preview.sample', id: pick(snareLoaded ? ['test:kick', 'test:snare'] : ['test:kick']) });
+    if (rnd() < 0.03) engine.send({ type: 'preview.synth', synth: synthParams(), keys: [48, 55, 60], duration: 0.4 });
+    if (rnd() < 0.02) engine.send({ type: 'preview.stop' });
+    if (rnd() < 0.04) {
+      engine.send(loadSnare());
+      snareLoaded = true;
+    }
+    if (rnd() < 0.015) {
+      engine.send({ type: 'samples.unload', id: 'test:snare' });
+      snareLoaded = false;
+    }
+    if (rnd() < 0.02) engine.send({ type: 'live.allNotesOff' });
+    if (allowDevice && rnd() < 0.015) engine.send({ type: 'audio.setDevice', bufferSize: pick([128, 256, 512, 1024, 4096]) });
+  };
+
+  const steps = async (count, allowDevice) => {
+    for (let i = 0; i < count; i++) {
+      mutate();
+      if (rnd() < 0.5) mutate();
+      engine.send({ type: 'project.sync', project });
+      extras(allowDevice);
+      await sleep(15);
+    }
+  };
+
+  // The limiter clips to -0.5 dBFS in its 2x oversampled domain; like Chromium's WaveShaper, the
+  // downsampling filter rings above that on heavily clipped material, so allow +1 dBFS.
+  const limiterBound = 1.12;
+
+  const s0 = engine.messages.length;
+  engine.send({ type: 'project.sync', project });
+  engine.send(randomTimeline());
+  engine.send({ type: 'transport.play', fromTick: 0 });
+  await steps(120, true);
+  const statusDuring = engine.messages.slice(s0).filter((m) => m.type === 'status' && m.playing).length;
+  // ~30/s normally; sanitizer builds spend most of the message thread on project.sync parsing.
+  check(statusDuring >= 3, `stress: status keeps arriving while playing (${statusDuring})`);
+
+  // Edits while an offline render of the current state runs (live playback stops for it).
+  const renderPath = join(work, 'stress-render.wav');
+  const r0 = engine.messages.length;
+  engine.send({ type: 'render.start', requestId: 'stress', path: renderPath, sampleRate: 48000, bitDepth: 32, startTick: 0, endTick: 384, tailSeconds: 0.3 });
+  await steps(40, false);
+  const done = await engine.waitFor((m) => (m.type === 'render.done' && m.requestId === 'stress') || (m.type === 'error' && m.request === 'render.start'), 120000, 'stress render', r0);
+  check(done.type === 'render.done', `stress: a render during edits finishes (${done.message ?? 'ok'})`);
+  if (done.type === 'render.done') {
+    const s = stats(readWav(renderPath).data);
+    check(s.nonFinite === 0 && s.peak <= limiterBound, `stress: rendered audio is finite and limited (peak ${s.peak.toFixed(3)})`);
+  }
+
+  // Play again with the final state, then stop.
+  engine.send({ type: 'transport.play', fromTick: 96 });
+  await steps(40, true);
+  engine.send({ type: 'transport.stop' });
+  engine.send({ type: 'live.allNotesOff' });
+  const pong = await engine.request({ type: 'ping', requestId: 'stress-ping' }, (m) => m.type === 'pong' && m.requestId === 'stress-ping', 20000, 'pong after stress');
+  check(pong.type === 'pong', 'stress: engine stays responsive');
+  await sleep(300);
+
+  const recent = engine.messages.slice(s0);
+  const meters = recent.filter((m) => m.type === 'meters');
+  const finite = (m) => m.peaks.every((p) => p.every(Number.isFinite)) && m.waveform.every(Number.isFinite);
+  check(meters.length > 0 && meters.every(finite), `stress: meters stay finite (${meters.length} frames)`);
+  const masterPeak = Math.max(0, ...meters.map((m) => Math.max(m.peaks[0][0], m.peaks[0][1])));
+  check(masterPeak <= limiterBound, `stress: the master limiter keeps the output bounded (peak ${masterPeak.toFixed(3)})`);
+  if (masterPeak > limiterBound) {
+    // What was sent shortly before the loudest meter frame (helps to reproduce with --seed).
+    const at = engine.messages.findIndex((m, i) => i >= s0 && m.type === 'meters' && Math.max(m.peaks[0][0], m.peaks[0][1]) === masterPeak);
+    const before = engine.sent.filter((s) => s.index <= at && s.index > at - 60 && s.type !== 'project.sync').map((s) => s.type);
+    console.log(`  loudest master frame: message #${at}; commands before it (project.sync omitted): ${before.join(', ')}`);
+  }
+  const errors = recent.filter((m) => m.type === 'error' || m.type === 'plugin.error');
+  check(errors.length === 0, `stress: no errors (${errors.length}${errors.length ? `: ${errors.slice(0, 3).map((e) => e.message).join('; ')}` : ''})`);
+  check(engine.proc.exitCode === null, 'stress: engine still running');
+
+  engine.send({ type: 'automation.set', lanes: [] });
+  engine.send({ type: 'audio.setDevice', bufferSize: 512 });
+  engine.send({ type: 'project.sync', project: baseProject() });
+  engine.send(timeline());
+  await engine.request({ type: 'ping' }, (m) => m.type === 'pong', 10000, 'pong after restoring the project');
+}
+
 // ---- main ---------------------------------------------------------------------------------------
 async function main() {
   console.log(`engine: ${enginePath}`);
@@ -621,7 +891,8 @@ async function main() {
     await testRender(engine);
     await testRecording(engine, ready);
     await testAutomation(engine);
-    await testPlugins(engine);
+    const plugins = await testPlugins(engine);
+    await testStress(engine, plugins);
     exitInfo = await engine.close();
     check(exitInfo.code === 0, `engine exits cleanly when stdin closes (code ${exitInfo.code}, signal ${exitInfo.signal})`);
     check(existsSync(join(dataDir, 'plugins.json')) || !existsSync(join(pluginDir, 'MAD Test Gain.vst3')), 'plugin list cached in <data-dir>/plugins.json');

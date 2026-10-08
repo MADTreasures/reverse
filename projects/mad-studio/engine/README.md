@@ -107,7 +107,7 @@ engine/build/Release/mad-engine --self-test
 # protocol end-to-end test: Node >= 20, no npm packages. Builds with -DMAD_BUILD_TEST_PLUGINS=ON
 # also exercise plugin hosting (otherwise that part is skipped). On macOS it additionally
 # scans AudioUnits and loads Apple's AULowpass and DLSMusicDevice.
-node engine/tests/protocol-test.mjs [--engine <path>] [--plugins <dir>] [--verbose] [--keep]
+node engine/tests/protocol-test.mjs [--engine <path>] [--plugins <dir>] [--verbose] [--keep] [--seed <n>]
 ```
 
 `--self-test` covers the envelope math (`envelope.ts`), biquad coefficients (Web Audio formulas,
@@ -117,6 +117,31 @@ timing against `scheduler.ts` (swing, loop wrap, several block sizes, count-in, 
 automation interpolation/hold/override rules, WAV writing (byte-identical to `wav.ts encodeWav`)
 and reading, and rendered levels of small graphs (pan laws, faders, solo/mute, chokes,
 automation, effects).
+
+The protocol test starts the engine with `--null-audio --null-input-tone 440` and checks every
+command and event, rendered levels/lengths/bit depths, recording with count-in and latency
+trimming, automation, plugin scanning/loading/parameters/states, and ends with a stress section:
+random structural edits, timeline/automation updates, sample reloads, live notes, previews, device
+restarts and an offline render while the transport plays. That part is most useful with sanitizer
+builds (GCC; clang needs its sanitizer runtimes installed):
+
+```bash
+cd projects/mad-studio
+S=thread   # or address,undefined
+cmake -S engine -B engine/build/San -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+  -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++ -DMAD_BUILD_TEST_PLUGINS=ON \
+  -DCMAKE_C_FLAGS=-fsanitize=$S -DCMAKE_CXX_FLAGS=-fsanitize=$S -DCMAKE_EXE_LINKER_FLAGS=-fsanitize=$S \
+  -DCMAKE_SHARED_LINKER_FLAGS=-fsanitize=$S -DCMAKE_MODULE_LINKER_FLAGS=-fsanitize=$S
+cmake --build engine/build/San -j4
+engine/build/San/mad-engine --self-test
+TSAN_OPTIONS="report_destroy_locked=0 detect_deadlocks=0" \
+node engine/tests/protocol-test.mjs --engine engine/build/San/mad-engine --plugins engine/build/San/plugins
+```
+
+(The TSan options work around JUCE itself: in the test plugins' VST3 wrapper a `MessageManagerLock`
+taken on the message thread leaves its entry mutex locked when destroyed. That is reported once
+per plugin instance and, after 64 instances, overflows TSan's deadlock-detector table.
+`--seed <n>` changes the stress section's random sequence.)
 
 The reference values in `src/tests/ReferenceData.h` are generated from the app's TypeScript code:
 
@@ -145,6 +170,10 @@ Result on Linux (Chromium 141, 48 kHz): full mix RMS +0.00/+0.01 dB (L/R), peak 
 single second 0.28 dB; every soloed insert within 0.18 dB RMS. The only larger per-second figure is
 a window that cuts the bass's first note: Chromium's FIR oversampler in the master limiter adds
 128 frames of latency, JUCE's about 1.4 ms less, so onsets are ~1.3 ms earlier natively.
+
+`probe-compressor.mjs` and `probe-limiter.mjs` in the same folder measure single Chromium nodes. The
+limiter (like the browser's) overshoots its ceiling on heavily clipped material because the 2x
+oversampler's downsampling filter rings: +0.78 dB in Chromium, +0.86 dB natively for loud noise.
 
 ## Architecture
 
@@ -204,6 +233,13 @@ match too.
 * Package the engine next to the app, e.g. electron-builder `extraResources` with
   `engine/build/Release/MAD Engine.app` (macOS) or `mad-engine` (Linux), and resolve it via
   `process.resourcesPath`. Sign the nested app on macOS.
+* macOS permissions: a process spawned by the Electron app has the app as its "responsible"
+  process, so the microphone prompt and check use the **Electron app's** Info.plist
+  (`NSMicrophoneUsageDescription`) and entitlements (`com.apple.security.device.audio-input` with
+  the hardened runtime). Signed with the hardened runtime, the engine itself needs
+  `com.apple.security.device.audio-input` and `com.apple.security.cs.disable-library-validation`
+  (to load third-party plugins); some plugins also need `com.apple.security.cs.allow-jit` /
+  `allow-unsigned-executable-memory`.
 * Closing stdin (or sending `quit`) shuts the engine down cleanly.
 * On Windows spawn with `windowsHide: true` (the engine is a console program).
 
@@ -219,7 +255,12 @@ match too.
 * AudioUnit hosting, the macOS bundle and microphone permission handling are implemented but have
   not been built or run on a Mac yet (development happened in a Linux container); the macOS part of
   the protocol test (AULowpass, DLSMusicDevice) still has to run there.
+* Windows is set up (console program `mad-engine.exe`, WASAPI/DirectSound through JUCE, no ASIO
+  since that needs Steinberg's SDK) but has not been built yet.
 * WAV files are limited to 4 GB (no RF64). Each recording take has a 30 s FIFO between the audio
   thread and the writer thread; if the disk stalls for longer, frames are dropped (reported as
   `droppedFrames` in `record.done`).
 * LV2 plugins are hosted on Linux but have no dedicated test.
+* Each reverb owns a JUCE `dsp::Convolution`, which runs its own small background thread (it
+  wakes every 10 ms); a shared `ConvolutionMessageQueue` would be leaner for projects with many
+  reverbs.

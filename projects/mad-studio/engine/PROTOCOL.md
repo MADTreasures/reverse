@@ -267,7 +267,8 @@ ignore unknown fields keep working.
   2 outputs).
 * **New commands**: `ping` → `{"type":"pong"}`; `quit` → graceful shutdown (same as closing
   stdin: recordings are finalised, the process exits with code 0).
-* **Command line**: `--null-audio` (always use the null device), `--null-input-tone <Hz>` (test
+* **Command line**: `--null-audio` (always use the null device, also after `audio.setDevice`,
+  which then only changes its sample rate / buffer size), `--null-input-tone <Hz>` (test
   aid: a 0.25 amplitude sine on the null device's two inputs), `--sample-rate N` /
   `--buffer-size N` (initial device settings), `--help`. `--version` prints
   `{"name":"mad-engine","version":"0.2.0","protocol":1,"juce":"8.0.15"}`; `--render` prints a
@@ -284,6 +285,8 @@ ignore unknown fields keep working.
   (only the newest of a run is applied).
 * A plugin effect that is still loading (or borrowed by an offline render) passes audio
   through; a plugin instrument is silent.
+* Internal effect parameters (project values and `fx:` automation) are clamped to the
+  `EFFECT_SPECS` ranges of `model/effects.ts`.
 * Sequenced notes on muted channels are not triggered (as in the Web Audio engine); live notes are.
 * A gated sampler (`oneShot:false`, or `loop`) releases a live note on `live.noteOff` (the Web
   Audio engine only releases looping ones).

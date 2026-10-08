@@ -78,7 +78,9 @@ set_target_properties(MadEngine PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BIN
 
 if(WIN32)
     # The engine talks over stdin/stdout, so it is a console program with a plain main().
+    # _CONSOLE selects JUCE's argc/argv entry point (as juce_add_console_app does).
     set_target_properties(MadEngine PROPERTIES WIN32_EXECUTABLE FALSE)
+    target_compile_definitions(MadEngine PRIVATE _CONSOLE=1)
 endif()
 
 target_sources(MadEngine PRIVATE

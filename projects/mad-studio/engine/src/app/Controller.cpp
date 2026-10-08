@@ -425,7 +425,6 @@ void Controller::handle (const juce::String& type, const juce::var& msg, const j
         if (render != nullptr)
             return fail ("an offline render is running");
         DeviceController::Request r = deviceRequest;
-        r.forceNull = false;
         if (json::has (msg, "type"))
             r.type = json::string (msg, "type");
         if (json::has (msg, "output"))
@@ -436,7 +435,7 @@ void Controller::handle (const juce::String& type, const juce::var& msg, const j
             r.sampleRate = json::number (msg, "sampleRate", 0.0);
         if (json::has (msg, "bufferSize"))
             r.bufferSize = json::integer (msg, "bufferSize", 0);
-        r.forceNull = r.type == "Null";
+        r.forceNull = args.nullAudio || r.type == "Null"; // --null-audio never opens real hardware
         deviceRequest = r;
         openDevice (r);
         sendReply (device.devicesJson(), requestId);

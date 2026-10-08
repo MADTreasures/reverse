@@ -24,7 +24,9 @@ void NullDevice::start (double sampleRate, int blockSize, Callback callback)
 
 void NullDevice::stop()
 {
-    stopThread (2000);
+    // Wait for the current block however long it takes (slow machines, sanitizer builds): JUCE
+    // would otherwise kill the thread mid-block and leave plugin slots locked.
+    stopThread (-1);
 }
 
 void NullDevice::run()

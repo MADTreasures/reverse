@@ -508,7 +508,7 @@ void ReverbEffect::prepare (double rate, int maxBlock, bool offline)
     wetR.assign ((size_t) maxBlock, 0.0f);
 
     // First IR immediately (effects.ts builds the first one synchronously as well).
-    const int key = irKey (std::round (params[0].getBase() * 100.0) / 100.0, std::round (params[2].getBase() * 100.0) / 100.0);
+    const int key = irKey (std::round (baseParam (0) * 100.0) / 100.0, std::round (baseParam (2) * 100.0) / 100.0);
     auto ir = buildImpulse (rate, keyDecay (key), keyDamping (key));
     convolution.loadImpulseResponse (std::move (*ir), rate, juce::dsp::Convolution::Stereo::yes,
                                      juce::dsp::Convolution::Trim::no, juce::dsp::Convolution::Normalise::no);
