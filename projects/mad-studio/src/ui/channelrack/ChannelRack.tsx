@@ -296,8 +296,18 @@ const ChannelRow = memo(function ChannelRow({ channel, patternId, stepCount }: R
       <div className="rack-left">
         <button
           className={`mute-led ${channel.muted ? '' : 'on'}`}
-          data-hint="Mute (Ctrl/Cmd+click: solo)"
+          data-hint="Mute (Ctrl/Cmd+click: solo, right-click: options)"
           onClick={(e) => (e.metaKey || e.ctrlKey ? soloChannel(channel.id) : toggleChannelMute(channel.id))}
+          onContextMenu={(e) => {
+            // FL Studio: right-clicking a channel's mute switch opens its menu (Solo …).
+            e.preventDefault();
+            const soloed = !channel.muted && useStore.getState().project.channels.every((c) => c.id === channel.id || c.muted);
+            showMenu(e, [
+              { label: channel.name, header: true },
+              { label: 'Solo', checked: soloed, onClick: () => soloChannel(channel.id) },
+              { label: 'Mute', checked: channel.muted, onClick: () => toggleChannelMute(channel.id) },
+            ]);
+          }}
         />
         <Knob
           size={20}

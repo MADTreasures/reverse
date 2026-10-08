@@ -172,10 +172,16 @@ const Strip = memo(function Strip({ track, index, selected }: { track: MixerTrac
       <span className="strip-fx-count">{activeFx ? `FX ${activeFx}` : track.input ? inputLabel(track.input) : ''}</span>
       <button
         className={`mute-led ${track.muted ? '' : 'on'} ${track.solo ? 'solo' : ''}`}
-        data-hint={isMaster ? 'Mute master' : 'Mute (Ctrl/Cmd+click: solo)'}
+        data-hint={isMaster ? 'Mute master' : 'Mute (right-click or Ctrl/Cmd+click: solo)'}
         onClick={(e) =>
           !isMaster && (e.metaKey || e.ctrlKey) ? setMixerTrackProps(index, { solo: !track.solo }) : setMixerTrackProps(index, { muted: !track.muted })
         }
+        onContextMenu={(e) => {
+          // FL Studio: right-clicking a mixer track's mute switch solos the track.
+          e.preventDefault();
+          e.stopPropagation();
+          if (!isMaster) setMixerTrackProps(index, { solo: !track.solo });
+        }}
       />
       <Knob
         size={24}

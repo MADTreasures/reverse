@@ -552,3 +552,20 @@ test('undo names the step like FL Studio: Ctrl+Z undoes, Ctrl+Alt+Z redoes', asy
   expect((await roll.notes()).length).toBe(count + 1);
   await expect(page.locator('.hint-bar')).toContainText('Redone: piano roll add note · Level 1/');
 });
+
+test('mute switches: right-click solos a mixer track, opens the channel menu in the rack', async ({ page }) => {
+  await boot(page);
+  await page.keyboard.press('F9');
+  const led = page.locator('.strip').nth(2).locator('.mute-led');
+  await led.click({ button: 'right' });
+  expect((await state(page)).project.mixer[2].solo).toBe(true);
+  await led.click({ button: 'right' });
+  expect((await state(page)).project.mixer[2].solo).toBe(false);
+
+  await page.keyboard.press('F6');
+  await page.locator('.rack-row').nth(1).locator('.mute-led').click({ button: 'right' });
+  await page.getByRole('menuitem', { name: 'Solo' }).click();
+  const channels = (await state(page)).project.channels;
+  expect(channels[1].muted).toBe(false);
+  expect(channels.filter((c: any) => !c.muted).length).toBe(1);
+});
