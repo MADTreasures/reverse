@@ -31,6 +31,11 @@ test('desktop app drives the native engine: playback, VST3 plugins, render, plug
   });
   const t0 = Date.now();
   const step = (name: string) => console.log(`[native ${((Date.now() - t0) / 1000).toFixed(1)}s] ${name}`);
+  // The app's stderr (engine messages included), printed when a step fails.
+  let stderrTail = '';
+  app.process().stderr?.on('data', (d) => {
+    stderrTail = (stderrTail + d.toString()).slice(-6000);
+  });
   if (process.env.MAD_NATIVE_DEBUG) {
     app.process().stdout?.on('data', (d) => process.stdout.write(`[main] ${d}`));
     app.process().stderr?.on('data', (d) => process.stdout.write(`[main:err] ${d}`));
@@ -43,11 +48,23 @@ test('desktop app drives the native engine: playback, VST3 plugins, render, plug
     await page.waitForFunction(() => window.__madStudio?.useStore.getState().audioReady === true);
     await page.waitForFunction(() => window.__madStudio.usePlugins.getState().nativeEngine === true);
     expect(await page.evaluate(() => window.__madStudio.engine.isNative)).toBe(true);
+    await page.waitForFunction(() => window.__madStudio.usePlugins.getState().device !== null);
+    const device = await page.evaluate(() => window.__madStudio.usePlugins.getState().device);
+    step(`engine ready: ${device.type} "${device.output}", ${device.sampleRate} Hz, ${device.bufferSize} frames, output latency ${device.outputLatency}`);
 
-    step('engine ready');
     // Playback: the engine's status messages move the playhead.
     await page.evaluate(() => window.__madStudio.engine.play());
-    await expect.poll(() => page.evaluate(() => window.__madStudio.engine.playheadTick() ?? -1)).toBeGreaterThan(48);
+    try {
+      await expect.poll(() => page.evaluate(() => window.__madStudio.engine.playheadTick() ?? -1)).toBeGreaterThan(48);
+    } catch (e) {
+      const state = await page.evaluate(() => {
+        const m = window.__madStudio;
+        const impl = m.engine.impl; // the facade's native engine
+        return { status: impl?.status, ready: impl?.ready, playing: m.useStore.getState().transport.playing, device: m.usePlugins.getState().device };
+      });
+      console.log(`[native] the playhead did not move: ${JSON.stringify(state)}\n[native] app stderr (tail):\n${stderrTail}`);
+      throw e;
+    }
     await page.evaluate(() => window.__madStudio.engine.stop());
     await expect.poll(() => page.evaluate(() => window.__madStudio.useStore.getState().transport.playing)).toBe(false);
 

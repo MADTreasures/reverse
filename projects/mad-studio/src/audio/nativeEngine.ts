@@ -53,6 +53,8 @@ export class NativeEngine implements EngineApi {
   /** Number of the last transport.play/stop/seek sent; `status` echoes the last one the engine applied. */
   private transportSeq = 0;
   private transportSentAt = 0;
+  /** Play was pressed before the engine was ready; it starts with the engine's `ready`. */
+  private playWhenReady = false;
   private meterPeaks: [number, number][] = [];
   private wave: number[] = [];
   private held = new Map<number, HeldNote>();
@@ -84,7 +86,6 @@ export class NativeEngine implements EngineApi {
     this.startTimer = setTimeout(() => {
       if (!this.everReady) this.fail('The native audio engine did not start.');
     }, 15000);
-    useStore.setState({ audioReady: true });
   }
 
   dispose(): void {
@@ -252,6 +253,11 @@ export class NativeEngine implements EngineApi {
     this.send({ type: 'audio.getDevices' });
     this.send({ type: 'plugins.getList' });
     this.send({ type: 'plugins.getPaths' });
+    if (!useStore.getState().audioReady) useStore.setState({ audioReady: true });
+    if (this.playWhenReady) {
+      this.playWhenReady = false;
+      void this.play();
+    }
   }
 
   // ------------------------------------------------------------------ store mirroring
@@ -357,7 +363,12 @@ export class NativeEngine implements EngineApi {
   }
 
   async play(): Promise<void> {
-    if (!this.ready || this.playing) return;
+    if (this.playing) return;
+    if (!this.ready) {
+      // Still starting (opening the audio device can take a moment): play once it is ready.
+      this.playWhenReady = true;
+      return;
+    }
     const s = useStore.getState();
     this.syncAll();
     this.take += 1;
@@ -372,6 +383,7 @@ export class NativeEngine implements EngineApi {
   }
 
   stop(): void {
+    this.playWhenReady = false;
     this.sendTransport({ type: 'transport.stop' });
     this.status = { ...this.status, playing: false };
     for (const [handle, note] of this.held) if (note.recordStart !== null) this.noteOff(handle);
@@ -380,7 +392,7 @@ export class NativeEngine implements EngineApi {
   }
 
   togglePlay(): void {
-    if (this.playing) this.stop();
+    if (this.playing || this.playWhenReady) this.stop();
     else void this.play();
   }
 
