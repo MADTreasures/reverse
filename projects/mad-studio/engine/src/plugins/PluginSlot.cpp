@@ -40,6 +40,7 @@ void PluginSlot::setInstance (std::unique_ptr<juce::AudioPluginInstance> instanc
         owned->addListener (this);
         ready.store (owned.get());
     }
+    updateLatency();
     lock.unlock();
 }
 
@@ -69,6 +70,7 @@ void PluginSlot::reprepare (double sampleRate, int blockSize)
     }
     rate = sampleRate;
     block = blockSize;
+    updateLatency();
     lock.unlock();
 }
 
@@ -86,6 +88,7 @@ void PluginSlot::prepareExclusive (double sampleRate, int blockSize, bool nonRea
     }
     rate = sampleRate;
     block = blockSize;
+    updateLatency();
 }
 
 void PluginSlot::setParameterFromAudioThread (int index, float value) noexcept
@@ -103,6 +106,18 @@ void PluginSlot::audioProcessorParameterChanged (juce::AudioProcessor*, int para
     changedIndex.store (parameterIndex);
     changedValue.store (newValue);
     changeCount.fetch_add (1, std::memory_order_release);
+}
+
+void PluginSlot::audioProcessorChanged (juce::AudioProcessor* processor, const ChangeDetails& details)
+{
+    // May arrive on any thread (some plugins announce latency changes from the audio thread).
+    if (details.latencyChanged && processor != nullptr)
+        latency.store (std::max (0, processor->getLatencySamples()));
+}
+
+void PluginSlot::updateLatency() noexcept
+{
+    latency.store (owned != nullptr ? std::max (0, owned->getLatencySamples()) : 0);
 }
 
 bool PluginSlot::takeChangedParameter (int& index, float& value) noexcept

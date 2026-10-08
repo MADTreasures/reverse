@@ -333,7 +333,10 @@ void Controller::handle (const juce::String& type, const juce::var& msg, const j
         {
             const auto info = device.info();
             juce::String error;
-            auto next = recorder.createSession (builder->project(), info.sampleRate, info.inputLatency + info.outputLatency, error);
+            // The player hears the music `totalLatency` late (plugin delay compensation) and plays
+            // along to that, so takes move back by it too, like the device latencies.
+            auto next = recorder.createSession (builder->project(), info.sampleRate,
+                                                info.inputLatency + info.outputLatency + builder->totalLatency(), error);
             if (next == nullptr)
                 protocol::sendError (error.isNotEmpty() ? error : juce::String ("no armed mixer track has an input"), type, requestId);
             else
@@ -695,7 +698,8 @@ void Controller::sendStatus()
 {
     const auto pos = engine.readPosition();
     const auto info = device.info();
-    const double latency = (double) info.outputLatency + (info.isNull ? 0.0 : (double) info.bufferSize);
+    // What is heard lags the transport by the device and by plugin delay compensation.
+    const double latency = (double) info.outputLatency + (info.isNull ? 0.0 : (double) info.bufferSize) + (double) pos.latency;
 
     double tick = pos.tick;
     if (pos.state != 0)
@@ -755,6 +759,32 @@ void Controller::sendMeters()
     protocol::writeLine (w.str());
 }
 
+void Controller::sendLatencyIfChanged()
+{
+    const auto& plan = builder->latencyPlan();
+    json::Writer w;
+    w.beginObject()
+        .field ("type", "latency")
+        .field ("automatic", builder->project().pdc)
+        .field ("total", plan.total)
+        .field ("sampleRate", engine.getSampleRate());
+    w.key ("tracks").beginArray();
+    for (size_t i = 0; i < plan.trackLatency.size(); ++i)
+        w.beginObject().field ("latency", plan.trackLatency[i]).field ("delay", plan.trackDelay[i]).endObject();
+    w.endArray();
+    w.key ("plugins").beginObject();
+    for (const auto& p : builder->pluginLatencies())
+    {
+        w.key (p.key.toStdString()).beginObject().field ("reported", p.reported).field ("offset", p.offset).endObject();
+    }
+    w.endObject().endObject();
+    auto report = w.take();
+    if (report == lastLatencyReport)
+        return;
+    lastLatencyReport = report;
+    protocol::writeLine (report);
+}
+
 void Controller::tick()
 {
     if (quitting)
@@ -769,6 +799,13 @@ void Controller::tick()
 
     plugins->pollParameterChanges();
     builder->serviceEffects();
+    // A render prepares the plugins it borrows for its own sample rate; their latency there
+    // is not the live one.
+    if (render == nullptr || ! render->running)
+    {
+        builder->checkLatency();
+        sendLatencyIfChanged();
+    }
     engine.snapshots.collectGarbage();
     collectSampleGarbage();
 

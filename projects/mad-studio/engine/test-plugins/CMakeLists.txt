@@ -2,6 +2,7 @@
 # After building they are copied to <build>/plugins/:
 #   "MAD Test Gain.vst3"  effect, one parameter `gain` (0..1, default 0.5), out = in * gain
 #   "MAD Test Synth.vst3" instrument, sine per MIDI note, amplitude velocity * 0.25, 5 ms attack/release
+#   "MAD Test Delay.vst3" effect, delays by `latency` samples (0..9600, default 1000) and reports it
 # On macOS also as AudioUnits ("*.component", same folder; not registered with the system).
 
 set(MAD_TEST_PLUGIN_DIR "${CMAKE_BINARY_DIR}/plugins")
@@ -10,7 +11,11 @@ if(APPLE)
     list(APPEND MAD_TEST_PLUGIN_FORMATS AU)
 endif()
 
-function(mad_add_test_plugin target product code is_synth)
+function(mad_add_test_plugin target product code kind)
+    set(is_synth FALSE)
+    if(kind STREQUAL "synth")
+        set(is_synth TRUE)
+    endif()
     if(is_synth)
         set(categories Instrument Synth)
         set(au_type kAudioUnitType_MusicDevice)
@@ -45,7 +50,8 @@ function(mad_add_test_plugin target product code is_synth)
             JUCE_WEB_BROWSER=0
             JUCE_USE_CURL=0
             JUCE_VST3_CAN_REPLACE_VST2=0
-            MAD_TEST_SYNTH=$<IF:$<BOOL:${is_synth}>,1,0>)
+            MAD_TEST_SYNTH=$<IF:$<BOOL:${is_synth}>,1,0>
+            MAD_TEST_DELAY=$<IF:$<STREQUAL:${kind},delay>,1,0>)
     target_link_libraries(${target}
         PRIVATE
             juce::juce_audio_processors
@@ -54,5 +60,6 @@ function(mad_add_test_plugin target product code is_synth)
             juce::juce_recommended_warning_flags)
 endfunction()
 
-mad_add_test_plugin(MadTestGain "MAD Test Gain" Mtgn FALSE)
-mad_add_test_plugin(MadTestSynth "MAD Test Synth" Mtsy TRUE)
+mad_add_test_plugin(MadTestGain "MAD Test Gain" Mtgn gain)
+mad_add_test_plugin(MadTestSynth "MAD Test Synth" Mtsy synth)
+mad_add_test_plugin(MadTestDelay "MAD Test Delay" Mtdl delay)

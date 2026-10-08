@@ -133,7 +133,8 @@ recognised and ignored. A `transport.play` refused during a render is acknowledg
 ## Events (engine → renderer)
 
 * `{"type":"status","playing":true,"tick":1234.5,"cpu":0.12,"seq":3,"activity":{"ch_1":0.02}}` – ~30×/s while
-  playing, ~4×/s when stopped. `tick` is the position currently **heard** (output latency compensated);
+  playing, ~4×/s when stopped. `tick` is the position currently **heard** (output latency and plugin
+  delay compensation accounted for);
   during count-in it is negative. `activity` lists channels that triggered a note in the last 0.2 s with
   the age in seconds. `cpu` = audio callback load 0..1. `seq` = the last applied transport command's
   `seq` (0 before any).
@@ -164,8 +165,9 @@ FL’s “In 1 - In 2” is `stereo:0`) and `armed`. Configure once:
 * Recording runs while the transport plays with `record:true` (after the count-in) for every **armed**
   track that has an input. The engine writes the raw input (pre-effects, FL’s “EXT” pickup) to a WAV file
   per track in `folder` (`<track name>_<yyyyMMdd-HHmmss>.wav`) on a background writer thread.
-* `latencyCompensation`: drop `inputLatency + outputLatency` samples from the start of each file so the
-  take lines up with the timeline.
+* `latencyCompensation`: drop `inputLatency + outputLatency` samples plus the plugin delay compensation
+  total (the player hears the music that much later) from the start of each file so the take lines up
+  with the timeline.
 * On stop: `{"type":"record.done","takes":[{"trackIndex":3,"path":"…","startTick":1536,"sampleRate":48000,"channels":2,"frames":96000}]}`.
 
 ## Offline render
@@ -198,13 +200,46 @@ automation like FL Studio).
 `PluginDescription`: `{"uid","name","vendor","format","category","version","fileOrIdentifier","isInstrument","numInputs","numOutputs"}`.
 `uid` must be stable across scans (JUCE `PluginDescription::createIdentifierString()`).
 
+## Plugin delay compensation (PDC)
+
+Like FL Studio's automatic PDC: a plugin that reports latency (VST3/AU latency, read again
+whenever the plugin announces a change) delays its own audio, so the engine delays every other
+path by the difference and everything meets in time.
+
+* Channels are aligned at their mixer track (each waits for the slowest channel of the track),
+  tracks at the master (each waits for the slowest track: aligned input + its inserts). Master
+  inserts add to the total. The output lags the transport by `total` samples; `status.tick`, the
+  metronome, recording (takes move back by it, like the device latencies) and offline renders
+  (the file still starts exactly at `startTick`) account for it.
+* Automation is compensated: a lane whose target sits behind latent plugins is read that many
+  samples earlier: `mx:<i>:*` – the track's aligned input plus all its inserts; `fx:<slotId>:*`
+  and `plug:fx:<slotId>:*` – the latency before that insert; `ch:<id>:volume|pan` – the
+  channel's instrument latency. Instrument parameters and `proj:*` are not shifted. Right after
+  a loop wrap a shifted lane reads the end of the loop (that audio is still playing).
+* Project fields: `"pdc": false` turns automatic compensation off (manual offsets still apply);
+  `mixer[i].latencyOffset` (ms, ±1000) shifts a track: > 0 delays it, < 0 delays all the others;
+  `plugin.latencyOffset` (samples) is added to what a plugin reports (for plugins that misreport
+  their latency). Every path is compensated by at most 524288 samples.
+* Event `latency`, sent at startup and whenever the compensation changes (project edits, a plugin
+  announcing a new latency, a plugin finishing loading, a new sample rate):
+
+  ```json
+  {"type":"latency","automatic":true,"total":1000,"sampleRate":48000,
+   "tracks":[{"latency":1000,"delay":0},{"latency":1000,"delay":0},{"latency":0,"delay":1000}],
+   "plugins":{"fx:fx_7":{"reported":1000,"offset":0}}}
+  ```
+
+  `tracks[i].latency` – latency the track has detected (aligned input plus its inserts; master:
+  the total); `tracks[i].delay` – compensation delay after the track's fader (master: 0).
+  `plugins` – every loaded instance by key with its reported latency and manual offset (samples).
+
 ## Project JSON (what `project.sync` contains)
 
 Only these fields matter to the engine (others such as `patterns`, `tracks`, `clips` are ignored):
 
 ```jsonc
 {
-  "bpm": 130, "beatsPerBar": 4, "swing": 0.0,
+  "bpm": 130, "beatsPerBar": 4, "swing": 0.0, "pdc": true,
   "channels": [
     {"id":"ch_1","kind":"synth","volume":0.8,"pan":0,"muted":false,"mixerTrack":1,
      "synth":{"osc":[{"wave":"sawtooth","level":0.8,"coarse":0,"fine":0,"unison":3,"detune":18,"pan":0}, {…}, {…}],
@@ -217,11 +252,11 @@ Only these fields matter to the engine (others such as `patterns`, `tracks`, `cl
                 "loop":false,"start":0,"ampEnv":{…},"chokeGroup":0,"cutSelf":false,"gain":0.8}},
     {"id":"ch_3","kind":"plugin","volume":0.8,"pan":0,"muted":false,"mixerTrack":3,
      "plugin":{"uid":"VST3-MAD Test Synth-…","name":"MAD Test Synth","vendor":"MAD","format":"VST3",
-               "fileOrIdentifier":"/…/MAD Test Synth.vst3","isInstrument":true,"state":null}},
+               "fileOrIdentifier":"/…/MAD Test Synth.vst3","isInstrument":true,"state":null,"latencyOffset":0}},
     {"id":"ch_4","kind":"automation", …}   // ignored by the engine
   ],
   "mixer": [   // index 0 = master
-    {"id":"mx_0","volume":0.8,"pan":0,"muted":false,"solo":false,"input":null,"armed":false,
+    {"id":"mx_0","volume":0.8,"pan":0,"muted":false,"solo":false,"input":null,"armed":false,"latencyOffset":0,
      "effects":[{"id":"fx_1","type":"limiter","enabled":true,"params":{"gain":0,"ceiling":-0.5,"release":0.1}},
                 {"id":"fx_2","type":"plugin","enabled":true,"params":{},"plugin":{…PluginInstanceData…}}]}
   ],
@@ -291,7 +326,9 @@ ignore unknown fields keep working.
 * Consecutive queued `project.sync` / `timeline.set` / `automation.set` messages are coalesced
   (only the newest of a run is applied).
 * A plugin effect that is still loading (or borrowed by an offline render) passes audio
-  through; a plugin instrument is silent.
+  through; a plugin instrument is silent. Until it has loaded, a plugin counts as latency 0.
+* When the compensation changes, delayed audio jumps (like any latency change in a DAW).
+  Unchanged delays keep running across project edits.
 * Internal effect parameters (project values and `fx:` automation) are clamped to the
   `EFFECT_SPECS` ranges of `model/effects.ts`.
 * Sequenced notes on muted channels are not triggered (as in the Web Audio engine); live notes are.

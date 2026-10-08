@@ -122,6 +122,7 @@ PluginRef parsePluginRef (const juce::var& v)
     const auto state = json::get (v, "state");
     r.hasState = state.isString() && state.toString().isNotEmpty();
     r.state = r.hasState ? state.toString() : juce::String();
+    r.latencyOffset = std::clamp (json::integer (v, "latencyOffset", 0), -(1 << 19), 1 << 19);
     return r;
 }
 
@@ -163,6 +164,7 @@ ProjectModel parseProject (const juce::var& json)
     m.bpm = std::clamp (json::number (json, "bpm", 130.0), 10.0, 522.0);
     m.beatsPerBar = std::clamp (json::integer (json, "beatsPerBar", 4), 1, 64);
     m.swing = std::clamp (json::number (json, "swing", 0.0), 0.0, 1.0);
+    m.pdc = json::boolean (json, "pdc", true);
 
     if (const auto* channels = json::get (json, "channels").getArray())
     {
@@ -209,6 +211,7 @@ ProjectModel parseProject (const juce::var& json)
             tr.solo = json::boolean (t, "solo", false);
             tr.armed = json::boolean (t, "armed", false);
             tr.input = parseInputRoute (json::get (t, "input"));
+            tr.latencyOffsetMs = (float) std::clamp (json::number (t, "latencyOffset", 0.0), -1000.0, 1000.0);
 
             if (const auto* effects = json::get (t, "effects").getArray())
             {

@@ -48,6 +48,7 @@ private:
     void sendReady();
     void sendStatus();
     void sendMeters();
+    void sendLatencyIfChanged();
     void handleNotifications();
     void startRender (const juce::var& msg, const juce::var& requestId);
     void beginPendingRender();
@@ -72,6 +73,7 @@ private:
     double readySampleRate = 0.0;
     int timerTicks = 0;
     bool metersWereSilent = false;
+    std::string lastLatencyReport;
     bool quitting = false;
 
     std::unique_ptr<RenderJob> render;

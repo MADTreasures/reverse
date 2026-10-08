@@ -56,6 +56,10 @@ public:
     int numInputChannels() const noexcept { return numIn.load(); }
     int numOutputChannels() const noexcept { return numOut.load(); }
 
+    /** Latency the plugin reports in samples (0 while loading); updated when the plugin
+        announces a change. Any thread. */
+    int latencySamples() const noexcept { return latency.load (std::memory_order_relaxed); }
+
     /** Audio thread: automation of a normalised parameter. */
     void setParameterFromAudioThread (int index, float value) noexcept;
 
@@ -69,7 +73,8 @@ public:
 
 private:
     void audioProcessorParameterChanged (juce::AudioProcessor*, int parameterIndex, float newValue) override;
-    void audioProcessorChanged (juce::AudioProcessor*, const ChangeDetails&) override {}
+    void audioProcessorChanged (juce::AudioProcessor* processor, const ChangeDetails& details) override;
+    void updateLatency() noexcept;
 
     std::unique_ptr<juce::AudioPluginInstance> owned;
     std::atomic<juce::AudioPluginInstance*> ready { nullptr };
@@ -77,6 +82,7 @@ private:
     double rate = 0.0;
     int block = 0;
     std::atomic<int> numIn { 0 }, numOut { 0 };
+    std::atomic<int> latency { 0 };
 
     std::atomic<int> changedIndex { -1 };
     std::atomic<float> changedValue { 0.0f };

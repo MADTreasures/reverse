@@ -20,7 +20,7 @@ if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
     set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
 endif()
 
-option(MAD_BUILD_TEST_PLUGINS "Build the 'MAD Test Gain' and 'MAD Test Synth' plugins used by the tests" OFF)
+option(MAD_BUILD_TEST_PLUGINS "Build the 'MAD Test Gain', 'MAD Test Synth' and 'MAD Test Delay' plugins used by the tests" OFF)
 option(MAD_ENABLE_LV2 "Host LV2 plugins on Linux" ON)
 option(MAD_ENABLE_JACK "Enable the JACK audio backend on Linux when its headers are available" ON)
 
@@ -123,6 +123,8 @@ target_sources(MadEngine PRIVATE
     src/engine/GraphBuilder.h
     src/engine/Instruments.cpp
     src/engine/Instruments.h
+    src/engine/Latency.cpp
+    src/engine/Latency.h
     src/engine/Params.cpp
     src/engine/Params.h
     src/engine/ProjectModel.cpp

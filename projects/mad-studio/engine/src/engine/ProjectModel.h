@@ -17,6 +17,7 @@ struct PluginRef
     bool isInstrument = false;
     juce::String state; // base64, empty when null
     bool hasState = false;
+    int latencyOffset = 0; // samples added to the reported latency (for plugins that misreport it)
 
     bool sameDescription (const PluginRef& o) const
     {
@@ -67,12 +68,14 @@ struct MixerTrackModel
     bool muted = false, solo = false, armed = false;
     InputRoute input;
     std::vector<EffectModel> effects;
+    float latencyOffsetMs = 0.0f; // manual PDC offset: > 0 delays this track, < 0 all others
 };
 
 struct ProjectModel
 {
     double bpm = 130.0, swing = 0.0;
     int beatsPerBar = 4;
+    bool pdc = true; // automatic plugin delay compensation
     std::vector<ChannelModel> channels;
     std::vector<MixerTrackModel> mixer;
 

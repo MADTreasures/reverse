@@ -53,12 +53,29 @@ void ChannelNode::prepare (double sampleRate, int maxBlock)
     bufR.assign ((size_t) maxBlock, 0.0f);
 }
 
-void ChannelNode::process (const BlockContext& ctx, float* busL, float* busR) noexcept
+void ChannelNode::process (const BlockContext& ctx, float* busL, float* busR, CompensationDelay* delay,
+                           int delaySamples) noexcept
 {
     const int n = ctx.numSamples;
+    const bool delayed = delay != nullptr && delaySamples > 0;
     const bool idle = instrument->isIdle();
     const bool stereo = instrument->render (ctx, bufL.data(), bufR.data());
     const float muteTarget = muted.load (std::memory_order_relaxed) ? 0.0f : 1.0f;
+    float* stripL = bufL.data();
+    float* stripR = bufR.data();
+    const auto addStrip = [&]
+    {
+        if (delayed)
+        {
+            float* channels[] = { stripL, stripR };
+            delay->process (channels, n, delaySamples);
+        }
+        for (int i = 0; i < n; ++i)
+        {
+            busL[i] += stripL[i];
+            busR[i] += stripR[i];
+        }
+    };
 
     if (idle)
     {
@@ -71,9 +88,17 @@ void ChannelNode::process (const BlockContext& ctx, float* busL, float* busR) no
             for (auto* s : { &volumeGain, &panValue, &muteGain })
                 s->skip (len);
         }
+        // A compensation delay still holding the end of the last note plays it out.
+        if (delayed && ! delay->isQuiet (delaySamples))
+        {
+            std::fill (stripL, stripL + n, 0.0f);
+            std::fill (stripR, stripR + n, 0.0f);
+            addStrip();
+        }
         return;
     }
 
+    // The strip output replaces the instrument output in place, then goes to the bus.
     const float* inL = bufL.data();
     const float* inR = bufR.data();
     double lastPan = panValue.current() + 10.0;
@@ -99,17 +124,18 @@ void ChannelNode::process (const BlockContext& ctx, float* busL, float* busR) no
             {
                 float l, r;
                 dsp::stereoPan (p, gains, inL[i] * g, inR[i] * g, l, r);
-                busL[i] += l;
-                busR[i] += r;
+                stripL[i] = l;
+                stripR[i] = r;
             }
             else
             {
                 const float m = inL[i] * g;
-                busL[i] += m * gains.left;
-                busR[i] += m * gains.right;
+                stripL[i] = m * gains.left;
+                stripR[i] = m * gains.right;
             }
         }
     }
+    addStrip();
 }
 
 //==============================================================================

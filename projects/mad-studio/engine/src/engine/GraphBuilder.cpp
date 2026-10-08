@@ -3,12 +3,39 @@
 #include "plugins/PluginSlot.h"
 
 #include <algorithm>
+#include <cmath>
 
 namespace mad
 {
 namespace
 {
 juce::String pointerKey (const void* p) { return juce::String::toHexString ((juce::pointer_sized_int) p); }
+
+int delayCapacityFor (int needed) noexcept
+{
+    int capacity = 4095;
+    while (capacity < needed && capacity < maxCompensation)
+        capacity = capacity * 2 + 1;
+    return std::min (capacity, maxCompensation);
+}
+
+/** The compensation delay of `key` for `needed` samples (null when no delay is needed; then a
+    later delay starts from silence instead of old audio). */
+template <typename Key>
+CompensationDelay* delayFor (std::map<Key, std::shared_ptr<CompensationDelay>>& delays, Key key, int needed, int channels,
+                             GraphSnapshot& snap)
+{
+    if (needed <= 0)
+    {
+        delays.erase (key);
+        return nullptr;
+    }
+    auto& delay = delays[key];
+    if (delay == nullptr || delay->capacity() < needed)
+        delay = std::make_shared<CompensationDelay> (channels, delayCapacityFor (needed));
+    snap.keepAlive.push_back (delay);
+    return delay.get();
+}
 } // namespace
 
 GraphBuilder::GraphBuilder (AudioEngine& e, SampleStore& s, ChannelIds& i, PluginProvider* p, bool isOffline)
@@ -298,8 +325,128 @@ std::vector<std::pair<juce::String, ChannelNode*>> GraphBuilder::channelNodes() 
     return out;
 }
 
+LatencyInput GraphBuilder::latencyInput() const
+{
+    LatencyInput in;
+    in.automatic = model.pdc;
+    const int numTracks = (int) tracks.size();
+    for (const auto& ch : model.channels) // the channels of the snapshot, in its order
+    {
+        const auto it = channels.find (ch.id);
+        if (it == channels.end() || numTracks == 0)
+            continue;
+        LatencyInput::Channel c;
+        c.track = std::clamp (ch.mixerTrack, 0, numTracks - 1);
+        if (ch.kind == ChannelKind::plugin && it->second.slot != nullptr)
+            c.latency = it->second.slot->latencySamples() + ch.plugin.latencyOffset;
+        in.channels.push_back (c);
+    }
+    for (size_t i = 0; i < tracks.size(); ++i)
+    {
+        LatencyInput::Track t;
+        if (i < model.mixer.size())
+        {
+            for (const auto& fx : model.mixer[i].effects)
+            {
+                const auto it = effects.find (fx.id);
+                if (! fx.enabled || it == effects.end())
+                    continue;
+                int latency = 0;
+                if (fx.type == "plugin" && it->second.slot != nullptr)
+                    latency = it->second.slot->latencySamples() + fx.plugin.latencyOffset;
+                t.effects.push_back (latency);
+            }
+            t.offset = (int) std::lround (model.mixer[i].latencyOffsetMs * 0.001 * engine.getSampleRate());
+        }
+        in.tracks.push_back (std::move (t));
+    }
+    return in;
+}
+
+bool GraphBuilder::checkLatency()
+{
+    if (latencyInput() == planInput)
+        return false;
+    publish();
+    return true;
+}
+
+std::vector<GraphBuilder::PluginLatency> GraphBuilder::pluginLatencies() const
+{
+    std::vector<PluginLatency> out;
+    for (const auto& ch : model.channels)
+    {
+        const auto it = channels.find (ch.id);
+        if (ch.kind == ChannelKind::plugin && it != channels.end() && it->second.slot != nullptr)
+            out.push_back ({ "ch:" + ch.id, it->second.slot->latencySamples(), ch.plugin.latencyOffset });
+    }
+    for (const auto& track : model.mixer)
+    {
+        for (const auto& fx : track.effects)
+        {
+            const auto it = effects.find (fx.id);
+            if (fx.type == "plugin" && it != effects.end() && it->second.slot != nullptr)
+                out.push_back ({ "fx:" + fx.id, it->second.slot->latencySamples(), fx.plugin.latencyOffset });
+        }
+    }
+    return out;
+}
+
+int GraphBuilder::automationOffsetFor (const juce::String& target) const
+{
+    if (! planInput.automatic)
+        return 0;
+    juce::StringArray parts;
+    parts.addTokens (target, ":", "");
+    if (parts.size() < 3)
+        return 0; // proj:bpm, proj:swing
+
+    if (parts[0] == "ch" && (parts[2] == "volume" || parts[2] == "pan"))
+    {
+        // The channel strip hears its instrument's latency.
+        size_t index = 0;
+        for (const auto& ch : model.channels)
+        {
+            if (channels.find (ch.id) == channels.end())
+                continue;
+            if (ch.id == parts[1])
+                return index < planInput.channels.size() ? std::clamp (planInput.channels[index].latency, 0, maxCompensation) : 0;
+            ++index;
+        }
+        return 0;
+    }
+    if (parts[0] == "mx")
+    {
+        const int t = parts[1].getIntValue();
+        if (! parts[1].containsOnly ("0123456789") || t < 0 || t >= (int) planInput.tracks.size())
+            return 0;
+        return plan.automationOffset (planInput, t, (int) planInput.tracks[(size_t) t].effects.size());
+    }
+    if (parts[0] == "fx" || (parts[0] == "plug" && parts[1] == "fx" && parts.size() >= 4))
+    {
+        const auto& slotId = parts[0] == "fx" ? parts[1] : parts[2];
+        for (size_t t = 0; t < model.mixer.size() && t < planInput.tracks.size(); ++t)
+        {
+            int position = 0;
+            for (const auto& fx : model.mixer[t].effects)
+            {
+                if (! fx.enabled || effects.find (fx.id) == effects.end())
+                    continue;
+                if (fx.id == slotId)
+                    return plan.automationOffset (planInput, (int) t, position);
+                ++position;
+            }
+        }
+        return 0;
+    }
+    return 0; // instrument parameters (also of plugin instruments) come before any latency
+}
+
 void GraphBuilder::publish()
 {
+    planInput = latencyInput();
+    plan = planCompensation (planInput);
+
     // Structure signature: anything the audio thread holds pointers to or iterates over.
     juce::String key;
     key << (int) tracks.size() << "|" << pointerKey (currentTimeline.get()) << "|" << pointerKey (currentAutomation.get()) << "|";
@@ -321,18 +468,34 @@ void GraphBuilder::publish()
                 key << pointerKey (it->second.effect.get()) << ",";
         }
     }
+    key << "|pdc" << (planInput.automatic ? 1 : 0) << ":";
+    for (const auto& c : planInput.channels)
+        key << c.latency << ",";
+    for (const auto& t : planInput.tracks)
+    {
+        key << "/";
+        for (const int l : t.effects)
+            key << l << ",";
+        key << "o" << t.offset;
+    }
     if (key == structure && engine.snapshots.latest() != nullptr)
         return;
     structure = key;
 
     auto snap = std::make_unique<GraphSnapshot>();
     const int numTracks = (int) tracks.size();
+    std::set<const ChannelNode*> liveChannels;
     for (const auto& ch : model.channels)
     {
         const auto it = channels.find (ch.id);
         if (it == channels.end() || numTracks == 0)
             continue;
-        snap->channels.push_back ({ it->second.node.get(), std::clamp (ch.mixerTrack, 0, numTracks - 1) });
+        const auto index = snap->channels.size();
+        const int delaySamples = index < plan.channelDelay.size() ? plan.channelDelay[index] : 0;
+        const ChannelNode* nodeKey = it->second.node.get();
+        liveChannels.insert (nodeKey);
+        snap->channels.push_back ({ it->second.node.get(), std::clamp (ch.mixerTrack, 0, numTracks - 1),
+                                    delayFor (channelDelays, nodeKey, delaySamples, 2, *snap), delaySamples });
         snap->keepAlive.push_back (it->second.node);
         if (it->second.forward != nullptr)
             snap->keepAlive.push_back (std::const_pointer_cast<SampleData> (it->second.forward));
@@ -341,11 +504,16 @@ void GraphBuilder::publish()
         if (it->second.slot != nullptr)
             snap->keepAlive.push_back (it->second.slot);
     }
+    std::set<const MixerTrackNode*> liveTracks;
     for (size_t i = 0; i < tracks.size(); ++i)
     {
         GraphSnapshot::TrackEntry entry;
         entry.node = tracks[i].get();
         snap->keepAlive.push_back (tracks[i]);
+        const MixerTrackNode* trackKey = tracks[i].get();
+        liveTracks.insert (trackKey);
+        entry.delaySamples = i < plan.trackDelay.size() ? plan.trackDelay[i] : 0;
+        entry.delay = delayFor (trackDelays, trackKey, entry.delaySamples, 2, *snap);
         if (i < model.mixer.size())
         {
             for (const auto& fx : model.mixer[i].effects)
@@ -363,6 +531,23 @@ void GraphBuilder::publish()
     }
     snap->timeline = currentTimeline;
     snap->automation = bindAutomation();
+    snap->latency = plan.total;
+    if (plan.total > 0)
+    {
+        if (clickDelay == nullptr || clickDelay->capacity() < plan.total)
+            clickDelay = std::make_shared<CompensationDelay> (1, delayCapacityFor (plan.total));
+        snap->clickDelay = clickDelay.get();
+        snap->keepAlive.push_back (clickDelay);
+    }
+    else
+    {
+        clickDelay.reset();
+    }
+    // Delays of removed nodes (the old snapshot keeps them alive while it is in use).
+    for (auto it = channelDelays.begin(); it != channelDelays.end();)
+        it = liveChannels.count (it->first) == 0 ? channelDelays.erase (it) : std::next (it);
+    for (auto it = trackDelays.begin(); it != trackDelays.end();)
+        it = liveTracks.count (it->first) == 0 ? trackDelays.erase (it) : std::next (it);
     engine.snapshots.publish (std::move (snap));
 }
 
@@ -475,6 +660,7 @@ std::unique_ptr<AutomationBinding> GraphBuilder::bindAutomation() const
             if (entry.param == nullptr)
                 continue;
         }
+        entry.offsetSamples = automationOffsetFor (lane.target);
         binding->entries.push_back (entry);
     }
     return binding;

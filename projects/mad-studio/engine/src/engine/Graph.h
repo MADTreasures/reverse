@@ -4,6 +4,7 @@
 #include "dsp/Smoother.h"
 #include "engine/Effects.h"
 #include "engine/Instruments.h"
+#include "engine/Latency.h"
 #include "engine/ProjectModel.h"
 #include "engine/Timeline.h"
 
@@ -49,8 +50,10 @@ public:
     /** Message thread, before publishing. */
     void prepare (double sampleRate, int maxBlock);
 
-    /** Audio thread: renders the instrument and adds the strip output to the bus. */
-    void process (const BlockContext& ctx, float* busL, float* busR) noexcept;
+    /** Audio thread: renders the instrument and adds the strip output to the bus, delayed by
+        `delaySamples` for plugin delay compensation when `delay` is set. */
+    void process (const BlockContext& ctx, float* busL, float* busR, CompensationDelay* delay = nullptr,
+                  int delaySamples = 0) noexcept;
 
 private:
     dsp::OnePole volumeGain, panValue, muteGain;
@@ -97,6 +100,9 @@ struct AutomationBinding
         AutoParam* param = nullptr;
         PluginSlot* plugin = nullptr;
         int pluginParam = -1;
+        /** Plugin delay compensation: the audio reaching this parameter lags the transport by
+            this many samples, so the lane is read that much earlier. */
+        double offsetSamples = 0.0;
         // audio-thread scratch
         AutoParam::OverrideState state;
         float lastPluginValue = -1.0f;
@@ -114,17 +120,25 @@ struct GraphSnapshot
     {
         ChannelNode* node = nullptr;
         int track = 0;
+        CompensationDelay* delay = nullptr; // plugin delay compensation before the track bus
+        int delaySamples = 0;
     };
     struct TrackEntry
     {
         MixerTrackNode* node = nullptr;
         std::vector<Effect*> chain;
+        CompensationDelay* delay = nullptr; // plugin delay compensation before the master bus
+        int delaySamples = 0;
     };
 
     std::vector<ChannelEntry> channels;
     std::vector<TrackEntry> tracks; // index 0 = master
     std::shared_ptr<const Timeline> timeline;
     std::unique_ptr<AutomationBinding> automation;
+    /** How far the output lags behind the transport (plugin delay compensation); the
+        metronome is delayed by it to stay in time with the music. */
+    int latency = 0;
+    CompensationDelay* clickDelay = nullptr;
 
     /** Owns the nodes, effects, samples and plugin slots referenced above. */
     std::vector<std::shared_ptr<void>> keepAlive;

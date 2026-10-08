@@ -10,6 +10,7 @@
 #include "dsp/WaveShaper.h"
 #include "engine/AudioEngine.h"
 #include "engine/GraphBuilder.h"
+#include "engine/Latency.h"
 #include "engine/Renderer.h"
 #include "engine/Sequencer.h"
 #include "engine/Wav.h"
@@ -737,6 +738,175 @@ void testGraphLevels()
     }
 }
 
+//==============================================================================
+void testLatencyPlan()
+{
+    auto& s = *suite;
+    s.check (planCompensation ({}).total == 0, "empty project: no latency");
+
+    // Insert 1: an instrument with 300 samples latency next to one without, inserts of 100 and
+    // 0; insert 2: dry; master insert of 50.
+    LatencyInput in;
+    in.channels = { { 1, 0 }, { 1, 300 }, { 2, 0 } };
+    in.tracks = { { { 50 }, 0 }, { { 100, 0 }, 0 }, { {}, 0 } };
+    auto p = planCompensation (in);
+    s.check (p.channelDelay == std::vector<int> ({ 300, 0, 0 }), "channels wait for the slowest channel of their track");
+    s.check (p.trackInput == std::vector<int> ({ 400, 300, 0 }) && p.masterInput == 400, "aligned track and master inputs");
+    s.check (p.trackLatency == std::vector<int> ({ 450, 400, 0 }), "track latency adds the inserts");
+    s.check (p.trackDelay == std::vector<int> ({ 0, 0, 400 }), "tracks wait for the slowest track at the master");
+    s.near (p.total, 450, 0, "total = master input + master inserts");
+    s.near (p.automationOffset (in, 1, 0), 300, 0, "automation offset: first insert of insert 1");
+    s.near (p.automationOffset (in, 1, 1), 400, 0, "automation offset: second insert");
+    s.near (p.automationOffset (in, 1, 2), 400, 0, "automation offset: fader of insert 1");
+    s.near (p.automationOffset (in, 2, 0), 0, 0, "automation offset: fader of the dry insert (delayed after it)");
+    s.near (p.automationOffset (in, 0, 0), 400, 0, "automation offset: master insert");
+    s.near (p.automationOffset (in, 0, 1), 450, 0, "automation offset: master fader");
+    s.near (p.automationOffset (in, 7, 0), 0, 0, "automation offset: unknown track");
+
+    // A latent channel routed straight to the master: everything else waits for it there.
+    auto direct = in;
+    direct.channels.push_back ({ 0, 700 });
+    p = planCompensation (direct);
+    s.check (p.masterInput == 700 && p.trackDelay == std::vector<int> ({ 0, 300, 700 }) && p.channelDelay[3] == 0 && p.total == 750,
+             "channel on the master sets the master input");
+
+    // Manual offsets: > 0 delays the track, < 0 delays all the others.
+    auto offsets = in;
+    offsets.tracks[2].offset = 100;
+    p = planCompensation (offsets);
+    s.check (p.trackDelay == std::vector<int> ({ 0, 0, 500 }) && p.total == 450, "positive offset delays its track");
+    offsets.tracks[2].offset = 0;
+    offsets.tracks[1].offset = -200;
+    p = planCompensation (offsets);
+    s.check (p.trackDelay == std::vector<int> ({ 0, 0, 600 }) && p.total == 650, "negative offset delays the others");
+
+    // PDC off: reported latencies are ignored, manual offsets still apply.
+    auto manual = in;
+    manual.automatic = false;
+    manual.tracks[2].offset = 100;
+    p = planCompensation (manual);
+    s.check (p.channelDelay == std::vector<int> ({ 0, 0, 0 }) && p.trackDelay == std::vector<int> ({ 0, 0, 100 }) && p.total == 0,
+             "PDC off: only the manual offsets");
+    s.near (p.automationOffset (manual, 1, 2), 0, 0, "PDC off: automation is not compensated");
+
+    // Out-of-range values are clamped (tracks, latencies, offsets).
+    LatencyInput wild;
+    wild.channels = { { 99, 1 << 30 }, { -3, -50 } };
+    wild.tracks = { { {}, 0 }, { { -10 }, 0 } };
+    p = planCompensation (wild);
+    s.check (p.channelDelay == std::vector<int> ({ 0, maxCompensation }) && p.trackDelay[1] == 0 && p.total == maxCompensation,
+             "latencies are clamped");
+    wild.tracks[1].offset = -(1 << 30);
+    p = planCompensation (wild);
+    s.check (p.trackDelay[1] == 0 && p.total == maxCompensation, "offsets are clamped");
+    wild.tracks[1].offset = 1 << 30;
+    p = planCompensation (wild);
+    s.check (p.channelDelay == std::vector<int> ({ 0, 0 }) && p.trackDelay[1] == 0 && p.total == 0,
+             "a maximal positive offset cancels the maximal latency");
+}
+
+void testCompensationDelay()
+{
+    auto& s = *suite;
+    CompensationDelay delay (2, 1000);
+    s.near (delay.capacity(), 1000, 0, "capacity");
+
+    // An impulse comes out `delay` samples later, whatever the block sizes.
+    std::vector<float> l (3000, 0.0f), r (3000, 0.0f);
+    l[10] = 1.0f;
+    r[20] = -1.0f;
+    for (int at = 0, block = 1; at < 3000; at += block, block = block * 3 % 509 + 1)
+    {
+        const int n = std::min (block, 3000 - at);
+        float* ch[] = { l.data() + at, r.data() + at };
+        delay.process (ch, n, 777);
+    }
+    s.near (l[787], 1.0, 0.0, "impulse delayed by 777 samples across odd block sizes (L)");
+    s.near (r[797], -1.0, 0.0, "impulse delayed by 777 samples across odd block sizes (R)");
+    s.near (peak (l, 0, 787) + peak (l, 788, 3000) + peak (r, 0, 797) + peak (r, 798, 3000), 0.0, 0.0, "nothing else comes out");
+    s.check (delay.isQuiet (777), "quiet once the impulse has left the delay");
+
+    CompensationDelay pass (1, 4096);
+    std::vector<float> x { 0.5f, 0.25f, -1.0f };
+    float* px[] = { x.data() };
+    pass.process (px, 3, 0);
+    s.near (std::abs (x[0] - 0.5f) + std::abs (x[1] - 0.25f) + std::abs (x[2] + 1.0f), 0.0, 0.0, "delay 0 passes through");
+    s.check (! pass.isQuiet (0), "not quiet right after audio");
+    std::vector<float> z (5, 0.0f);
+    float* pz[] = { z.data() };
+    pass.process (pz, 5, 4);
+    s.check (pass.isQuiet (4) && ! pass.isQuiet (5), "quiet after more silent samples than the delay");
+}
+
+void testLoopedCompensation()
+{
+    // Live engine, loop of one beat (24000 samples at 120 BPM). Insert 2 holds a plugin effect
+    // with a manual latency of 9600 samples (no instance needed), so insert 1 is delayed by 9600
+    // at the master and the master fader's automation is read 9600 samples earlier. Insert 1
+    // plays DC; the master is at unity for the first half of the loop and silent for the second.
+    // Right after each loop wrap the master still hears the end of the previous pass: silent.
+    auto& s = *suite;
+    SampleStore samples;
+    ChannelIds ids;
+    samples.add (constantSample ("dc_long", 2, 0.5f, 4.0, 48000.0));
+
+    AudioEngine engine (false);
+    const int block = 480;
+    engine.prepare (48000.0, block);
+    GraphBuilder builder (engine, samples, ids, nullptr, false);
+
+    auto project = makeProject();
+    ChannelModel ch;
+    ch.id = "ch_dc";
+    ch.kind = ChannelKind::sampler;
+    ch.mixerTrack = 1;
+    for (int i = 0; i < sampler::numParams; ++i)
+        ch.samplerParams[(size_t) i] = sampler::defaultValue (i);
+    ch.samplerParams[sampler::gain] = 1.0f;
+    ch.samplerParams[sampler::cutSelf] = 1.0f;
+    ch.sampleId = "dc_long";
+    project.channels.push_back (ch);
+    EffectModel latent;
+    latent.id = "fx_latent";
+    latent.type = "plugin";
+    latent.plugin.name = "Latent";
+    latent.plugin.latencyOffset = 9600;
+    project.mixer[2].effects.push_back (latent);
+
+    auto tl = std::make_shared<Timeline>();
+    tl->songMode = true;
+    tl->loopStart = 0.0;
+    tl->loopEnd = 96.0;
+    tl->events = { { 0.0, 96.0, ids.uidFor ("ch_dc"), 60, 1.0f, 0.0, false } };
+    auto automation = std::make_shared<AutomationData>();
+    automation->lanes.push_back ({ "mx:0:volume", { { 0.0, 0.8 }, { 48.0, 0.8 }, { 48.0, 0.0 }, { 96.0, 0.0 } } });
+
+    builder.setTimeline (tl);
+    builder.setAutomation (automation);
+    builder.setProject (project);
+    s.near (builder.totalLatency(), 9600, 0, "manual plugin latency drives the compensation");
+
+    EngineCommand play;
+    play.type = EngineCommand::Type::play;
+    play.tick = 0.0;
+    engine.post (play);
+
+    std::vector<float> out, l ((size_t) block), r ((size_t) block);
+    float* outs[] = { l.data(), r.data() };
+    for (int i = 0; i < 180; ++i) // 3.6 loops
+    {
+        engine.process (nullptr, 0, outs, 2, block);
+        out.insert (out.end(), l.begin(), l.end());
+        engine.snapshots.collectGarbage();
+    }
+    for (const size_t wrap : { (size_t) 24000, (size_t) 48000 })
+    {
+        s.near (peak (out, wrap + 3000, wrap + 6600), 0.0, 1.0e-3, str ("after the wrap at %g: still the silent end of the loop", (double) wrap));
+        s.near (rms (out, wrap + 12600, wrap + 18600), 0.5, 1.0e-3, str ("then the delayed start of the loop at unity (wrap %g)", (double) wrap));
+        s.near (peak (out, wrap + 24600, wrap + 30600), 0.0, 1.0e-3, str ("and the second half silent again (wrap %g)", (double) wrap));
+    }
+}
+
 } // namespace
 
 bool runSelfTests()
@@ -758,6 +928,9 @@ bool runSelfTests()
     s.run ("automation interpolation and override", testAutomation);
     s.run ("WAV writing and reading", testWav);
     s.run ("graph levels, chokes, automation, effects", testGraphLevels);
+    s.run ("plugin delay compensation plan", testLatencyPlan);
+    s.run ("compensation delay line", testCompensationDelay);
+    s.run ("compensated automation across a loop wrap", testLoopedCompensation);
     collectSampleGarbage();
     std::printf ("%d checks passed, %d failed\n", s.passed, s.failed);
     suite = nullptr;

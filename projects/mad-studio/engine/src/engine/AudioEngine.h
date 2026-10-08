@@ -78,6 +78,7 @@ struct PositionInfo
     double loopStart = 0.0, loopEnd = 0.0;
     double nextStart = 0.0;
     uint32_t seq = 0;       // sequence number of the last transport command applied
+    int latency = 0;        // plugin delay compensation: how far the output lags the transport
 };
 
 /** Renders a GraphSnapshot. The live engine is driven by the audio device (or the null

@@ -20,32 +20,65 @@ constexpr double twoPi = 6.28318530717958647692;
 class AudioEngine::Dispatcher final : public Sequencer::Sink
 {
 public:
-    Dispatcher (AudioEngine& e, GraphSnapshot* s) : engine (e), snap (s) {}
+    Dispatcher (AudioEngine& e, GraphSnapshot* s, const BlockContext& c) : engine (e), snap (s), ctx (c) {}
 
     void chunkStarted (int c, double songTick) override
     {
         if (snap == nullptr || snap->automation == nullptr)
             return;
+        // Plugin delay compensation: a parameter behind latent plugins hears the music late, so
+        // its lane is read that much earlier ("compensate automations"). Lanes without latency
+        // go first: the tempo lane sets the tempo that converts the offsets to ticks.
+        bool compensated = false;
         for (auto& entry : snap->automation->entries)
         {
-            double v = 0.0;
-            if (entry.param != nullptr)
+            if (entry.offsetSamples > 0.0)
+                compensated = true;
+            else
+                apply (entry, c, songTick);
+        }
+        if (! compensated)
+            return;
+
+        const double ticksPerSample = std::clamp ((double) engine.bpm.value (ctx, c), 10.0, 522.0) * ppq / (60.0 * ctx.sampleRate);
+        const auto* tl = snap->timeline.get();
+        const bool loops = tl != nullptr && ! engine.sequencer.bounded() && tl->loopEnd > tl->loopStart && songTick >= tl->loopStart;
+        for (auto& entry : snap->automation->entries)
+        {
+            if (entry.offsetSamples <= 0.0)
+                continue;
+            double tick = songTick - entry.offsetSamples * ticksPerSample;
+            if (songTick >= 0.0)
             {
-                if (songTick >= 0.0)
-                {
-                    entry.state.active = entry.lane->evaluate (songTick, v);
-                    if (entry.state.active)
-                        entry.state.value = (float) v;
-                }
-                entry.param->setChunk (c, entry.state);
+                // Right after a loop wrap, that audio still comes from the end of the loop.
+                if (loops && tick < tl->loopStart)
+                    tick = tl->loopEnd - std::fmod (tl->loopStart - tick, tl->loopEnd - tl->loopStart);
+                tick = std::max (0.0, tick);
             }
-            else if (entry.plugin != nullptr && c == 0 && songTick >= 0.0 && entry.lane->evaluate (songTick, v))
+            apply (entry, c, songTick >= 0.0 ? tick : -1.0);
+        }
+    }
+
+    /** Applies a lane read at `tick` (< 0: not playing in song mode) to chunk `c`. */
+    void apply (AutomationBinding::Entry& entry, int c, double tick) noexcept
+    {
+        double v = 0.0;
+        if (entry.param != nullptr)
+        {
+            if (tick >= 0.0)
             {
-                if (differs ((float) v, entry.lastPluginValue))
-                {
-                    entry.plugin->setParameterFromAudioThread (entry.pluginParam, (float) v);
-                    entry.lastPluginValue = (float) v;
-                }
+                entry.state.active = entry.lane->evaluate (tick, v);
+                if (entry.state.active)
+                    entry.state.value = (float) v;
+            }
+            entry.param->setChunk (c, entry.state);
+        }
+        else if (entry.plugin != nullptr && c == 0 && tick >= 0.0 && entry.lane->evaluate (tick, v))
+        {
+            if (differs ((float) v, entry.lastPluginValue))
+            {
+                entry.plugin->setParameterFromAudioThread (entry.pluginParam, (float) v);
+                entry.lastPluginValue = (float) v;
             }
         }
     }
@@ -96,6 +129,7 @@ public:
 private:
     AudioEngine& engine;
     GraphSnapshot* snap;
+    const BlockContext& ctx;
 };
 
 //==============================================================================
@@ -451,7 +485,7 @@ void AudioEngine::processBlock (const float* const* inputs, int numInputs, float
                 entry.state = entry.param->beginAutomation (ctx);
 
     {
-        Dispatcher dispatcher (*this, snap);
+        Dispatcher dispatcher (*this, snap, ctx);
         sequencer.process (ctx, snap != nullptr ? snap->timeline.get() : nullptr, bpm, swing,
                            beatsPerBar.load (std::memory_order_relaxed),
                            metronomeEnabled.load (std::memory_order_relaxed), dispatcher);
@@ -557,7 +591,7 @@ void AudioEngine::processBlock (const float* const* inputs, int numInputs, float
         for (const auto& c : snap->channels)
         {
             auto* track = snap->tracks[(size_t) c.track].node;
-            c.node->process (ctx, track->busL.data(), track->busR.data());
+            c.node->process (ctx, track->busL.data(), track->busR.data(), c.delay, c.delaySamples);
         }
 
         auto* master = snap->tracks[0].node;
@@ -567,6 +601,11 @@ void AudioEngine::processBlock (const float* const* inputs, int numInputs, float
         {
             auto& entry = snap->tracks[t];
             entry.node->process (ctx, entry.chain);
+            if (entry.delay != nullptr && entry.delaySamples > 0)
+            {
+                float* bus[] = { entry.node->busL.data(), entry.node->busR.data() };
+                entry.delay->process (bus, n, entry.delaySamples);
+            }
             const float* l = entry.node->busL.data();
             const float* r = entry.node->busR.data();
             for (int i = 0; i < n; ++i)
@@ -578,6 +617,11 @@ void AudioEngine::processBlock (const float* const* inputs, int numInputs, float
         master->process (ctx, snap->tracks[0].chain);
 
         renderClicks (ctx, clickBuffer.data());
+        if (snap->clickDelay != nullptr && snap->latency > 0)
+        {
+            float* click[] = { clickBuffer.data() };
+            snap->clickDelay->process (click, n, snap->latency);
+        }
         const float* ml = master->busL.data();
         const float* mr = master->busR.data();
         const float* ck = clickBuffer.data();
@@ -607,6 +651,7 @@ void AudioEngine::processBlock (const float* const* inputs, int numInputs, float
     position.loopEnd = tl != nullptr ? tl->loopEnd : 0.0;
     position.nextStart = sequencer.nextStartTick();
     position.seq = transportSeq;
+    position.latency = snap != nullptr ? snap->latency : 0;
     positions.publish();
 
     snapshots.release();

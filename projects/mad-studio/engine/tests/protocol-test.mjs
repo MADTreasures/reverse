@@ -595,7 +595,7 @@ async function testPlugins(engine) {
   check(gone.type === 'error', 'plugins are released when removed from the project');
 
   if (isMac) await testAudioUnits(engine);
-  return { synth, gain };
+  return { synth, gain, delay: list.plugins.find((p) => p.name === 'MAD Test Delay') };
 }
 
 async function testAudioUnits(engine) {
@@ -633,6 +633,191 @@ async function testAudioUnits(engine) {
     check(s.rms > 1e-4 && s.nonFinite === 0, `DLSMusicDevice through AULowpass is audible (rms ${s.rms})`);
   }
   engine.send({ type: 'project.sync', project: baseProject() });
+}
+
+// Plugin delay compensation with "MAD Test Delay" (delays its input by its Latency parameter and
+// reports that as its latency). The same click plays on two channels: through the delay on
+// insert 1 (panned left) and dry on insert 2 (panned right), so each side of a render shows
+// where one path lands.
+async function testLatency(engine, plugins) {
+  if (!existsSync(join(pluginDir, 'MAD Test Delay.vst3'))) {
+    console.log('plugin delay compensation: skipped (no MAD Test Delay in the plugin folder)');
+    return;
+  }
+  console.log('plugin delay compensation');
+  const delay = plugins?.delay;
+  check(delay && delay.isInstrument === false && delay.format === 'VST3', 'scan finds MAD Test Delay');
+  if (!delay) return;
+
+  const clickPath = writeRawSample('click.f32', 1, 4800, (i) => (i < 200 ? 0.9 : 0));
+  const loaded = await engine.request({ type: 'samples.loadRaw', id: 'test:click', path: clickPath, sampleRate: 48000, channels: 1, frames: 4800 },
+    (m) => (m.type === 'samples.loaded' && m.id === 'test:click') || (m.type === 'error' && m.request === 'samples.loadRaw'), 5000, 'click sample');
+  check(loaded.type === 'samples.loaded', 'latency: click sample loads');
+
+  const ref = { uid: delay.uid, name: delay.name, vendor: delay.vendor, format: delay.format, fileOrIdentifier: delay.fileOrIdentifier, isInstrument: false, state: null };
+  const project = ({ pdc = true, enabled = true, pluginOffset = 0, offset1 = 0, offset2 = 0 } = {}) => ({
+    bpm: 120,
+    beatsPerBar: 4,
+    swing: 0,
+    pdc,
+    channels: [
+      { id: 'ch_l', kind: 'sampler', volume: 0.8, pan: 0, muted: false, mixerTrack: 1, sampler: samplerParams('test:click') },
+      { id: 'ch_r', kind: 'sampler', volume: 0.8, pan: 0, muted: false, mixerTrack: 2, sampler: samplerParams('test:click') },
+    ],
+    mixer: [
+      mixerTrack(0),
+      mixerTrack(1, { pan: -1, latencyOffset: offset1, effects: [{ id: 'fx_delay', type: 'plugin', enabled, params: {}, plugin: { ...ref, latencyOffset: pluginOffset } }] }),
+      mixerTrack(2, { pan: 1, latencyOffset: offset2 }),
+    ],
+    samples: { 'test:click': { id: 'test:click', name: 'Click', source: 'factory' } },
+  });
+  const clicksAt = (...ticks) => ({
+    type: 'timeline.set', mode: 'song', loopStart: 0, loopEnd: 384,
+    events: ticks.flatMap((tick) => ['ch_l', 'ch_r'].map((channelId) => ({ tick, length: 24, channelId, key: 60, velocity: 1 }))),
+  });
+  // Syncs a project and returns the engine's latency report for it (sent whenever it changes).
+  const sync = async (p, total, what) => {
+    const since = engine.messages.length;
+    engine.send({ type: 'project.sync', project: p });
+    try {
+      return await engine.waitFor((m) => m.type === 'latency' && m.total === total && m.automatic === p.pdc, 10000, `latency report: ${what}`, since);
+    } catch (err) {
+      const last = engine.messages.filter((m) => m.type === 'latency').at(-1);
+      check(false, `${err.message} (last report: ${JSON.stringify(last)})`);
+      return null;
+    }
+  };
+  const render = async (name) => {
+    const path = join(work, name);
+    const d = await engine.request({ type: 'render.start', requestId: name, path, sampleRate: 48000, bitDepth: 32, startTick: 0, endTick: 384, tailSeconds: 0.2 },
+      (m) => (m.type === 'render.done' && m.requestId === name) || (m.type === 'error' && m.request === 'render.start'), 60000, `render ${name}`);
+    check(d.type === 'render.done', `latency render ${name} (${d.message ?? 'ok'})`);
+    return d.type === 'render.done' ? readWav(path) : null;
+  };
+  // First sample above a quarter of the channel's peak inside [from, to).
+  const onset = (ch, from = 12000, to = 48000) => {
+    let peak = 0;
+    for (let i = from; i < to; i++) peak = Math.max(peak, Math.abs(ch[i]));
+    if (peak < 1e-3) return NaN;
+    for (let i = from; i < to; i++) if (Math.abs(ch[i]) > peak / 4) return i;
+    return NaN;
+  };
+  const peakIn = (ch, from, to) => {
+    let peak = 0;
+    for (let i = from; i < Math.min(to, ch.length); i++) peak = Math.max(peak, Math.abs(ch[i]));
+    return peak;
+  };
+
+  // Reference: the delay is loaded but bypassed, so nothing has latency.
+  const s0 = engine.messages.length;
+  engine.send({ type: 'project.sync', project: project({ enabled: false }) });
+  const ready = await engine.waitFor((m) => (m.type === 'plugin.loaded' || m.type === 'plugin.error') && m.key === 'fx:fx_delay', 30000, 'MAD Test Delay loads', s0);
+  check(ready.type === 'plugin.loaded', `MAD Test Delay loads (${ready.message ?? ''})`);
+  if (ready.type !== 'plugin.loaded') return;
+  const baseReport = await engine.waitFor((m) => m.type === 'latency' && m.plugins?.['fx:fx_delay']?.reported === 1000, 10000, 'latency report of the bypassed delay', s0)
+    .catch((err) => check(false, err.message));
+  engine.send(clicksAt(96));
+  let wav = await render('pdc-reference.wav');
+  if (!wav) return;
+  const refL = onset(wav.data[0]);
+  const refR = onset(wav.data[1]);
+  const refFrames = wav.frames;
+  near(refL, refR, 0, 'latency: both clicks start together without latency');
+  check(Math.abs(refL - 24000) <= 64, `latency: reference click at tick 96 = sample 24000 (+ attack) (got ${refL})`);
+  if (baseReport) check(baseReport.total === 0 && baseReport.tracks?.length === 3 && baseReport.tracks.every((t) => t.delay === 0), `latency report: a bypassed plugin is not compensated (${JSON.stringify(baseReport)})`);
+
+  // Automatic PDC: the dry path waits for the delayed one; the render starts at tick 0 anyway.
+  let report = await sync(project(), 1000, 'automatic');
+  if (report) {
+    check(report.tracks[1].latency === 1000 && report.tracks[1].delay === 0, `latency report: insert 1 has 1000 samples latency (${JSON.stringify(report.tracks[1])})`);
+    check(report.tracks[2].latency === 0 && report.tracks[2].delay === 1000, `latency report: insert 2 is delayed by 1000 (${JSON.stringify(report.tracks[2])})`);
+    check(report.tracks[0].latency === 1000 && report.sampleRate > 0, 'latency report: the master hears 1000 samples latency');
+    check(report.plugins['fx:fx_delay']?.reported === 1000 && report.plugins['fx:fx_delay']?.offset === 0, 'latency report: plugin reported/offset');
+  }
+  wav = await render('pdc-auto.wav');
+  if (wav) {
+    near(onset(wav.data[0]), refL, 0, 'PDC: the click through the latent plugin is in time');
+    near(onset(wav.data[1]), refR, 0, 'PDC: the dry click is delayed to match');
+    near(wav.frames, refFrames, 0, 'PDC: the render length does not change');
+  }
+
+  // PDC off: the plugin's latency is heard.
+  report = await sync(project({ pdc: false }), 0, 'PDC off');
+  if (report) check(report.tracks[2].delay === 0, 'latency report: PDC off delays nothing');
+  wav = await render('pdc-off.wav');
+  if (wav) {
+    near(onset(wav.data[0]), refL + 1000, 0, 'PDC off: the latent path is 1000 samples late');
+    near(onset(wav.data[1]), refR, 0, 'PDC off: the dry path is unchanged');
+  }
+
+  // Manual track offsets (ms): > 0 delays the track, < 0 delays all the others.
+  await sync(project({ offset2: 10 }), 1000, 'insert 2 +10 ms');
+  wav = await render('pdc-offset-plus.wav');
+  if (wav) {
+    near(onset(wav.data[0]), refL, 0, 'track offset +10 ms: insert 1 stays in time');
+    near(onset(wav.data[1]), refR + 480, 0, 'track offset +10 ms: insert 2 is 480 samples later');
+  }
+  await sync(project({ offset1: -10 }), 1480, 'insert 1 -10 ms');
+  wav = await render('pdc-offset-minus.wav');
+  if (wav) {
+    near(onset(wav.data[0]), refL - 480, 0, 'track offset -10 ms: insert 1 is 480 samples earlier');
+    near(onset(wav.data[1]), refR, 0, 'track offset -10 ms: insert 2 stays in time');
+  }
+
+  // A plugin's latency offset (wrapper setting) corrects a plugin that misreports its latency.
+  report = await sync(project({ pluginOffset: 200 }), 1200, 'plugin offset +200');
+  if (report) check(report.plugins['fx:fx_delay']?.reported === 1000 && report.plugins['fx:fx_delay']?.offset === 200, 'latency report: plugin offset');
+  wav = await render('pdc-plugin-offset.wav');
+  if (wav) near(onset(wav.data[0]), refL - 200, 0, 'plugin latency offset +200: compensated as 1200 samples');
+
+  // The plugin changes its latency while running: compensation follows.
+  await sync(project(), 1000, 'automatic again');
+  const params = await engine.request({ type: 'plugin.getParams', key: 'fx:fx_delay' }, (m) => m.type === 'plugin.params' && m.key === 'fx:fx_delay', 5000, 'delay params');
+  const lp = params.params.find((p) => p.name === 'Latency');
+  check(!!lp, 'MAD Test Delay has a Latency parameter');
+  if (!lp) return;
+  let since = engine.messages.length;
+  engine.send({ type: 'plugin.setParam', key: 'fx:fx_delay', index: lp.index, value: 2000 / 9600 });
+  try {
+    await engine.waitFor((m) => m.type === 'latency' && m.total === 2000, 10000, 'latency report after the plugin changed its latency', since);
+    check(true, 'a plugin announcing a new latency updates the compensation');
+  } catch (err) {
+    check(false, err.message);
+  }
+  wav = await render('pdc-changed.wav');
+  if (wav) {
+    near(onset(wav.data[0]), refL, 0, 'changed latency (2000): the latent path is in time');
+    near(onset(wav.data[1]), refR, 0, 'changed latency (2000): the dry path is in time');
+  }
+
+  // Compensated automation: insert 1's fader drops to 0 at tick 192; with 9600 samples latency
+  // (38.4 ticks) its audio reaches the fader late, so the lane must be read that much earlier.
+  since = engine.messages.length;
+  engine.send({ type: 'plugin.setParam', key: 'fx:fx_delay', index: lp.index, value: 1 });
+  await engine.waitFor((m) => m.type === 'latency' && m.total === 9600, 10000, 'latency report: 9600', since).catch((err) => check(false, err.message));
+  engine.send(clicksAt(172, 212)); // 20 ticks before and after the step (samples 43000 and 53000)
+  engine.send({ type: 'automation.set', lanes: [{ target: 'mx:1:volume', points: [[0, 0.8], [191, 0.8], [192, 0], [384, 0]] }] });
+  wav = await render('pdc-automation.wav');
+  if (wav) {
+    const [l, r] = wav.data;
+    const before = peakIn(l, 42000, 46000) / peakIn(r, 42000, 46000);
+    const after = peakIn(l, 52000, 56000) / peakIn(r, 52000, 56000);
+    near(before, 1, 0.02, 'compensated automation: the click before the step plays at full volume');
+    check(after < 0.01, `compensated automation: the click after the step is silenced (${after.toFixed(4)})`);
+  }
+  await sync(project({ pdc: false }), 0, 'PDC off, automation');
+  wav = await render('pdc-automation-off.wav');
+  if (wav) {
+    // Without compensation the first click reaches the fader 9600 samples late, after the step.
+    const [l, r] = wav.data;
+    const late = peakIn(l, 52000, 56000) / peakIn(r, 42000, 46000);
+    check(late < 0.01, `without PDC the automation step comes too early for the latent click (${late.toFixed(4)})`);
+  }
+
+  engine.send({ type: 'automation.set', lanes: [] });
+  engine.send({ type: 'project.sync', project: baseProject() });
+  engine.send(timeline());
+  await engine.request({ type: 'ping' }, (m) => m.type === 'pong', 10000, 'pong after the latency test');
 }
 
 // Random project edits (structural and parameter changes), timeline/automation updates, sample
@@ -915,6 +1100,7 @@ async function main() {
     await testRecording(engine, ready);
     await testAutomation(engine);
     const plugins = await testPlugins(engine);
+    await testLatency(engine, plugins);
     await testStress(engine, plugins);
     exitInfo = await engine.close();
     check(exitInfo.code === 0, `engine exits cleanly when stdin closes (code ${exitInfo.code}, signal ${exitInfo.signal})`);

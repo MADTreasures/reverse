@@ -1,13 +1,16 @@
 // Minimal plugins with exactly predictable output, used by engine/tests/protocol-test.mjs.
-//   MAD_TEST_SYNTH=0: "MAD Test Gain"  - stereo effect, output = input * gain (parameter 0..1, default 0.5)
+//   (default)         "MAD Test Gain"  - stereo effect, output = input * gain (parameter 0..1, default 0.5)
 //   MAD_TEST_SYNTH=1: "MAD Test Synth" - sine per MIDI note at the note's frequency,
 //                                        amplitude velocity * 0.25, 5 ms linear attack/release
+//   MAD_TEST_DELAY=1: "MAD Test Delay" - stereo effect, output = input delayed by `latency` samples
+//                                        (parameter 0..9600, default 1000), reported as its latency
 
 #include <juce_audio_processors/juce_audio_processors.h>
 
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <vector>
 
 namespace
 {
@@ -29,7 +32,91 @@ public:
     void releaseResources() override {}
 };
 
-#if ! MAD_TEST_SYNTH
+#if MAD_TEST_DELAY
+
+class TestDelay final : public TestPluginBase
+{
+public:
+    static constexpr int maxLatency = 9600;
+
+    TestDelay()
+        : TestPluginBase (BusesProperties()
+                              .withInput ("Input", juce::AudioChannelSet::stereo(), true)
+                              .withOutput ("Output", juce::AudioChannelSet::stereo(), true))
+    {
+        addParameter (latency = new juce::AudioParameterInt (juce::ParameterID { "latency", 1 }, "Latency", 0, maxLatency, 1000));
+    }
+
+    bool acceptsMidi() const override { return false; }
+    bool producesMidi() const override { return false; }
+
+    bool isBusesLayoutSupported (const BusesLayout& layouts) const override
+    {
+        const auto out = layouts.getMainOutputChannelSet();
+        return (out == juce::AudioChannelSet::mono() || out == juce::AudioChannelSet::stereo())
+               && layouts.getMainInputChannelSet() == out;
+    }
+
+    void prepareToPlay (double, int) override
+    {
+        for (auto& line : lines)
+            line.assign ((size_t) maxLatency + 1, 0.0f);
+        write = 0;
+        applyLatency();
+    }
+
+    using TestPluginBase::processBlock; // keep the double-precision overload visible
+    void processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer&) override
+    {
+        applyLatency(); // a changed parameter changes the delay and the reported latency together
+        const int size = maxLatency + 1;
+        const int channels = std::min (buffer.getNumChannels(), 2);
+        int w = write;
+        for (int i = 0; i < buffer.getNumSamples(); ++i)
+        {
+            const int r = (w - current + size) % size;
+            for (int ch = 0; ch < channels; ++ch)
+            {
+                auto& line = lines[(size_t) ch];
+                const float in = buffer.getSample (ch, i);
+                line[(size_t) w] = in;
+                buffer.setSample (ch, i, line[(size_t) r]);
+            }
+            w = (w + 1) % size;
+        }
+        write = w;
+    }
+
+    void getStateInformation (juce::MemoryBlock& dest) override
+    {
+        juce::MemoryOutputStream out (dest, false);
+        out.writeString ("MADTestDelay");
+        out.writeInt (latency->get());
+    }
+
+    void setStateInformation (const void* data, int size) override
+    {
+        juce::MemoryInputStream in (data, (size_t) size, false);
+        if (in.readString() == "MADTestDelay")
+            *latency = juce::jlimit (0, maxLatency, in.readInt());
+    }
+
+private:
+    void applyLatency()
+    {
+        const int wanted = juce::jlimit (0, maxLatency, latency->get());
+        if (wanted == current)
+            return;
+        current = wanted;
+        setLatencySamples (wanted);
+    }
+
+    juce::AudioParameterInt* latency = nullptr;
+    std::array<std::vector<float>, 2> lines;
+    int write = 0, current = -1;
+};
+
+#elif ! MAD_TEST_SYNTH
 
 class TestGain final : public TestPluginBase
 {
@@ -203,7 +290,9 @@ private:
 // Declared by the JUCE plugin client headers.
 juce::AudioProcessor* JUCE_CALLTYPE createPluginFilter()
 {
-   #if MAD_TEST_SYNTH
+   #if MAD_TEST_DELAY
+    return new TestDelay();
+   #elif MAD_TEST_SYNTH
     return new TestSynth();
    #else
     return new TestGain();

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "engine/AudioEngine.h"
+#include "engine/Latency.h"
 #include "engine/ProjectModel.h"
 #include "engine/Samples.h"
 #include "engine/Timeline.h"
@@ -50,6 +51,23 @@ public:
     /** Message thread: background work of effects (reverb IR rebuilds). */
     void serviceEffects();
 
+    /** Message thread: recomputes the plugin delay compensation from the plugins' current
+        latencies and publishes a new graph when it changed. True if it changed. */
+    bool checkLatency();
+
+    /** The compensation of the published graph. */
+    const LatencyPlan& latencyPlan() const noexcept { return plan; }
+    int totalLatency() const noexcept { return plan.total; }
+
+    /** Latency of every plugin in use: what it reports and the manual offset (wrapper
+        setting), keyed like the slots ("ch:<channelId>" / "fx:<slotId>"). */
+    struct PluginLatency
+    {
+        juce::String key;
+        int reported = 0, offset = 0;
+    };
+    std::vector<PluginLatency> pluginLatencies() const;
+
     const ProjectModel& project() const noexcept { return model; }
     ChannelNode* findChannel (const juce::String& id) const;
     std::vector<std::pair<juce::String, ChannelNode*>> channelNodes() const;
@@ -78,6 +96,8 @@ private:
     bool updateMixer();
     bool resolveSamples (ChannelEntry& entry, const ChannelModel& ch);
     void publish();
+    LatencyInput latencyInput() const;
+    int automationOffsetFor (const juce::String& target) const;
     std::unique_ptr<AutomationBinding> bindAutomation() const;
     AutoParam* resolveParam (const juce::String& target) const;
     void resetRemovedLanes (const AutomationData* previous, const AutomationData* next);
@@ -97,6 +117,14 @@ private:
     std::shared_ptr<const AutomationData> currentAutomation;
     juce::String structure;
     uint64_t sampleRevision = 0;
+
+    // Plugin delay compensation of the published graph and the delays it uses (reused while
+    // big enough, so delayed audio keeps flowing across graph updates).
+    LatencyInput planInput;
+    LatencyPlan plan;
+    std::map<const ChannelNode*, std::shared_ptr<CompensationDelay>> channelDelays;
+    std::map<const MixerTrackNode*, std::shared_ptr<CompensationDelay>> trackDelays;
+    std::shared_ptr<CompensationDelay> clickDelay;
 };
 
 } // namespace mad

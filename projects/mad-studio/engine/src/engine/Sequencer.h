@@ -52,6 +52,7 @@ public:
         isBounded = bounded;
         boundEnd = endTick;
     }
+    bool bounded() const noexcept { return isBounded; }
 
     void process (BlockContext& ctx, const Timeline* timeline, const AutoParam& bpm, const AutoParam& swing,
                   int beatsPerBar, bool metronome, Sink& sink) noexcept;
