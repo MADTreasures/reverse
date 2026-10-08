@@ -139,6 +139,7 @@ class Controller {
       case 'pencil':
       case 'brush':
       case 'airbrush':
+      case 'decoration':
       case 'eraser':
       case 'blend':
         return BrushSession.create(sub, p);

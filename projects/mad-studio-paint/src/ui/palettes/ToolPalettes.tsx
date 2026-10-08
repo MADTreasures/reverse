@@ -8,6 +8,7 @@ import { setFrameProps } from '../../store/frameActions';
 import type { Balloon } from '../../paint/text';
 import type { GradientEdge, GradientSpec } from '../../paint/gradient';
 import { GradientBar } from '../controls/GradientBar';
+import { tipAlphaUrl } from '../../engine/materials';
 import { openDialog } from '../overlays';
 import { entryForTool, isSpecialCurve, PALETTE_ENTRIES, PALETTE_LAYOUT, subToolsOf, toolInfo, type CorrectSettings, type FillReference, type SubTool, type ToolId } from '../../paint/tools';
 import { Icon } from '../controls/Icons';
@@ -101,11 +102,57 @@ export function SubToolPalette() {
   );
 }
 
-/** A tapering S-curve drawn with the brush's softness and opacity. */
+/** Points along the preview's S-curve (two cubic pieces). */
+function previewPoints(n: number): { x: number; y: number; a: number }[] {
+  const pieces = [
+    [6, 15, 40, 2, 70, 2, 82, 11],
+    [82, 11, 94, 20, 125, 21, 154, 6],
+  ];
+  const at = (q: number[], t: number) => {
+    const u = 1 - t;
+    const k = [u * u * u, 3 * u * u * t, 3 * u * t * t, t * t * t];
+    return { x: k[0] * q[0] + k[1] * q[2] + k[2] * q[4] + k[3] * q[6], y: k[0] * q[1] + k[1] * q[3] + k[2] * q[5] + k[3] * q[7] };
+  };
+  return Array.from({ length: n }, (_, i) => {
+    const f = (i + 0.5) / n;
+    const q = pieces[f < 0.5 ? 0 : 1];
+    const t = f < 0.5 ? f * 2 : f * 2 - 1;
+    const p = at(q, t);
+    const r = at(q, Math.min(1, t + 0.01));
+    return { ...p, a: (Math.atan2(r.y - p.y, r.x - p.x) * 180) / Math.PI };
+  });
+}
+
+/** A tapering S-curve drawn with the brush's softness and opacity (image tips: stamped along it). */
 function StrokePreview({ sub }: { sub: SubTool }) {
   const b = sub.brush!;
   const w = Math.max(1.2, Math.min(9, Math.sqrt(b.size) * 1.6));
   const soft = b.hardness < 0.5 || b.mode === 'blend';
+  if (b.tipShape === 'material' && b.tipMaterials.length) {
+    const size = Math.max(8, Math.min(18, Math.sqrt(b.size) * 2.6));
+    const n = Math.max(5, Math.min(16, Math.round(150 / (size * Math.max(0.35, Math.min(2, b.spacing))))));
+    const id = `tipmask-${sub.id}`;
+    return (
+      <svg className="stroke-preview" viewBox="0 0 160 22" preserveAspectRatio="none" aria-hidden="true">
+        <defs>
+          <mask id={id} style={{ maskType: 'alpha' }}>
+            {previewPoints(n).map((p, i) => (
+              <image
+                key={i}
+                href={tipAlphaUrl(b.tipMaterials[i % b.tipMaterials.length])}
+                x={p.x - size / 2}
+                y={p.y - size / 2}
+                width={size}
+                height={size}
+                transform={b.angleSource === 'line' ? `rotate(${p.a} ${p.x} ${p.y})` : undefined}
+              />
+            ))}
+          </mask>
+        </defs>
+        <rect width="160" height="22" fill="currentColor" mask={`url(#${id})`} opacity={Math.max(0.5, b.flow * b.opacity)} />
+      </svg>
+    );
+  }
   return (
     <svg className="stroke-preview" viewBox="0 0 160 22" preserveAspectRatio="none" aria-hidden="true">
       <path
@@ -115,7 +162,7 @@ function StrokePreview({ sub }: { sub: SubTool }) {
         strokeLinecap="round"
         strokeWidth={w}
         opacity={b.mode === 'erase' ? 0.4 : Math.max(0.4, b.flow * b.opacity)}
-        strokeDasharray={b.scatter > 0 ? '1 3' : b.texture === 'grain' ? '6 1.5' : undefined}
+        strokeDasharray={b.scatter > 0 ? '1 3' : b.texture === 'grain' || b.paper ? '6 1.5' : undefined}
         style={soft ? { filter: 'blur(1.2px)' } : undefined}
       />
     </svg>

@@ -3,6 +3,7 @@ import { LINEAR, sanitizeCurve01, type CurvePoint } from './curve';
 import { DEFAULT_TEXT_STYLE, sanitizeTextStyle, type BalloonShape, type TextStyle } from './text';
 import { sanitizeGradientStops, type GradientSpec } from './gradient';
 import { CURVE_TYPES, type CurveType, type RulerFigure } from './curves';
+import type { TipOrder } from './materials';
 
 export type ToolId =
   | 'zoom'
@@ -17,6 +18,7 @@ export type ToolId =
   | 'pencil'
   | 'brush'
   | 'airbrush'
+  | 'decoration'
   | 'eraser'
   | 'blend'
   | 'fill'
@@ -30,6 +32,7 @@ export type ToolId =
   | 'correct';
 
 export type BrushMode = 'paint' | 'erase' | 'blend';
+export type TipFlip = 'off' | 'on' | 'random';
 export type TipTexture = 'none' | 'grain';
 export type SelectShape = 'rect' | 'ellipse' | 'lasso' | 'polyline' | 'pen' | 'erase';
 export type FigureShape = 'line' | 'rect' | 'ellipse';
@@ -214,6 +217,34 @@ export interface BrushSettings {
   /** 0..1: how long the pure drawing colour lasts from the start of a stroke. */
   colorStretch: number;
 
+  // Brush tip materials
+  /** Round tip, or image materials (Brush tip > Tip shape). */
+  tipShape: 'circle' | 'material';
+  /** Material ids of the tip shapes, used dab after dab in `tipOrder`. */
+  tipMaterials: string[];
+  tipOrder: TipOrder;
+  flipH: TipFlip;
+  flipV: TipFlip;
+  /** Random turn of each dab, 0..1 of a full turn. */
+  angleRandom: number;
+
+  // Paper texture
+  /** Texture material id ('' = none). */
+  paper: string;
+  /** 0..1 */
+  paperDensity: number;
+  /** % */
+  paperScale: number;
+  /** Degrees. */
+  paperAngle: number;
+  /** −100..100 */
+  paperBrightness: number;
+  paperContrast: number;
+  paperInvert: boolean;
+  paperMode: 'multiply' | 'subtract';
+  /** "Apply by each plot": the texture on every dab instead of on the whole stroke. */
+  paperPerDab: boolean;
+
   // Watercolor edge (applied when the stroke ends)
   watercolorEdge: boolean;
   /** px */
@@ -311,6 +342,21 @@ export const DEFAULT_BRUSH: BrushSettings = {
   paintAmount: 0.6,
   paintDensity: 0.8,
   colorStretch: 0.2,
+  tipShape: 'circle',
+  tipMaterials: [],
+  tipOrder: 'repeat',
+  flipH: 'off',
+  flipV: 'off',
+  angleRandom: 0,
+  paper: '',
+  paperDensity: 1,
+  paperScale: 100,
+  paperAngle: 0,
+  paperBrightness: 0,
+  paperContrast: 0,
+  paperInvert: false,
+  paperMode: 'subtract',
+  paperPerDab: false,
   watercolorEdge: false,
   edgeRange: 5,
   edgeOpacity: 0.6,
@@ -341,6 +387,7 @@ export const TOOLS: ToolInfo[] = [
   { id: 'pencil', label: 'Pencil', key: 'P', hint: 'Sketching pencils · ⇧-click connects to the last point' },
   { id: 'brush', label: 'Brush', key: 'B', hint: 'Painting brushes' },
   { id: 'airbrush', label: 'Airbrush', key: 'B', hint: 'Soft airbrush and spray' },
+  { id: 'decoration', label: 'Decoration', key: 'B', hint: 'Draws patterns of image tips: leaves, grass, stars, sparkles …' },
   { id: 'eraser', label: 'Eraser', key: 'E', hint: 'Erase pixels on the current layer' },
   { id: 'blend', label: 'Blend', key: 'J', hint: 'Blur, blend and smudge colours on the current layer' },
   { id: 'fill', label: 'Fill', key: 'G', hint: 'Click to fill an area · ⇧-click toggles "refer multiple"' },
@@ -357,7 +404,7 @@ export const TOOLS: ToolInfo[] = [
 export const toolInfo = (id: ToolId): ToolInfo => TOOLS.find((t) => t.id === id)!;
 
 /** Tools that paint with a brush tip. */
-export const BRUSH_TOOLS: ToolId[] = ['pen', 'pencil', 'brush', 'airbrush', 'eraser', 'blend', 'figure'];
+export const BRUSH_TOOLS: ToolId[] = ['pen', 'pencil', 'brush', 'airbrush', 'decoration', 'eraser', 'blend', 'figure'];
 
 const FILL_LAYER: FillSettings = { reference: 'layer', tolerance: 10, expand: 0, alphaOnly: false, contiguous: true, closeGap: 1 };
 const FILL_OTHERS: FillSettings = { reference: 'all', tolerance: 10, expand: 1, alphaOnly: false, contiguous: true, closeGap: 2 };
@@ -408,6 +455,19 @@ export const DEFAULT_SUB_TOOLS: SubTool[] = [
     tool: 'pencil',
     name: 'Crayon',
     brush: brush({ size: 18, minSize: 0.6, opacityPressure: true, flow: 0.7, hardness: 0.7, texture: 'grain', stabilization: 2, spacing: 0.08 }),
+  },
+  {
+    // Light pressure only touches the high grain of the paper.
+    id: 'pencil-paper',
+    tool: 'pencil',
+    name: 'Pencil on paper',
+    brush: brush({ size: 12, minSize: 0.5, opacityPressure: true, minDensity: 0.25, flow: 0.9, hardness: 0.75, stabilization: 5, spacing: 0.1, paper: 'paper', paperDensity: 0.9, paperScale: 60 }),
+  },
+  {
+    id: 'pencil-pastel',
+    tool: 'pencil',
+    name: 'Pastel',
+    brush: brush({ size: 36, minSize: 0.6, opacityPressure: true, flow: 0.8, tipShape: 'material', tipMaterials: ['chalk'], angleRandom: 1, stabilization: 2, spacing: 0.12, paper: 'rough', paperDensity: 0.7, paperScale: 100 }),
   },
   // Brush
   {
@@ -495,6 +555,20 @@ export const DEFAULT_SUB_TOOLS: SubTool[] = [
     name: 'Soft brush',
     brush: brush({ size: 60, minSize: 0.4, opacity: 0.9, opacityPressure: true, flow: 0.35, hardness: 0.2, stabilization: 2, spacing: 0.05 }),
   },
+  {
+    id: 'brush-dry',
+    tool: 'brush',
+    group: 'Thick paint',
+    name: 'Dry brush',
+    brush: brush({ size: 50, minSize: 0.6, flow: 0.85, tipShape: 'material', tipMaterials: ['bristle'], angleSource: 'line', stabilization: 3, spacing: 0.04 }),
+  },
+  {
+    id: 'brush-canvas',
+    tool: 'brush',
+    group: 'Thick paint',
+    name: 'Paint on canvas',
+    brush: brush({ size: 40, minSize: 0.5, opacityPressure: true, flow: 0.8, hardness: 0.7, stabilization: 3, spacing: 0.06, paper: 'canvas', paperDensity: 0.6, paperMode: 'multiply', paperScale: 60 }),
+  },
   // Airbrush
   {
     id: 'air-soft',
@@ -504,6 +578,49 @@ export const DEFAULT_SUB_TOOLS: SubTool[] = [
   },
   { id: 'air-spray', tool: 'airbrush', name: 'Spray', brush: brush({ size: 3, sizePressure: false, flow: 0.8, hardness: 0.9, scatter: 12, spacing: 0.15, stabilization: 0, sizeRandom: 0.6 }) },
   { id: 'air-droplet', tool: 'airbrush', name: 'Droplet', brush: brush({ size: 8, sizePressure: false, flow: 0.9, hardness: 0.95, scatter: 6, spacing: 0.5, stabilization: 0 }) },
+  {
+    id: 'air-splatter',
+    tool: 'airbrush',
+    name: 'Splatter',
+    brush: brush({ size: 60, sizePressure: false, flow: 1, tipShape: 'material', tipMaterials: ['splatter'], angleRandom: 1, flipH: 'random', scatter: 0.6, sizeRandom: 0.5, spacing: 0.8, stabilization: 0 }),
+  },
+  // Decoration (patterns of image tips)
+  {
+    id: 'deco-leaves',
+    tool: 'decoration',
+    name: 'Leaves',
+    brush: brush({ size: 40, sizePressure: false, tipShape: 'material', tipMaterials: ['leaf'], angleSource: 'line', angleRandom: 0.35, flipV: 'random', scatter: 0.6, sizeRandom: 0.4, spacing: 0.9, stabilization: 4 }),
+  },
+  {
+    id: 'deco-grass',
+    tool: 'decoration',
+    name: 'Grass',
+    brush: brush({ size: 60, sizePressure: false, tipShape: 'material', tipMaterials: ['grass'], flipH: 'random', sizeRandom: 0.35, scatter: 0.15, spacing: 0.3, stabilization: 4 }),
+  },
+  {
+    id: 'deco-stars',
+    tool: 'decoration',
+    name: 'Stars',
+    brush: brush({ size: 26, sizePressure: false, tipShape: 'material', tipMaterials: ['star'], angleRandom: 1, scatter: 1.2, sizeRandom: 0.6, spacing: 1.6, stabilization: 0 }),
+  },
+  {
+    id: 'deco-sparkle',
+    tool: 'decoration',
+    name: 'Sparkle',
+    brush: brush({ size: 34, sizePressure: false, tipShape: 'material', tipMaterials: ['sparkle'], scatter: 1.5, sizeRandom: 0.7, densityRandom: 0.4, spacing: 1.8, stabilization: 0 }),
+  },
+  {
+    id: 'deco-hearts',
+    tool: 'decoration',
+    name: 'Hearts',
+    brush: brush({ size: 28, sizePressure: false, tipShape: 'material', tipMaterials: ['heart'], angleRandom: 0.15, scatter: 0.8, sizeRandom: 0.4, spacing: 1.6, stabilization: 2 }),
+  },
+  {
+    id: 'deco-flowers',
+    tool: 'decoration',
+    name: 'Flowers',
+    brush: brush({ size: 32, sizePressure: false, tipShape: 'material', tipMaterials: ['flower', 'star'], tipOrder: 'random', angleRandom: 1, scatter: 0.8, sizeRandom: 0.4, spacing: 1.4, stabilization: 2 }),
+  },
   // Eraser
   { id: 'eraser-hard', tool: 'eraser', name: 'Hard', brush: brush({ size: 30, sizePressure: false, hardness: 1, mode: 'erase', stabilization: 0 }) },
   {
@@ -697,7 +814,7 @@ export function sanitizeBrush(raw: unknown): BrushSettings {
     opacity: n(b.opacity, 1, 0, 1),
     flow: n(b.flow, 1, 0, 1),
     hardness: n(b.hardness, DEFAULT_BRUSH.hardness, 0, 1),
-    spacing: n(b.spacing, DEFAULT_BRUSH.spacing, 0.01, 2),
+    spacing: n(b.spacing, DEFAULT_BRUSH.spacing, 0.01, 5),
     stabilization: n(b.stabilization, 0, 0, 100),
     scatter: n(b.scatter, 0, 0, 50),
     sizePressure: b.sizePressure === true,
@@ -739,8 +856,27 @@ function migrateBrush(b: BrushSettings): BrushSettings {
     edgeRange: n(b.edgeRange, d.edgeRange, 0.5, 100),
     edgeOpacity: n(b.edgeOpacity, d.edgeOpacity, 0, 1),
     edgeDarkness: n(b.edgeDarkness, d.edgeDarkness, 0, 1),
+    tipShape: b.tipShape === 'material' ? 'material' : 'circle',
+    tipMaterials: Array.isArray(b.tipMaterials) ? b.tipMaterials.filter((id): id is string => typeof id === 'string' && MATERIAL_ID.test(id)).slice(0, 16) : [],
+    tipOrder: TIP_ORDERS.includes(b.tipOrder) ? b.tipOrder : 'repeat',
+    flipH: b.flipH === 'on' || b.flipH === 'random' ? b.flipH : 'off',
+    flipV: b.flipV === 'on' || b.flipV === 'random' ? b.flipV : 'off',
+    angleRandom: n(b.angleRandom, 0, 0, 1),
+    paper: typeof b.paper === 'string' && MATERIAL_ID.test(b.paper) ? b.paper : '',
+    paperDensity: n(b.paperDensity, 1, 0, 1),
+    paperScale: n(b.paperScale, 100, 5, 1000),
+    paperAngle: n(b.paperAngle, 0, -360, 360),
+    paperBrightness: n(b.paperBrightness, 0, -100, 100),
+    paperContrast: n(b.paperContrast, 0, -100, 100),
+    paperInvert: b.paperInvert === true,
+    paperMode: b.paperMode === 'multiply' ? 'multiply' : 'subtract',
+    paperPerDab: b.paperPerDab === true,
   };
 }
+
+/** Ids of materials: the built-in names, or imported ones ("img-…"). */
+const MATERIAL_ID = /^[a-z0-9-]{1,40}$/;
+const TIP_ORDERS: readonly TipOrder[] = ['repeat', 'reverse', 'stay', 'random', 'once'];
 
 /** Next tool for a shortcut key: cycles through the tools sharing that key. */
 export function toolForKey(key: string, current: ToolId): ToolId | null {
@@ -769,6 +905,7 @@ export const PALETTE_ENTRIES: PaletteEntry[] = [
   { id: 'pencil', label: 'Pencil', icon: 'pencil', tools: ['pencil'] },
   { id: 'brush', label: 'Brush', icon: 'brush', tools: ['brush'] },
   { id: 'airbrush', label: 'Airbrush', icon: 'airbrush', tools: ['airbrush'] },
+  { id: 'decoration', label: 'Decoration', icon: 'decoration', tools: ['decoration'] },
   { id: 'eraser', label: 'Eraser', icon: 'eraser', tools: ['eraser'] },
   { id: 'blend', label: 'Blend', icon: 'blend', tools: ['blend'] },
   { id: 'fill', label: 'Fill', icon: 'fill', tools: ['fill'] },
@@ -789,13 +926,13 @@ export type WorkspaceId = 'default' | 'classic';
  */
 export const PALETTE_LAYOUT: Record<WorkspaceId, string[][]> = {
   default: [
-    ['pen', 'pencil', 'brush', 'eraser', 'airbrush', 'blend'],
+    ['pen', 'pencil', 'brush', 'eraser', 'airbrush', 'decoration', 'blend'],
     ['select', 'autoSelect', 'fill', 'gradient'],
     ['operation', 'figure', 'frame', 'ruler', 'text', 'correct', 'navigate', 'eyedropper'],
   ],
   classic: [
     ['zoom', 'navigate', 'operation', 'select', 'autoSelect', 'eyedropper'],
-    ['pen', 'pencil', 'brush', 'airbrush', 'eraser', 'blend'],
+    ['pen', 'pencil', 'brush', 'airbrush', 'decoration', 'eraser', 'blend'],
     ['fill', 'gradient', 'figure', 'frame', 'ruler', 'text', 'correct'],
   ],
 };

@@ -30,6 +30,19 @@ export function scratchCanvas(key: string, width: number, height: number): HTMLC
   return c;
 }
 
+/** A scratch canvas at least `width` × `height` (it only grows), for reading pixels back. */
+export function growScratch(key: string, width: number, height: number): HTMLCanvasElement {
+  let c = scratch.get(key);
+  if (!c || c.width < width || c.height < height) {
+    c = createCanvas(Math.max(width, c?.width ?? 0), Math.max(height, c?.height ?? 0));
+    scratch.set(key, c);
+  }
+  return c;
+}
+
+/** Changes the alpha of a block of pixels whose top-left pixel lies at (ox, oy) on the canvas (paper textures). */
+export type PixelFilter = (rgba: Uint8ClampedArray, w: number, h: number, ox: number, oy: number) => void;
+
 export type ApplyMode = 'paint' | 'erase';
 
 export interface EditOptions {
@@ -41,6 +54,8 @@ export interface EditOptions {
   selection: HTMLCanvasElement | null;
   /** Called with every changed region (to recomposite and redraw). */
   onChange: (r: Rect) => void;
+  /** Paper texture applied to the stroke as it goes onto the layer. */
+  texture?: PixelFilter | null;
 }
 
 export class LayerEdit {
@@ -106,7 +121,7 @@ export class LayerEdit {
     const rr = r ? intersect(r, this.bounds) : null;
     if (!rr) return;
     this.touched = union(this.touched, rr);
-    const { selection, mode, opacity, lockAlpha } = this.opts;
+    const { selection, mode, opacity, lockAlpha, texture } = this.opts;
     if (selection) {
       withClip(this.bufferCtx, rr, () => {
         this.bufferCtx.globalCompositeOperation = 'destination-in';
@@ -120,7 +135,19 @@ export class LayerEdit {
       ctx.drawImage(this.backup, 0, 0);
       ctx.globalAlpha = opacity;
       ctx.globalCompositeOperation = mode === 'erase' ? 'destination-out' : lockAlpha ? 'source-atop' : 'source-over';
-      ctx.drawImage(this.buffer, 0, 0);
+      if (texture) {
+        // The stroke through the paper: a copy of the buffer's part, filtered.
+        const t = growScratch('textured', rr.w, rr.h);
+        const tctx = ctx2d(t, true);
+        tctx.globalAlpha = 1;
+        tctx.globalCompositeOperation = 'copy';
+        tctx.drawImage(this.buffer, rr.x, rr.y, rr.w, rr.h, 0, 0, rr.w, rr.h);
+        tctx.globalCompositeOperation = 'source-over';
+        const img = tctx.getImageData(0, 0, rr.w, rr.h);
+        texture(img.data, rr.w, rr.h, rr.x, rr.y);
+        tctx.putImageData(img, 0, 0);
+        ctx.drawImage(t, 0, 0, rr.w, rr.h, rr.x, rr.y, rr.w, rr.h);
+      } else ctx.drawImage(this.buffer, 0, 0);
     });
     touch(this.layerId);
     this.opts.onChange(rr);

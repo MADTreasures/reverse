@@ -2,7 +2,9 @@
  * Brush settings beyond the Tool Settings palette: the dynamics popover (pen pressure graph, tilt,
  * random) and the Advanced Tool Settings palette with all categories of a brush.
  */
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
+import { deleteMaterial, importMaterial, materialList, materialPreview, materialsVersion, subscribeMaterials } from '../../engine/materials';
+import type { MaterialInfo, MaterialKind } from '../../paint/materials';
 import type { BrushSettings, SubTool } from '../../paint/tools';
 import * as actions from '../../store/actions';
 import { currentSubTool, setState, useStore } from '../../store/store';
@@ -117,6 +119,64 @@ function Segmented<T extends string>({ value, options, onChange, label }: { valu
   );
 }
 
+const previews = new Map<string, string>();
+const previewOf = (m: MaterialInfo) => {
+  const key = `${m.kind}:${m.id}`;
+  let url = previews.get(key);
+  if (url === undefined) previews.set(key, (url = materialPreview(m.id, m.kind)));
+  return url;
+};
+
+/**
+ * Thumbnails of the brush tips or paper textures to choose from, with a button to import an image
+ * as a new one; imported ones can be deleted (⌥-click).
+ */
+function MaterialPicker({ kind, label, selected, onPick }: { kind: MaterialKind; label: string; selected: string[]; onPick: (id: string) => void }) {
+  useSyncExternalStore(subscribeMaterials, materialsVersion);
+  const list = materialList(kind);
+  const input = useRef<HTMLInputElement>(null);
+  return (
+    <div className="prop-row column">
+      <span className="prop-label">{label}</span>
+      <div className="material-grid" role="listbox" aria-label={label} aria-multiselectable={kind === 'tip'}>
+        {list.map((m) => (
+          <button
+            key={m.id}
+            role="option"
+            aria-selected={selected.includes(m.id)}
+            className={`material ${selected.includes(m.id) ? 'on' : ''}`}
+            title={m.id.startsWith('img-') ? `${m.name} (⌥-click deletes it)` : m.name}
+            aria-label={m.name}
+            onClick={(e) => {
+              if (e.altKey && m.id.startsWith('img-')) deleteMaterial(m.id);
+              else onPick(m.id);
+            }}
+          >
+            <img src={previewOf(m)} alt="" draggable={false} />
+          </button>
+        ))}
+        <button className="material add" title="Import an image" aria-label={kind === 'tip' ? 'Import brush tip image' : 'Import texture image'} onClick={() => input.current?.click()}>
+          +
+        </button>
+        <input
+          ref={input}
+          type="file"
+          accept="image/png,image/jpeg,image/webp,image/gif"
+          hidden
+          data-testid={`import-${kind}`}
+          onChange={async (e) => {
+            const f = e.target.files?.[0];
+            e.target.value = '';
+            if (!f) return;
+            const m = await importMaterial(f, f.name, kind);
+            onPick(m.id);
+          }}
+        />
+      </div>
+    </div>
+  );
+}
+
 function CategoryBody({ sub, category }: { sub: SubTool; category: Category }): ReactNode {
   const b = sub.brush!;
   const set = (patch: Partial<BrushSettings>) => setBrush(sub, patch);
@@ -174,7 +234,52 @@ function CategoryBody({ sub, category }: { sub: SubTool; category: Category }): 
     case 'tip':
       return (
         <>
-          <PropSlider label="Hardness" value={Math.round(b.hardness * 100)} min={0} max={100} onChange={(v) => set({ hardness: v / 100 })} />
+          <Segmented
+            label="Tip shape"
+            value={b.tipShape}
+            options={[
+              ['circle', 'Circle'],
+              ['material', 'Material'],
+            ]}
+            onChange={(v) => set({ tipShape: v, ...(v === 'material' && b.tipMaterials.length === 0 ? { tipMaterials: ['chalk'] } : {}) })}
+          />
+          {b.tipShape === 'material' ? (
+            <>
+              <MaterialPicker
+                kind="tip"
+                label="Brush tip (click to add or remove)"
+                selected={b.tipMaterials}
+                onPick={(id) => {
+                  const on = b.tipMaterials.includes(id);
+                  // At least one tip stays.
+                  if (on && b.tipMaterials.length === 1) return;
+                  set({ tipMaterials: on ? b.tipMaterials.filter((x) => x !== id) : [...b.tipMaterials, id].slice(0, 16) });
+                }}
+              />
+              <Segmented
+                label="Flip horizontal"
+                value={b.flipH}
+                options={[
+                  ['off', 'Off'],
+                  ['on', 'Flip'],
+                  ['random', 'Random'],
+                ]}
+                onChange={(v) => set({ flipH: v })}
+              />
+              <Segmented
+                label="Flip vertical"
+                value={b.flipV}
+                options={[
+                  ['off', 'Off'],
+                  ['on', 'Flip'],
+                  ['random', 'Random'],
+                ]}
+                onChange={(v) => set({ flipV: v })}
+              />
+            </>
+          ) : (
+            <PropSlider label="Hardness" value={Math.round(b.hardness * 100)} min={0} max={100} onChange={(v) => set({ hardness: v / 100 })} />
+          )}
           <PropSlider label="Thickness" value={Math.round(b.thickness * 100)} min={5} max={100} unit="%" onChange={(v) => set({ thickness: v / 100 })} />
           <PropSlider label="Angle" value={b.angle} min={0} max={360} unit="°" onChange={(v) => set({ angle: v })} />
           <Segmented
@@ -187,23 +292,69 @@ function CategoryBody({ sub, category }: { sub: SubTool; category: Category }): 
             ]}
             onChange={(v) => set({ angleSource: v })}
           />
+          <PropSlider label="Random angle" value={Math.round(b.angleRandom * 100)} min={0} max={100} unit="%" onChange={(v) => set({ angleRandom: v / 100 })} />
         </>
       );
     case 'spray':
       return <PropSlider label="Particle spread" value={Math.round(b.scatter * 100)} min={0} max={2000} unit="%" onChange={(v) => set({ scatter: v / 100 })} />;
     case 'stroke':
-      return <PropSlider label="Gap" value={Math.round(b.spacing * 100)} min={1} max={100} unit="%" onChange={(v) => set({ spacing: v / 100 })} />;
+      return (
+        <>
+          <PropSlider label="Gap" value={Math.round(b.spacing * 100)} min={1} max={500} unit="%" onChange={(v) => set({ spacing: v / 100 })} />
+          {b.tipShape === 'material' && b.tipMaterials.length > 1 && (
+            <Segmented
+              label="Repeat method"
+              value={b.tipOrder}
+              options={[
+                ['repeat', 'Repeat'],
+                ['reverse', 'Reverse'],
+                ['stay', 'Do not repeat'],
+                ['random', 'Random'],
+                ['once', 'One time only'],
+              ]}
+              onChange={(v) => set({ tipOrder: v })}
+            />
+          )}
+        </>
+      );
     case 'texture':
       return (
-        <Segmented
-          label="Texture"
-          value={b.texture}
-          options={[
-            ['none', 'None'],
-            ['grain', 'Grain'],
-          ]}
-          onChange={(v) => set({ texture: v })}
-        />
+        <>
+          <MaterialPicker kind="texture" label="Paper texture (click again to remove)" selected={b.paper ? [b.paper] : []} onPick={(id) => set({ paper: b.paper === id ? '' : id })} />
+          {b.paper && (
+            <>
+              <PropSlider label="Texture density" value={Math.round(b.paperDensity * 100)} min={0} max={100} onChange={(v) => set({ paperDensity: v / 100 })} />
+              <PropSlider label="Scale ratio" value={b.paperScale} min={5} max={400} unit="%" onChange={(v) => set({ paperScale: v })} />
+              <PropSlider label="Rotation angle" value={b.paperAngle} min={0} max={360} unit="°" onChange={(v) => set({ paperAngle: v })} />
+              <PropSlider label="Brightness" value={b.paperBrightness} min={-100} max={100} onChange={(v) => set({ paperBrightness: v })} />
+              <PropSlider label="Contrast" value={b.paperContrast} min={-100} max={100} onChange={(v) => set({ paperContrast: v })} />
+              <label className="check">
+                <input type="checkbox" checked={b.paperInvert} onChange={(e) => set({ paperInvert: e.target.checked })} /> Invert texture
+              </label>
+              <Segmented
+                label="Texture mode"
+                value={b.paperMode}
+                options={[
+                  ['subtract', 'Subtract'],
+                  ['multiply', 'Multiply'],
+                ]}
+                onChange={(v) => set({ paperMode: v })}
+              />
+              <label className="check">
+                <input type="checkbox" checked={b.paperPerDab} onChange={(e) => set({ paperPerDab: e.target.checked })} /> Apply by each plot
+              </label>
+            </>
+          )}
+          <Segmented
+            label="Tip grain"
+            value={b.texture}
+            options={[
+              ['none', 'None'],
+              ['grain', 'Grain'],
+            ]}
+            onChange={(v) => set({ texture: v })}
+          />
+        </>
       );
     case 'watercolor':
       return (

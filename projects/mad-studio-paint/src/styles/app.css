@@ -2240,3 +2240,35 @@
 .frame-template-dialog {
   width: 560px;
 }
+
+/* Brush tip and paper texture materials */
+.material-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, 40px);
+  gap: 4px;
+}
+.material-grid .material {
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius);
+  background: #fff;
+  overflow: hidden;
+  cursor: pointer;
+}
+.material-grid .material img {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+.material-grid .material.on {
+  outline: 2px solid var(--accent-strong);
+  outline-offset: -2px;
+}
+.material-grid .material.add {
+  background: var(--bg-2);
+  color: var(--text);
+  font-size: 20px;
+  line-height: 38px;
+}

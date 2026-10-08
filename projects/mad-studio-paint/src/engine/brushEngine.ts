@@ -8,9 +8,11 @@ import { linePath, strokeBounds, type VectorPoint, type VectorStroke } from '../
 import { circleBounds, inflate, intersect, union, type Rect } from '../paint/rect';
 import { affineAngle, applyAffine, type Affine, type Constraint } from '../paint/rulers';
 import { dabAlpha, interpolateDabs, pressureCurve, seededRandom, Stabilizer, stabilizerWindow, taperFactor, type Dab, type StrokePoint } from '../paint/stroke';
-import type { BrushSettings } from '../paint/tools';
+import { applyPaper, tipIndex } from '../paint/materials';
+import type { BrushSettings, TipFlip } from '../paint/tools';
 import { createCanvas, ctx2d, type Ctx } from './canvas';
-import { DirectEdit, LayerEdit, type PixelPatch } from './edit';
+import { DirectEdit, growScratch, LayerEdit, type PixelFilter, type PixelPatch } from './edit';
+import { paperHeights, tipCanvas } from './materials';
 
 const MAX_TIP = 256;
 
@@ -25,7 +27,11 @@ class Tips {
   private tint: HTMLCanvasElement | null = null;
   private readonly hard: boolean;
   private readonly aa: number;
-  /** Random source of the stroke (grain variants). */
+  /** Image material tips in the stroke colour (made when first used; null: unknown material). */
+  private materials: (HTMLCanvasElement | null)[] | null = null;
+  /** Dabs drawn so far (which material tip comes next). */
+  private n = 0;
+  /** Random source of the stroke (grain variants, material order and flips). */
   rand: () => number = Math.random;
 
   constructor(
@@ -34,6 +40,42 @@ class Tips {
   ) {
     this.aa = Math.max(0, Math.min(3, Math.round(brush.antiAlias)));
     this.hard = brush.texture === 'none' && brush.hardness >= 0.97;
+  }
+
+  /** Starts the order of material tips again (a stroke drawn again from the start). */
+  reset(): void {
+    this.n = 0;
+  }
+
+  private get usesMaterial(): boolean {
+    return this.brush.tipShape === 'material' && this.brush.tipMaterials.length > 0;
+  }
+
+  private materialTip(k: number): HTMLCanvasElement | null {
+    if (!this.materials) this.materials = this.brush.tipMaterials.map((id) => tipCanvas(id, this.rgb));
+    return this.materials[k] ?? null;
+  }
+
+  private flip(f: TipFlip): number {
+    return f === 'on' || (f === 'random' && this.rand() < 0.5) ? -1 : 1;
+  }
+
+  /** An image tip: its longer side is the brush size; turned, flipped and squashed like the round tip. */
+  private drawMaterial(ctx: Ctx, tip: HTMLCanvasElement, x: number, y: number, r: number, alpha: number, angle: number, thickness: number, color: Paint | null): Rect {
+    const fx = this.flip(this.brush.flipH);
+    const fy = this.flip(this.brush.flipV);
+    const s = (2 * r) / Math.max(tip.width, tip.height);
+    const w = tip.width * s;
+    const h = tip.height * s;
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.translate(x, y);
+    ctx.rotate(angle);
+    ctx.scale(fx, fy * Math.max(0.05, Math.min(1, thickness)));
+    ctx.imageSmoothingEnabled = this.aa > 0;
+    ctx.drawImage(color ? this.tinted(tip, color) : tip, -w / 2, -h / 2, w, h);
+    ctx.restore();
+    return circleBounds(x, y, Math.hypot(w, h) / 2 + 1);
   }
 
   private softTips(hardness: number): HTMLCanvasElement[] {
@@ -111,7 +153,14 @@ class Tips {
    * Draws one dab; returns the touched rect. `thickness` < 1 squashes the tip across `angle`
    * (radians); `color` overrides the stroke colour (colour mixing).
    */
-  draw(ctx: Ctx, x: number, y: number, radius: number, alpha: number, angle = 0, thickness = 1, color: Paint | null = null): Rect {
+  draw(ctx: Ctx, x: number, y: number, radius: number, alpha: number, angle = 0, thickness = 1, color: Paint | null = null): Rect | null {
+    if (this.usesMaterial) {
+      const k = tipIndex(this.brush.tipOrder, this.brush.tipMaterials.length, this.n++, this.rand);
+      // "One time only": nothing after the last tip.
+      if (k < 0) return null;
+      const tip = this.materialTip(k);
+      if (tip) return this.drawMaterial(ctx, tip, x, y, Math.max(0.5, radius), alpha, angle, thickness, color);
+    }
     const squash = Math.max(0.05, Math.min(1, thickness));
     const shaped = squash < 1;
     if (this.aa === 0 && !shaped) {
@@ -167,6 +216,45 @@ class Tips {
 
 const paintCss = (c: Paint) => `rgb(${Math.round(c.r)},${Math.round(c.g)},${Math.round(c.b)})`;
 
+/** A brush's paper texture as a filter on pixel blocks (null without one, or when it is unknown here). */
+function paperOf(b: BrushSettings): PixelFilter | null {
+  if (!b.paper || b.mode === 'blend' || b.paperDensity <= 0) return null;
+  const tex = paperHeights(b.paper, { brightness: b.paperBrightness, contrast: b.paperContrast, invert: b.paperInvert });
+  if (!tex) return null;
+  const p = { density: b.paperDensity, scale: b.paperScale, angle: b.paperAngle, brightness: b.paperBrightness, contrast: b.paperContrast, invert: b.paperInvert, mode: b.paperMode };
+  return (rgba, w, h, ox, oy) => applyPaper(rgba, w, h, ox, oy, tex.heights, tex.size, p);
+}
+
+/**
+ * Draws one tip onto `ctx` (canvas coordinates through its transform); with `paper`, the tip goes
+ * through the paper texture first ("Apply by each plot").
+ */
+function drawTip(ctx: Ctx, tips: Tips, paper: PixelFilter | null, x: number, y: number, r: number, alpha: number, angle: number, thickness: number, color: Paint | null): Rect | null {
+  if (!paper) return tips.draw(ctx, x, y, r, alpha, angle, thickness, color);
+  const R = Math.ceil(r * 1.5 + 3);
+  const x0 = Math.floor(x) - R;
+  const y0 = Math.floor(y) - R;
+  const n = 2 * R + 1;
+  const s = growScratch('dab', n, n);
+  const sctx = ctx2d(s, true);
+  sctx.setTransform(1, 0, 0, 1, 0, 0);
+  sctx.globalAlpha = 1;
+  sctx.globalCompositeOperation = 'source-over';
+  sctx.clearRect(0, 0, n, n);
+  sctx.translate(-x0, -y0);
+  const rect = tips.draw(sctx, x, y, r, alpha, angle, thickness, color);
+  sctx.setTransform(1, 0, 0, 1, 0, 0);
+  if (!rect) return null;
+  const img = sctx.getImageData(0, 0, n, n);
+  paper(img.data, n, n, x0, y0);
+  sctx.putImageData(img, 0, 0);
+  ctx.save();
+  ctx.globalAlpha = 1;
+  ctx.drawImage(s, 0, 0, n, n, x0, y0, n, n);
+  ctx.restore();
+  return rect;
+}
+
 export interface StrokeTarget {
   layerId: Id;
   layer: HTMLCanvasElement;
@@ -212,6 +300,8 @@ export class BrushStroke implements Stroke {
   copies: Affine[] | null = null;
   /** Ruler snapping: maps each (smoothed) point onto the ruler's path. */
   constrain: Constraint | null = null;
+  /** Paper texture on every dab ("Apply by each plot"); otherwise it is on the whole stroke. */
+  private readonly dabPaper: PixelFilter | null;
 
   constructor(
     private brush: BrushSettings,
@@ -227,12 +317,15 @@ export class BrushStroke implements Stroke {
     this.carried = { ...this.brushPaint };
     this.stabilizer = new Stabilizer(stabilizerWindow(brush.stabilization));
     this.erase = erase || brush.mode === 'erase';
+    const paper = paperOf(brush);
+    this.dabPaper = brush.paperPerDab ? paper : null;
     this.edit = new LayerEdit(target.layerId, target.layer, {
       mode: this.erase ? 'erase' : 'paint',
       opacity: brush.opacity,
       lockAlpha: target.lockAlpha,
       selection: target.selection,
       onChange: target.onChange,
+      texture: brush.paperPerDab ? null : paper,
     });
   }
 
@@ -313,14 +406,15 @@ export class BrushStroke implements Stroke {
       alpha *= densityFactor(under.a, this.brush.paintDensity);
     }
     if (r <= 0 || alpha <= 0) return null;
-    const angle = this.tipAngle(p);
-    let rect = this.tips.draw(ctx, x, y, r, alpha, angle, this.brush.thickness, color);
+    let angle = this.tipAngle(p);
+    if (this.brush.angleRandom > 0) angle += (this.rand() - 0.5) * 2 * Math.PI * this.brush.angleRandom;
+    let rect = drawTip(ctx, this.tips, this.dabPaper, x, y, r, alpha, angle, this.brush.thickness, color);
     if (this.copies) {
       for (let i = 1; i < this.copies.length; i++) {
         const m = this.copies[i];
         const q = applyAffine(m, { x, y });
         const { angle: turn, mirrored } = affineAngle(m);
-        rect = union(rect, this.tips.draw(ctx, q.x, q.y, r, alpha, mirrored ? turn - angle : angle + turn, this.brush.thickness, color))!;
+        rect = union(rect, drawTip(ctx, this.tips, this.dabPaper, q.x, q.y, r, alpha, mirrored ? turn - angle : angle + turn, this.brush.thickness, color));
       }
     }
     return rect;
@@ -348,6 +442,7 @@ export class BrushStroke implements Stroke {
     this.edit.reset();
     this.rand = seededRandom(this.seed);
     this.tips.rand = this.rand;
+    this.tips.reset();
     this.carried = { ...this.brushPaint };
     this.carry = 0;
     this.travel = 0;
@@ -480,7 +575,7 @@ export function renderVectorStroke(ctx: Ctx, line: VectorStroke): void {
   if (!lineBuffer || lineBuffer.width < box.w || lineBuffer.height < box.h) {
     lineBuffer = createCanvas(Math.max(box.w, lineBuffer?.width ?? 0), Math.max(box.h, lineBuffer?.height ?? 0));
   }
-  const buf = ctx2d(lineBuffer);
+  const buf = ctx2d(lineBuffer, true);
   buf.setTransform(1, 0, 0, 1, 0, 0);
   buf.globalAlpha = 1;
   buf.globalCompositeOperation = 'source-over';
@@ -489,6 +584,9 @@ export function renderVectorStroke(ctx: Ctx, line: VectorStroke): void {
   const tips = tipsFor(b, line.color);
   const rand = seededRandom(hashId(line.id));
   tips.rand = rand;
+  tips.reset();
+  const paper = paperOf(b);
+  const dabPaper = b.paperPerDab ? paper : null;
   const jitter = (amount: number) => (amount > 0 ? 1 - amount * rand() : 1);
   const thin = Math.max(0.1, Math.min(1, b.thickness));
   const base = (b.angle * Math.PI) / 180;
@@ -503,8 +601,9 @@ export function renderVectorStroke(ctx: Ctx, line: VectorStroke): void {
       x += Math.cos(t) * d;
       y += Math.sin(t) * d;
     }
-    const angle = b.angleSource === 'line' ? base + dir : b.angleSource === 'tilt' ? base + (p.az ?? 0) : base;
-    tips.draw(buf, x, y, r, a, angle, b.thickness, null);
+    let angle = b.angleSource === 'line' ? base + dir : b.angleSource === 'tilt' ? base + (p.az ?? 0) : base;
+    if (b.angleRandom > 0) angle += (rand() - 0.5) * 2 * Math.PI * b.angleRandom;
+    drawTip(buf, tips, dabPaper, x, y, r, a, angle, b.thickness, null);
   };
   const pts = linePath(line);
   dab(pts[0], pts.length > 1 ? Math.atan2(pts[1].y - pts[0].y, pts[1].x - pts[0].x) : 0);
@@ -527,6 +626,12 @@ export function renderVectorStroke(ctx: Ctx, line: VectorStroke): void {
     carry = dist - (t - step);
   }
   buf.setTransform(1, 0, 0, 1, 0, 0);
+  if (paper && !b.paperPerDab) {
+    // The line through the paper (the texture stays put on the canvas).
+    const img = buf.getImageData(0, 0, box.w, box.h);
+    paper(img.data, box.w, box.h, box.x, box.y);
+    buf.putImageData(img, 0, 0);
+  }
   ctx.save();
   ctx.globalAlpha = b.opacity;
   ctx.globalCompositeOperation = line.erase ? 'destination-out' : 'source-over';

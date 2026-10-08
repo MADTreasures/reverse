@@ -86,7 +86,8 @@ Status: ✅ gleich · 🟡 ähnlich/vereinfacht · ❌ fehlt (noch)
 | Deckkraft vs. Dichte | Deckkraft begrenzt den ganzen Strich, „Brush density“ wirkt pro Tupfer [GL-I, T563] | gleich (Strichpuffer) | ✅ | `blend mode and opacity …` |
 | Kantenglättung | 4 Stufen: None, Weak, Middle, Strong [GL-A] | 4 Stufen | ✅ | – |
 | Stiftdruck | Dynamik je Einstellung: Druck (Mindestwert + Kurve), Neigung, Tempo, Zufall; globale Druckeinstellung (File > Pen Pressure Settings: Zeichnen, „Stronger/Lighter“, Kurve) [DYN, PEN] | Druck mit Mindestwert und Kurve (monoton kubisch), Neigung, Zufall für Grösse und Dichte; globale Kurve mit Testfeld, Stärker/Leichter und „Adjust from drawing“ (Perzentile); Tempo fehlt; Wirkung der Neigung eigenes Modell | 🟡 | Unit: `pressure graphs`, `brush dynamics`; `brush dynamics popover …` |
-| Pinselspitze | Härte, Dicke, Richtung, Winkel (fest, Stiftrichtung, Linienrichtung, Zufall); Materialspitzen [GL-B] | Härte, Dicke, Winkel fest / Linienrichtung / Stiftrichtung; keine Materialspitzen | 🟡 | `a flat brush tip …` |
+| Pinselspitze | Härte, Dicke, Richtung, Winkel (fest, Stiftrichtung, Linienrichtung, Zufall); Spitzenform Kreis oder Material (mehrere Bildspitzen, hinzufügen/löschen), horizontal/vertikal spiegeln (aus, spiegeln, zufällig, bei umgekehrten Strichen); Wiederholmethode (Repeat, Reverse, Do not repeat, Random, One time only, One random cycle) [GL-B, GL-S] | Härte, Dicke, Winkel fest / Linienrichtung / Stiftrichtung, Zufallswinkel; Material-Spitzen: neun eigene, per Code gezeichnete Spitzen und importierte Bilder (dunkel bzw. deckend = Farbe, max. 256 px, im Browser-Speicher), mehrere Spitzen mit Repeat/Reverse/Do not repeat/Random/One time only, Spiegeln aus/an/zufällig; neues Werkzeug **Dekoration** (B) mit Blättern, Gras, Sternen, Glitzer, Herzen, Blumen; „One random cycle“, „bei umgekehrten Strichen“ und „Ribbon“ fehlen | 🟡 | `a flat brush tip …`, `brush materials: …`, Unit: `brush tip materials` |
+| Textur | Texture: Papiertextur-Material, Dichte (mit Dynamik), Invertieren, Dichte betonen, Skalierung, Drehwinkel, Helligkeit, Kontrast, Texturmodus (Normal, Multiply, Subtract, Compare, Outline, Overlay, Color dodge, Hard mix, Height), „Apply by each plot“ [GL-T] | fünf eigene nahtlose Texturen und importierte Bilder (max. 512 px); Dichte, Skalierung, Drehung, Helligkeit, Kontrast, Invertieren, Modus Subtract/Multiply, pro Strich oder pro Abdruck, auch auf Vektorlinien; die Textur ist an der Leinwand verankert; Dichte-Dynamik, „Dichte betonen“ und die übrigen Modi fehlen | 🟡 | `brush materials: …`, Unit: `paper textures` |
 | Ein- und Auslaufen | „Starting and ending“ [GL-S] | Länge in px für Anfang und Ende, wirkt auf Grösse und/oder Dichte; der Strich wird beim Absetzen mit bekannter Länge neu gezeichnet | 🟡 | `starting and ending taper …`, Unit: `taperFactor` |
 | Farbmischung | Ink > Color mixing: Blend, Running color (Smear), Amount/Density of paint, Color stretch [GL-I] | Blend und Running color mit Farbmenge, Farbdichte, Farbdehnung (Formeln eigenes Modell); Smear fehlt | 🟡 | `colour mixing: …`, Unit: `color mixing` |
 | Aquarellkante (Pinsel) | Watercolor edge: Bereich, Deckkraft, Dunkelheit [GL-W] | gleich, beim Absetzen auf den Strich angewendet | 🟡 | – |
@@ -240,7 +241,15 @@ vergleichen. Abweichungen bitte als Issue oder Nachricht melden – mit dem Punk
   (nur Screenshot: 200). Eigene, plausible Werte gewählt.
 - **Glow dodge / Add (Glow):** offiziell nur „stärker bei halbtransparenten Pixeln“; Formel nach
   einem Community-Modell (niedrige Konfidenz).
-- **Pinsel:** Materialspitzen, Texturen, Doppelpinsel, Tempo-Dynamik und „Smear“ fehlen.
+- **Pinsel:** Doppelpinsel, Tempo-Dynamik und „Smear“ fehlen.
+- **Pinsel-Materialien:** Die Materialien des Vorbilds werden nicht verwendet; alle Spitzen und
+  Texturen sind eigene, per Code erzeugte Bilder (seeded, nahtlos über periodisches Rauschen).
+  Wie Texturen wirken, beschreibt das Handbuch nur in Worten; eigenes Modell: Höhe 0–255 der
+  Textur, „Subtrahieren“ nimmt Dichte × (255 − Höhe) vom Alphawert (leichte Striche treffen nur
+  die hohen Stellen), „Multiplizieren“ multipliziert mit 1 − Dichte × (1 − Höhe/255). Importierte
+  Bilder: Transparenz, sonst Helligkeit (dunkel = Farbe bzw. hohe Stelle). Importierte Materialien
+  liegen nur im Browser-Speicher dieses Rechners; Vektorlinien, die sie verwenden, werden anderswo
+  mit runder Spitze bzw. ohne Textur gezeichnet.
 - **3D** ist nicht umgesetzt.
 - **Kurven-Lineale:** Wie Spline und Parallelkurve gerechnet werden, sagt das Handbuch nicht.
   Eigene Annahmen: Spline = zentripetaler Catmull-Rom durch alle Punkte; Parallelkurven und die

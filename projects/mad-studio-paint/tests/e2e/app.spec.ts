@@ -848,6 +848,73 @@ const thinPen = (page: Page) =>
     m.actions.updateSubTool(sub.id, { brush: { ...sub.brush, size: 6, sizePressure: false, stabilization: 0 } });
   });
 
+/** Alpha values of the active layer along a row. */
+const alphasAlong = (page: Page, x0: number, x1: number, y: number) =>
+  page.evaluate(
+    ([a, b, row]) => {
+      const m = window.__madPaint;
+      const id = m.useStore.getState().activeLayerId;
+      const out: number[] = [];
+      for (let x = a; x <= b; x++) out.push(m.engine.sampleLayer(id, x, row)[3]);
+      return out;
+    },
+    [x0, x1, y],
+  );
+
+test('brush materials: image tips, paper textures and imported tip images', async ({ page }) => {
+  const errors = await boot(page);
+  // Decoration: stars stamped along the stroke, with gaps between them.
+  await useSubTool(page, 'decoration', 'deco-stars');
+  await drag(page, [40, 50], [360, 50], 16);
+  const stars = await page.evaluate(() => {
+    const m = window.__madPaint;
+    const id = m.useStore.getState().activeLayerId;
+    let n = 0;
+    for (let y = 0; y < 110; y += 2) for (let x = 0; x < 400; x += 2) if (m.engine.sampleLayer(id, x, y)[3] > 0) n++;
+    return n;
+  });
+  expect(stars).toBeGreaterThan(40);
+  // Pencil on paper: the paper grain shows inside the line.
+  await useSubTool(page, 'pencil', 'pencil-paper');
+  await page.evaluate(() => window.__madPaint.actions.setBrushSize(24));
+  await drag(page, [40, 150], [360, 150], 16);
+  const grain = await alphasAlong(page, 80, 320, 150);
+  expect(Math.max(...grain) - Math.min(...grain)).toBeGreaterThan(80);
+  // A plain pen line is even.
+  await thinPen(page);
+  await drag(page, [40, 200], [360, 200], 16);
+  const plain = await alphasAlong(page, 80, 320, 200);
+  expect(Math.max(...plain) - Math.min(...plain)).toBeLessThan(10);
+  // Advanced Tool Settings > Brush tip: import an image as the pen's tip (a bar across its top).
+  const png = await page.evaluate(() => {
+    const c = document.createElement('canvas');
+    c.width = c.height = 32;
+    c.getContext('2d')!.fillRect(0, 0, 32, 6);
+    return c.toDataURL('image/png').split(',')[1];
+  });
+  await page.getByRole('button', { name: 'Tool Settings', exact: true }).click();
+  await page.getByRole('button', { name: 'Advanced tool settings' }).click();
+  const adv = page.getByRole('dialog', { name: 'Advanced Tool Settings' });
+  await adv.getByRole('button', { name: 'Brush tip', exact: true }).click();
+  await adv.getByRole('radio', { name: 'Material' }).click();
+  await page.getByTestId('import-tip').setInputFiles({ name: 'bar.png', mimeType: 'image/png', buffer: Buffer.from(png, 'base64') });
+  await expect(adv.getByRole('option', { name: 'bar' })).toHaveAttribute('aria-selected', 'true');
+  // Only the imported tip: the chalk tip chosen first is removed by clicking it.
+  await adv.getByRole('option', { name: 'Chalk' }).click();
+  const tips = await page.evaluate(() => {
+    const s = window.__madPaint.useStore.getState();
+    return s.subTools.find((t: any) => t.id === s.activeSub.pen).brush.tipMaterials;
+  });
+  expect(tips).toHaveLength(1);
+  expect(tips[0]).toMatch(/^img-/);
+  await page.evaluate(() => window.__madPaint.actions.setBrushSize(32));
+  await drag(page, [60, 260], [300, 260], 16);
+  // The tip's bar lies across its top: paint above the line's middle, none below it.
+  expect(await layerAlpha(page, 180, 248)).toBeGreaterThan(100);
+  expect(await layerAlpha(page, 180, 268)).toBe(0);
+  expect(errors).toEqual([]);
+});
+
 test('symmetrical ruler mirrors strokes; ⌘2 turns special snapping off', async ({ page }) => {
   await boot(page);
   await useSubTool(page, 'ruler', 'ruler-symmetry');
