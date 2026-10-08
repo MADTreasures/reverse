@@ -4,6 +4,7 @@ import type { Id, PaintDocument } from '../model/types';
 import type { Mask, SelectionOp } from '../paint/mask';
 import { LINEAR, type CurvePoint } from '../paint/curve';
 import { DEFAULT_SUB_TOOLS, type SubTool, type ToolId, type WorkspaceId } from '../paint/tools';
+import type { TextBox } from '../paint/text';
 
 export interface ViewState {
   /** Screen pixels per document pixel. */
@@ -40,6 +41,15 @@ export interface Preferences {
 }
 
 export const DEFAULT_PREFS: Preferences = { theme: 'dark', rotationStep: 5, undoLevels: 200, holdMs: 500, pressureCurve: LINEAR };
+
+/** Text being typed or edited on the canvas (Text tool). */
+export interface TextEdit {
+  /** Layer of the text box; null: a new text layer is made when the text is confirmed. */
+  layerId: Id | null;
+  box: TextBox;
+  /** Text typed into a balloon is centred in it when confirmed. */
+  balloonId?: string;
+}
 
 export interface PaintState {
   doc: PaintDocument;
@@ -85,8 +95,9 @@ export interface PaintState {
   snapSpecial: boolean;
   /** Ruler selected with the Object tool. */
   selectedRuler: { layerId: Id; rulerId: string } | null;
-  /** Vector lines of the active layer selected with the Object tool (line ids). */
-  selectedLines: string[];
+  /** Objects of the active layer selected with the Object tool (vector lines, text boxes, balloons). */
+  selectedObjects: string[];
+  textEdit: TextEdit | null;
   prefs: Preferences;
 }
 
@@ -125,7 +136,8 @@ function initialState(): PaintState {
     snapRuler: true,
     snapSpecial: true,
     selectedRuler: null,
-    selectedLines: [],
+    selectedObjects: [],
+    textEdit: null,
     prefs: { ...DEFAULT_PREFS },
   };
 }

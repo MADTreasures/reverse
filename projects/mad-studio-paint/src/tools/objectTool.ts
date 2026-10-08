@@ -1,18 +1,20 @@
 /**
- * Object tool on vector layers: click a line to select it (⇧ adds or removes it), drag to move the
- * selected lines, drag a corner of their box to scale (⇧ frees the aspect ratio) and the round
- * handle above it to rotate (⇧ in 15° steps). Clicking a line on another vector layer switches to
- * that layer. Delete removes the selected lines; Tool Settings changes their colour and width.
+ * Object tool on vector and text layers: click a line, text or balloon to select it (⇧ adds or
+ * removes it), drag to move the selection, drag a corner of its box to scale (⇧ frees the aspect
+ * ratio) and the round handle above it to rotate (⇧ in 15° steps). Clicking an object on another
+ * layer switches to that layer; double-clicking text edits it. Delete removes the selection; Tool
+ * Settings changes colour, width, font and so on.
  */
 import { flatten, isEffectivelyVisible } from '../model/layers';
-import type { VectorLayer } from '../model/types';
+import { contentBounds, contentOf, pickObject, transformContent, type Content } from '../paint/objects';
 import { union, type Rect } from '../paint/rect';
 import type { Affine } from '../paint/rulers';
-import { hitStroke, linesBounds, type VectorStroke } from '../paint/vector';
+import { balloonBody, frameCorners, tailShapes } from '../paint/text';
 import { apply as applyMatrix } from '../paint/viewMath';
 import { engine } from '../engine/engine';
 import * as actions from '../store/actions';
 import { currentSubTool, getState, setState } from '../store/store';
+import { editTextBox } from '../store/textActions';
 import { hitHandle as hitRulerHandle, rulerObjectSession } from './rulerTool';
 import type { Modifiers, OverlayView, PointerInfo, ToolSession } from './types';
 
@@ -21,13 +23,14 @@ const HANDLE_PX = 8;
 /** Distance of the rotation handle from the box (screen px). */
 const ROTATE_PX = 22;
 const DRAG_THRESHOLD = 3;
+const DOUBLE_CLICK_MS = 350;
 
-type LineHandle = { kind: 'scale'; hx: -1 | 1; hy: -1 | 1 } | { kind: 'rotate' } | { kind: 'move' };
+type ObjectHandle = { kind: 'scale'; hx: -1 | 1; hy: -1 | 1 } | { kind: 'rotate' } | { kind: 'move' };
 
-/** The selected lines of the active vector layer and their box. */
-function selection(): { layer: VectorLayer; lines: VectorStroke[]; box: Rect } | null {
-  const sel = actions.selectedVectorLines();
-  const box = sel && linesBounds(sel.lines);
+/** The selected objects of the active layer and their box. */
+function selection(): { layer: actions.ObjectLayer; ids: Set<string>; content: Content; box: Rect } | null {
+  const sel = actions.selectedObjectsOf();
+  const box = sel && contentBounds(sel.content, sel.ids);
   return sel && box ? { ...sel, box } : null;
 }
 
@@ -40,8 +43,8 @@ function rotateHandle(box: Rect, view: OverlayView): { x: number; y: number } {
   return { x: top.x + dir.x * ROTATE_PX, y: top.y + dir.y * ROTATE_PX };
 }
 
-/** The handle of the selected lines' box under the pointer. */
-function hitLineHandle(p: PointerInfo, view: OverlayView, box: Rect): LineHandle | null {
+/** The handle of the selection box under the pointer. */
+function hitObjectHandle(p: PointerInfo, view: OverlayView, box: Rect): ObjectHandle | null {
   for (const hx of [-1, 1] as const) {
     for (const hy of [-1, 1] as const) {
       const q = applyMatrix(view.matrix, hx < 0 ? box.x : box.x + box.w, hy < 0 ? box.y : box.y + box.h);
@@ -54,25 +57,25 @@ function hitLineHandle(p: PointerInfo, view: OverlayView, box: Rect): LineHandle
   return null;
 }
 
-/** Moves, scales or rotates the selected lines; the whole drag is one undo step. */
-class LineEditSession implements ToolSession {
-  private readonly original: VectorStroke[];
+/** Moves, scales or rotates the selected objects; the whole drag is one undo step. */
+class ObjectEditSession implements ToolSession {
+  private readonly original: Content;
   private readonly which: Set<string>;
-  private lines: VectorStroke[];
+  private content: Content;
   private shown: Rect;
   private dragged = false;
   private last: PointerInfo;
   readonly cursor: string;
 
   constructor(
-    private layer: VectorLayer,
-    private handle: LineHandle,
+    private layer: actions.ObjectLayer,
+    private handle: ObjectHandle,
     private start: PointerInfo,
     private box: Rect,
   ) {
-    this.original = layer.strokes;
-    this.lines = layer.strokes;
-    this.which = new Set(getState().selectedLines);
+    this.original = contentOf(layer);
+    this.content = this.original;
+    this.which = new Set(getState().selectedObjects);
     this.shown = box;
     this.last = start;
     this.cursor = handle.kind === 'move' ? 'move' : handle.kind === 'rotate' ? 'alias' : handle.hx === handle.hy ? 'nwse-resize' : 'nesw-resize';
@@ -122,9 +125,9 @@ class LineEditSession implements ToolSession {
     if (!this.dragged && Math.hypot(p.sx - this.start.sx, p.sy - this.start.sy) < DRAG_THRESHOLD) return;
     this.dragged = true;
     const scaleWidth = currentSubTool(getState(), 'object').scaleLineWidth !== false;
-    this.lines = actions.transformSome(this.original, this.which, this.matrix(p, m), scaleWidth);
-    const now = linesBounds(this.lines.filter((x) => this.which.has(x.id))) ?? this.shown;
-    engine.renderVectorLines(this.layer.id, this.lines, union(this.shown, now));
+    this.content = transformContent(this.original, this.which, this.matrix(p, m), { scaleWidth });
+    const now = contentBounds(this.content, this.which) ?? this.shown;
+    actions.previewContent(this.layer, this.content, union(this.shown, now));
     this.shown = now;
   }
 
@@ -141,90 +144,111 @@ class LineEditSession implements ToolSession {
     this.last = p;
     this.update(p, p);
     if (!this.dragged) return;
-    const label = this.handle.kind === 'move' ? 'Move lines' : this.handle.kind === 'rotate' ? 'Rotate lines' : 'Scale lines';
-    actions.commitTransform(label, [], new Map([[this.layer.id, this.lines]]));
+    const what = this.layer.kind === 'vector' ? ' lines' : '';
+    const label = this.handle.kind === 'move' ? `Move${what}` : this.handle.kind === 'rotate' ? `Rotate${what}` : `Scale${what}`;
+    actions.commitTransform(label, [], new Map([[this.layer.id, this.content]]));
   }
 
   cancel(): void {
-    if (this.dragged) engine.renderVectorLines(this.layer.id, this.original, union(this.shown, this.box));
+    if (!this.dragged) return;
+    actions.previewContent(this.layer, this.original, union(this.shown, this.box));
+    engine.resync();
   }
 
   overlay(ctx: CanvasRenderingContext2D, view: OverlayView): void {
-    drawLines(ctx, view, this.lines.filter((x) => this.which.has(x.id)));
+    drawOutlines(ctx, view, this.content, this.which);
   }
 }
 
-/** The top-most line under the pointer on a visible, unlocked vector layer (the active one first). */
-function pickLine(p: PointerInfo): { layer: VectorLayer; id: string } | null {
+/** The top-most object under the pointer on a visible vector or text layer (the active one first). */
+function pickAt(p: PointerInfo): { layer: actions.ObjectLayer; id: string } | null {
   const s = getState();
   const tolerance = PICK_PX / Math.max(0.01, s.view.zoom);
   const active = actions.activeLayer(s);
-  const layers = flatten(s.doc.layers).filter((l): l is VectorLayer => l.kind === 'vector' && isEffectivelyVisible(s.doc.layers, l.id));
-  if (active?.kind === 'vector') layers.sort((a, b) => Number(b.id === active.id) - Number(a.id === active.id));
+  const layers = flatten(s.doc.layers).filter((l): l is actions.ObjectLayer => actions.isObjectLayer(l) && isEffectivelyVisible(s.doc.layers, l.id));
+  if (active) layers.sort((a, b) => Number(b.id === active.id) - Number(a.id === active.id));
   for (const layer of layers) {
-    const i = hitStroke(layer.strokes, p, tolerance);
-    if (i >= 0) return { layer, id: layer.strokes[i].id };
+    const id = pickObject(contentOf(layer), p, tolerance);
+    if (id) return { layer, id };
   }
   return null;
 }
 
-/** Object tool: rulers and vector lines. */
+let lastClick: { time: number; id: string } | null = null;
+
+/** Object tool: rulers, vector lines, text and balloons. */
 export function objectSession(p: PointerInfo, view: OverlayView): ToolSession | null {
   if (hitRulerHandle(p, view)) return rulerObjectSession(p, view);
   const sel = selection();
-  const handle = sel && hitLineHandle(p, view, sel.box);
-  if (sel && handle && handle.kind !== 'move' && !p.shift) return editable() ? new LineEditSession(sel.layer, handle, p, sel.box) : null;
-  const hit = pickLine(p);
+  const handle = sel && hitObjectHandle(p, view, sel.box);
+  if (sel && handle && handle.kind !== 'move' && !p.shift) return editable() ? new ObjectEditSession(sel.layer, handle, p, sel.box) : null;
+  const hit = pickAt(p);
   if (hit) {
-    const s = getState();
-    if (hit.layer.id !== s.activeLayerId) actions.selectLayer(hit.layer.id);
-    const selected = getState().selectedLines;
-    if (p.shift) {
-      actions.selectLines(selected.includes(hit.id) ? selected.filter((id) => id !== hit.id) : [...selected, hit.id]);
+    // Double-clicking text edits it.
+    const double = lastClick?.id === hit.id && p.time - lastClick.time < DOUBLE_CLICK_MS;
+    lastClick = { time: p.time, id: hit.id };
+    if (double && hit.layer.kind === 'text' && hit.layer.texts.some((t) => t.id === hit.id)) {
+      editTextBox(hit.layer.id, hit.id);
       return null;
     }
-    if (!selected.includes(hit.id)) actions.selectLines([hit.id]);
+    if (hit.layer.id !== getState().activeLayerId) actions.selectLayer(hit.layer.id);
+    const selected = getState().selectedObjects;
+    if (p.shift) {
+      actions.selectObjects(selected.includes(hit.id) ? selected.filter((id) => id !== hit.id) : [...selected, hit.id]);
+      return null;
+    }
+    if (!selected.includes(hit.id)) actions.selectObjects([hit.id]);
     setState({ selectedRuler: null });
     const now = selection();
-    return now && editable() ? new LineEditSession(now.layer, { kind: 'move' }, p, now.box) : null;
+    return now && editable() ? new ObjectEditSession(now.layer, { kind: 'move' }, p, now.box) : null;
   }
-  if (sel && handle?.kind === 'move' && !p.shift) return editable() ? new LineEditSession(sel.layer, handle, p, sel.box) : null;
-  if (!p.shift) actions.selectLines([]);
+  lastClick = null;
+  if (sel && handle?.kind === 'move' && !p.shift) return editable() ? new ObjectEditSession(sel.layer, handle, p, sel.box) : null;
+  if (!p.shift) actions.selectObjects([]);
   return rulerObjectSession(p, view);
 }
 
 function editable(): boolean {
-  const reason = actions.editBlocker();
+  const reason = actions.objectBlocker();
   if (reason) setState({ hint: reason });
   return reason === null;
 }
 
-/** Paths of lines as thin highlighted polylines. */
-function drawLines(ctx: CanvasRenderingContext2D, view: OverlayView, lines: VectorStroke[]): void {
+/** Outlines of objects as thin highlighted lines: line paths, text frames, balloon shapes. */
+function drawOutlines(ctx: CanvasRenderingContext2D, view: OverlayView, c: Content, ids: Set<string>): void {
   ctx.save();
   ctx.lineWidth = 1.5;
   ctx.strokeStyle = '#2f80ed';
-  for (const line of lines) {
+  const poly = (pts: { x: number; y: number }[], close: boolean) => {
     ctx.beginPath();
-    line.points.forEach((q, i) => {
+    pts.forEach((q, i) => {
       const s = applyMatrix(view.matrix, q.x, q.y);
       if (i === 0) ctx.moveTo(s.x, s.y);
       else ctx.lineTo(s.x, s.y);
     });
-    if (line.points.length === 1) {
-      const s = applyMatrix(view.matrix, line.points[0].x, line.points[0].y);
+    if (close) ctx.closePath();
+    if (pts.length === 1) {
+      const s = applyMatrix(view.matrix, pts[0].x, pts[0].y);
       ctx.arc(s.x, s.y, 2, 0, Math.PI * 2);
     }
     ctx.stroke();
+  };
+  for (const line of c.strokes) if (ids.has(line.id)) poly(line.points, false);
+  for (const b of c.balloons) {
+    if (!ids.has(b.id)) continue;
+    poly(balloonBody(b), true);
+    for (const t of b.tails) for (const shape of tailShapes(b, t)) poly(shape, true);
   }
+  ctx.setLineDash([3, 3]);
+  for (const t of c.texts) if (ids.has(t.id)) poly(frameCorners(t), true);
   ctx.restore();
 }
 
-/** The selected lines, their box, scale handles and rotation handle (Object tool). */
+/** The selected objects, their box, scale handles and rotation handle (Object tool). */
 export function drawLineSelection(ctx: CanvasRenderingContext2D, view: OverlayView): void {
   const sel = selection();
   if (!sel) return;
-  drawLines(ctx, view, sel.lines);
+  drawOutlines(ctx, view, sel.content, sel.ids);
   const { box } = sel;
   const corners = [
     [box.x, box.y],
@@ -259,10 +283,10 @@ export function drawLineSelection(ctx: CanvasRenderingContext2D, view: OverlayVi
   ctx.restore();
 }
 
-/** Cursor over the selected lines' handles (Object tool, no drag). */
+/** Cursor over the selection's handles (Object tool, no drag). */
 export function lineHandleCursor(p: PointerInfo, view: OverlayView): string | null {
   const sel = selection();
-  const h = sel && hitLineHandle(p, view, sel.box);
+  const h = sel && hitObjectHandle(p, view, sel.box);
   if (!h) return null;
   return h.kind === 'move' ? 'move' : h.kind === 'rotate' ? 'alias' : h.hx === h.hy ? 'nwse-resize' : 'nesw-resize';
 }

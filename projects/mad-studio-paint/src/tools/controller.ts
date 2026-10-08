@@ -27,7 +27,8 @@ import {
   ZoomSession,
 } from './sessions';
 import { drawRulers, rulerSession } from './rulerTool';
-import { drawLineSelection, lineHandleCursor, objectSession } from './vectorTool';
+import { drawLineSelection, lineHandleCursor, objectSession } from './objectTool';
+import { balloonSession, textSession } from './textTool';
 import { confirmTransform, drawTransformOverlay, hitHandle, isTransforming, transformCursor, TransformSession } from './transform';
 import type { Modifiers, OverlayView, PointerInfo, ToolSession } from './types';
 
@@ -159,6 +160,10 @@ class Controller {
         return rulerSession(sub, p, this.view);
       case 'object':
         return objectSession(p, this.view);
+      case 'text':
+        return textSession(p);
+      case 'balloon':
+        return balloonSession(sub, p);
       default:
         return null;
     }

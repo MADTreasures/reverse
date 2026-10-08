@@ -44,6 +44,10 @@ export function cursorFor(t: EffectiveTool): string {
       return 'pointer';
     case 'object':
       return 'default';
+    case 'text':
+      return 'text';
+    case 'balloon':
+      return 'crosshair';
     case 'ruler':
     case 'eyedropper':
     case 'select':

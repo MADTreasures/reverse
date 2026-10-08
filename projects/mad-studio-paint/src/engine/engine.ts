@@ -2,13 +2,14 @@
  * The pixel side of the app: surfaces, compositing, selection canvas, undo history.
  * The document structure (layer tree, flags) lives in the store; this module owns the pixels.
  */
-import { flatten, maskIds, pixelIds, vectorIds } from '../model/layers';
-import type { Id, PaintDocument, VectorLayer } from '../model/types';
+import { flatten, maskIds, pixelIds, renderedIds } from '../model/layers';
+import type { Id, PaintDocument, TextLayer, VectorLayer } from '../model/types';
 import { HistoryStack } from '../paint/history';
 import type { Mask } from '../paint/mask';
 import { intersect, type Rect } from '../paint/rect';
 import { linesBounds, strokeBounds, type VectorStroke } from '../paint/vector';
 import { renderVectorStroke } from './brushEngine';
+import { renderTextLayer } from './textRender';
 import { createCanvas, ctx2d, maskToCanvas } from './canvas';
 import { Compositor } from './compositor';
 import { patchBytes, type PixelPatch } from './edit';
@@ -45,8 +46,10 @@ class PaintEngine {
   private selectionCanvasCache: HTMLCanvasElement | null = null;
   private renderListeners = new Set<() => void>();
   private currentDoc: PaintDocument | null = null;
-  /** Revision of the strokes each vector layer's pixels were rendered from. */
+  /** Revision of the content each vector or text layer's pixels were rendered from. */
   private vectorRevs = new Map<Id, number>();
+  /** Text box or balloon left out while it is being edited on the canvas. */
+  private hidden: string | null = null;
   /** Lines a tool already drew into a vector layer's pixels (ids in order), see expectVectorLines. */
   private drawnLines = new Map<Id, string>();
 
@@ -80,6 +83,7 @@ class PaintEngine {
     if (this.compositor) this.compositor.resize(doc.width, doc.height);
     else this.compositor = new Compositor(doc.width, doc.height);
     this.vectorRevs.clear();
+    this.hidden = null;
     this.syncVectors(doc);
     this.history.clear();
     this.selectionMask = null;
@@ -98,14 +102,14 @@ class PaintEngine {
     this.invalidate();
   }
 
-  /** Renders vector layers whose strokes changed (new lines, erasing, undo …). */
+  /** Renders vector and text layers whose content changed (new lines, erasing, typing, undo …). */
   private syncVectors(doc: PaintDocument): void {
     for (const l of flatten(doc.layers)) {
-      if (l.kind !== 'vector') continue;
+      if (l.kind !== 'vector' && l.kind !== 'text') continue;
       const known = getSurface(l.id);
       const sized = known && known.width === doc.width && known.height === doc.height;
       if (sized && this.vectorRevs.get(l.id) === l.rev) continue;
-      if (sized && this.drawnLines.get(l.id) === lineIds(l.strokes)) {
+      if (sized && l.kind === 'vector' && this.drawnLines.get(l.id) === lineIds(l.strokes)) {
         // A tool already drew exactly these lines.
         this.vectorRevs.set(l.id, l.rev);
         continue;
@@ -114,12 +118,46 @@ class PaintEngine {
       if (surface !== known) setSurface(l.id, surface);
       const ctx = ctx2d(surface);
       ctx.clearRect(0, 0, surface.width, surface.height);
-      for (const stroke of l.strokes) renderVectorStroke(ctx, stroke);
+      if (l.kind === 'vector') for (const stroke of l.strokes) renderVectorStroke(ctx, stroke);
+      else renderTextLayer(ctx, l, this.hidden);
       this.vectorRevs.set(l.id, l.rev);
       touch(l.id);
       this.compositor?.invalidate();
     }
     this.drawnLines.clear();
+  }
+
+  /** Leaves a text box or balloon out of its layer's pixels (while it is edited on the canvas). */
+  setHidden(id: string | null): void {
+    if (id === this.hidden) return;
+    const was = this.hidden;
+    this.hidden = id;
+    if (!this.currentDoc) return;
+    for (const l of flatten(this.currentDoc.layers)) {
+      if (l.kind === 'text' && [...l.texts, ...l.balloons].some((o) => o.id === id || o.id === was)) this.vectorRevs.delete(l.id);
+    }
+    this.syncVectors(this.currentDoc);
+    this.invalidate();
+  }
+
+  /** Renders vector and text layers again where a tool's preview left them out of date (cancel). */
+  resync(): void {
+    if (!this.currentDoc) return;
+    this.syncVectors(this.currentDoc);
+    this.invalidate();
+  }
+
+  /** Shows a text layer with other text and balloons while a tool changes them. */
+  previewText(layer: TextLayer, content: Pick<TextLayer, 'texts' | 'balloons'>): void {
+    const surface = getSurface(layer.id);
+    if (!surface) return;
+    const ctx = ctx2d(surface);
+    ctx.clearRect(0, 0, surface.width, surface.height);
+    renderTextLayer(ctx, content, this.hidden);
+    // The document still holds the old content: render it again when the tool is done.
+    this.vectorRevs.delete(layer.id);
+    touch(layer.id);
+    this.invalidate();
   }
 
   /**
@@ -231,7 +269,7 @@ class PaintEngine {
   gc(): void {
     const keep = new Set<Id>();
     const add = (doc: PaintDocument | undefined) => {
-      if (doc) for (const id of [...pixelIds(doc.layers), ...vectorIds(doc.layers)]) keep.add(id);
+      if (doc) for (const id of [...pixelIds(doc.layers), ...renderedIds(doc.layers)]) keep.add(id);
     };
     add(this.currentDoc ?? undefined);
     for (const e of this.history.entries()) {

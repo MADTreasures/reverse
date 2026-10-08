@@ -3,6 +3,8 @@ import { useShallow } from 'zustand/react/shallow';
 import { BRUSH_SIZE_PRESETS } from '../../store/actions';
 import * as actions from '../../store/actions';
 import { currentSubTool, drawingColor, getState, setState, useStore } from '../../store/store';
+import { pxToPt, setTextStyle, setTextWrap, textToolStyle } from '../../store/textActions';
+import type { Balloon } from '../../paint/text';
 import { entryForTool, PALETTE_ENTRIES, PALETTE_LAYOUT, subToolsOf, toolInfo, type FillReference, type SubTool, type ToolId } from '../../paint/tools';
 import { Icon } from '../controls/Icons';
 import { PropSlider } from '../controls/PropSlider';
@@ -228,6 +230,9 @@ export function ToolProperty() {
       )}
       {sub.tool === 'eraser' && b && <VectorEraserRow sub={sub} update={update} />}
       {sub.tool === 'object' && <ObjectLineSettings sub={sub} update={update} />}
+      {sub.tool === 'text' && <TextSettings />}
+      {sub.tool === 'balloon' && sub.balloon && <BalloonToolSettings sub={sub} update={update} />}
+      {sub.tool === 'balloon' && sub.tail && <TailSettings sub={sub} update={update} />}
       {sub.tool === 'select' && <SelectionModeRow />}
       {sub.tool === 'ruler' && sub.rulerKind === 'symmetry' && (
         <>
@@ -269,7 +274,7 @@ export function ToolProperty() {
           </div>
         </div>
       )}
-      {!b && !f && sub.tool !== 'select' && sub.tool !== 'gradient' && sub.tool !== 'object' && <div className="prop-note">{toolInfo(sub.tool).hint}</div>}
+      {!b && !f && !['select', 'gradient', 'object', 'text', 'balloon'].includes(sub.tool) && <div className="prop-note">{toolInfo(sub.tool).hint}</div>}
       <div className="prop-footer">
         <button className="icon-btn" title="Reset to the default settings" aria-label="Reset sub tool" onClick={() => actions.resetSubTool(sub.id)}>
           <Icon name="resetRotation" size={15} />
@@ -330,8 +335,12 @@ function ObjectLineSettings({ sub, update }: { sub: SubTool; update: (patch: Par
   const lines = useStore(useShallow((s) => actions.selectedVectorLines(s)?.lines ?? []));
   const first = lines[0];
   const change = (fn: Parameters<typeof actions.updateSelectedLines>[0], label: string, key?: string) => actions.updateSelectedLines(fn, label, key);
+  const texts = useStore(useShallow((s) => actions.selectedTextObjects(s)?.texts ?? []));
+  const balloons = useStore(useShallow((s) => actions.selectedTextObjects(s)?.balloons ?? []));
   return (
     <>
+      {texts.length > 0 && <TextSettings />}
+      {balloons.length > 0 && <BalloonObjectSettings balloons={balloons} />}
       {first ? (
         <>
           <div className="prop-row">
@@ -383,12 +392,201 @@ function ObjectLineSettings({ sub, update }: { sub: SubTool; update: (patch: Par
           </div>
         </>
       ) : (
-        <div className="prop-note">{toolInfo('object').hint}</div>
+        texts.length + balloons.length === 0 && <div className="prop-note">{toolInfo('object').hint}</div>
       )}
       <label className="check prop-check">
         <input type="checkbox" checked={sub.scaleLineWidth !== false} onChange={(e) => update({ scaleLineWidth: e.target.checked })} />
         Adjust line thickness when scaling
       </label>
+    </>
+  );
+}
+
+/** Fonts offered in the list (any installed font can be typed in). */
+const FONTS = [
+  'sans-serif',
+  'serif',
+  'monospace',
+  'Helvetica Neue',
+  'Arial',
+  'Avenir Next',
+  'Futura',
+  'Gill Sans',
+  'Georgia',
+  'Times New Roman',
+  'Menlo',
+  'Courier New',
+  'Comic Sans MS',
+  'Chalkboard SE',
+  'Marker Felt',
+  'Hiragino Sans',
+  'Hiragino Mincho ProN',
+  'Hiragino Maru Gothic ProN',
+];
+
+/**
+ * Text settings: of the text being typed, else of the selected text, else of the Text tool (for new
+ * text). Sizes are shown in points at the document resolution.
+ */
+function TextSettings() {
+  const st = useStore(
+    useShallow((s) => {
+      const box = s.textEdit?.box ?? actions.selectedTextObjects(s)?.texts[0] ?? null;
+      const style = box ?? textToolStyle(s);
+      return {
+        font: style.font,
+        size: box ? pxToPt(box.size, s.doc.dpi) : style.size,
+        bold: style.bold,
+        italic: style.italic,
+        underline: style.underline,
+        strike: style.strike,
+        align: style.align,
+        vertical: style.vertical,
+        color: box?.color ?? null,
+        lineSpacing: style.lineSpacing,
+        letterSpacing: style.letterSpacing,
+        edge: style.edge,
+        edgeColor: style.edgeColor,
+        wrap: box ? box.wrap : null,
+      };
+    }),
+  );
+  const set = setTextStyle;
+  const toggles = [
+    ['bold', 'B', 'Bold'],
+    ['italic', 'I', 'Italic'],
+    ['underline', 'U', 'Underline'],
+    ['strike', 'S', 'Strikethrough'],
+  ] as const;
+  return (
+    <>
+      <div className="prop-row">
+        <span className="prop-label">Font</span>
+        <input className="prop-input" list="font-families" aria-label="Font" value={st.font} onChange={(e) => e.target.value.trim() && set({ font: e.target.value })} />
+        <datalist id="font-families">
+          {FONTS.map((f) => (
+            <option key={f} value={f} />
+          ))}
+        </datalist>
+      </div>
+      <PropSlider testId="text-size" label="Size" unit="pt" value={Math.round(st.size * 10) / 10} min={1} max={500} log step={0.5} decimals={1} onChange={(v) => set({ size: v })} />
+      <div className="prop-row">
+        <span className="prop-label">Style</span>
+        <div className="segmented" role="group" aria-label="Font style">
+          {toggles.map(([key, letter, label]) => (
+            <button key={key} className={`style-${key} ${st[key] ? 'on' : ''}`} aria-pressed={st[key]} title={label} aria-label={label} onClick={() => set({ [key]: !st[key] })}>
+              {letter}
+            </button>
+          ))}
+        </div>
+      </div>
+      <div className="prop-row">
+        <span className="prop-label">Justify</span>
+        <div className="segmented" role="radiogroup" aria-label="Justify">
+          {(['left', 'center', 'right'] as const).map((a) => (
+            <button key={a} role="radio" aria-checked={st.align === a} className={st.align === a ? 'on' : ''} onClick={() => set({ align: a })}>
+              {a === 'left' ? 'Left' : a === 'center' ? 'Center' : 'Right'}
+            </button>
+          ))}
+        </div>
+      </div>
+      <div className="prop-row">
+        <span className="prop-label">Direction</span>
+        <div className="segmented" role="radiogroup" aria-label="Text direction">
+          <button role="radio" aria-checked={!st.vertical} className={!st.vertical ? 'on' : ''} onClick={() => set({ vertical: false })}>
+            Horizontal
+          </button>
+          <button role="radio" aria-checked={st.vertical} className={st.vertical ? 'on' : ''} onClick={() => set({ vertical: true })}>
+            Vertical
+          </button>
+        </div>
+      </div>
+      {st.color !== null ? (
+        <div className="prop-row">
+          <span className="prop-label">Text color</span>
+          <span className="line-color-row">
+            <input type="color" className="line-color" aria-label="Text color" value={st.color} onChange={(e) => set({ color: e.target.value })} />
+            <button className="btn small" title="Give the text the drawing color" onClick={() => set({ color: drawingColor(getState().colors) })}>
+              Drawing color
+            </button>
+          </span>
+        </div>
+      ) : (
+        <div className="prop-note">New text uses the drawing color.</div>
+      )}
+      {st.wrap !== null && (
+        <label className="check prop-check">
+          <input type="checkbox" checked={st.wrap} onChange={(e) => setTextWrap(e.target.checked)} />
+          Wrap text at frame
+        </label>
+      )}
+      <PropSlider label="Line spacing" unit="%" value={Math.round(st.lineSpacing * 100)} min={50} max={300} onChange={(v) => set({ lineSpacing: v / 100 })} />
+      <PropSlider label="Letter spacing" unit="px" value={st.letterSpacing} min={-20} max={100} onChange={(v) => set({ letterSpacing: v })} />
+      <div className="prop-row">
+        <span className="prop-label">Edge</span>
+        <span className="line-color-row">
+          <input type="color" className="line-color" aria-label="Edge color" value={st.edgeColor} onChange={(e) => set({ edgeColor: e.target.value })} />
+        </span>
+      </div>
+      <PropSlider label="Edge width" unit="px" value={st.edge} min={0} max={50} step={0.5} decimals={1} onChange={(v) => set({ edge: v })} />
+    </>
+  );
+}
+
+/** Balloon tools: outline width and whether the balloon is filled. */
+function BalloonToolSettings({ sub, update }: { sub: SubTool; update: (patch: Partial<SubTool>) => void }) {
+  const bl = sub.balloon!;
+  return (
+    <>
+      <PropSlider label="Line width" unit="px" value={bl.lineWidth} min={0} max={50} step={0.5} decimals={1} onChange={(v) => update({ balloon: { ...bl, lineWidth: v } })} />
+      <label className="check prop-check">
+        <input type="checkbox" checked={bl.fill} onChange={(e) => update({ balloon: { ...bl, fill: e.target.checked } })} />
+        Fill (sub color)
+      </label>
+      <div className="prop-note">Line in the main color · drag from inside a balloon with a balloon tail tool to add a tail.</div>
+    </>
+  );
+}
+
+/** Balloon tail tools: width and bend. */
+function TailSettings({ sub, update }: { sub: SubTool; update: (patch: Partial<SubTool>) => void }) {
+  const t = sub.tail!;
+  return (
+    <>
+      <PropSlider label="Width of tail" unit="px" value={t.width} min={2} max={300} onChange={(v) => update({ tail: { ...t, width: v } })} />
+      {t.kind === 'pointed' && <PropSlider label="How to bend" unit="%" value={Math.round(t.bend * 100)} min={-100} max={100} onChange={(v) => update({ tail: { ...t, bend: v / 100 } })} />}
+    </>
+  );
+}
+
+/** Object tool with balloons selected: outline width and colours. */
+function BalloonObjectSettings({ balloons }: { balloons: Balloon[] }) {
+  const first = balloons[0];
+  const change = (fn: (b: Balloon) => Balloon, label: string, key?: string) => actions.updateSelectedBalloons(fn, label, key);
+  return (
+    <>
+      <PropSlider label="Line width" unit="px" value={first.lineWidth} min={0} max={50} step={0.5} decimals={1} onChange={(v) => change((b) => ({ ...b, lineWidth: v }), 'Balloon line width', 'balloon:line')} />
+      <div className="prop-row">
+        <span className="prop-label">Line color</span>
+        <input type="color" className="line-color" aria-label="Balloon line color" value={first.lineColor} onChange={(e) => change((b) => ({ ...b, lineColor: e.target.value }), 'Balloon color', 'balloon:color')} />
+      </div>
+      <div className="prop-row">
+        <span className="prop-label">Fill color</span>
+        <span className="line-color-row">
+          <input
+            type="color"
+            className="line-color"
+            aria-label="Balloon fill color"
+            value={first.fillColor ?? '#ffffff'}
+            disabled={first.fillColor === null}
+            onChange={(e) => change((b) => ({ ...b, fillColor: e.target.value }), 'Balloon color', 'balloon:fill')}
+          />
+          <label className="check">
+            <input type="checkbox" checked={first.fillColor !== null} onChange={(e) => change((b) => ({ ...b, fillColor: e.target.checked ? '#ffffff' : null }), 'Balloon fill')} />
+            Fill
+          </label>
+        </span>
+      </div>
     </>
   );
 }

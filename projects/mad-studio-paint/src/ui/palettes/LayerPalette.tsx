@@ -206,8 +206,8 @@ function LayerRow({ layer, depth, drag, setDrag, drop, setDrop }: RowsProps & { 
       ...(layer.kind === 'correction' && layer.correction.type !== 'reverse'
         ? [{ label: 'Correction layer settings…', onClick: () => openTonalDialog({ kind: 'layer', layerId: layer.id }) }]
         : []),
-      ...(layer.kind === 'raster' || layer.kind === 'vector' ? [{ label: 'Select layer opacity area', onClick: () => actions.selectLayerOpacity(layer.id) }] : []),
-      ...(layer.kind === 'vector' ? [{ label: 'Rasterize', disabled: layer.locked, onClick: () => actions.rasterizeLayer(layer.id) }] : []),
+      ...(layer.kind === 'raster' || actions.isObjectLayer(layer) ? [{ label: 'Select layer opacity area', onClick: () => actions.selectLayerOpacity(layer.id) }] : []),
+      ...(actions.isObjectLayer(layer) ? [{ label: 'Rasterize', disabled: layer.locked, onClick: () => actions.rasterizeLayer(layer.id) }] : []),
       { separator: true },
       { label: 'Clip to layer below', checked: layer.clip, onClick: () => actions.setLayerProps(layer.id, { clip: !layer.clip }, 'Clip to layer below') },
       { label: 'Set as reference layer', checked: layer.reference, onClick: () => actions.setLayerProps(layer.id, { reference: !layer.reference }, 'Reference layer') },
@@ -384,6 +384,11 @@ function LayerRow({ layer, depth, drag, setDrag, drop, setDrop }: RowsProps & { 
         {layer.kind === 'vector' && (
           <span className="vector-icon" title="Vector layer" data-testid="vector-icon">
             <Icon name="vector" size={16} />
+          </span>
+        )}
+        {layer.kind === 'text' && (
+          <span className="vector-icon" title={layer.balloons.length ? 'Balloon layer' : 'Text layer'} data-testid={layer.balloons.length ? 'balloon-icon' : 'text-icon'}>
+            <Icon name={layer.balloons.length ? 'balloon' : 'text'} size={16} />
           </span>
         )}
         {layer.rulers && (

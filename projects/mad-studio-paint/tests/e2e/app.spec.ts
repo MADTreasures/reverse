@@ -986,7 +986,7 @@ test('Object tool: select, move, recolour and delete vector lines; transforms st
   await selectTool(page, 'object');
   const on = await docToScreen(page, 150, 101);
   await page.mouse.click(on.x, on.y);
-  expect(await page.evaluate(() => window.__madPaint.useStore.getState().selectedLines)).toHaveLength(1);
+  expect(await page.evaluate(() => window.__madPaint.useStore.getState().selectedObjects)).toHaveLength(1);
   // Dragging the line moves it.
   await drag(page, [150, 100], [150, 180], 10);
   expect(await layerAlpha(page, 150, 180)).toBeGreaterThan(200);
@@ -1087,9 +1087,116 @@ test('Move layer, ⌘T and Flip move vector lines, not pixels; Select overlappin
   });
   const picked = await page.evaluate(() => {
     const s = window.__madPaint.useStore.getState();
-    return { tool: s.tool, ids: s.selectedLines, lower: s.doc.layers[0].strokes[1].id };
+    return { tool: s.tool, ids: s.selectedObjects, lower: s.doc.layers[0].strokes[1].id };
   });
   expect(picked.tool).toBe('object');
   expect(picked.ids).toEqual([picked.lower]);
+  expect(errors).toEqual([]);
+});
+
+/** Opaque pixels of the active layer inside a rectangle. */
+const inkIn = (page: Page, x: number, y: number, w: number, h: number) =>
+  page.evaluate(
+    ([rx, ry, rw, rh]) => {
+      const m = window.__madPaint;
+      const id = m.useStore.getState().activeLayerId;
+      let n = 0;
+      for (let yy = ry; yy < ry + rh; yy += 2) for (let xx = rx; xx < rx + rw; xx += 2) if ((m.engine.sampleLayer(id, xx, yy)?.[3] ?? 0) > 100) n++;
+      return n;
+    },
+    [x, y, w, h],
+  );
+
+test('text tool: type, confirm, edit, cancel; the text layer is named after its text', async ({ page }) => {
+  const errors = await boot(page);
+  await page.keyboard.press('t');
+  expect((await state(page)).tool).toBe('text');
+  const at = await docToScreen(page, 60, 100);
+  await page.mouse.click(at.x, at.y);
+  const editor = page.getByTestId('text-editor');
+  await expect(editor).toBeFocused();
+  await page.keyboard.type('Hi there');
+  await page.keyboard.press('ControlOrMeta+Enter');
+  await expect(editor).toHaveCount(0);
+  let l = (await state(page)).layers[0];
+  expect(l).toMatchObject({ kind: 'text', name: 'Hi there' });
+  expect(l.texts[0].text).toBe('Hi there');
+  expect(await inkIn(page, 55, 85, 120, 30)).toBeGreaterThan(20);
+  // Clicking the text edits it; a click outside confirms.
+  await page.mouse.click(at.x + 10, at.y);
+  await expect(editor).toHaveValue('Hi there');
+  await page.keyboard.press('End');
+  await page.keyboard.type('!');
+  const outside = await docToScreen(page, 300, 250);
+  await page.mouse.click(outside.x, outside.y);
+  await expect(editor).toHaveCount(0);
+  l = (await state(page)).layers[0];
+  expect(l.texts[0].text).toBe('Hi there!');
+  expect(l.name).toBe('Hi there!');
+  await page.keyboard.press('ControlOrMeta+z');
+  expect((await state(page)).layers[0].texts[0].text).toBe('Hi there');
+  // Esc cancels.
+  await page.mouse.click(at.x + 10, at.y);
+  await page.keyboard.type('xyz');
+  await page.keyboard.press('Escape');
+  expect((await state(page)).layers[0].texts[0].text).toBe('Hi there');
+  // Tool Settings change the text being edited: size and bold.
+  await page.mouse.click(at.x + 10, at.y);
+  await page.getByRole('button', { name: 'Tool Settings', exact: true }).click();
+  await page.getByRole('button', { name: 'Bold' }).click();
+  await page.getByRole('button', { name: 'Confirm text' }).click();
+  expect((await state(page)).layers[0].texts[0].bold).toBe(true);
+  // Removing all the text removes the layer.
+  await page.mouse.click(at.x + 10, at.y);
+  await page.keyboard.press('ControlOrMeta+a');
+  await page.keyboard.press('Backspace');
+  await page.keyboard.press('ControlOrMeta+Enter');
+  expect((await state(page)).layers.some((x: any) => x.kind === 'text')).toBe(false);
+  expect(errors).toEqual([]);
+});
+
+test('balloons: drawn over text, with a tail; the Object tool moves balloon and text; saved', async ({ page }) => {
+  const errors = await boot(page);
+  await selectTool(page, 'text');
+  const at = await docToScreen(page, 150, 120);
+  await page.mouse.click(at.x, at.y);
+  await page.keyboard.type('Wow');
+  await page.keyboard.press('ControlOrMeta+Enter');
+  await useSubTool(page, 'balloon', 'balloon-ellipse');
+  await drag(page, [100, 80], [260, 180], 8);
+  let l = (await state(page)).layers[0];
+  expect(l.balloons).toHaveLength(1);
+  await expect(page.getByTestId('balloon-icon')).toHaveCount(1);
+  // The text is centred in the balloon.
+  const t = l.texts[0];
+  expect(t.x + t.w / 2).toBeCloseTo(180, 0);
+  expect(t.y + t.h / 2).toBeCloseTo(130, 0);
+  await useSubTool(page, 'balloon', 'balloon-tail');
+  await drag(page, [180, 160], [120, 260], 8);
+  l = (await state(page)).layers[0];
+  expect(l.balloons[0].tails).toHaveLength(1);
+  // The tail is drawn.
+  expect(await inkIn(page, 115, 230, 30, 30)).toBeGreaterThan(3);
+  // Object tool: drag the balloon (outside the text) – the text goes along.
+  await selectTool(page, 'object');
+  await drag(page, [120, 130], [150, 150], 8);
+  l = (await state(page)).layers[0];
+  // Moved by the drag (30, 20), give or take the pointer's rounding.
+  expect(Math.abs(l.balloons[0].x - 130)).toBeLessThan(2.5);
+  expect(Math.abs(l.texts[0].x + l.texts[0].w / 2 - 210)).toBeLessThan(2.5);
+  // Saved and opened again.
+  const back = await page.evaluate(async () => {
+    const m = window.__madPaint;
+    await m.openFileBytes({ name: 'balloons.madpaint', data: await m.buildDocumentBytes() });
+    const x = m.useStore.getState().doc.layers[0];
+    return { kind: x.kind, texts: x.texts.map((y: any) => y.text), balloons: x.balloons.length, tails: x.balloons[0].tails.length };
+  });
+  expect(back).toEqual({ kind: 'text', texts: ['Wow'], balloons: 1, tails: 1 });
+  // Drawing tools refuse text layers; Rasterize converts them.
+  await thinPen(page);
+  await drag(page, [20, 20], [60, 20], 4);
+  expect((await state(page)).hint).toMatch(/Text layers cannot be drawn on/);
+  await page.evaluate(() => window.__madPaint.runCommand('rasterize'));
+  expect((await state(page)).layers[0].kind).toBe('raster');
   expect(errors).toEqual([]);
 });

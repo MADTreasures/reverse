@@ -10,6 +10,8 @@ import { ellipsePoints, rectPoints, snapAngle, type StrokePoint } from '../paint
 import { evalPressureCurve } from '../paint/curve';
 import { type FillReference, type SubTool } from '../paint/tools';
 import { eraseAt, linesBounds, newStrokeId, transformStrokes, type VectorEraseMode, type VectorStroke } from '../paint/vector';
+import { contentBounds, contentOf, pickContent, transformContent, type Content } from '../paint/objects';
+import { newObjectId } from '../paint/text';
 import { apply as applyMatrix, normalizeAngle } from '../paint/viewMath';
 import { BlendStroke, BrushStroke, type Stroke, type StrokeTarget } from '../engine/brushEngine';
 import { createCanvas, ctx2d, maskToCanvas } from '../engine/canvas';
@@ -850,24 +852,33 @@ export function pickLayerAt(p: PointerInfo): void {
 
 // ------------------------------------------------------------------ move layer
 
-/** A vector layer taken along by Move layer: its lines are moved, not its pixels. */
-interface MovingLines {
-  id: Id;
-  original: VectorStroke[];
+/** A vector or text layer taken along by Move layer: its objects are moved, not its pixels. */
+interface MovingObjects {
+  layer: actions.ObjectLayer;
+  original: Content;
   which: Set<string>;
-  /** Bounds of the moving lines before the move. */
+  /** Bounds of the moving objects before the move. */
   box: Rect | null;
   /** Where they were last drawn. */
   shown: Rect | null;
-  /** ⌥ copies the lines instead of moving them. */
+  /** ⌥ copies the objects instead of moving them. */
   copy: boolean;
 }
 
 const offset = (r: Rect | null, dx: number, dy: number): Rect | null => (r ? { ...r, x: r.x + dx, y: r.y + dy } : null);
 
+/** Copies of objects with new ids (⌥ with Move layer). */
+function duplicateContent(c: Content): Content {
+  return {
+    strokes: c.strokes.map((x) => ({ ...x, id: newStrokeId() })),
+    texts: c.texts.map((x) => ({ ...x, id: newObjectId('t') })),
+    balloons: c.balloons.map((x) => ({ ...x, id: newObjectId('b'), tails: x.tails.map((t) => ({ ...t, id: newObjectId('q') })) })),
+  };
+}
+
 export class MoveSession implements ToolSession {
   private edits: { edit: DirectEdit; hole: HTMLCanvasElement; lifted: HTMLCanvasElement }[] = [];
-  private vectors: MovingLines[] = [];
+  private objects: MovingObjects[] = [];
   private start: PointerInfo;
   private dx = 0;
   private dy = 0;
@@ -889,10 +900,11 @@ export class MoveSession implements ToolSession {
     const sel = engine.selectionCanvas();
     ids.forEach((id, i) => {
       const layer = findLayer(s.doc.layers, id);
-      if (layer?.kind === 'vector') {
-        const which = actions.linesToMove(layer, s.selection);
-        const box = linesBounds(layer.strokes.filter((x) => which.has(x.id)));
-        this.vectors.push({ id, original: layer.strokes, which, box, shown: box, copy: p.alt });
+      if (actions.isObjectLayer(layer)) {
+        const which = actions.objectsToMove(layer, s.selection);
+        const original = contentOf(layer);
+        const box = contentBounds(original, which);
+        this.objects.push({ layer, original, which, box, shown: box, copy: p.alt });
         return;
       }
       const surface = getSurface(id);
@@ -919,12 +931,12 @@ export class MoveSession implements ToolSession {
     });
   }
 
-  /** A vector layer's lines at the current offset. */
-  private moved(v: MovingLines): VectorStroke[] {
-    const m: [number, number, number, number, number, number] = [1, 0, 0, 1, this.dx, this.dy];
-    if (!v.copy) return v.original.map((x) => (v.which.has(x.id) ? transformStrokes([x], m)[0] : x));
-    const copies = v.original.filter((x) => v.which.has(x.id)).map((x) => ({ ...transformStrokes([x], m)[0], id: newStrokeId() }));
-    return [...v.original, ...copies];
+  /** A layer's objects at the current offset. */
+  private moved(v: MovingObjects): Content {
+    const m: Affine = [1, 0, 0, 1, this.dx, this.dy];
+    if (!v.copy) return transformContent(v.original, v.which, m);
+    const copies = duplicateContent(transformContent(pickContent(v.original, v.which), null, m));
+    return { strokes: [...v.original.strokes, ...copies.strokes], texts: [...v.original.texts, ...copies.texts], balloons: [...v.original.balloons, ...copies.balloons] };
   }
 
   private render(): void {
@@ -940,9 +952,9 @@ export class MoveSession implements ToolSession {
       ctx.restore();
       edit.changed({ x: 0, y: 0, w: hole.width, h: hole.height });
     }
-    for (const v of this.vectors) {
+    for (const v of this.objects) {
       const now = offset(v.box, this.dx, this.dy);
-      engine.renderVectorLines(v.id, this.moved(v), union(v.shown, now));
+      actions.previewContent(v.layer, this.moved(v), union(v.shown, now));
       v.shown = now;
     }
   }
@@ -965,16 +977,20 @@ export class MoveSession implements ToolSession {
     this.move(p);
     const patches: (PixelPatch | null)[] = this.edits.map(({ edit }) => edit.commit());
     const list = patches.filter((x): x is PixelPatch => x !== null);
-    const lines = new Map<Id, VectorStroke[]>();
-    if (this.dx || this.dy) for (const v of this.vectors) if (v.which.size) lines.set(v.id, this.moved(v));
-    if (list.length === 0 && lines.size === 0) return;
+    const contents = new Map<Id, Content>();
+    if (this.dx || this.dy) for (const v of this.objects) if (v.which.size) contents.set(v.layer.id, this.moved(v));
+    if (list.length === 0 && contents.size === 0) {
+      engine.resync();
+      return;
+    }
     const moved = this.selection ? translateMask(this.selection, this.dx, this.dy) : null;
-    actions.commitTransform('Move layer', list, lines, this.selection ? { before: this.selection, after: moved } : undefined);
+    actions.commitTransform('Move layer', list, contents, this.selection ? { before: this.selection, after: moved } : undefined);
   }
 
   cancel(): void {
     for (const { edit } of this.edits) edit.cancel();
-    for (const v of this.vectors) if (v.shown !== v.box || this.dx || this.dy) engine.renderVectorLines(v.id, v.original, union(v.shown, v.box));
+    for (const v of this.objects) if (v.shown !== v.box || this.dx || this.dy) actions.previewContent(v.layer, v.original, union(v.shown, v.box));
+    engine.resync();
   }
 }
 

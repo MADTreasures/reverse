@@ -1,5 +1,6 @@
 /** Tools, sub tools (presets) and their settings. Sub tools are user-editable and persisted. */
 import { LINEAR, sanitizeCurve01, type CurvePoint } from './curve';
+import { DEFAULT_TEXT_STYLE, sanitizeTextStyle, type BalloonShape, type TextStyle } from './text';
 
 export type ToolId =
   | 'zoom'
@@ -20,7 +21,9 @@ export type ToolId =
   | 'gradient'
   | 'figure'
   | 'ruler'
-  | 'object';
+  | 'object'
+  | 'text'
+  | 'balloon';
 
 export type BrushMode = 'paint' | 'erase' | 'blend';
 export type TipTexture = 'none' | 'grain';
@@ -148,6 +151,12 @@ export interface SubTool {
   vectorReferAll?: boolean;
   /** Object tool: scaling vector lines also scales their width. */
   scaleLineWidth?: boolean;
+  /** Text tool: settings for new text (size in points). */
+  textStyle?: TextStyle;
+  /** Balloon tools: the shape drawn, its outline width (px) and whether it is filled (with the sub colour). */
+  balloon?: { shape: BalloonShape; lineWidth: number; fill: boolean };
+  /** Balloon tail tools. */
+  tail?: { width: number; bend: number; kind: 'pointed' | 'thought' };
 }
 
 export const DEFAULT_BRUSH: BrushSettings = {
@@ -219,7 +228,9 @@ export const TOOLS: ToolInfo[] = [
   { id: 'gradient', label: 'Gradient', key: 'G', hint: 'Drag to draw a gradient with the drawing colour' },
   { id: 'figure', label: 'Figure', key: 'U', hint: 'Drag to draw · ⇧ snaps lines to 45° and makes squares / circles' },
   { id: 'ruler', label: 'Ruler', key: 'U', hint: 'Drag to create a ruler · drag a handle to edit it · strokes snap to rulers (⌘1 / ⌘2)' },
-  { id: 'object', label: 'Object', key: 'O', hint: 'Click a vector line or ruler to select it · drag to move, handles to scale and rotate · Delete removes it' },
+  { id: 'object', label: 'Object', key: 'O', hint: 'Click a vector line, text, balloon or ruler to select it · drag to move, handles to scale and rotate · Delete removes it' },
+  { id: 'text', label: 'Text', key: 'T', hint: 'Click to type, drag to type in a frame (the text wraps at it) · click text to edit it · ⌘Enter or a click outside confirms' },
+  { id: 'balloon', label: 'Balloon', key: 'T', hint: 'Drag to draw a speech balloon · balloon tail: drag from inside a balloon' },
 ];
 
 export const toolInfo = (id: ToolId): ToolInfo => TOOLS.find((t) => t.id === id)!;
@@ -434,6 +445,15 @@ export const DEFAULT_SUB_TOOLS: SubTool[] = [
   { id: 'ruler-guide', tool: 'ruler', name: 'Guide', rulerKind: 'guide' },
   { id: 'ruler-perspective', tool: 'ruler', name: 'Perspective ruler', rulerKind: 'perspective' },
   { id: 'ruler-symmetry', tool: 'ruler', name: 'Symmetrical ruler', rulerKind: 'symmetry', symmetryLines: 2, symmetryMirror: true },
+  // Text & balloons
+  { id: 'text', tool: 'text', name: 'Text', textStyle: { ...DEFAULT_TEXT_STYLE, size: 24 } },
+  { id: 'text-vertical', tool: 'text', name: 'Vertical text', textStyle: { ...DEFAULT_TEXT_STYLE, size: 24, vertical: true } },
+  { id: 'balloon-ellipse', tool: 'balloon', name: 'Ellipse balloon', balloon: { shape: 'ellipse', lineWidth: 3, fill: true } },
+  { id: 'balloon-rounded', tool: 'balloon', name: 'Rounded balloon', balloon: { shape: 'rounded', lineWidth: 3, fill: true } },
+  { id: 'balloon-rect', tool: 'balloon', name: 'Rectangle balloon', balloon: { shape: 'rect', lineWidth: 3, fill: true } },
+  { id: 'balloon-cloud', tool: 'balloon', name: 'Thought balloon', balloon: { shape: 'cloud', lineWidth: 3, fill: true } },
+  { id: 'balloon-tail', tool: 'balloon', name: 'Balloon tail', tail: { width: 24, bend: 0.3, kind: 'pointed' } },
+  { id: 'balloon-tail-thought', tool: 'balloon', name: 'Thought balloon tail', tail: { width: 30, bend: 0, kind: 'thought' } },
   // Operation, view & eyedropper
   { id: 'object', tool: 'object', name: 'Object', scaleLineWidth: true },
   { id: 'select-layer', tool: 'selectLayer', name: 'Select layer' },
@@ -466,6 +486,25 @@ export function mergeSubTools(saved: unknown): SubTool[] {
       ...(def.tool === 'eraser' && (s.vectorErase === 'touched' || s.vectorErase === 'intersection' || s.vectorErase === 'whole') ? { vectorErase: s.vectorErase } : {}),
       ...(def.tool === 'eraser' && typeof s.vectorReferAll === 'boolean' ? { vectorReferAll: s.vectorReferAll } : {}),
       ...(def.scaleLineWidth !== undefined && typeof s.scaleLineWidth === 'boolean' ? { scaleLineWidth: s.scaleLineWidth } : {}),
+      ...(def.textStyle && s.textStyle ? { textStyle: { ...sanitizeTextStyle({ ...def.textStyle, ...s.textStyle }), size: Math.min(500, sanitizeTextStyle(s.textStyle).size) } } : {}),
+      ...(def.balloon && s.balloon && typeof s.balloon === 'object'
+        ? {
+            balloon: {
+              shape: def.balloon.shape,
+              lineWidth: typeof s.balloon.lineWidth === 'number' && Number.isFinite(s.balloon.lineWidth) ? Math.max(0, Math.min(100, s.balloon.lineWidth)) : def.balloon.lineWidth,
+              fill: typeof s.balloon.fill === 'boolean' ? s.balloon.fill : def.balloon.fill,
+            },
+          }
+        : {}),
+      ...(def.tail && s.tail && typeof s.tail === 'object'
+        ? {
+            tail: {
+              kind: def.tail.kind,
+              width: typeof s.tail.width === 'number' && Number.isFinite(s.tail.width) ? Math.max(1, Math.min(1000, s.tail.width)) : def.tail.width,
+              bend: typeof s.tail.bend === 'number' && Number.isFinite(s.tail.bend) ? Math.max(-1, Math.min(1, s.tail.bend)) : def.tail.bend,
+            },
+          }
+        : {}),
     };
   });
 }
@@ -560,6 +599,7 @@ export const PALETTE_ENTRIES: PaletteEntry[] = [
   { id: 'gradient', label: 'Gradient', icon: 'gradient', tools: ['gradient'] },
   { id: 'figure', label: 'Figure', icon: 'figure', tools: ['figure'] },
   { id: 'ruler', label: 'Ruler', icon: 'ruler', tools: ['ruler'] },
+  { id: 'text', label: 'Text (Text, Balloon)', icon: 'text', tools: ['text', 'balloon'] },
 ];
 
 export type WorkspaceId = 'default' | 'classic';
@@ -573,12 +613,12 @@ export const PALETTE_LAYOUT: Record<WorkspaceId, string[][]> = {
   default: [
     ['pen', 'pencil', 'brush', 'eraser', 'airbrush', 'blend'],
     ['select', 'autoSelect', 'fill', 'gradient'],
-    ['operation', 'figure', 'ruler', 'navigate', 'eyedropper'],
+    ['operation', 'figure', 'ruler', 'text', 'navigate', 'eyedropper'],
   ],
   classic: [
     ['zoom', 'navigate', 'operation', 'select', 'autoSelect', 'eyedropper'],
     ['pen', 'pencil', 'brush', 'airbrush', 'eraser', 'blend'],
-    ['fill', 'gradient', 'figure', 'ruler'],
+    ['fill', 'gradient', 'figure', 'ruler', 'text'],
   ],
 };
 

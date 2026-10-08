@@ -22,6 +22,8 @@ export interface Command {
 
 const hasSelection = () => getState().selection !== null;
 const canEdit = () => actions.editBlocker() === null;
+/** Text layers cannot be drawn on, but can be moved, flipped and transformed. */
+const canTransform = () => actions.transformBlocker() === null;
 const notTransforming = () => !isTransforming();
 const hasLayer = () => actions.activeLayer() !== null;
 const hasMask = () => Boolean(actions.activeLayer()?.mask);
@@ -93,22 +95,22 @@ export const COMMANDS: Command[] = [
     // With the Object tool, Delete removes the selected vector lines or ruler.
     run: () => {
       const { tool, selectedRuler } = getState();
-      if (tool === 'object' && actions.selectedVectorLines()) actions.deleteSelectedLines();
+      if (tool === 'object' && actions.selectedVectorLines()) actions.deleteSelectedObjects();
       else if (tool === 'object' && selectedRuler) actions.deleteRuler(selectedRuler.layerId, selectedRuler.rulerId);
       else actions.clearLayer();
     },
-    enabled: () => canEdit() || (getState().tool === 'object' && getState().selectedRuler !== null),
+    enabled: () => canEdit() || actions.activeLayer()?.kind === 'text' || (getState().tool === 'object' && getState().selectedRuler !== null),
   },
   { id: 'clearOutside', label: 'Delete outside selected area', keys: ['Shift+backspace', 'Shift+delete'], run: () => actions.clearOutsideSelection(), enabled: () => canEdit() && hasSelection() },
   { id: 'fill', label: 'Fill', keys: ['Alt+backspace', 'Alt+delete'], run: () => actions.fillWithColor(), enabled: canEdit },
-  { id: 'transform', label: 'Transform: Scale up/Scale down/Rotate', keys: ['Mod+t'], run: () => void startTransform('scaleRotate'), enabled: () => canEdit() && notTransforming() },
-  { id: 'freeTransform', label: 'Transform: Free transform', keys: ['Mod+Shift+t'], run: () => void startTransform('free'), enabled: () => canEdit() && notTransforming() },
+  { id: 'transform', label: 'Transform: Scale up/Scale down/Rotate', keys: ['Mod+t'], run: () => void startTransform('scaleRotate'), enabled: () => canTransform() && notTransforming() },
+  { id: 'freeTransform', label: 'Transform: Free transform', keys: ['Mod+Shift+t'], run: () => void startTransform('free'), enabled: () => canTransform() && notTransforming() },
   { id: 'confirmTransform', label: 'Confirm transform', keys: ['enter'], run: () => confirmTransform(), enabled: () => isTransforming() },
   { id: 'cancelTransform', label: 'Cancel transform', keys: ['escape'], run: () => cancelTransform(), enabled: () => isTransforming() },
   { id: 'canvasSize', label: 'Change canvas size…', run: () => openDialog('canvasSize'), enabled: notTransforming },
   { id: 'imageResolution', label: 'Change image resolution…', run: () => openDialog('imageResolution'), enabled: notTransforming },
-  { id: 'flipLayerH', label: 'Flip layer horizontal', run: () => actions.flipLayer(true), enabled: canEdit },
-  { id: 'flipLayerV', label: 'Flip layer vertical', run: () => actions.flipLayer(false), enabled: canEdit },
+  { id: 'flipLayerH', label: 'Flip layer horizontal', run: () => actions.flipLayer(true), enabled: canTransform },
+  { id: 'flipLayerV', label: 'Flip layer vertical', run: () => actions.flipLayer(false), enabled: canTransform },
   // Layer
   { id: 'newRasterLayer', label: 'New raster layer', keys: ['Mod+Shift+n'], run: () => void actions.addRasterLayer() },
   { id: 'newVectorLayer', label: 'New vector layer', run: () => void actions.addVectorLayer() },
@@ -117,7 +119,7 @@ export const COMMANDS: Command[] = [
     id: 'rasterize',
     label: 'Rasterize',
     run: () => actions.rasterizeLayer(),
-    enabled: () => actions.activeLayer()?.kind === 'vector' && !actions.activeLayer()?.locked,
+    enabled: () => actions.isObjectLayer(actions.activeLayer()) && !actions.activeLayer()?.locked,
   },
   { id: 'groupLayer', label: 'Create folder and insert layer', keys: ['Mod+g'], run: () => actions.groupLayer() },
   {

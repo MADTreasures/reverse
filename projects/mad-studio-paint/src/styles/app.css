@@ -674,6 +674,27 @@
   width: 100%;
 }
 
+.prop-input {
+  width: 100%;
+  min-width: 0;
+}
+
+.segmented .style-bold {
+  font-weight: 700;
+}
+
+.segmented .style-italic {
+  font-style: italic;
+}
+
+.segmented .style-underline {
+  text-decoration: underline;
+}
+
+.segmented .style-strike {
+  text-decoration: line-through;
+}
+
 .prop-check {
   padding: 3px 0;
 }
@@ -1130,8 +1151,39 @@
   z-index: 5;
 }
 
-.selection-launcher .icon-btn:hover {
+.selection-launcher .icon-btn:hover,
+.text-launcher .icon-btn:hover {
   background: #3a3a3a;
+}
+
+/* Text typed on the canvas: positioned and scaled like the text box (see TextEditor). */
+.text-editor {
+  position: absolute;
+  left: 0;
+  top: 0;
+  transform-origin: 0 0;
+  margin: 0;
+  padding: 0;
+  border: none;
+  background: transparent;
+  outline: 1px dashed #2f80ed;
+  overflow: hidden;
+  resize: none;
+  z-index: 4;
+  caret-color: #2f80ed;
+}
+
+.text-launcher {
+  position: absolute;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 1px;
+  padding: 3px;
+  background: #1f1f1f;
+  border: 1px solid #000;
+  border-radius: 4px;
+  box-shadow: var(--shadow);
+  z-index: 5;
 }
 
 /* ------------------------------------------------------------ navigator */

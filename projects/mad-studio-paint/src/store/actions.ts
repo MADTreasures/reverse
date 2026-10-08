@@ -26,9 +26,13 @@ import {
   shiftLayer as shiftLayerInTree,
   type DropPosition,
 } from '../model/layers';
-import type { FolderLayer, Id, Layer, LayerMask, PaintDocument, RasterLayer, RulerRange, VectorLayer } from '../model/types';
+import type { FolderLayer, Id, Layer, LayerMask, PaintDocument, RasterLayer, RulerRange, TextLayer, VectorLayer } from '../model/types';
 import { defaultPerspective, type Affine, type Ruler, type RulerInput } from '../paint/rulers';
-import { eraseWhere, keepWhere, transformStrokes, type VectorStroke } from '../paint/vector';
+import { eraseWhere, keepWhere, type VectorStroke } from '../paint/vector';
+import type { Rect } from '../paint/rect';
+import { contentOf, EMPTY_CONTENT, idsTouching, objectIds, removeObjects, transformContent, type Content } from '../paint/objects';
+import type { Balloon, TextBox } from '../paint/text';
+import { fitTextBox } from '../engine/textRender';
 import { sanitizeCurve01 } from '../paint/curve';
 import type { LayerEffects } from '../paint/effects';
 import { applyCorrection, correctionLabel, type Correction } from '../paint/tonal';
@@ -88,7 +92,7 @@ export function changeDoc(label: string, fn: (doc: PaintDocument, s: PaintState)
   const doc = cloneDocument(s.doc);
   const active = fn(doc, s) ?? s.activeLayerId;
   const activeLayerId = findLayer(doc.layers, active) ? active : flatten(doc.layers)[0]?.id ?? '';
-  setState({ doc, activeLayerId, ...(activeLayerId !== s.activeLayerId ? { maskEditing: false, selectedLines: [] } : {}) });
+  setState({ doc, activeLayerId, ...(activeLayerId !== s.activeLayerId ? { maskEditing: false, selectedObjects: [] } : {}) });
   commit({ label, before, after: { doc, activeLayerId }, patches: opts.patches ?? [], key: opts.key });
 }
 
@@ -99,7 +103,7 @@ export function commitPixels(label: string, patches: (PixelPatch | null)[]): voi
 
 function setActiveDoc(d: DocState): void {
   const changed = d.activeLayerId !== getState().activeLayerId;
-  setState({ doc: d.doc, activeLayerId: d.activeLayerId, ...(changed ? { maskEditing: false, selectedLines: [] } : {}) });
+  setState({ doc: d.doc, activeLayerId: d.activeLayerId, ...(changed ? { maskEditing: false, selectedObjects: [] } : {}) });
 }
 
 export function undo(): void {
@@ -131,6 +135,8 @@ export function redo(): void {
 export function loadDocument(doc: PaintDocument, images: Map<Id, HTMLCanvasElement>, fileName: string | null): void {
   engine.load(doc, images);
   setState({
+    textEdit: null,
+    selectedObjects: [],
     doc,
     activeLayerId: rasterLayers(doc.layers)[0]?.id ?? flatten(doc.layers)[0]?.id ?? '',
     maskEditing: false,
@@ -214,17 +220,22 @@ export const editingMask = (s: PaintState = getState()): boolean => editTarget(s
 export function editBlocker(s: PaintState = getState()): string | null {
   const l = activeLayer(s);
   if (!l) return 'No layer selected';
-  if (!editTarget(s)) return 'Select a raster layer to draw on (folders cannot be drawn on)';
+  if (!editTarget(s)) return l.kind === 'text' ? 'Text layers cannot be drawn on (Layer > Rasterize converts the layer)' : 'Select a raster layer to draw on (folders cannot be drawn on)';
   if (isEffectivelyLocked(s.doc.layers, l.id)) return 'The layer is locked';
   if (!l.visible) return 'The layer is hidden';
   return null;
+}
+
+/** Why the active layer cannot be moved, flipped or transformed, or null. Text layers can be, although they cannot be drawn on. */
+export function transformBlocker(s: PaintState = getState()): string | null {
+  return activeLayer(s)?.kind === 'text' && !s.maskEditing ? objectBlocker(s) : editBlocker(s);
 }
 
 /** Selects a layer; with `mask`, its mask thumbnail (the mask becomes the drawing target). */
 export function selectLayer(id: Id, mask = false): void {
   const s = getState();
   const l = findLayer(s.doc.layers, id);
-  if (l) setState({ activeLayerId: id, maskEditing: mask && Boolean(l.mask), ...(id !== s.activeLayerId ? { selectedLines: [] } : {}) });
+  if (l) setState({ activeLayerId: id, maskEditing: mask && Boolean(l.mask), ...(id !== s.activeLayerId ? { selectedObjects: [] } : {}) });
 }
 
 /**
@@ -239,14 +250,14 @@ export function movingSurfaces(s: PaintState = getState()): Id[] {
   const ids: Id[] = [];
   for (const x of flatten([l])) {
     if (isEffectivelyLocked(s.doc.layers, x.id)) continue;
-    if (x.kind === 'raster' || x.kind === 'vector') ids.push(x.id);
+    if (x.kind === 'raster' || x.kind === 'vector' || x.kind === 'text') ids.push(x.id);
     if (x.mask?.linked) ids.push(x.mask.id);
   }
   return ids;
 }
 
 /** New layers go directly above the selected layer, or to the top of a selected folder. */
-function insertNew(doc: PaintDocument, layer: Layer, activeId: Id): void {
+export function insertNew(doc: PaintDocument, layer: Layer, activeId: Id): void {
   const active = findLayer(doc.layers, activeId);
   if (active?.kind === 'folder') {
     active.children.unshift(layer);
@@ -581,7 +592,11 @@ export function soloLayer(id: Id): void {
   });
 }
 
-// ------------------------------------------------------------------ vector layers
+// ------------------------------------------------------------------ vector and text layers
+
+/** Layers whose pixels are rendered from objects: vector lines, or text boxes and balloons. */
+export type ObjectLayer = VectorLayer | TextLayer;
+export const isObjectLayer = (l: Layer | null | undefined): l is ObjectLayer => l?.kind === 'vector' || l?.kind === 'text';
 
 export function addVectorLayer(): Id {
   const layer = createVectorLayer(nextLayerName(getState().doc));
@@ -592,15 +607,25 @@ export function addVectorLayer(): Id {
   return layer.id;
 }
 
-/** Replaces a vector layer's lines as one undo step; its pixels are rendered again from them. */
-export function setVectorStrokes(layerId: Id, strokes: VectorStroke[], label: string): void {
-  changeDoc(label, (doc) => {
-    const l = findLayer(doc.layers, layerId);
-    if (l?.kind !== 'vector') return;
-    l.strokes = strokes;
-    l.rev = nextRev();
-  });
+/** Replaces the objects of a vector or text layer as one undo step (`key` merges slider drags). */
+export function setLayerContent(layerId: Id, c: Content, label: string, key?: string): void {
+  changeDoc(
+    label,
+    (doc) => {
+      const l = findLayer(doc.layers, layerId);
+      if (l?.kind === 'vector') l.strokes = c.strokes;
+      else if (l?.kind === 'text') {
+        l.texts = c.texts;
+        l.balloons = c.balloons;
+      } else return;
+      l.rev = nextRev();
+    },
+    { key },
+  );
 }
+
+/** Replaces a vector layer's lines as one undo step; its pixels are rendered again from them. */
+export const setVectorStrokes = (layerId: Id, strokes: VectorStroke[], label: string) => setLayerContent(layerId, { ...EMPTY_CONTENT, strokes }, label);
 
 /**
  * Adds lines a tool drew to a vector layer (only their parts inside the selection). They are drawn
@@ -617,47 +642,71 @@ export function addVectorLines(layerId: Id, lines: VectorStroke[], label: string
   setVectorStrokes(layerId, [...l.strokes, ...added], label);
 }
 
-/** The lines of the active vector layer selected with the Object tool. */
-export function selectedVectorLines(s: PaintState = getState()): { layer: VectorLayer; lines: VectorStroke[] } | null {
+/** The objects of the active vector or text layer selected with the Object tool. */
+export function selectedObjectsOf(s: PaintState = getState()): { layer: ObjectLayer; ids: Set<string>; content: Content } | null {
   const l = activeLayer(s);
-  if (l?.kind !== 'vector' || s.selectedLines.length === 0) return null;
-  const ids = new Set(s.selectedLines);
-  const lines = l.strokes.filter((x) => ids.has(x.id));
-  return lines.length ? { layer: l, lines } : null;
+  if (!isObjectLayer(l) || s.selectedObjects.length === 0) return null;
+  const content = contentOf(l);
+  const present = new Set(objectIds(content));
+  const ids = new Set(s.selectedObjects.filter((id) => present.has(id)));
+  return ids.size ? { layer: l, ids, content } : null;
 }
 
-/** Object tool: selects lines of the active layer; `add` keeps the lines already selected. */
-export function selectLines(ids: string[], add = false): void {
-  const cur = getState().selectedLines;
-  setState({ selectedLines: add ? [...new Set([...cur, ...ids])] : ids });
+/** The selected lines of the active vector layer. */
+export function selectedVectorLines(s: PaintState = getState()): { layer: VectorLayer; lines: VectorStroke[] } | null {
+  const sel = selectedObjectsOf(s);
+  if (sel?.layer.kind !== 'vector') return null;
+  const lines = sel.content.strokes.filter((x) => sel.ids.has(x.id));
+  return lines.length ? { layer: sel.layer, lines } : null;
 }
 
-/** Changes the selected lines (colour, width, opacity), one undo step per slider drag (`key`). */
-export function updateSelectedLines(fn: (line: VectorStroke) => VectorStroke, label: string, key?: string): void {
+/** The selected text boxes and balloons of the active text layer. */
+export function selectedTextObjects(s: PaintState = getState()): { layer: TextLayer; texts: TextBox[]; balloons: Balloon[] } | null {
+  const sel = selectedObjectsOf(s);
+  if (sel?.layer.kind !== 'text') return null;
+  return { layer: sel.layer, texts: sel.content.texts.filter((t) => sel.ids.has(t.id)), balloons: sel.content.balloons.filter((b) => sel.ids.has(b.id)) };
+}
+
+/** Object tool: selects objects of the active layer; `add` keeps the ones already selected. */
+export function selectObjects(ids: string[], add = false): void {
+  const cur = getState().selectedObjects;
+  setState({ selectedObjects: add ? [...new Set([...cur, ...ids])] : ids });
+}
+
+/** Changes the selected objects (colour, width, font …), one undo step per slider drag (`key`). */
+function updateSelected(change: (c: Content, ids: Set<string>) => Content, label: string, key?: string): void {
   const s = getState();
-  const sel = selectedVectorLines(s);
-  if (!sel || blocked(editBlocker(s))) return;
-  const ids = new Set(s.selectedLines);
-  changeDoc(
-    label,
-    (doc) => {
-      const l = findLayer(doc.layers, sel.layer.id);
-      if (l?.kind !== 'vector') return;
-      l.strokes = l.strokes.map((x) => (ids.has(x.id) ? fn(x) : x));
-      l.rev = nextRev();
-    },
-    { key },
-  );
+  const sel = selectedObjectsOf(s);
+  if (!sel || blocked(objectBlocker(s))) return;
+  setLayerContent(sel.layer.id, change(sel.content, sel.ids), label, key);
 }
 
-/** Delete with the Object tool: removes the selected lines. */
-export function deleteSelectedLines(): void {
+export const updateSelectedLines = (fn: (line: VectorStroke) => VectorStroke, label: string, key?: string) =>
+  updateSelected((c, ids) => ({ ...c, strokes: c.strokes.map((x) => (ids.has(x.id) ? fn(x) : x)) }), label, key);
+
+/** Text boxes keep fitting their text after a change (font, size …). */
+export const updateSelectedTexts = (fn: (t: TextBox) => TextBox, label: string, key?: string) =>
+  updateSelected((c, ids) => ({ ...c, texts: c.texts.map((x) => (ids.has(x.id) ? fitTextBox(fn(x)) : x)) }), label, key);
+
+export const updateSelectedBalloons = (fn: (b: Balloon) => Balloon, label: string, key?: string) =>
+  updateSelected((c, ids) => ({ ...c, balloons: c.balloons.map((x) => (ids.has(x.id) ? fn(x) : x)) }), label, key);
+
+/** Why the objects of the active layer cannot be changed (locked or hidden layer), or null. */
+export function objectBlocker(s: PaintState = getState()): string | null {
+  const l = activeLayer(s);
+  if (!l) return 'No layer selected';
+  if (isEffectivelyLocked(s.doc.layers, l.id)) return 'The layer is locked';
+  if (!l.visible) return 'The layer is hidden';
+  return null;
+}
+
+/** Delete with the Object tool: removes the selected objects. */
+export function deleteSelectedObjects(): void {
   const s = getState();
-  const sel = selectedVectorLines(s);
-  if (!sel || blocked(editBlocker(s))) return;
-  const ids = new Set(s.selectedLines);
-  setVectorStrokes(sel.layer.id, sel.layer.strokes.filter((x) => !ids.has(x.id)), 'Delete lines');
-  setState({ selectedLines: [] });
+  const sel = selectedObjectsOf(s);
+  if (!sel || blocked(objectBlocker(s))) return;
+  setLayerContent(sel.layer.id, removeObjects(sel.content, sel.ids), sel.layer.kind === 'vector' ? 'Delete lines' : 'Delete');
+  setState({ selectedObjects: [] });
 }
 
 /** Select > Select overlapping vectors / Select vectors within area (lines of the active vector layer). */
@@ -671,28 +720,32 @@ export function selectVectorsInSelection(within: boolean): void {
   }
   const inside = (p: { x: number; y: number }) => isSelected(sel, p);
   const ids = l.strokes.filter((x) => (within ? eraseWhere([x], inside).length === 0 : keepWhere([x], inside).length > 0)).map((x) => x.id);
-  setState({ selectedLines: ids, tool: 'object', hint: `${ids.length} line${ids.length === 1 ? '' : 's'} selected` });
+  setState({ selectedObjects: ids, tool: 'object', hint: `${ids.length} line${ids.length === 1 ? '' : 's'} selected` });
 }
 
 export const isVectorLayer = (id: Id, s: PaintState = getState()) => findLayer(s.doc.layers, id)?.kind === 'vector';
 
 /**
- * Records moved or transformed pixels (patches) together with the new lines of vector layers as one
- * undo step (Move layer, Transform, Flip). The tools already show the lines, so they are not
- * rendered again.
+ * Records moved or transformed pixels (patches) together with the new objects of vector and text
+ * layers as one undo step (Move layer, Transform, Flip, Object tool). The tools already show
+ * the new lines, so vector layers are not rendered again.
  */
-export function commitTransform(label: string, patches: PixelPatch[], lines: Map<Id, VectorStroke[]>, selection?: { before: Mask | null; after: Mask | null }): void {
+export function commitTransform(label: string, patches: PixelPatch[], contents: Map<Id, Content>, selection?: { before: Mask | null; after: Mask | null }): void {
   const s = getState();
   const before = docState(s);
   let after: DocState | null = null;
-  if (lines.size) {
+  if (contents.size) {
     const doc = cloneDocument(s.doc);
-    for (const [id, strokes] of lines) {
+    for (const [id, c] of contents) {
       const l = findLayer(doc.layers, id);
-      if (l?.kind !== 'vector') continue;
-      l.strokes = strokes;
+      if (l?.kind === 'vector') {
+        l.strokes = c.strokes;
+        engine.expectVectorLines(id, c.strokes);
+      } else if (l?.kind === 'text') {
+        l.texts = c.texts;
+        l.balloons = c.balloons;
+      } else continue;
       l.rev = nextRev();
-      engine.expectVectorLines(id, strokes);
     }
     after = { doc, activeLayerId: s.activeLayerId };
     setState({ doc });
@@ -702,23 +755,23 @@ export function commitTransform(label: string, patches: PixelPatch[], lines: Map
   commit({ label, ...(after ? { before, after } : {}), patches, ...(selection ? { selection } : {}) });
 }
 
-/** The lines of a vector layer that a move or transform takes along: all, or those touching the selection. */
-export function linesToMove(l: VectorLayer, selection: Mask | null): Set<string> {
-  if (!selection) return new Set(l.strokes.map((x) => x.id));
-  const inside = (p: { x: number; y: number }) => isSelected(selection, p);
-  return new Set(l.strokes.filter((x) => keepWhere([x], inside).length > 0).map((x) => x.id));
+/** The objects a move or transform takes along: all, or those touching the selection. */
+export function objectsToMove(l: ObjectLayer, selection: Mask | null): Set<string> {
+  const c = contentOf(l);
+  return selection ? idsTouching(c, (p) => isSelected(selection, p)) : new Set(objectIds(c));
 }
 
-/** A vector layer's lines with `m` applied to those in `which`. */
-export function transformSome(strokes: VectorStroke[], which: Set<string>, m: Affine, scaleWidth = true): VectorStroke[] {
-  return strokes.map((x) => (which.has(x.id) ? transformStrokes([x], m, scaleWidth)[0] : x));
+/** Shows new objects of a vector or text layer while a tool changes them (lines only inside `r`). */
+export function previewContent(l: ObjectLayer, c: Content, r: Rect | null): void {
+  if (l.kind === 'vector') engine.renderVectorLines(l.id, c.strokes, r);
+  else engine.previewText(l, c);
 }
 
-/** Layer > Rasterize: a vector layer becomes a raster layer with the same pixels. */
+/** Layer > Rasterize: a vector or text layer becomes a raster layer with the same pixels. */
 export function rasterizeLayer(id: Id = getState().activeLayerId): void {
   const s = getState();
   const l = findLayer(s.doc.layers, id);
-  if (l?.kind !== 'vector') return;
+  if (!isObjectLayer(l)) return;
   const src = getSurface(l.id);
   const raster = createRasterLayer(l.name, {
     visible: l.visible,
@@ -1240,11 +1293,17 @@ function maskWithNewAreaVisible(old: HTMLCanvasElement, w: number, h: number, tr
   return out;
 }
 
-/** Applies `m` to the lines of every vector layer (canvas size and resolution changes). */
+/** Applies `m` to the objects of every vector and text layer (canvas size and resolution changes). */
 function transformVectorLayers(doc: PaintDocument, m: Affine): void {
   for (const l of flatten(doc.layers)) {
-    if (l.kind !== 'vector') continue;
-    l.strokes = transformStrokes(l.strokes, m);
+    if (!isObjectLayer(l)) continue;
+    // The whole image scales: letters and balloon outlines too.
+    const c = transformContent(contentOf(l), null, m, { scaleText: true, scaleLine: true });
+    if (l.kind === 'vector') l.strokes = c.strokes;
+    else {
+      l.texts = c.texts;
+      l.balloons = c.balloons;
+    }
     l.rev = nextRev();
   }
 }
@@ -1375,6 +1434,14 @@ export function clearLayer(): void {
     if (l) setVectorStrokes(l.id, selection ? eraseWhere(l.strokes, (p) => isSelected(selection, p)) : [], 'Clear');
     return;
   }
+  const active = activeLayer();
+  if (active?.kind === 'text' && !getState().maskEditing) {
+    // Text and balloons in the selection are removed (all of them without one).
+    if (blocked(objectBlocker())) return;
+    const c = contentOf(active);
+    setLayerContent(active.id, selection ? removeObjects(c, idsTouching(c, (p) => isSelected(selection, p))) : EMPTY_CONTENT, 'Clear');
+    return;
+  }
   withEditSurface((target, surface) => {
     if (getState().selection && !bounds) return null;
     return captureLayerChange(target.surfaceId, surface, bounds, (ctx) => {
@@ -1447,7 +1514,7 @@ export function fillWithColor(): void {
 /** Flips the layer (and its linked mask, or a whole folder's layers) or the selected pixels. */
 export function flipLayer(horizontal: boolean): void {
   const s = getState();
-  const blocker = editBlocker(s);
+  const blocker = transformBlocker(s);
   if (blocker) {
     setState({ hint: blocker });
     return;
@@ -1458,17 +1525,18 @@ export function flipLayer(horizontal: boolean): void {
   const area = bounds ?? { x: 0, y: 0, w: s.doc.width, h: s.doc.height };
   const cx = area.x + area.w / 2;
   const cy = area.y + area.h / 2;
-  const vectors = movingSurfaces(s).filter((id) => isVectorLayer(id, s));
   const flip: Affine = horizontal ? [-1, 0, 0, 1, 2 * cx, 0] : [1, 0, 0, -1, 0, 2 * cy];
-  const lines = new Map<Id, VectorStroke[]>();
-  for (const id of vectors) {
+  const contents = new Map<Id, Content>();
+  const objectLayers = new Set<Id>();
+  for (const id of movingSurfaces(s)) {
     const l = findLayer(s.doc.layers, id);
-    if (l?.kind !== 'vector') continue;
-    const flipped = transformSome(l.strokes, linesToMove(l, s.selection), flip);
-    engine.renderVectorLines(id, flipped);
-    lines.set(id, flipped);
+    if (!isObjectLayer(l)) continue;
+    objectLayers.add(id);
+    const flipped = transformContent(contentOf(l), objectsToMove(l, s.selection), flip);
+    previewContent(l, flipped, null);
+    contents.set(id, flipped);
   }
-  for (const id of movingSurfaces(s).filter((x) => !vectors.includes(x))) {
+  for (const id of movingSurfaces(s).filter((x) => !objectLayers.has(x))) {
     const surface = getSurface(id);
     if (!surface) continue;
     const r = bounds ?? { x: 0, y: 0, w: surface.width, h: surface.height };
@@ -1497,7 +1565,7 @@ export function flipLayer(horizontal: boolean): void {
     );
   }
   engine.invalidate();
-  commitTransform(horizontal ? 'Flip horizontal' : 'Flip vertical', patches.filter((p): p is PixelPatch => p !== null), lines);
+  commitTransform(horizontal ? 'Flip horizontal' : 'Flip vertical', patches.filter((p): p is PixelPatch => p !== null), contents);
 }
 
 // ------------------------------------------------------------------ selection

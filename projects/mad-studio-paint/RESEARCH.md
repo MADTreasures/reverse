@@ -99,6 +99,8 @@ Status: ✅ gleich · 🟡 ähnlich/vereinfacht · ❌ fehlt (noch)
 | Lineale | Lineal, Kurven-, Figur-Lineal, Lineal-Stift, Spezial-Lineale (Parallel, Parallelkurve, Mehrfachkurve, Radial, Radialkurve, Konzentrisch), Hilfslinien, Perspektiv-Lineal (1/2/3 Punkte, Fischauge, Raster), Symmetrie-Lineal (Linienzahl, Liniensymmetrie); Lineal gehört zu einer Ebene, Bereich „alle Ebenen / gleicher Ordner / nur Bearbeitungsziel“, ⇧-Klick aufs Symbol blendet aus; Einrasten über View > Snap (⌘1 Lineal, ⌘2 Spezial-Lineal), lila = Einrasten an, grün = aus; Bearbeiten mit dem Objekt-Werkzeug [RUL, SNAP, PERSP, EDITR, MENU] | Lineal, Hilfslinie, Parallel, Radial, Konzentrisch, Symmetrie (2–32, mit/ohne Spiegelung), Perspektive 1/2/3 Punkte (Menü und Werkzeug), Bereich und Ein-/Ausblenden über das Symbol, ⌘1/⌘2, Farben, Objekt-Werkzeug (Griffe, Verschieben, Entf); Standardbereich „alle Ebenen“ angenommen. Kurven-, Figur-Lineal, Lineal-Stift, Kurven-Spezial-Lineale, Fischauge, Raster und ⌘4 fehlen | 🟡 | `symmetrical ruler …`, `special and linear rulers …`, `perspective ruler …`, Unit: `rulers` |
 | Vektorradierer | Eraser-Gruppe „Vector“; Modi: berührten Bereich, bis zum Schnittpunkt (Option „Refer all layers“), ganze Linie; andere Radierer erzeugen auf Vektorebenen keine Linien; mit Transparentfarbe gezeichnete Striche werden Linien; auf Rasterebenen radiert er normal [VEC, ERASE] | gleich; Einstellung „Vector eraser“ bei jedem Radierer in Tool Settings (statt Advanced Tool Settings) | ✅ | `vector layer: strokes become lines …`, Unit: `vector lines` |
 | Objekt-Werkzeug auf Vektorebenen | Linie antippen = auswählen (Linie und Kontrollpunkte hervorgehoben), verschieben, Griffe skalieren, Drehgriff oben; „Adjust line thickness when scaling“; Farbe, Grösse, Pinselform der gewählten Linien in Tool Settings; „Operation of transparent part: Switch to a different layer“; Auswahlmodus [VEC, OBJ, V] | Auswählen (⇧ ergänzt/entfernt), verschieben, skalieren (Ecken; ⇧ frei), drehen (⇧ 15°), Linienfarbe (Farbwähler oder Zeichenfarbe), Breite, Deckkraft, Linienstärke beim Skalieren ein/aus, Klick auf eine Linie einer anderen Vektorebene wechselt die Ebene, Entf löscht; Kontrollpunkte und Pinselform-Wechsel fehlen | 🟡 | `Object tool: select, move, recolour …` |
+| Text-Werkzeug | T; Klick = Text an der Stelle, Ziehen = Textrahmen mit „Wrap text at frame“ (Umbruch, Überstehendes unsichtbar); OK-/Abbrechen-Starter; Schrift, Grösse, Stil (fett, kursiv, durchgestrichen …), Ausrichtung, Richtung (vertikal: lateinische Zeichen gedreht), Textfarbe; erweitert: Zeilen-/Zeichenabstand, Rand; Text anklicken = bearbeiten; Objekt-Werkzeug: verschieben (⇧ Achse), drehen, skalieren (ohne Umbruch: Schriftgrösse) [TXT, TXE, TXS, TXV] | gleich; Grösse in pt (bei der Dokumentauflösung); Esc = Abbrechen, ⌘Enter = OK; neue Ebene je Text, benannt nach dem Text; Stile gelten für den ganzen Rahmen (nicht pro Buchstabe); Rubi, TateChuYoko, Kreistext, Verzerren fehlen | 🟡 | `text tool: …`, Unit: `text layout` |
+| Sprechblasen | T (Gruppe Balloon): Ellipse-Sprechblase wie eine Figur aufziehen, Linienbreite, Linien- und Füllfarbe; „Balloon tail“ von innen nach aussen ziehen (Biegung, Breite); Blase über vorhandenem Text → Textebene wird Sprechblasenebene; überlappende Blasen derselben Ebene verschmelzen; Objekt-Werkzeug: verschieben, skalieren (Text bleibt gleich gross), drehen [BAL] | Ellipse, abgerundet, Rechteck, Gedanken-Wolke; Schwanz gebogen oder als Gedankenbläschen; Text in der Blase wird zentriert und bewegt sich mit; Linie = Hauptfarbe, Füllung = Unterfarbe (eigene Annahme); Kurven-Sprechblase, Sprechblasenstift, Kontrollpunkte, Blitz-Blasen fehlen | 🟡 | `balloons: …`, Unit: `text boxes and balloons`, `layer objects` |
 | Ebene verschieben | in der Gruppe „Operation“ (K); ⌥-Ziehen kopiert, ⇧ fixiert die Richtung [LAY, MOD] | gleich; auch Gruppe „Operation“ mit „Select layer“ (D) | ✅ | `free transform …` |
 | Transformieren | ⌘T Skalieren/Drehen (Seitenverhältnis bleibt), ⇧⌘T frei; ausserhalb ziehen = drehen; ⇧ = 45°-Schritte; Enter/Doppelklick bestätigt, Esc bricht ab [TR] | gleich; Verzerren, Perspektive, Netz fehlen | 🟡 | `free transform …` |
 | Pipette | „Pick displayed color“ / „Pick color from layer“; ⌥-Klick in Zeichenwerkzeugen; Rechtsklick überall [EYE, MOD] | gleich | ✅ | `⌥-click with a brush picks …` |
@@ -124,7 +126,7 @@ Status: ✅ gleich · 🟡 ähnlich/vereinfacht · ❌ fehlt (noch)
 
 | Funktion | Clip Studio Paint [TS, MENU, OPT] | MAD Studio Paint | Status |
 | -------- | --------------------------------- | ---------------- | ------ |
-| Werkzeuge | / Zoom · H Hand · R Drehen · D Ebene wählen · K Ebene verschieben · M Auswahl · W Auto select · I Pipette · P Pen/Pencil · B Brush/Airbrush · E Radierer · J Blend · G Füllen/Verlauf · U Figur | gleich | ✅ |
+| Werkzeuge | / Zoom · H Hand · R Drehen · O Objekt · D Ebene wählen · K Ebene verschieben · M Auswahl · W Auto select · I Pipette · P Pen/Pencil · B Brush/Airbrush · E Radierer · J Blend · G Füllen/Verlauf · U Figur/Lineal · T Text/Sprechblase | gleich | ✅ |
 | Gruppen | mehrmals drücken wechselt; , / . = voriges/nächstes Werkzeug der Gruppe | gleich | ✅ |
 | Datei | ⌘N, ⌘O, ⌘S, ⇧⌘S | gleich | ✅ |
 | Bearbeiten | ⌘Z, ⌘Y/⇧⌘Z, ⌘X/F2, ⌘C/F3, ⌘V/F4, ⌫ Löschen, ⇧⌫ ausserhalb löschen, ⌥⌫ Füllen, ⌘U HSL, ⌘I Umkehren, ⌘T, ⇧⌘T | gleich | ✅ |
@@ -154,7 +156,8 @@ Status: ✅ gleich · 🟡 ähnlich/vereinfacht · ❌ fehlt (noch)
 | Ebeneneigenschaften | Layer Property palette: Border effect (Edge: Dicke, Farbe; Watercolor edge: Bereich, Deckkraft, Dunkelheit, Weichzeichnung), Layer color (ersetzt Schwarz, Unterfarbe ersetzt Weiss), Tone, Expression color [LPROP] | Randeffekt und Ebenenfarbe gleich (Formeln eigene Modelle); Tone und Expression color fehlen | 🟡 | `Layer Property palette: …`, Unit: `layer effects` |
 | Masken-Darstellung „Mask Expression“ (Verläufe ja/nein, Schwelle) | in den Ebeneneigenschaften [LPROP] | Masken wirken immer stufenlos | ❌ | – |
 | Vektorebenen | Linien als Pfad mit Kontrollpunkten: verlustfrei skalieren/transformieren; alle Zeichen- und Figurwerkzeuge; Füllen, Verlauf, Mischen und Farbmischung gesperrt; „Select overlapping vectors“ / „Select vectors within area“; Neue Vektorebene über Menü oder Symbol [VEC] | gleich; Linien speichern Punkte mit Breite und Dichte (aus Druck, Neigung, Ein-/Auslaufen) und werden daraus gezeichnet; Verschieben, ⌘T, Spiegeln, Bildauflösung, Leinwandgrösse, Zuschneiden wirken auf die Linien; Auswahl begrenzt neue Linien; *Layer → Rasterize*; plain Vektorebenen lassen sich in Vektorebenen vereinen. Linienkorrektur-Werkzeuge (Kontrollpunkte, Ziehen, Vereinfachen, Verbinden, Linienbreite) und „Convert layer“ nach Vektor fehlen; Aquarellkante und Farbmischung werden auf Linien nicht angewendet | 🟡 | `vector layer: …`, `Object tool: …`, `fill, gradient and blend refuse …`, `Move layer, ⌘T and Flip …`, Unit: `vector lines`, `.madpaint format` |
-| Text-, Füll-, Tonebenen | vorhanden [WAL] | fehlen | ❌ | – |
+| Text-/Sprechblasenebenen | Text und Blasen als eigene Ebenenarten, rastern über Layer > Rasterize [TXT, BAL] | eine Ebenenart für beide (mit Blasen als Sprechblasenebene angezeigt); Zeichenwerkzeuge verweigern sie mit Hinweis; Verschieben, ⌘T, Spiegeln, Bildgrösse wirken auf Text und Blasen; Entf löscht Text/Blasen (in der Auswahl) | 🟡 | `text tool: …`, `balloons: …` |
+| Füll-, Tonebenen | vorhanden [WAL] | fehlen | ❌ | – |
 
 ### Ansicht, Undo, Dateien
 
@@ -220,7 +223,13 @@ vergleichen. Abweichungen bitte als Issue oder Nachricht melden – mit dem Punk
 - **Glow dodge / Add (Glow):** offiziell nur „stärker bei halbtransparenten Pixeln“; Formel nach
   einem Community-Modell (niedrige Konfidenz).
 - **Pinsel:** Materialspitzen, Texturen, Doppelpinsel, Tempo-Dynamik und „Smear“ fehlen.
-- **Text, Comic-Rahmen, Animation und 3D** sind nicht umgesetzt; bei den Linealen fehlen die Kurven-Arten.
+- **Comic-Rahmen, Animation und 3D** sind nicht umgesetzt; bei den Linealen fehlen die Kurven-Arten.
+- **Text:** Grösse-Einheit, Standardgrösse und Standardschrift des Text-Werkzeugs sind nicht
+  dokumentiert; gewählt: pt bei der Dokumentauflösung, 24 pt, Systemschrift „sans-serif“. Ob Esc
+  im Text bestätigt oder abbricht, sagt das Handbuch nicht (umgesetzt: abbrechen).
+- **Sprechblasen:** Farben neuer Blasen (Linie/Füllung) sind als „Line color / Fill color“
+  beschrieben, nicht deren Standard; angenommen: Haupt- und Unterfarbe. Formen der Wolke und des
+  Schwanzes sind eigene Geometrie.
 - **Vektorlinien:** Das Handbuch beschreibt Pfade mit Kontrollpunkten (Spline/Bezier), aber kein
   Dateiformat und keine Formeln. MAD Studio Paint speichert die geglätteten Punkte des Strichs mit
   Breite und Dichte je Punkt (eigenes Modell) und zeichnet die Linie mit derselben Pinselspitze;
@@ -250,6 +259,7 @@ Präfix `M/` = `https://help.clip-studio.com/en-us/manual_en/` (Handbuch Ver. 5.
 | LP, BO, OLS, REF, DR, FOL, BL | `M/180_layers/Using_layers.htm`, `…/Basic_operations.htm`, `…/Other_layer_settings.htm`, `…/Reference_layers.htm`, `…/Draft_layers.htm`, `…/Layer_folders.htm`, `…/Blending_modes.htm` |
 | MASK, LPROP | `M/180_layers/Layer_masks.htm`, `…/Layer_properties.htm` |
 | VEC, ERASE | `M/180_layers/Vector_layers.htm`, `M/240_brushes/Eraser_tools.htm` |
+| TXT, TXE, TXS, TXV, BAL | `M/480_text/Adding_text.htm`, `…/Editing_text.htm`, `…/Text_settings.htm`, `…/Vertical_text_and_readings.htm`, `M/540_comic/Balloons.htm` |
 | OBJ, V | `M/810_subtools/O.htm` (Operation), `M/810_subtools/V.htm` (Vector) |
 | TC, TCE, GD | `M/390_filters/Tonal_Correction.htm`, `…/Tonal_Correction_Effects.htm`, `M/810_subtools/G.htm` (Gradient dialog) |
 | JB, JS | `https://help.clip-studio.com/ja-jp/manual_jp/180_layers/` (Grundoperationen, nützliche Einstellungen) |

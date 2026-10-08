@@ -7,7 +7,7 @@ import type { Id } from '../model/types';
 import { maskBounds, type Mask } from '../paint/mask';
 import { union, type Rect } from '../paint/rect';
 import type { Affine } from '../paint/rulers';
-import { linesBounds, type VectorStroke } from '../paint/vector';
+import { contentBounds, contentOf, transformContent, type Content } from '../paint/objects';
 import { apply as applyMatrix, invert, type Matrix } from '../paint/viewMath';
 import { createCanvas, ctx2d } from '../engine/canvas';
 import { DirectEdit, type PixelPatch } from '../engine/edit';
@@ -39,10 +39,10 @@ interface Part {
   hole: HTMLCanvasElement;
 }
 
-/** A vector layer being transformed: its lines are transformed, not its pixels (lossless). */
-interface LinePart {
-  id: Id;
-  original: VectorStroke[];
+/** A vector or text layer being transformed: its objects are transformed, not its pixels (lossless). */
+interface ObjectPart {
+  layer: actions.ObjectLayer;
+  original: Content;
   which: Set<string>;
   /** Bounds of the lines before the transform and where they were last drawn. */
   box: Rect | null;
@@ -51,7 +51,7 @@ interface LinePart {
 
 class FreeTransform {
   private parts: Part[];
-  private lines: LinePart[] = [];
+  private objects: ObjectPart[] = [];
   readonly bounds: Rect;
   params: Params;
   private readonly initial: Params;
@@ -68,10 +68,11 @@ class FreeTransform {
     const sel = engine.selectionCanvas();
     this.parts = ids.flatMap((id, i) => {
       const layer = findLayer(state.doc.layers, id);
-      if (layer?.kind === 'vector') {
-        const which = actions.linesToMove(layer, state.selection);
-        const box = linesBounds(layer.strokes.filter((x) => which.has(x.id)));
-        this.lines.push({ id, original: layer.strokes, which, box, shown: box });
+      if (actions.isObjectLayer(layer)) {
+        const which = actions.objectsToMove(layer, state.selection);
+        const original = contentOf(layer);
+        const box = contentBounds(original, which);
+        this.objects.push({ layer, original, which, box, shown: box });
         return [];
       }
       const surface = getSurface(id);
@@ -105,8 +106,8 @@ class FreeTransform {
     return [a, b, c, d, e - a * x - c * y, f - b * x - d * y];
   }
 
-  private transformedLines(v: LinePart): VectorStroke[] {
-    return actions.transformSome(v.original, v.which, this.docMatrix());
+  private transformed(v: ObjectPart): Content {
+    return transformContent(v.original, v.which, this.docMatrix());
   }
 
   private get changed(): boolean {
@@ -156,21 +157,24 @@ class FreeTransform {
       ctx.restore();
       edit.changed({ x: 0, y: 0, w: width, h: height });
     }
-    for (const v of this.lines) {
-      const lines = this.transformedLines(v);
-      const now = linesBounds(lines.filter((x) => v.which.has(x.id)));
-      engine.renderVectorLines(v.id, lines, union(v.shown, now));
+    for (const v of this.objects) {
+      const c = this.transformed(v);
+      const now = contentBounds(c, v.which);
+      actions.previewContent(v.layer, c, union(v.shown, now));
       v.shown = now;
     }
   }
 
   commit(): void {
     const patches = this.parts.map(({ edit }) => edit.commit()).filter((p): p is PixelPatch => p !== null);
-    const lines = new Map<Id, VectorStroke[]>();
-    if (this.changed) for (const v of this.lines) if (v.which.size) lines.set(v.id, this.transformedLines(v));
-    if (patches.length === 0 && lines.size === 0) return;
+    const contents = new Map<Id, Content>();
+    if (this.changed) for (const v of this.objects) if (v.which.size) contents.set(v.layer.id, this.transformed(v));
+    if (patches.length === 0 && contents.size === 0) {
+      engine.resync();
+      return;
+    }
     if (!this.selection) {
-      actions.commitTransform('Transform', patches, lines);
+      actions.commitTransform('Transform', patches, contents);
       return;
     }
     // The selection follows the transformed pixels (rasterised from the new outline).
@@ -189,12 +193,13 @@ class FreeTransform {
     const data = s.getImageData(0, 0, sel.width, sel.height).data;
     const mask = { width: sel.width, height: sel.height, data: new Uint8Array(sel.width * sel.height) };
     for (let i = 0, p = 3; i < mask.data.length; i++, p += 4) mask.data[i] = data[p];
-    actions.commitTransform('Transform', patches, lines, { before: this.selection, after: mask });
+    actions.commitTransform('Transform', patches, contents, { before: this.selection, after: mask });
   }
 
   cancel(): void {
     for (const { edit } of this.parts) edit.cancel();
-    for (const v of this.lines) engine.renderVectorLines(v.id, v.original, union(v.shown, v.box));
+    for (const v of this.objects) actions.previewContent(v.layer, v.original, union(v.shown, v.box));
+    engine.resync();
   }
 }
 
@@ -209,7 +214,7 @@ export const isTransforming = () => active !== null;
 export function startTransform(mode: TransformMode = 'scaleRotate'): boolean {
   if (active) return true;
   const s = getState();
-  const blocker = actions.editBlocker(s);
+  const blocker = actions.transformBlocker(s);
   if (blocker) {
     setState({ hint: blocker });
     return false;

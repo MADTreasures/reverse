@@ -10,9 +10,11 @@ import { getSurface, revisionOf } from '../../engine/surfaces';
 import { isMac } from '../../platform/platform';
 import * as actions from '../../store/actions';
 import { getState, useStore } from '../../store/store';
+import { commitTextEdit } from '../../store/textActions';
 import { controller } from '../../tools/controller';
 import type { PointerInfo } from '../../tools/types';
 import { SelectionLauncher } from './SelectionLauncher';
+import { TextEditor } from './TextEditor';
 
 let workspaceBg: string | null = null;
 /** Colour around the canvas, from the theme (read once). */
@@ -182,6 +184,11 @@ export function CanvasView() {
       if (controller.busy) return;
       if (e.button !== 0 && e.button !== 1 && e.button !== 2) return;
       e.preventDefault();
+      // A click outside the text being typed confirms it (and does nothing else).
+      if (getState().textEdit && e.button === 0 && !controller.mods.space) {
+        commitTextEdit();
+        return;
+      }
       (document.activeElement as HTMLElement | null)?.blur?.();
       canvas.setPointerCapture(e.pointerId);
       controller.setModifiers({ shift: e.shiftKey, alt: e.altKey, mod: isMac ? e.metaKey : e.ctrlKey });
@@ -248,7 +255,8 @@ export function CanvasView() {
           s.showMaskArea !== prev.showMaskArea ||
           s.activeLayerId !== prev.activeLayerId ||
           s.selectedRuler !== prev.selectedRuler ||
-          s.selectedLines !== prev.selectedLines ||
+          s.selectedObjects !== prev.selectedObjects ||
+          s.textEdit !== prev.textEdit ||
           s.snapRuler !== prev.snapRuler ||
           s.snapSpecial !== prev.snapSpecial
         )
@@ -282,6 +290,7 @@ export function CanvasView() {
     <div className="canvas-host" ref={hostRef}>
       <canvas ref={canvasRef} className="paint-canvas" data-testid="paint-canvas" />
       <SelectionLauncher />
+      <TextEditor />
     </div>
   );
 }

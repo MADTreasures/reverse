@@ -2,7 +2,8 @@
  * The .madpaint document format: a ZIP archive with
  *   document.json      – format tag, version, document structure (layer tree, flags)
  *   layers/<id>.png    – pixels of each raster layer and layer mask (document size, straight alpha);
- *                        vector layers store their lines in document.json and are rendered on load
+ *                        vector and text layers store their lines, text and balloons in
+ *                        document.json and are rendered on load
  *   preview.png        – merged image for previews (optional)
  * Pure (no DOM): PNG encoding/decoding happens in the browser layer.
  */
@@ -10,15 +11,16 @@ import { strFromU8, strToU8, unzipSync, zipSync } from 'fflate';
 import { isBlendMode } from '../model/blend';
 import { clampCanvasSide } from '../model/document';
 import { createRasterLayer, flatten, nextRev } from '../model/layers';
-import type { CorrectionLayer, FolderLayer, Id, Layer, LayerMask, LayerRulers, PaintDocument, RasterLayer, VectorLayer } from '../model/types';
+import type { CorrectionLayer, FolderLayer, Id, Layer, LayerMask, LayerRulers, PaintDocument, RasterLayer, TextLayer, VectorLayer } from '../model/types';
 import { sanitizeEffects } from '../paint/effects';
 import { sanitizeRuler, type Ruler } from '../paint/rulers';
 import { sanitizeCorrection } from '../paint/tonal';
 import { sanitizeBrush, type BrushSettings } from '../paint/tools';
 import { packStroke, unpackStroke, type VectorStroke } from '../paint/vector';
+import { sanitizeBalloon, sanitizeTextBox, type Balloon, type TextBox } from '../paint/text';
 
 export const FORMAT = 'mad-studio-paint';
-/** 2: layer masks, correction layers, effects, rulers. 3: vector layers. Older files open unchanged. */
+/** 2: layer masks, correction layers, effects, rulers. 3: vector and text layers. Older files open unchanged. */
 export const FORMAT_VERSION = 3;
 export const EXTENSION = 'madpaint';
 
@@ -111,6 +113,12 @@ function sanitizeLayer(raw: unknown, seen: Set<string>, depth: number): Layer | 
     const vector: VectorLayer = { ...common, kind: 'vector', blend: isBlendMode(r.blend) ? r.blend : 'normal', strokes, rev: nextRev() };
     return vector;
   }
+  if (r.kind === 'text') {
+    const texts = Array.isArray(r.texts) ? r.texts.slice(0, 10000).map(sanitizeTextBox).filter((x): x is TextBox => x !== null) : [];
+    const balloons = Array.isArray(r.balloons) ? r.balloons.slice(0, 10000).map(sanitizeBalloon).filter((x): x is Balloon => x !== null) : [];
+    const text: TextLayer = { ...common, kind: 'text', blend: isBlendMode(r.blend) ? r.blend : 'normal', texts, balloons, rev: nextRev() };
+    return text;
+  }
   const raster: RasterLayer = {
     ...common,
     kind: 'raster',
@@ -159,8 +167,15 @@ function packVectorLayer(l: VectorLayer): Record<string, unknown> {
 /** The document structure as stored in document.json. */
 function documentJson(doc: PaintDocument): unknown {
   const pack = (layers: Layer[]): unknown[] =>
-    layers.map((l) => (l.kind === 'vector' ? packVectorLayer(l) : l.kind === 'folder' ? { ...l, children: pack(l.children) } : l));
-  return flatten(doc.layers).some((l) => l.kind === 'vector') ? { ...doc, layers: pack(doc.layers) } : doc;
+    layers.map((l) => {
+      if (l.kind === 'vector') return packVectorLayer(l);
+      if (l.kind === 'text') {
+        const { rev: _rev, ...rest } = l;
+        return rest;
+      }
+      return l.kind === 'folder' ? { ...l, children: pack(l.children) } : l;
+    });
+  return flatten(doc.layers).some((l) => l.kind === 'vector' || l.kind === 'text') ? { ...doc, layers: pack(doc.layers) } : doc;
 }
 
 export function packDocument(file: DocumentFile): Uint8Array {
