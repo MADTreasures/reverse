@@ -61,14 +61,3 @@ Konventionen:
 - **Native Binärdateien** (Mach-O, PE, ELF) brauchen Hopper, Ghidra oder IDA:
   `npx -y rea-agents@5.0.0 doctor` zeigt, was fehlt; `npx -y rea-agents@5.0.0 setup`
   richtet REA für deine Agents ein (mit Vorschau vor jeder Änderung).
-
-## Spielregeln (Recht)
-
-- Ins Repo kommt nur **eigener Code** und eigene Assets – keine fremden Binärdateien,
-  Samples, Logos oder dekompilierter Code.
-- **Dekompilieren** nur, wo Lizenz bzw. Gesetz es erlauben (in der Schweiz z. B. zur
-  Herstellung von Interoperabilität, Art. 21 URG). Viele Lizenzverträge (EULAs) verbieten es.
-- Bevorzugt **Clean-Room**: Verhalten und öffentliche Dokumentation beobachten, dann selbst
-  implementieren und das in `RESEARCH.md` festhalten.
-- Namen und Marken der Vorbilder nur **beschreibend** verwenden; die Nachbauten bekommen
-  eigene Namen.
