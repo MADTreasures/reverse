@@ -218,7 +218,7 @@ void Recorder::run()
                 if (sessions[i].finishing)
                 {
                     finished.push_back (std::move (sessions[i]));
-                    sessions.erase (sessions.begin() + (long) i);
+                    sessions.erase (sessions.begin() + (std::ptrdiff_t) i);
                 }
                 else
                 {

@@ -1,0 +1,86 @@
+name: MAD Studio · Windows app
+
+on:
+  push:
+    branches: ['**']
+    tags: ['mad-studio-v*']
+    paths:
+      - 'projects/mad-studio/**'
+      - '.github/workflows/mad-studio-windows.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: mad-studio-windows-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build installer (x64)
+    runs-on: windows-2022
+    timeout-minutes: 75
+    defaults:
+      run:
+        shell: bash
+        working-directory: projects/mad-studio
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: projects/mad-studio/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck and unit tests
+        run: |
+          npm run typecheck
+          npm test
+
+      - name: Build web bundle
+        run: npm run build
+
+      - name: Build native engine (MSVC x64, with test plugins)
+        run: |
+          cmake -S engine -B engine/build/Release -G "Visual Studio 17 2022" -A x64 -DMAD_BUILD_TEST_PLUGINS=ON
+          cmake --build engine/build/Release --config Release --parallel 4
+
+      - name: Engine self-test and protocol test (VST3)
+        run: |
+          engine/build/Release/mad-engine.exe --self-test
+          node engine/tests/protocol-test.mjs
+
+      - name: Electron smoke test with the native engine
+        run: |
+          npx electron . --smoke-test | tee smoke.log
+          grep -q MAD_STUDIO_ENGINE_PONG smoke.log
+
+      - name: Desktop app + native engine (playback, plugins, render, plugin state)
+        run: npx playwright test -c playwright.native.config.ts
+
+      - name: Stage native engine into the app
+        run: node scripts/stage-engine.mjs
+
+      - name: Package Windows app (NSIS installer, unsigned)
+        run: npx electron-builder --win --x64 --publish never
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+
+      - name: Smoke test the packaged app (with the bundled engine)
+        run: |
+          ls -la release release/win-unpacked/resources/engine
+          "release/win-unpacked/MAD Studio.exe" --smoke-test | tee smoke-packaged.log
+          grep -q MAD_STUDIO_ENGINE_PONG smoke-packaged.log
+
+      - name: Upload installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: MAD-Studio-Windows-x64
+          path: projects/mad-studio/release/*.exe
+          if-no-files-found: error
+          retention-days: 30

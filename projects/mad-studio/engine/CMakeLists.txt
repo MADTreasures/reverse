@@ -73,8 +73,9 @@ juce_add_gui_app(MadEngine
     NEEDS_CURL FALSE
     NEEDS_WEB_BROWSER FALSE)
 
-# Put the product directly into the build directory: build/<config>/mad-engine or "MAD Engine.app".
-set_target_properties(MadEngine PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
+# Put the product directly into the build directory: build/<config>/mad-engine(.exe) or "MAD Engine.app".
+# The generator expression keeps multi-config generators (Visual Studio) from adding a <config> folder.
+set_target_properties(MadEngine PROPERTIES RUNTIME_OUTPUT_DIRECTORY "$<1:${CMAKE_BINARY_DIR}>")
 
 if(WIN32)
     # The engine talks over stdin/stdout, so it is a console program with a plain main().

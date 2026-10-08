@@ -1,7 +1,40 @@
 #include "app/CommandLine.h"
 
+#if JUCE_WINDOWS
+ #ifndef NOMINMAX
+  #define NOMINMAX
+ #endif
+ #ifndef WIN32_LEAN_AND_MEAN
+  #define WIN32_LEAN_AND_MEAN
+ #endif
+ #include <windows.h>
+ #include <shellapi.h>
+#endif
+
 namespace mad
 {
+namespace
+{
+juce::StringArray argumentsOf (int argc, char* argv[])
+{
+    juce::StringArray args;
+   #if JUCE_WINDOWS
+    // argv uses the ANSI code page on Windows; the UTF-16 command line keeps every path intact
+    // (user names, plugin folders with umlauts).
+    int count = 0;
+    if (auto** wide = CommandLineToArgvW (GetCommandLineW(), &count))
+    {
+        for (int i = 1; i < count; ++i)
+            args.add (juce::String (wide[i]));
+        LocalFree (wide);
+        return args;
+    }
+   #endif
+    for (int i = 1; i < argc; ++i)
+        args.add (juce::String::fromUTF8 (argv[i]));
+    return args;
+}
+} // namespace
 
 const char* usageText()
 {
@@ -20,9 +53,7 @@ const char* usageText()
 CommandLine parseCommandLine (int argc, char* argv[])
 {
     CommandLine c;
-    juce::StringArray args;
-    for (int i = 1; i < argc; ++i)
-        args.add (juce::String::fromUTF8 (argv[i]));
+    const auto args = argumentsOf (argc, argv);
 
     const auto value = [&] (int& i, const char* name) -> juce::String
     {

@@ -117,7 +117,7 @@ void Sequencer::process (BlockContext& ctx, const Timeline* tl, const AutoParam&
                 const double t0 = countTick, t1 = countTick + segSamples * tps;
                 for (double b = std::ceil (t0 / ppq) * ppq; b < t1 - 1.0e-9 && b < -1.0e-9; b += ppq)
                 {
-                    const auto beat = (long) std::lround (b / ppq);
+                    const auto beat = (int64_t) std::llround (b / ppq);
                     const bool accent = ((beat % bpb) + bpb) % bpb == 0;
                     sink.click ((double) ctx.blockStart + pos + (b - t0) / tps, accent);
                 }
@@ -162,7 +162,7 @@ void Sequencer::process (BlockContext& ctx, const Timeline* tl, const AutoParam&
             {
                 for (double b = std::ceil (t0 / ppq - 1.0e-9) * ppq; b < t1 - 1.0e-9; b += ppq)
                 {
-                    const auto beat = (long) std::lround (b / ppq);
+                    const auto beat = (int64_t) std::llround (b / ppq);
                     sink.click ((double) ctx.blockStart + pos + (b - t0) / tps, beat % bpb == 0);
                 }
             }
