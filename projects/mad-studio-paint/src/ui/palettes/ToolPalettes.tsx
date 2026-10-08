@@ -226,6 +226,33 @@ export function ToolProperty() {
         </>
       )}
       {sub.tool === 'select' && <SelectionModeRow />}
+      {sub.tool === 'ruler' && sub.rulerKind === 'symmetry' && (
+        <>
+          <PropSlider label="Number of lines" value={sub.symmetryLines ?? 2} min={2} max={32} onChange={(v) => update({ symmetryLines: v })} />
+          <label className="check prop-check">
+            <input type="checkbox" checked={sub.symmetryMirror ?? true} onChange={(e) => update({ symmetryMirror: e.target.checked })} />
+            Line symmetry
+          </label>
+        </>
+      )}
+      {sub.tool === 'ruler' && sub.rulerKind === 'special' && (
+        <div className="prop-row column">
+          <span className="prop-label">Special ruler</span>
+          <div className="segmented wrap" role="radiogroup" aria-label="Special ruler">
+            {(
+              [
+                ['parallel', 'Parallel line'],
+                ['radial', 'Radial line'],
+                ['concentric', 'Concentric circle'],
+              ] as const
+            ).map(([id, label]) => (
+              <button key={id} role="radio" aria-checked={sub.specialRuler === id} className={sub.specialRuler === id ? 'on' : ''} onClick={() => update({ specialRuler: id })}>
+                {label}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
       {sub.tool === 'gradient' && (
         <div className="prop-row">
           <span className="prop-label">Shape</span>

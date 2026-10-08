@@ -376,6 +376,32 @@ function LayerRow({ layer, depth, drag, setDrag, drop, setDrop }: RowsProps & { 
         )}
       </span>
       <span className="row-icons">
+        {layer.rulers && (
+          <button
+            className={`ruler-icon ${layer.rulers.visible ? '' : 'off'}`}
+            title="Ruler: where it applies (⇧-click shows or hides it)"
+            aria-label="Ruler range"
+            data-testid="ruler-icon"
+            onPointerDown={(e) => e.stopPropagation()}
+            onClick={(e) => {
+              if (e.shiftKey) {
+                actions.toggleRulersVisible(layer.id);
+                return;
+              }
+              const range = layer.rulers?.range;
+              showMenu({ x: e.clientX, y: e.clientY }, [
+                { label: 'Show in all layers', checked: range === 'all', onClick: () => actions.setRulerRange(layer.id, 'all') },
+                { label: 'Show in same folder', checked: range === 'folder', onClick: () => actions.setRulerRange(layer.id, 'folder') },
+                { label: 'Show only when editing target', checked: range === 'editing', onClick: () => actions.setRulerRange(layer.id, 'editing') },
+                { separator: true },
+                { label: 'Show ruler', checked: layer.rulers?.visible, onClick: () => actions.toggleRulersVisible(layer.id) },
+                { label: 'Delete ruler', onClick: () => actions.deleteLayerRulers(layer.id) },
+              ]);
+            }}
+          >
+            <Icon name="ruler" size={13} />
+          </button>
+        )}
         {layer.draft && <Icon name="draft" size={12} />}
         {layer.kind === 'raster' && layer.lockAlpha && <Icon name="lockAlpha" size={12} />}
         {(layer.locked || lockedByParent) && <Icon name="lock" size={12} />}

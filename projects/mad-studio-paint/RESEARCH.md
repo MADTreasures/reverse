@@ -96,6 +96,7 @@ Status: ✅ gleich · 🟡 ähnlich/vereinfacht · ❌ fehlt (noch)
 | Auswahlbereich | Rechteck, Ellipse, Lasso, Polylinie, Auswahlstift, Auswahl radieren …; ⇧ hinzufügen, ⌥ abziehen, ⇧⌥ Schnittmenge; ⇧ Quadrat/Kreis [SEL] | alle genannten; Magnet-Lasso, „Shrink selection“ fehlen | 🟡 | `polyline selection …`, `selection pen …` |
 | Verlauf | „Foreground to transparent“, „Foreground to background“ …; Form Linie/Kreis/Ellipse [GRAD] | Linie und Kreis, beide Farbvarianten; kein Verlaufseditor | 🟡 | – |
 | Figur | Gerade (⇧ = 45°), Rechteck/Ellipse (⇧ = Quadrat/Kreis), Kurven, Polylinie … [FIG] | Gerade, Rechteck, Ellipse | 🟡 | – |
+| Lineale | Lineal, Kurven-, Figur-Lineal, Lineal-Stift, Spezial-Lineale (Parallel, Parallelkurve, Mehrfachkurve, Radial, Radialkurve, Konzentrisch), Hilfslinien, Perspektiv-Lineal (1/2/3 Punkte, Fischauge, Raster), Symmetrie-Lineal (Linienzahl, Liniensymmetrie); Lineal gehört zu einer Ebene, Bereich „alle Ebenen / gleicher Ordner / nur Bearbeitungsziel“, ⇧-Klick aufs Symbol blendet aus; Einrasten über View > Snap (⌘1 Lineal, ⌘2 Spezial-Lineal), lila = Einrasten an, grün = aus; Bearbeiten mit dem Objekt-Werkzeug [RUL, SNAP, PERSP, EDITR, MENU] | Lineal, Hilfslinie, Parallel, Radial, Konzentrisch, Symmetrie (2–32, mit/ohne Spiegelung), Perspektive 1/2/3 Punkte (Menü und Werkzeug), Bereich und Ein-/Ausblenden über das Symbol, ⌘1/⌘2, Farben, Objekt-Werkzeug (Griffe, Verschieben, Entf); Standardbereich „alle Ebenen“ angenommen. Kurven-, Figur-Lineal, Lineal-Stift, Kurven-Spezial-Lineale, Fischauge, Raster und ⌘4 fehlen | 🟡 | `symmetrical ruler …`, `special and linear rulers …`, `perspective ruler …`, Unit: `rulers` |
 | Ebene verschieben | in der Gruppe „Operation“ (K); ⌥-Ziehen kopiert, ⇧ fixiert die Richtung [LAY, MOD] | gleich; auch Gruppe „Operation“ mit „Select layer“ (D) | ✅ | `free transform …` |
 | Transformieren | ⌘T Skalieren/Drehen (Seitenverhältnis bleibt), ⇧⌘T frei; ausserhalb ziehen = drehen; ⇧ = 45°-Schritte; Enter/Doppelklick bestätigt, Esc bricht ab [TR] | gleich; Verzerren, Perspektive, Netz fehlen | 🟡 | `free transform …` |
 | Pipette | „Pick displayed color“ / „Pick color from layer“; ⌥-Klick in Zeichenwerkzeugen; Rechtsklick überall [EYE, MOD] | gleich | ✅ | `⌥-click with a brush picks …` |
@@ -216,7 +217,8 @@ vergleichen. Abweichungen bitte als Issue oder Nachricht melden – mit dem Punk
 - **Glow dodge / Add (Glow):** offiziell nur „stärker bei halbtransparenten Pixeln“; Formel nach
   einem Community-Modell (niedrige Konfidenz).
 - **Pinsel:** Materialspitzen, Texturen, Doppelpinsel, Tempo-Dynamik und „Smear“ fehlen.
-- **Vektorebenen, Lineale, Text, Comic-Rahmen, Animation und 3D** sind nicht umgesetzt.
+- **Vektorebenen, Text, Comic-Rahmen, Animation und 3D** sind nicht umgesetzt; bei den Linealen fehlen die Kurven-Arten.
+- **Lineal-Bereich:** Welchen Geltungsbereich ein neues Lineal standardmässig hat, sagt das Handbuch nicht; angenommen: „alle Ebenen“.
 - **Mehrfaches Drücken** einer geteilten Werkzeugtaste (Zyklus) belegt nur die Celsys-Tutorialseite
   „Art Rocket“, nicht das Handbuch.
 
@@ -232,6 +234,7 @@ Präfix `M/` = `https://help.clip-studio.com/en-us/manual_en/` (Handbuch Ver. 5.
 | PAL, CMD, HIDE | `M/690_interface/Palettes.htm`, `…/Command_Bar.htm`, `…/Hide_Title_Bar_and_Menu_Bar.htm` |
 | TOOLPAL, USE, CUST | `M/150_tools/The_Tool_palette.htm`, `…/How_to_use_tools.htm`, `…/Customizing_the_Tool_and_Tool_Group_palettes.htm` |
 | PEN | `M/240_brushes/Adjusting_pen_pressure.htm` |
+| RUL, SNAP, PERSP, EDITR | `M/510_ruler/Basics_of_creating_rulers.htm`, `…/Drawing_while_snapping_to_a_ruler.htm`, `…/Perspective_Rulers.htm` + `…/Drawing_along_a_perspective_ruler.htm`, `…/Editing_a_ruler.htm` |
 | DYN, BS, TS, PB | `M/240_brushes/Customizing_brush_tools.htm`, `…/Brush_Size_palette.htm`, `…/Tool_Sliders_palette.htm`, `…/Drawing_and_painting.htm` |
 | SEL, CW, CS, CSET, CH, EYE | `M/300_color/Selecting_colors.htm`, `…/Color_Wheel_palette.htm`, `…/Color_Slider_palette.htm`, `…/Color_Set_palette.htm`, `…/Color_History_palette.htm`, `…/Eyedropper_Tool.htm` |
 | NAV, CANVAS | `M/270_canvas/Navigating_the_canvas.htm`, `…/Canvas_window.htm` |

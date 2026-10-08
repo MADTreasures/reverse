@@ -1,5 +1,6 @@
 /** Document model of MAD Studio Paint. Pixel data lives in surfaces (see engine/surfaces.ts), keyed by layer id. */
 import type { LayerEffects } from '../paint/effects';
+import type { Ruler } from '../paint/rulers';
 import type { Correction } from '../paint/tonal';
 
 export type Id = string;
@@ -46,6 +47,15 @@ export interface LayerMask {
   linked: boolean;
 }
 
+/** Where a layer's rulers apply: on every layer, on layers in the same folder, or only on this layer. */
+export type RulerRange = 'all' | 'folder' | 'editing';
+
+export interface LayerRulers {
+  items: Ruler[];
+  range: RulerRange;
+  visible: boolean;
+}
+
 interface LayerBase {
   id: Id;
   name: string;
@@ -63,6 +73,7 @@ interface LayerBase {
   mask?: LayerMask;
   /** Layer Property palette: border effect, layer colour. */
   effects?: LayerEffects;
+  rulers?: LayerRulers;
 }
 
 export interface RasterLayer extends LayerBase {

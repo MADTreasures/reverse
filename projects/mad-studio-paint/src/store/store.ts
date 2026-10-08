@@ -80,6 +80,11 @@ export interface PaintState {
   menuHidden: boolean;
   /** The Advanced Tool Settings palette is open. */
   advancedToolSettings: boolean;
+  /** View > Snap: linear rulers and guides / special rulers (symmetry, perspective, …). */
+  snapRuler: boolean;
+  snapSpecial: boolean;
+  /** Ruler selected with the Object tool. */
+  selectedRuler: { layerId: Id; rulerId: string } | null;
   prefs: Preferences;
 }
 
@@ -115,6 +120,9 @@ function initialState(): PaintState {
     workspace: 'default',
     menuHidden: false,
     advancedToolSettings: false,
+    snapRuler: true,
+    snapSpecial: true,
+    selectedRuler: null,
     prefs: { ...DEFAULT_PREFS },
   };
 }

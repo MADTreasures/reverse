@@ -26,6 +26,7 @@ import {
   SelectSession,
   ZoomSession,
 } from './sessions';
+import { drawRulers, objectSession, rulerSession } from './rulerTool';
 import { confirmTransform, drawTransformOverlay, hitHandle, isTransforming, transformCursor, TransformSession } from './transform';
 import type { Modifiers, OverlayView, PointerInfo, ToolSession } from './types';
 
@@ -151,6 +152,10 @@ class Controller {
         return null;
       case 'move':
         return MoveSession.create(p);
+      case 'ruler':
+        return rulerSession(sub, p, this.view);
+      case 'object':
+        return objectSession(p, this.view);
       default:
         return null;
     }
@@ -184,6 +189,7 @@ class Controller {
 
   /** Draws tool feedback (brush outline, selection preview, transform box) in viewport space. */
   overlay(ctx: CanvasRenderingContext2D): void {
+    drawRulers(ctx, this.view);
     drawTransformOverlay(ctx, this.view);
     PolylineSelect.overlay(ctx, this.view);
     if (this.session?.overlay) {

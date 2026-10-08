@@ -18,7 +18,9 @@ export type ToolId =
   | 'blend'
   | 'fill'
   | 'gradient'
-  | 'figure';
+  | 'figure'
+  | 'ruler'
+  | 'object';
 
 export type BrushMode = 'paint' | 'erase' | 'blend';
 export type TipTexture = 'none' | 'grain';
@@ -132,6 +134,14 @@ export interface SubTool {
 
   /** Rectangle / ellipse start from the centre. */
   fromCenter?: boolean;
+
+  /** Ruler tool: which ruler a drag creates. */
+  rulerKind?: 'linear' | 'special' | 'guide' | 'perspective' | 'symmetry';
+  /** Special ruler type. */
+  specialRuler?: 'parallel' | 'radial' | 'concentric';
+  /** Symmetrical ruler: number of lines (2–32) and line symmetry (mirroring). */
+  symmetryLines?: number;
+  symmetryMirror?: boolean;
 }
 
 export const DEFAULT_BRUSH: BrushSettings = {
@@ -202,6 +212,8 @@ export const TOOLS: ToolInfo[] = [
   { id: 'fill', label: 'Fill', key: 'G', hint: 'Click to fill an area · ⇧-click toggles "refer multiple"' },
   { id: 'gradient', label: 'Gradient', key: 'G', hint: 'Drag to draw a gradient with the drawing colour' },
   { id: 'figure', label: 'Figure', key: 'U', hint: 'Drag to draw · ⇧ snaps lines to 45° and makes squares / circles' },
+  { id: 'ruler', label: 'Ruler', key: 'U', hint: 'Drag to create a ruler · drag a handle to edit it · strokes snap to rulers (⌘1 / ⌘2)' },
+  { id: 'object', label: 'Object', key: 'O', hint: 'Click a ruler to select it · drag its handles or its line · Delete removes it' },
 ];
 
 export const toolInfo = (id: ToolId): ToolInfo => TOOLS.find((t) => t.id === id)!;
@@ -408,7 +420,14 @@ export const DEFAULT_SUB_TOOLS: SubTool[] = [
   { id: 'fig-line', tool: 'figure', name: 'Straight line', figureShape: 'line', brush: brush({ size: 3, sizePressure: false, stabilization: 0 }) },
   { id: 'fig-rect', tool: 'figure', name: 'Rectangle', figureShape: 'rect', brush: brush({ size: 3, sizePressure: false, stabilization: 0 }) },
   { id: 'fig-ellipse', tool: 'figure', name: 'Ellipse', figureShape: 'ellipse', brush: brush({ size: 3, sizePressure: false, stabilization: 0 }) },
+  // Ruler
+  { id: 'ruler-linear', tool: 'ruler', name: 'Linear ruler', rulerKind: 'linear' },
+  { id: 'ruler-special', tool: 'ruler', name: 'Special ruler', rulerKind: 'special', specialRuler: 'parallel' },
+  { id: 'ruler-guide', tool: 'ruler', name: 'Guide', rulerKind: 'guide' },
+  { id: 'ruler-perspective', tool: 'ruler', name: 'Perspective ruler', rulerKind: 'perspective' },
+  { id: 'ruler-symmetry', tool: 'ruler', name: 'Symmetrical ruler', rulerKind: 'symmetry', symmetryLines: 2, symmetryMirror: true },
   // Operation, view & eyedropper
+  { id: 'object', tool: 'object', name: 'Object' },
   { id: 'select-layer', tool: 'selectLayer', name: 'Select layer' },
   { id: 'move', tool: 'move', name: 'Move layer' },
   { id: 'hand', tool: 'hand', name: 'Hand' },
@@ -433,6 +452,9 @@ export function mergeSubTools(saved: unknown): SubTool[] {
       ...structuredClone(def),
       brush: def.brush ? migrateBrush({ ...def.brush, ...(s.brush ?? {}) }) : undefined,
       fill: def.fill ? { ...def.fill, ...(s.fill ?? {}) } : undefined,
+      ...(def.symmetryLines !== undefined && typeof s.symmetryLines === 'number' ? { symmetryLines: Math.max(2, Math.min(32, Math.round(s.symmetryLines))) } : {}),
+      ...(def.symmetryMirror !== undefined && typeof s.symmetryMirror === 'boolean' ? { symmetryMirror: s.symmetryMirror } : {}),
+      ...(def.specialRuler && (s.specialRuler === 'parallel' || s.specialRuler === 'radial' || s.specialRuler === 'concentric') ? { specialRuler: s.specialRuler } : {}),
     };
   });
 }
@@ -485,7 +507,7 @@ export interface PaletteEntry {
 export const PALETTE_ENTRIES: PaletteEntry[] = [
   { id: 'zoom', label: 'Zoom', icon: 'zoom', tools: ['zoom'] },
   { id: 'navigate', label: 'Move (Hand, Rotate)', icon: 'hand', tools: ['hand', 'rotate'] },
-  { id: 'operation', label: 'Operation (Select layer, Move layer)', icon: 'operation', tools: ['selectLayer', 'move'] },
+  { id: 'operation', label: 'Operation (Object, Select layer, Move layer)', icon: 'operation', tools: ['object', 'selectLayer', 'move'] },
   { id: 'select', label: 'Selection area', icon: 'select', tools: ['select'] },
   { id: 'autoSelect', label: 'Auto select', icon: 'autoSelect', tools: ['autoSelect'] },
   { id: 'eyedropper', label: 'Eyedropper', icon: 'eyedropper', tools: ['eyedropper'] },
@@ -498,6 +520,7 @@ export const PALETTE_ENTRIES: PaletteEntry[] = [
   { id: 'fill', label: 'Fill', icon: 'fill', tools: ['fill'] },
   { id: 'gradient', label: 'Gradient', icon: 'gradient', tools: ['gradient'] },
   { id: 'figure', label: 'Figure', icon: 'figure', tools: ['figure'] },
+  { id: 'ruler', label: 'Ruler', icon: 'ruler', tools: ['ruler'] },
 ];
 
 export type WorkspaceId = 'default' | 'classic';
@@ -511,12 +534,12 @@ export const PALETTE_LAYOUT: Record<WorkspaceId, string[][]> = {
   default: [
     ['pen', 'pencil', 'brush', 'eraser', 'airbrush', 'blend'],
     ['select', 'autoSelect', 'fill', 'gradient'],
-    ['operation', 'figure', 'navigate', 'eyedropper'],
+    ['operation', 'figure', 'ruler', 'navigate', 'eyedropper'],
   ],
   classic: [
     ['zoom', 'navigate', 'operation', 'select', 'autoSelect', 'eyedropper'],
     ['pen', 'pencil', 'brush', 'airbrush', 'eraser', 'blend'],
-    ['fill', 'gradient', 'figure'],
+    ['fill', 'gradient', 'figure', 'ruler'],
   ],
 };
 

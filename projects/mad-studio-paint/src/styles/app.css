@@ -1872,3 +1872,13 @@
   touch-action: none;
   cursor: crosshair;
 }
+
+.ruler-icon {
+  display: flex;
+  align-items: center;
+  color: #b07be6;
+}
+
+.ruler-icon.off {
+  opacity: 0.4;
+}

@@ -40,6 +40,9 @@ export function cursorFor(t: EffectiveTool): string {
     case 'pickLayer':
     case 'selectLayer':
       return 'pointer';
+    case 'object':
+      return 'default';
+    case 'ruler':
     case 'eyedropper':
     case 'select':
     case 'autoSelect':

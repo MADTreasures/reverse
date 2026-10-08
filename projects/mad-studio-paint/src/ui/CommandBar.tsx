@@ -48,6 +48,10 @@ const CLASSIC_GROUPS: Group[] = [
     ['invertSelection', 'invertSelection'],
     ['selectionBorder', 'border'],
   ],
+  [
+    ['snapRuler', 'snapRuler'],
+    ['snapSpecial', 'snapSpecial'],
+  ],
   [['shortcuts', 'help']],
 ];
 
@@ -66,7 +70,7 @@ function WindowTitle() {
 
 /** Quick-access icon row under the menu bar. */
 export function CommandBar() {
-  useStore(useShallow((s) => [s.canUndo, s.canRedo, s.selection, s.activeLayerId, s.doc, s.transforming, s.view.flipH, s.showSelectionBorder]));
+  useStore(useShallow((s) => [s.canUndo, s.canRedo, s.selection, s.activeLayerId, s.doc, s.transforming, s.view.flipH, s.showSelectionBorder, s.snapRuler, s.snapSpecial, s.tool, s.selectedRuler]));
   const transforming = useStore((s) => s.transforming);
   const workspace = useStore((s) => s.workspace);
   const groups = workspace === 'classic' ? CLASSIC_GROUPS : DEFAULT_GROUPS;

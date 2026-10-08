@@ -837,3 +837,93 @@ test('brush dynamics popover, pen pressure settings and Advanced Tool Settings',
   await adv.getByRole('spinbutton', { name: 'Starting' }).fill('20');
   expect(await page.evaluate(() => window.__madPaint.useStore.getState().subTools.find((t: any) => t.id === 'pen-g').brush.taperStart)).toBe(20);
 });
+
+const thinPen = (page: Page) =>
+  page.evaluate(() => {
+    const m = window.__madPaint;
+    m.actions.setTool('pen');
+    const s = m.useStore.getState();
+    const sub = s.subTools.find((t: any) => t.id === s.activeSub.pen);
+    m.actions.updateSubTool(sub.id, { brush: { ...sub.brush, size: 6, sizePressure: false, stabilization: 0 } });
+  });
+
+test('symmetrical ruler mirrors strokes; ⌘2 turns special snapping off', async ({ page }) => {
+  await boot(page);
+  await useSubTool(page, 'ruler', 'ruler-symmetry');
+  // Drag upwards from the centre: a vertical mirror axis at x = 200.
+  await drag(page, [200, 150], [200, 60], 6);
+  expect((await state(page)).layers[0].rulers.items[0]).toMatchObject({ kind: 'symmetry', lines: 2, mirror: true });
+  await thinPen(page);
+  await drag(page, [80, 100], [120, 200], 8);
+  expect(await layerAlpha(page, 100, 150)).toBeGreaterThan(200);
+  expect(await layerAlpha(page, 300, 150)).toBeGreaterThan(200);
+  await page.keyboard.press('ControlOrMeta+2');
+  await drag(page, [80, 250], [120, 260], 8);
+  expect(await layerAlpha(page, 100, 255)).toBeGreaterThan(200);
+  expect(await layerAlpha(page, 300, 255)).toBe(0);
+});
+
+test('special and linear rulers straighten strokes; the Object tool edits and deletes rulers', async ({ page }) => {
+  await boot(page);
+  await useSubTool(page, 'ruler', 'ruler-special');
+  // Parallel lines: drag a horizontal direction.
+  await drag(page, [50, 50], [150, 50], 6);
+  await thinPen(page);
+  await drag(page, [100, 200], [250, 260], 10);
+  // The stroke stays on y = 200 instead of going down to 260.
+  expect(await layerAlpha(page, 240, 200)).toBeGreaterThan(200);
+  expect(await layerAlpha(page, 240, 256)).toBe(0);
+  // Object tool: select the ruler by clicking its line, Delete removes it, undo brings it back.
+  await selectTool(page, 'object');
+  const at = await docToScreen(page, 300, 50);
+  await page.mouse.click(at.x, at.y);
+  expect(await page.evaluate(() => window.__madPaint.useStore.getState().selectedRuler)).toBeTruthy();
+  await page.keyboard.press('Delete');
+  expect((await state(page)).layers[0].rulers).toBeUndefined();
+  await page.keyboard.press('ControlOrMeta+z');
+  expect((await state(page)).layers[0].rulers.items).toHaveLength(1);
+  await page.keyboard.press('ControlOrMeta+z');
+  await page.keyboard.press('ControlOrMeta+z');
+  // A linear ruler only catches strokes that start near it.
+  await useSubTool(page, 'ruler', 'ruler-linear');
+  await drag(page, [20, 100], [380, 100], 6);
+  await thinPen(page);
+  await drag(page, [60, 104], [200, 140], 10);
+  expect(await layerAlpha(page, 190, 100)).toBeGreaterThan(200);
+  expect(await layerAlpha(page, 190, 137)).toBe(0);
+  await drag(page, [60, 220], [200, 280], 10);
+  expect(await layerAlpha(page, 190, 277)).toBeGreaterThan(100);
+});
+
+test('perspective ruler: strokes run towards the closest vanishing point; rulers are saved', async ({ page }) => {
+  await boot(page);
+  await page.evaluate(() => window.__madPaint.runCommand('perspective2'));
+  const vps = (await state(page)).layers[0].rulers.items[0].vps;
+  expect(vps).toHaveLength(2);
+  await thinPen(page);
+  // Start at (200, 250) heading right and slightly up: towards the right vanishing point.
+  await drag(page, [200, 250], [330, 230], 12);
+  const right = vps[1];
+  const endOnLine = await page.evaluate(
+    ([vx, vy]) => {
+      const m = window.__madPaint;
+      const id = m.useStore.getState().activeLayerId;
+      // Where the line from (200, 250) to the vanishing point crosses x = 320.
+      const y = 250 + ((vy - 250) * (320 - 200)) / (vx - 200);
+      return m.engine.sampleLayer(id, 320, Math.round(y))[3];
+    },
+    [right.x, right.y],
+  );
+  expect(endOnLine).toBeGreaterThan(150);
+  const saved = await page.evaluate(async () => {
+    const m = window.__madPaint;
+    await m.openFileBytes({ name: 'rulers.madpaint', data: await m.buildDocumentBytes() });
+    return m.useStore.getState().doc.layers[0].rulers;
+  });
+  expect(saved.items[0].kind).toBe('perspective');
+  // "Show only when editing target": another layer does not use it.
+  await page.locator('[data-testid=ruler-icon]').click();
+  await page.getByRole('menuitem', { name: 'Show only when editing target' }).click();
+  await page.keyboard.press('ControlOrMeta+Shift+n');
+  expect(await page.evaluate(() => window.__madPaint.actions.activeRulers().length)).toBe(0);
+});

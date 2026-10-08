@@ -5,6 +5,7 @@ import type { Id } from '../model/types';
 import { CLOSE_GAP_STEPS, floodFillMask } from '../paint/fill';
 import { combine, ellipseMask, expandMask, maskBounds, polygonMask, rectMask, translateMask, type Mask, type SelectionOp } from '../paint/mask';
 import { fromPoints, type Rect } from '../paint/rect';
+import { isSpecial, perspectiveConstraint, rulerConstraint, symmetryTransforms, type Affine, type Constraint, type Pt, type Ruler } from '../paint/rulers';
 import { ellipsePoints, rectPoints, snapAngle, type StrokePoint } from '../paint/stroke';
 import { type FillReference, type SubTool } from '../paint/tools';
 import { apply as applyMatrix, normalizeAngle } from '../paint/viewMath';
@@ -62,6 +63,46 @@ function strokeOverlayColor(ctx: CanvasRenderingContext2D): void {
 /** End of the last brush stroke per layer (⇧-click connects from there). */
 let lastStrokeEnd: { layerId: Id; x: number; y: number; pressure: number } | null = null;
 
+type PerspectiveRuler = Extract<Ruler, { kind: 'perspective' }>;
+
+/** How the current rulers shape a stroke that starts at `start`. */
+interface Snap {
+  copies: Affine[] | null;
+  constrain: Constraint | null;
+  /** Perspective: the direction is chosen once the stroke has moved a little. */
+  perspective: PerspectiveRuler | null;
+}
+
+/**
+ * Ruler snapping (View > Snap): one special ruler (symmetry, perspective, parallel, radial,
+ * concentric) or a linear ruler / guide the stroke starts near.
+ */
+export function rulerSnap(start: Pt): Snap {
+  const s = getState();
+  const none: Snap = { copies: null, constrain: null, perspective: null };
+  const rulers = actions.activeRulers(s).map((x) => x.ruler);
+  if (s.snapSpecial) {
+    const special = rulers.find(isSpecial);
+    if (special?.kind === 'symmetry') return { ...none, copies: symmetryTransforms(special) };
+    if (special?.kind === 'perspective') return { ...none, perspective: special };
+    const c = special ? rulerConstraint(special, start) : null;
+    if (c) return { ...none, constrain: c };
+  }
+  if (s.snapRuler) {
+    // Within about 16 screen pixels.
+    const reach = 16 / Math.max(0.01, s.view.zoom);
+    for (const r of rulers) {
+      if (isSpecial(r)) continue;
+      const c = rulerConstraint(r, start, reach);
+      if (c) return { ...none, constrain: c };
+    }
+  }
+  return none;
+}
+
+/** Screen distance a stroke travels before a perspective direction is chosen. */
+const PERSPECTIVE_DECIDE_PX = 6;
+
 export class BrushSession implements ToolSession {
   private stroke: Stroke;
   private start: PointerInfo;
@@ -70,6 +111,9 @@ export class BrushSession implements ToolSession {
   /** ⇧-click: the straight line starts at the end of the previous stroke. */
   private connectFrom: StrokePoint | null;
   private layerId: Id;
+  private snap: Snap;
+  /** Points held back until a perspective direction is chosen. */
+  private held: StrokePoint[] | null = null;
   readonly cursor = 'none';
 
   static create(sub: SubTool, p: PointerInfo): BrushSession | null {
@@ -94,13 +138,29 @@ export class BrushSession implements ToolSession {
     this.last = p;
     this.lineMode = p.shift && brush.mode !== 'blend';
     this.connectFrom = this.lineMode && lastStrokeEnd?.layerId === target.layerId ? { ...lastStrokeEnd } : null;
+    this.snap = rulerSnap(this.connectFrom ?? p);
+    if (this.stroke instanceof BrushStroke) {
+      this.stroke.copies = this.snap.copies;
+      this.stroke.constrain = this.snap.constrain;
+    }
     if (this.lineMode) this.drawLine(p);
+    else if (this.snap.perspective && this.stroke instanceof BrushStroke) this.held = [toStroke(p)];
     else this.stroke.add(toStroke(p));
+  }
+
+  /** End point of a straight line, following the rulers. */
+  private lineEnd(from: StrokePoint, p: PointerInfo): StrokePoint {
+    const end = { ...toStroke(p), pressure: from.pressure };
+    if (this.snap.perspective) {
+      const c = perspectiveConstraint(this.snap.perspective, from, end);
+      return c ? { ...end, ...c(end) } : end;
+    }
+    return this.snap.constrain ? { ...end, ...this.snap.constrain(end) } : end;
   }
 
   private drawLine(p: PointerInfo): void {
     const from = this.connectFrom ?? toStroke(this.start);
-    this.stroke.path([from, { ...toStroke(p), pressure: from.pressure }]);
+    this.stroke.path([from, this.lineEnd(from, p)]);
   }
 
   move(p: PointerInfo, coalesced: PointerInfo[]): void {
@@ -111,12 +171,27 @@ export class BrushSession implements ToolSession {
       this.drawLine(p);
       return;
     }
-    for (const c of coalesced.length ? coalesced : [p]) this.stroke.add(toStroke(c));
+    const points = (coalesced.length ? coalesced : [p]).map(toStroke);
+    if (this.held) {
+      this.held.push(...points);
+      if (Math.hypot(p.sx - this.start.sx, p.sy - this.start.sy) < PERSPECTIVE_DECIDE_PX) return;
+      // The stroke follows the perspective direction closest to how it started.
+      (this.stroke as BrushStroke).constrain = perspectiveConstraint(this.snap.perspective!, this.held[0], toStroke(p));
+      const held = this.held;
+      this.held = null;
+      for (const q of held) this.stroke.add(q);
+      return;
+    }
+    for (const q of points) this.stroke.add(q);
   }
 
   up(p: PointerInfo): void {
     this.last = p;
     if (this.lineMode) this.drawLine(p);
+    if (this.held) {
+      for (const q of this.held) this.stroke.add(q);
+      this.held = null;
+    }
     const patch = this.stroke.end();
     actions.commitPixels(this.sub.name, [patch]);
     lastStrokeEnd = { layerId: this.layerId, x: this.last.x, y: this.last.y, pressure: this.lineMode ? (this.connectFrom ?? toStroke(this.start)).pressure : this.last.pressure };
@@ -135,6 +210,7 @@ export class FigureSession implements ToolSession {
   private stroke: BrushStroke;
   private start: PointerInfo;
   private last: PointerInfo;
+  private snap: Snap;
 
   static create(sub: SubTool, p: PointerInfo): FigureSession | null {
     const target = strokeTarget();
@@ -151,6 +227,8 @@ export class FigureSession implements ToolSession {
     this.stroke = new BrushStroke({ ...sub.brush!, stabilization: 0 }, drawingColor(s.colors), s.colors.transparent, target);
     this.start = p;
     this.last = p;
+    this.snap = rulerSnap(p);
+    this.stroke.copies = this.snap.copies;
   }
 
   private points(p: PointerInfo, m: Modifiers): StrokePoint[] {
@@ -158,11 +236,13 @@ export class FigureSession implements ToolSession {
     let { x: x1, y: y1 } = p;
     const shape = this.sub.figureShape ?? 'line';
     if (shape === 'line') {
-      if (m.shift) ({ x: x1, y: y1 } = snapAngle(x0, y0, x1, y1));
-      return [
-        { x: x0, y: y0, pressure: 1 },
-        { x: x1, y: y1, pressure: 1 },
-      ];
+      const from = { x: x0, y: y0, pressure: 1 };
+      if (this.snap.perspective) {
+        const c = perspectiveConstraint(this.snap.perspective, from, { x: x1, y: y1 });
+        if (c) ({ x: x1, y: y1 } = c({ x: x1, y: y1 }));
+      } else if (this.snap.constrain) ({ x: x1, y: y1 } = this.snap.constrain({ x: x1, y: y1 }));
+      else if (m.shift) ({ x: x1, y: y1 } = snapAngle(x0, y0, x1, y1));
+      return [from, { x: x1, y: y1, pressure: 1 }];
     }
     if (m.shift) {
       // Square / circle.

@@ -9,12 +9,13 @@ import { strFromU8, strToU8, unzipSync, zipSync } from 'fflate';
 import { isBlendMode } from '../model/blend';
 import { clampCanvasSide } from '../model/document';
 import { createRasterLayer } from '../model/layers';
-import type { CorrectionLayer, FolderLayer, Id, Layer, LayerMask, PaintDocument, RasterLayer } from '../model/types';
+import type { CorrectionLayer, FolderLayer, Id, Layer, LayerMask, LayerRulers, PaintDocument, RasterLayer } from '../model/types';
 import { sanitizeEffects } from '../paint/effects';
+import { sanitizeRuler, type Ruler } from '../paint/rulers';
 import { sanitizeCorrection } from '../paint/tonal';
 
 export const FORMAT = 'mad-studio-paint';
-/** 2: layer masks and correction layers. Version 1 files open unchanged. */
+/** 2: layer masks, correction layers, effects, rulers. Version 1 files open unchanged. */
 export const FORMAT_VERSION = 2;
 export const EXTENSION = 'madpaint';
 
@@ -44,6 +45,14 @@ function sanitizeMask(raw: unknown, seen: Set<string>): LayerMask | undefined {
   return { id, enabled: bool(r.enabled, true), linked: bool(r.linked, true) };
 }
 
+function sanitizeRulers(raw: unknown): LayerRulers | undefined {
+  if (!raw || typeof raw !== 'object') return undefined;
+  const r = raw as Record<string, unknown>;
+  const items = Array.isArray(r.items) ? r.items.slice(0, 64).map(sanitizeRuler).filter((x): x is Ruler => x !== null) : [];
+  if (items.length === 0) return undefined;
+  return { items, range: r.range === 'folder' || r.range === 'editing' ? r.range : 'all', visible: r.visible !== false };
+}
+
 function sanitizeLayer(raw: unknown, seen: Set<string>, depth: number): Layer | null {
   if (!raw || typeof raw !== 'object' || depth > 32) return null;
   const r = raw as Record<string, unknown>;
@@ -52,6 +61,7 @@ function sanitizeLayer(raw: unknown, seen: Set<string>, depth: number): Layer | 
   seen.add(id);
   const mask = sanitizeMask(r.mask, seen);
   const effects = sanitizeEffects(r.effects);
+  const rulers = sanitizeRulers(r.rulers);
   const common = {
     id,
     name: str(r.name, 'Layer', 120),
@@ -63,6 +73,7 @@ function sanitizeLayer(raw: unknown, seen: Set<string>, depth: number): Layer | 
     draft: bool(r.draft, false),
     ...(mask ? { mask } : {}),
     ...(effects ? { effects } : {}),
+    ...(rulers ? { rulers } : {}),
   };
   if (r.kind === 'folder') {
     const children = Array.isArray(r.children) ? r.children.map((c) => sanitizeLayer(c, seen, depth + 1)).filter((c): c is Layer => c !== null) : [];

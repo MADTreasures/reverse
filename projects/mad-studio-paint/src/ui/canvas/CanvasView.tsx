@@ -246,7 +246,10 @@ export function CanvasView() {
           s.tool !== prev.tool ||
           s.showSelectionBorder !== prev.showSelectionBorder ||
           s.showMaskArea !== prev.showMaskArea ||
-          s.activeLayerId !== prev.activeLayerId
+          s.activeLayerId !== prev.activeLayerId ||
+          s.selectedRuler !== prev.selectedRuler ||
+          s.snapRuler !== prev.snapRuler ||
+          s.snapSpecial !== prev.snapSpecial
         )
           schedule();
       }),

@@ -11,6 +11,7 @@ import {
   flatten,
   insertAbove,
   isEffectivelyLocked,
+  isEffectivelyVisible,
   layerBelow,
   locate,
   moveLayer as moveLayerInTree,
@@ -22,7 +23,8 @@ import {
   shiftLayer as shiftLayerInTree,
   type DropPosition,
 } from '../model/layers';
-import type { FolderLayer, Id, Layer, LayerMask, PaintDocument, RasterLayer } from '../model/types';
+import type { FolderLayer, Id, Layer, LayerMask, PaintDocument, RasterLayer, RulerRange } from '../model/types';
+import { defaultPerspective, type Ruler, type RulerInput } from '../paint/rulers';
 import { sanitizeCurve01 } from '../paint/curve';
 import type { LayerEffects } from '../paint/effects';
 import { applyCorrection, correctionLabel, type Correction } from '../paint/tonal';
@@ -542,6 +544,103 @@ export function soloLayer(id: Id): void {
       else l.visible = alreadySolo;
     }
   });
+}
+
+// ------------------------------------------------------------------ rulers
+
+/**
+ * Rulers that apply to the current layer: its own first, then those of other layers whose range
+ * includes it (all layers, or the same folder). Hidden rulers and hidden layers do not count.
+ */
+export function activeRulers(s: PaintState = getState()): { layerId: Id; ruler: Ruler }[] {
+  const active = locate(s.doc.layers, s.activeLayerId);
+  const own: { layerId: Id; ruler: Ruler }[] = [];
+  const others: { layerId: Id; ruler: Ruler }[] = [];
+  for (const l of flatten(s.doc.layers)) {
+    const set = l.rulers;
+    if (!set?.visible || set.items.length === 0 || !isEffectivelyVisible(s.doc.layers, l.id)) continue;
+    const mine = l.id === s.activeLayerId;
+    const applies = mine || set.range === 'all' || (set.range === 'folder' && locate(s.doc.layers, l.id)?.parent?.id === active?.parent?.id);
+    if (!applies) continue;
+    for (const ruler of set.items) (mine ? own : others).push({ layerId: l.id, ruler });
+  }
+  return [...own, ...others];
+}
+
+const newRulerId = () => `r${Math.random().toString(36).slice(2, 10)}`;
+
+/** Adds a ruler to a layer (the current one by default) and selects it. */
+export function addRuler(ruler: RulerInput, layerId: Id = getState().activeLayerId, label = 'Create ruler'): string {
+  const r = { ...ruler, id: ruler.id ?? newRulerId() } as Ruler;
+  changeDoc(label, (doc) => {
+    const l = findLayer(doc.layers, layerId);
+    if (!l) return;
+    l.rulers = { items: [...(l.rulers?.items ?? []), r], range: l.rulers?.range ?? 'all', visible: true };
+  });
+  setState({ selectedRuler: { layerId, rulerId: r.id } });
+  return r.id;
+}
+
+/** Replaces a ruler (handle drags merge into one undo step through `key`). */
+export function updateRuler(layerId: Id, ruler: Ruler, label = 'Edit ruler', key?: string): void {
+  changeDoc(
+    label,
+    (doc) => {
+      const set = findLayer(doc.layers, layerId)?.rulers;
+      if (set) set.items = set.items.map((r) => (r.id === ruler.id ? ruler : r));
+    },
+    { key: key ?? `ruler:${ruler.id}` },
+  );
+}
+
+export function deleteRuler(layerId: Id, rulerId: string): void {
+  changeDoc('Delete ruler', (doc) => {
+    const l = findLayer(doc.layers, layerId);
+    if (!l?.rulers) return;
+    const items = l.rulers.items.filter((r) => r.id !== rulerId);
+    if (items.length) l.rulers = { ...l.rulers, items };
+    else delete l.rulers;
+  });
+  setState({ selectedRuler: null });
+}
+
+/** Layer palette ruler icon: where the layer's rulers apply. */
+export function setRulerRange(layerId: Id, range: RulerRange): void {
+  changeDoc('Ruler range', (doc) => {
+    const l = findLayer(doc.layers, layerId);
+    if (l?.rulers) l.rulers = { ...l.rulers, range };
+  });
+}
+
+export function toggleRulersVisible(layerId: Id = getState().activeLayerId): void {
+  const set = findLayer(getState().doc.layers, layerId)?.rulers;
+  if (!set) return;
+  changeDoc(set.visible ? 'Hide ruler' : 'Show ruler', (doc) => {
+    const l = findLayer(doc.layers, layerId);
+    if (l?.rulers) l.rulers = { ...l.rulers, visible: !l.rulers.visible };
+  });
+}
+
+/** Removes all rulers of a layer. */
+export function deleteLayerRulers(layerId: Id = getState().activeLayerId): void {
+  if (!findLayer(getState().doc.layers, layerId)?.rulers) return;
+  changeDoc('Delete ruler', (doc) => {
+    const l = findLayer(doc.layers, layerId);
+    if (l) delete l.rulers;
+  });
+  setState({ selectedRuler: null });
+}
+
+/** Layer > Ruler/Frame > Create perspective ruler: 1, 2 or 3 vanishing points at default places. */
+export function createPerspectiveRuler(points: 1 | 2 | 3): void {
+  const { doc } = getState();
+  addRuler({ kind: 'perspective', vps: defaultPerspective(points, doc.width, doc.height) }, getState().activeLayerId, 'Create perspective ruler');
+}
+
+/** View > Snap > Snap to ruler / Snap to special ruler. */
+export function toggleSnap(which: 'ruler' | 'special'): void {
+  setState((s) => (which === 'ruler' ? { snapRuler: !s.snapRuler } : { snapSpecial: !s.snapSpecial }));
+  engine.requestRender();
 }
 
 // ------------------------------------------------------------------ dialog previews

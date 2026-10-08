@@ -86,7 +86,18 @@ export const COMMANDS: Command[] = [
   { id: 'cut', label: 'Cut', keys: ['Mod+x', 'F2'], run: () => void cut(), enabled: canEdit },
   { id: 'copy', label: 'Copy', keys: ['Mod+c', 'F3'], run: () => void copy(), enabled: () => actions.editTarget() !== null },
   { id: 'paste', label: 'Paste', keys: ['Mod+v', 'F4', 'Mod+Shift+v'], run: () => void pasteImage(), enabled: () => hasClip() },
-  { id: 'clear', label: 'Delete', keys: ['backspace', 'delete', 'Mod+backspace'], run: () => actions.clearLayer(), enabled: canEdit },
+  {
+    id: 'clear',
+    label: 'Delete',
+    keys: ['backspace', 'delete', 'Mod+backspace'],
+    // With the Object tool, Delete removes the selected ruler.
+    run: () => {
+      const { tool, selectedRuler } = getState();
+      if (tool === 'object' && selectedRuler) actions.deleteRuler(selectedRuler.layerId, selectedRuler.rulerId);
+      else actions.clearLayer();
+    },
+    enabled: () => canEdit() || (getState().tool === 'object' && getState().selectedRuler !== null),
+  },
   { id: 'clearOutside', label: 'Delete outside selected area', keys: ['Shift+backspace', 'Shift+delete'], run: () => actions.clearOutsideSelection(), enabled: () => canEdit() && hasSelection() },
   { id: 'fill', label: 'Fill', keys: ['Alt+backspace', 'Alt+delete'], run: () => actions.fillWithColor(), enabled: canEdit },
   { id: 'transform', label: 'Transform: Scale up/Scale down/Rotate', keys: ['Mod+t'], run: () => void startTransform('scaleRotate'), enabled: () => canEdit() && notTransforming() },
@@ -122,6 +133,20 @@ export const COMMANDS: Command[] = [
       return l?.kind === 'correction' && l.correction.type !== 'reverse';
     },
   },
+  // View > Snap, Layer > Ruler/Frame
+  { id: 'snapRuler', label: 'Snap to ruler', keys: ['Mod+1'], run: () => actions.toggleSnap('ruler'), checked: () => getState().snapRuler },
+  { id: 'snapSpecial', label: 'Snap to special ruler', keys: ['Mod+2'], run: () => actions.toggleSnap('special'), checked: () => getState().snapSpecial },
+  { id: 'perspective1', label: 'Create perspective ruler: 1-point', run: () => actions.createPerspectiveRuler(1), enabled: hasLayer },
+  { id: 'perspective2', label: 'Create perspective ruler: 2-point', run: () => actions.createPerspectiveRuler(2), enabled: hasLayer },
+  { id: 'perspective3', label: 'Create perspective ruler: 3-point', run: () => actions.createPerspectiveRuler(3), enabled: hasLayer },
+  {
+    id: 'showRuler',
+    label: 'Show ruler',
+    run: () => actions.toggleRulersVisible(),
+    enabled: () => Boolean(actions.activeLayer()?.rulers),
+    checked: () => Boolean(actions.activeLayer()?.rulers?.visible),
+  },
+  { id: 'deleteRulers', label: 'Delete ruler', run: () => actions.deleteLayerRulers(), enabled: () => Boolean(actions.activeLayer()?.rulers) },
   // Layer > Layer mask
   { id: 'maskOutside', label: 'Mask outside selection', run: () => actions.maskLayer(true), enabled: hasLayer },
   { id: 'maskSelection', label: 'Mask selection', run: () => actions.maskLayer(false), enabled: hasLayer },

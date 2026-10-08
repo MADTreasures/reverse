@@ -5,6 +5,7 @@ import { evalPressureCurve } from '../paint/curve';
 import { applyWatercolorEdge } from '../paint/effects';
 import { amountAt, densityFactor, nextDab, type Paint } from '../paint/mixing';
 import { circleBounds, inflate, intersect, union, type Rect } from '../paint/rect';
+import { affineAngle, applyAffine, type Affine, type Constraint } from '../paint/rulers';
 import { dabAlpha, interpolateDabs, pressureCurve, seededRandom, Stabilizer, stabilizerWindow, taperFactor, type Dab, type StrokePoint } from '../paint/stroke';
 import type { BrushSettings } from '../paint/tools';
 import { createCanvas, ctx2d, type Ctx } from './canvas';
@@ -206,6 +207,10 @@ export class BrushStroke implements Stroke {
   private readonly brushPaint: Paint;
   /** Paint carried by a "Blend" colour-mixing brush. */
   private carried: Paint;
+  /** Symmetrical ruler: every dab is repeated with these transforms (identity first). */
+  copies: Affine[] | null = null;
+  /** Ruler snapping: maps each (smoothed) point onto the ruler's path. */
+  constrain: Constraint | null = null;
 
   constructor(
     private brush: BrushSettings,
@@ -287,7 +292,22 @@ export class BrushStroke implements Stroke {
       alpha *= densityFactor(under.a, this.brush.paintDensity);
     }
     if (r <= 0 || alpha <= 0) return null;
-    return this.tips.draw(ctx, x, y, r, alpha, this.tipAngle(p), this.brush.thickness, color);
+    const angle = this.tipAngle(p);
+    let rect = this.tips.draw(ctx, x, y, r, alpha, angle, this.brush.thickness, color);
+    if (this.copies) {
+      for (let i = 1; i < this.copies.length; i++) {
+        const m = this.copies[i];
+        const q = applyAffine(m, { x, y });
+        const { angle: turn, mirrored } = affineAngle(m);
+        rect = union(rect, this.tips.draw(ctx, q.x, q.y, r, alpha, mirrored ? turn - angle : angle + turn, this.brush.thickness, color))!;
+      }
+    }
+    return rect;
+  }
+
+  /** Applies the ruler constraint to a point (keeping pressure and tilt). */
+  private snapped(p: StrokePoint): StrokePoint {
+    return this.constrain ? { ...p, ...this.constrain(p) } : p;
   }
 
   /** Dabs between two points; `total` is the stroke length when known (ending taper). */
@@ -317,7 +337,7 @@ export class BrushStroke implements Stroke {
   }
 
   add(raw: StrokePoint): void {
-    const p = this.stabilizer.push(raw);
+    const p = this.snapped(this.stabilizer.push(raw));
     if (!this.start) {
       this.start = raw;
       this.last = p;
@@ -346,7 +366,8 @@ export class BrushStroke implements Stroke {
 
   end(): PixelPatch | null {
     let r: Rect | null = null;
-    for (const p of this.stabilizer.finish()) {
+    for (const raw of this.stabilizer.finish()) {
+      const p = this.snapped(raw);
       if (this.last) r = union(r, this.segment(this.last, p, Infinity));
       this.last = p;
       this.trail.push(p);
