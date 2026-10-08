@@ -59,9 +59,15 @@ export function useAutomatedValue(target: string | undefined): number | undefine
   return useAutomationOverlay((s) => (target ? s.values[target] : undefined));
 }
 
+/** FL Studio: Ctrl (Cmd on the Mac) while dragging or turning the wheel = fine, Shift = coarse. */
+export function dragFactor(e: { ctrlKey: boolean; metaKey: boolean; shiftKey: boolean }): number {
+  if (e.ctrlKey || e.metaKey) return 0.25;
+  return e.shiftKey ? 3 : 1;
+}
+
 /**
- * Rotary control like FL Studio's: drag vertically (Shift = fine), wheel, double-click to reset,
- * right-click for the control menu (reset, automation, copy/paste/type value).
+ * Rotary control like FL Studio's: drag vertically (Ctrl/Cmd = fine, Shift = coarse), wheel,
+ * double-click to reset, right-click for the control menu (reset, automation, copy/paste/type value).
  */
 export function Knob({
   value,
@@ -107,15 +113,14 @@ export function Knob({
   const onPointerMove = (e: ReactPointerEvent<HTMLDivElement>) => {
     const d = drag.current;
     if (!d) return;
-    const range = e.shiftKey ? 800 : 160;
-    emit(d.startN + (d.startY - e.clientY) / range, d.key);
+    emit(d.startN + ((d.startY - e.clientY) / 160) * dragFactor(e), d.key);
   };
   const onPointerUp = () => {
     drag.current = null;
     endCoalesce();
   };
   const onWheel = (e: ReactWheelEvent<HTMLDivElement>) => {
-    const step = (integer ? 1 / Math.max(1, max - min) : e.shiftKey ? 0.002 : 0.02) * (e.deltaY < 0 ? 1 : -1);
+    const step = (integer ? 1 / Math.max(1, max - min) : 0.02 * dragFactor(e)) * (e.deltaY < 0 ? 1 : -1);
     emit(n + step, `wheel:${label ?? ''}`);
   };
 

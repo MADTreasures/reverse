@@ -457,6 +457,9 @@ function StepArea({ channel, patternId, notes, stepCount }: StepAreaProps) {
     endCoalesce();
   };
   const onWheel = (e: ReactWheelEvent<HTMLDivElement>) => {
+    // The plain wheel scrolls the rack, as in FL Studio; Alt+wheel changes a step's velocity
+    // (like Alt+wheel over a note in the piano roll).
+    if (!e.altKey) return;
     const rect = e.currentTarget.getBoundingClientRect();
     const x = e.clientX - rect.left;
     const i = Array.from({ length: stepCount }, (_, k) => k).find((k) => x >= stepX(k) && x < stepX(k) + STEP_W);
@@ -475,7 +478,7 @@ function StepArea({ channel, patternId, notes, stepCount }: StepAreaProps) {
           }
         }
       },
-      { coalesce: `vel:${channel.id}:${i}` },
+      { coalesce: `vel:${channel.id}:${i}`, label: 'channel rack step velocity' },
     );
     setHint(`Step ${i + 1} velocity: ${Math.round(vel * 127)}`);
   };
@@ -490,7 +493,7 @@ function StepArea({ channel, patternId, notes, stepCount }: StepAreaProps) {
       onPointerCancel={onPointerUp}
       onContextMenu={(e) => e.preventDefault()}
       onWheel={onWheel}
-      data-hint="Steps: click/drag to paint, right-drag to erase, wheel over a step: velocity"
+      data-hint="Steps: click/drag to paint, right-drag to erase, Alt+wheel over a step: velocity"
     >
       {view.steps.map((v, i) => (
         <span

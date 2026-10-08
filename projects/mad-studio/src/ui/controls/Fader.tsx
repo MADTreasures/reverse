@@ -6,7 +6,7 @@ import { noteTweaked, recordAutomationValue } from '../../store/automationAction
 import { setHint } from '../hint';
 import { controlMenu } from '../menus/controlMenu';
 import { showMenu } from '../overlays';
-import { useAutomatedValue } from './Knob';
+import { useAutomatedValue, dragFactor } from './Knob';
 
 interface FaderProps {
   value: number;
@@ -54,8 +54,7 @@ export function Fader({ value, onChange, label = 'Volume', height = 120, default
   const onPointerMove = (e: ReactPointerEvent<HTMLDivElement>) => {
     const d = drag.current;
     if (!d) return;
-    const scale = e.shiftKey ? 0.2 : 1;
-    set(d.startV + ((d.startY - e.clientY) / travel) * scale, d.key);
+    set(d.startV + ((d.startY - e.clientY) / travel) * dragFactor(e), d.key);
   };
   const onPointerUp = () => {
     drag.current = null;
@@ -74,7 +73,7 @@ export function Fader({ value, onChange, label = 'Volume', height = 120, default
         set(defaultValue, gestureKey('reset'));
         endCoalesce();
       }}
-      onWheel={(e) => set(value + (e.deltaY < 0 ? 0.01 : -0.01) * (e.shiftKey ? 0.25 : 1), `wheel:${label}`)}
+      onWheel={(e) => set(value + (e.deltaY < 0 ? 0.01 : -0.01) * dragFactor(e), `wheel:${label}`)}
       onMouseEnter={() => setHint(describe(shown))}
       onContextMenu={(e) => {
         e.preventDefault();

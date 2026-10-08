@@ -45,6 +45,7 @@ const EDITOR_SHORTCUTS: [string, string][] = [
   ['Double-click a pattern clip', 'Open it in the piano roll'],
   ['Click the icon in a clip title', 'Clip menu (mute, source pattern, make unique …)'],
   ['Right-click a control', 'Reset, automation clip, type value'],
+  [`${mod}+drag · Shift+drag a control`, 'Fine · coarse adjustment'],
   ['Right-click in an automation clip', 'Add point · on a point: curve mode'],
   ['Drag the small circle', 'Bend an automation segment'],
   [`${mod}+drag · ${mod}+Shift+drag`, 'Rectangle selection · add to selection'],
@@ -71,7 +72,7 @@ const EDITOR_SHORTCUTS: [string, string][] = [
   ['Esc', 'Deselect, or close the focused window'],
   [`${mod}+wheel / pinch`, 'Zoom horizontally'],
   ['Shift+wheel', 'Scroll horizontally'],
-  ['Alt+wheel', 'Note velocity (piano roll) · track height (playlist)'],
+  ['Alt+wheel', 'Velocity (piano roll notes, channel rack steps) · track height (playlist)'],
   ['Z S X D C … / Q 2 W 3 E …', 'Typing keyboard (when enabled)'],
 ];
 

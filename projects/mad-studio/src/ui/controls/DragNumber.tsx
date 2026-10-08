@@ -41,9 +41,10 @@ export function DragNumber({ value, min, max, step, onChange, format, hint, clas
   const onPointerMove = (e: ReactPointerEvent<HTMLDivElement>) => {
     const d = drag.current;
     if (!d) return;
-    const factor = e.shiftKey ? 0.1 : 1;
-    const raw = d.v + (d.y - e.clientY) * step * factor;
-    const p = Math.pow(10, e.shiftKey ? Math.max(decimals, 1) : 0);
+    // Ctrl/Cmd (FL Studio) or Shift: fine steps with decimals.
+    const fine = e.ctrlKey || e.metaKey || e.shiftKey;
+    const raw = d.v + (d.y - e.clientY) * step * (fine ? 0.1 : 1);
+    const p = Math.pow(10, fine ? Math.max(decimals, 1) : 0);
     const v = clamp(Math.round(raw * p) / p);
     if (v !== value) change(v, d.key);
     setHint(`${hint}: ${format(v)}`);
@@ -80,7 +81,7 @@ export function DragNumber({ value, min, max, step, onChange, format, hint, clas
       onPointerUp={onPointerUp}
       onPointerCancel={onPointerUp}
       onDoubleClick={() => setEditing(true)}
-      onWheel={(e) => change(clamp(value + (e.deltaY < 0 ? 1 : -1) * (e.shiftKey ? 0.1 : 1)), `wheel:${hint}`)}
+      onWheel={(e) => change(clamp(value + (e.deltaY < 0 ? 1 : -1) * (e.ctrlKey || e.metaKey || e.shiftKey ? 0.1 : 1)), `wheel:${hint}`)}
       onContextMenu={(e) => {
         if (!target) return;
         e.preventDefault();
