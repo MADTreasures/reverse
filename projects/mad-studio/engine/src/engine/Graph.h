@@ -1,0 +1,141 @@
+#pragma once
+
+#include "dsp/Panner.h"
+#include "dsp/Smoother.h"
+#include "engine/Effects.h"
+#include "engine/Instruments.h"
+#include "engine/ProjectModel.h"
+#include "engine/Timeline.h"
+
+#include <atomic>
+#include <memory>
+#include <vector>
+
+namespace mad
+{
+
+/** Peak of |x| over (at least) the last 1024 samples, like an AnalyserNode with fftSize 1024. */
+class PeakWindow
+{
+public:
+    void push (const float* data, int n) noexcept;
+    float peak() const noexcept;
+    void reset() noexcept;
+
+private:
+    static constexpr int slots = 32; // 32 x 32 samples
+    std::array<float, slots> chunkPeaks {};
+    int position = 0, fill = 0;
+    float current = 0.0f;
+};
+
+//==============================================================================
+/** Instrument + channel volume (volumeToGain), pan (mono/stereo law) and mute. */
+class ChannelNode
+{
+public:
+    ChannelNode (uint32_t uid, juce::String id, ChannelKind kind, std::unique_ptr<Instrument> instrument);
+
+    const uint32_t uid;
+    const juce::String id;
+    const ChannelKind kind;
+    const std::unique_ptr<Instrument> instrument;
+
+    AutoParam volume { 0.8f }, pan { 0.0f };
+    std::atomic<bool> muted { false };
+    /** Absolute sample time of the most recent note (activity LEDs). */
+    std::atomic<int64_t> lastTrigger { std::numeric_limits<int64_t>::min() };
+
+    /** Message thread, before publishing. */
+    void prepare (double sampleRate, int maxBlock);
+
+    /** Audio thread: renders the instrument and adds the strip output to the bus. */
+    void process (const BlockContext& ctx, float* busL, float* busR) noexcept;
+
+private:
+    dsp::OnePole volumeGain, panValue, muteGain;
+    std::vector<float> bufL, bufR;
+};
+
+//==============================================================================
+/** Mixer track: input bus -> effects -> pan (stereo law) -> fader -> mute -> meters. */
+class MixerTrackNode
+{
+public:
+    explicit MixerTrackNode (int index);
+
+    const int index;
+    AutoParam volume { 0.8f }, pan { 0.0f };
+    /** 0 when muted or soloed out, else 1 (smoothed on the audio thread). */
+    std::atomic<float> audible { 1.0f };
+    /** Recording/monitoring input routing. */
+    std::atomic<int> inputChannels { 0 }, inputFirst { 0 };
+    std::atomic<bool> monitor { false };
+
+    std::vector<float> busL, busR;
+
+    void prepare (double sampleRate, int maxBlock);
+    void clearBus (int n) noexcept;
+    void addInput (const float* const* inputs, int numInputs, int n) noexcept;
+    void process (const BlockContext& ctx, const std::vector<Effect*>& chain) noexcept;
+
+    float peakLeft() const noexcept { return peakL.peak(); }
+    float peakRight() const noexcept { return peakR.peak(); }
+
+private:
+    dsp::OnePole panValue, faderGain, muteGain;
+    PeakWindow peakL, peakR;
+};
+
+//==============================================================================
+/** Automation lanes bound to the parameters of one graph. */
+struct AutomationBinding
+{
+    struct Entry
+    {
+        const AutomationLane* lane = nullptr;
+        AutoParam* param = nullptr;
+        PluginSlot* plugin = nullptr;
+        int pluginParam = -1;
+        // audio-thread scratch
+        AutoParam::OverrideState state;
+        float lastPluginValue = -1.0f;
+    };
+
+    std::shared_ptr<const AutomationData> data;
+    std::vector<Entry> entries;
+};
+
+/** Everything the audio thread needs for one version of the project. Immutable once
+    published (except audio-thread scratch inside the nodes). */
+struct GraphSnapshot
+{
+    struct ChannelEntry
+    {
+        ChannelNode* node = nullptr;
+        int track = 0;
+    };
+    struct TrackEntry
+    {
+        MixerTrackNode* node = nullptr;
+        std::vector<Effect*> chain;
+    };
+
+    std::vector<ChannelEntry> channels;
+    std::vector<TrackEntry> tracks; // index 0 = master
+    std::shared_ptr<const Timeline> timeline;
+    std::unique_ptr<AutomationBinding> automation;
+
+    /** Owns the nodes, effects, samples and plugin slots referenced above. */
+    std::vector<std::shared_ptr<void>> keepAlive;
+
+    ChannelNode* findChannel (uint32_t uid) const noexcept
+    {
+        for (const auto& c : channels)
+            if (c.node->uid == uid)
+                return c.node;
+        return nullptr;
+    }
+};
+
+} // namespace mad
