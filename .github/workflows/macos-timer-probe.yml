@@ -1,0 +1,176 @@
+name: macOS timer probe (temporary diagnostic)
+
+# Measures how precisely timers fire for processes started by a GitHub-hosted macOS job, to
+# explain why the MAD Engine's 30 Hz status timer runs at ~7 Hz there. Removed after use.
+
+on:
+  push:
+    paths:
+      - '.github/workflows/macos-timer-probe.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: macos-14
+    timeout-minutes: 10
+    steps:
+      - name: Process tree and scheduling priority
+        run: |
+          p=$$
+          while [ -n "$p" ] && [ "$p" -gt 1 ]; do
+            ps -o pid=,ppid=,pri=,ni=,command= -p "$p" | cut -c1-160
+            p=$(ps -o ppid= -p "$p" | tr -d ' ')
+          done
+          echo "--- taskinfo (shell)"
+          sudo taskinfo $$ 2>&1 | grep -iE "role|darwin|bg|latency|qos|apptype|suppress|throttl|tier" | head -40 || true
+          echo "--- launchctl procinfo (shell)"
+          sudo launchctl procinfo $$ 2>&1 | head -60 || true
+          echo "--- taskpolicy usage"
+          taskpolicy 2>&1 | head -20 || true
+
+      - name: Timer precision (C probe)
+        run: |
+          mkdir -p "$RUNNER_TEMP/probe" && cd "$RUNNER_TEMP/probe"
+          cat > timer-probe.c <<'EOF'
+          #include <dispatch/dispatch.h>
+          #include <errno.h>
+          #include <mach/mach.h>
+          #include <mach/mach_time.h>
+          #include <mach/thread_policy.h>
+          #include <pthread.h>
+          #include <stdio.h>
+          #include <sys/resource.h>
+          #include <unistd.h>
+
+          #ifndef PRIO_DARWIN_ROLE
+           #define PRIO_DARWIN_ROLE 6
+          #endif
+
+          static double now (void)
+          {
+              static mach_timebase_info_data_t tb;
+              if (tb.denom == 0)
+                  mach_timebase_info (&tb);
+              return (double) mach_absolute_time() * tb.numer / tb.denom * 1.0e-9;
+          }
+
+          static int curPriority (void)
+          {
+              struct policy_timeshare_info info;
+              mach_msg_type_number_t count = POLICY_TIMESHARE_INFO_COUNT;
+              thread_act_t t = mach_thread_self();
+              kern_return_t kr = thread_info (t, THREAD_SCHED_TIMESHARE_INFO, (thread_info_t) &info, &count);
+              mach_port_deallocate (mach_task_self(), t);
+              return kr == KERN_SUCCESS ? info.cur_priority : -1;
+          }
+
+          static double sleepLoop (void)
+          {
+              const double t0 = now();
+              for (int i = 0; i < 30; ++i)
+                  usleep (33333);
+              return now() - t0;
+          }
+
+          static void report (const char* what, double seconds)
+          {
+              printf ("%-48s 30 waits of 33.3 ms: %.3f s (%.1f Hz)\n", what, seconds, 30.0 / seconds);
+          }
+
+          static void* qosThread (void* arg)
+          {
+              pthread_set_qos_class_self_np (QOS_CLASS_USER_INTERACTIVE, 0);
+              *(double*) arg = sleepLoop();
+              return NULL;
+          }
+
+          static void* realtimeThread (void* arg)
+          {
+              mach_timebase_info_data_t tb;
+              mach_timebase_info (&tb);
+              const double msToAbs = 1.0e6 * tb.denom / tb.numer;
+              thread_time_constraint_policy_data_t p;
+              p.period = (uint32_t) (33.333 * msToAbs);
+              p.computation = (uint32_t) (1.0 * msToAbs);
+              p.constraint = (uint32_t) (2.0 * msToAbs);
+              p.preemptible = 1;
+              thread_act_t t = mach_thread_self();
+              kern_return_t kr = thread_policy_set (t, THREAD_TIME_CONSTRAINT_POLICY, (thread_policy_t) &p,
+                                                    THREAD_TIME_CONSTRAINT_POLICY_COUNT);
+              mach_port_deallocate (mach_task_self(), t);
+              if (kr != KERN_SUCCESS)
+                  printf ("time-constraint policy failed: %d\n", kr);
+              *(double*) arg = sleepLoop();
+              return NULL;
+          }
+
+          static double dispatchLoop (unsigned long flags)
+          {
+              dispatch_queue_t q = dispatch_queue_create ("probe", DISPATCH_QUEUE_SERIAL);
+              dispatch_source_t s = dispatch_source_create (DISPATCH_SOURCE_TYPE_TIMER, 0, flags, q);
+              __block int fired = 0;
+              dispatch_semaphore_t done = dispatch_semaphore_create (0);
+              dispatch_source_set_timer (s, dispatch_time (DISPATCH_TIME_NOW, 33333333), 33333333, 0);
+              dispatch_source_set_event_handler (s, ^{
+                  if (++fired == 30)
+                      dispatch_semaphore_signal (done);
+              });
+              const double t0 = now();
+              dispatch_resume (s);
+              dispatch_semaphore_wait (done, DISPATCH_TIME_FOREVER);
+              const double t = now() - t0;
+              dispatch_source_cancel (s);
+              return t;
+          }
+
+          static void runAll (const char* label)
+          {
+              printf ("== %s: main thread cur_priority %d\n", label, curPriority());
+              errno = 0;
+              const int bg = getpriority (PRIO_DARWIN_PROCESS, 0);
+              printf ("getpriority(PRIO_DARWIN_PROCESS) = %d (errno %d)\n", bg, errno);
+              errno = 0;
+              const int role = getpriority (PRIO_DARWIN_ROLE, 0);
+              printf ("getpriority(PRIO_DARWIN_ROLE) = %d (errno %d)\n", role, errno);
+              task_category_policy_data_t cat;
+              mach_msg_type_number_t n = TASK_CATEGORY_POLICY_COUNT;
+              boolean_t isDefault = FALSE;
+              kern_return_t kr = task_policy_get (mach_task_self(), TASK_CATEGORY_POLICY, (task_policy_t) &cat, &n, &isDefault);
+              printf ("task role %d (kr %d, default %d)\n", kr == KERN_SUCCESS ? (int) cat.role : -1, kr, isDefault);
+
+              report ("usleep, main thread", sleepLoop());
+              double t = 0;
+              pthread_t th;
+              pthread_create (&th, NULL, qosThread, &t);
+              pthread_join (th, NULL);
+              report ("usleep, user-interactive QoS thread", t);
+              pthread_create (&th, NULL, realtimeThread, &t);
+              pthread_join (th, NULL);
+              report ("usleep, time-constraint thread", t);
+              report ("dispatch timer", dispatchLoop (0));
+              report ("dispatch timer, DISPATCH_TIMER_STRICT", dispatchLoop (DISPATCH_TIMER_STRICT));
+          }
+
+          int main (void)
+          {
+              runAll ("as started");
+              const int r = setpriority (PRIO_DARWIN_PROCESS, 0, 0);
+              printf ("setpriority(PRIO_DARWIN_PROCESS, 0, 0) = %d (errno %d)\n", r, r == 0 ? 0 : errno);
+              runAll ("after clearing the darwin background request");
+              return 0;
+          }
+          EOF
+          clang -O2 -Wall -o timer-probe timer-probe.c
+          ./timer-probe
+          echo "--- under taskpolicy -b (explicitly backgrounded, for comparison)"
+          taskpolicy -b ./timer-probe 2>&1 | head -8 || true
+
+      - name: Timer precision (Node setTimeout)
+        run: |
+          node -e '
+            const t0 = performance.now(); let n = 0;
+            const tick = () => { if (++n < 30) setTimeout(tick, 33.3); else console.log(`30 x setTimeout(33.3): ${((performance.now() - t0) / 1000).toFixed(3)} s`); };
+            setTimeout(tick, 33.3);'
