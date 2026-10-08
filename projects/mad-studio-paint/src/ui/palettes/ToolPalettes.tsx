@@ -3,6 +3,7 @@ import { useShallow } from 'zustand/react/shallow';
 import { BRUSH_SIZE_PRESETS } from '../../store/actions';
 import * as actions from '../../store/actions';
 import * as anim from '../../store/animationActions';
+import * as sound from '../../store/soundActions';
 import { isCameraFolder } from '../../model/animation';
 import type { Layer } from '../../model/types';
 import type { Interp, Placement } from '../../paint/keyframes';
@@ -401,8 +402,41 @@ function VectorEraserRow({ sub, update }: { sub: SubTool; update: (patch: Partia
 
 /** Object tool: a track's keyframe placement (keyframes on, or a 2D camera folder), else the selected objects. */
 function ObjectSettings({ sub, update }: { sub: SubTool; update: (patch: Partial<SubTool>) => void }) {
+  const audio = useStore((s) => (s.doc.timeline ? sound.activeSoundTrack(s) : null));
   const keyed = useStore((s) => (s.doc.timeline?.enabled && !s.editKeyed ? anim.keyTrack(s) : null));
+  if (audio) return <AudioTrackSettings />;
   return keyed ? <KeyframeSettings track={keyed} /> : <ObjectLineSettings sub={sub} update={update} />;
+}
+
+/** Object tool on an audio track: its volume at the current frame (with volume keyframes: a keyframe there). */
+function AudioTrackSettings() {
+  const track = useStore((s) => sound.activeSoundTrack(s));
+  const volume = useStore((s) => sound.volumeNow(s));
+  const frame = useStore((s) => s.frame);
+  if (!track) return null;
+  const atKey = track.keys.some((k) => k.frame === frame);
+  return (
+    <>
+      <div className="prop-note" data-testid="audio-info">
+        Audio track {track.name} · frame {frame}
+        {atKey ? ' (keyframe)' : track.keys.length ? '' : ' · no volume keyframes'}
+      </div>
+      <PropSlider label="Volume" unit="%" value={Math.round(volume * 100)} min={0} max={100} onChange={(v) => sound.setVolumeNow(v / 100)} />
+      <label className="check prop-check">
+        <input type="checkbox" checked={!track.visible} onChange={(e) => sound.setSoundTrack(track.id, { visible: !e.target.checked }, e.target.checked ? 'Mute audio track' : 'Unmute audio track')} />
+        Mute
+      </label>
+      <div className="prop-row">
+        <button className="btn small" onClick={() => anim.addKeyframe()}>
+          Add keyframe
+        </button>
+        <button className="btn small" onClick={() => sound.deleteSoundTrack(track.id)}>
+          Delete audio track
+        </button>
+      </div>
+      <div className="prop-note">With volume keyframes the volume changes between them (Timeline palette: Add keyframe, interpolation).</div>
+    </>
+  );
 }
 
 const round2 = (v: number) => Math.round(v * 100) / 100;

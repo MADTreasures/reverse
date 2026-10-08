@@ -7,13 +7,16 @@
  * clips, drag its ends to trim them (Alt: time stretch). Right-click or double-click a frame for
  * the track's pop-up menu (assign a cel, clip commands).
  */
-import { memo, useCallback, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import { isAnimationFolder, isCameraFolder, keysOn, timelineTracks, trackContent, type AnimationFolder, type TrackRow as Row } from '../../model/animation';
 import type { Id, Layer } from '../../model/types';
 import { assignmentAt, entryAt } from '../../paint/animation';
-import { clipIndexAt, type ClipEdge, type TrackContent } from '../../paint/clips';
+import { clipIndexAt, type ClipEdge, type Timed, type TrackContent } from '../../paint/clips';
 import { moveKeys, type Interp, type Keyframe } from '../../paint/keyframes';
+import type { SoundFile, SoundTrack } from '../../paint/sound';
+import { soundPeaks, soundsVersion, subscribeSounds } from '../../engine/sounds';
+import * as sound from '../../store/soundActions';
 import * as actions from '../../store/actions';
 import * as anim from '../../store/animationActions';
 import { getState, setState, useStore, type ClipRef, type KeyRef } from '../../store/store';
@@ -109,15 +112,38 @@ interface RowProps {
   /** Frames of this track's selected keyframes. */
   selectedKeys: string;
   /** What the track shows while a clip is dragged. */
-  preview: TrackContent<Keyframe> | null;
-  onGrip: (e: React.PointerEvent<HTMLDivElement>, track: Layer, start: number, lane: HTMLElement) => void;
-  onKey: (e: React.PointerEvent<HTMLDivElement>, track: Layer, frame: number) => void;
+  preview: TrackContent<Timed> | null;
+  onGrip: (e: React.PointerEvent<HTMLDivElement>, track: Id, start: number, lane: HTMLElement) => void;
+  onKey: (e: React.PointerEvent<HTMLDivElement>, track: Id, frame: number) => void;
+}
+
+/** Keyframe marks of a lane. */
+function KeyMarks({ keys, frames, selected, onKey, track, menu }: { keys: { frame: number; interp: Interp }[]; frames: number; selected: Set<number>; track: Id; onKey: RowProps['onKey']; menu: (e: React.MouseEvent, f: number) => void }) {
+  return (
+    <>
+      {keys
+        .filter((k) => k.frame <= frames)
+        .map((k) => (
+          <div
+            key={`k${k.frame}`}
+            className={`tl-key ${k.interp} ${selected.has(k.frame) ? 'selected' : ''}`}
+            data-testid="timeline-key"
+            data-frame={k.frame}
+            title={`Keyframe on frame ${k.frame} (${INTERP_LABELS[k.interp]}): drag to move, Alt+drag to duplicate`}
+            style={{ left: (k.frame - 0.5) * CELL }}
+            onPointerDown={(e) => onKey(e, track, k.frame)}
+            onClick={(e) => e.stopPropagation()}
+            onContextMenu={(e) => menu(e, k.frame)}
+          />
+        ))}
+    </>
+  );
 }
 
 const TrackRow = memo(function TrackRow({ row, frames, active, selected, selectedKeys, preview, onGrip, onKey }: RowProps) {
   const track = row.layer;
   const content = preview ?? trackContent(track, frames);
-  const keys = keysOn(track) ? (content.keys ?? []) : [];
+  const keys = keysOn(track) ? ((content.keys ?? []) as Keyframe[]) : [];
   const keySel = new Set(selectedKeys ? selectedKeys.split(',').map(Number) : []);
   const animation = isAnimationFolder(track) ? (content.cels ? { cels: content.cels } : track.animation) : null;
   const starts = new Set(selected ? selected.split(',').map(Number) : []);
@@ -211,32 +237,125 @@ const TrackRow = memo(function TrackRow({ row, frames, active, selected, selecte
               <div
                 className="tl-clip-grip"
                 title="Clip: drag to move, drag an end to trim (Alt: stretch); Ctrl/⌘-click selects several"
-                onPointerDown={(e) => lane.current && onGrip(e, track, c.start, lane.current)}
+                onPointerDown={(e) => lane.current && onGrip(e, track.id, c.start, lane.current)}
                 onClick={(e) => e.stopPropagation()}
                 onContextMenu={(e) => menu(e, c.start)}
               />
             </div>
           ))}
         {animation && <div className="tl-cells">{cells}</div>}
-        {keys
-          .filter((k) => k.frame <= frames)
-          .map((k) => (
-            <div
-              key={`k${k.frame}`}
-              className={`tl-key ${k.interp} ${keySel.has(k.frame) ? 'selected' : ''}`}
-              data-testid="timeline-key"
-              data-frame={k.frame}
-              title={`Keyframe on frame ${k.frame} (${INTERP_LABELS[k.interp]}): drag to move, Alt+drag to duplicate`}
-              style={{ left: (k.frame - 0.5) * CELL }}
-              onPointerDown={(e) => onKey(e, track, k.frame)}
-              onClick={(e) => e.stopPropagation()}
-              onContextMenu={(e) => menu(e, k.frame)}
-            />
-          ))}
+        <KeyMarks keys={keys} frames={frames} selected={keySel} track={track.id} onKey={onKey} menu={menu} />
       </div>
     </div>
   );
 });
+
+/** The waveform of a stretch of sound, as bars across `width` × `height` px. */
+function Waveform({ sound: id, offset, seconds, width, height }: { sound: string; offset: number; seconds: number; width: number; height: number }) {
+  useSyncExternalStore(subscribeSounds, soundsVersion);
+  const buckets = Math.max(1, Math.floor(width / 2));
+  const p = soundPeaks(id, Math.max(0, offset), seconds, buckets);
+  if (p.length === 0) return null;
+  let d = '';
+  const mid = height / 2;
+  p.forEach((v, i) => {
+    const h = Math.max(0.5, v * mid);
+    d += `M${i * 2 + 1} ${(mid - h).toFixed(1)}V${(mid + h).toFixed(1)}`;
+  });
+  return (
+    <svg className="tl-wave" width={width} height={height} aria-hidden="true">
+      <path d={d} />
+    </svg>
+  );
+}
+
+interface SoundRowProps {
+  track: SoundTrack;
+  files: SoundFile[];
+  frames: number;
+  fps: number;
+  active: boolean;
+  selected: string;
+  selectedKeys: string;
+  preview: TrackContent<Timed> | null;
+  onGrip: RowProps['onGrip'];
+  onKey: RowProps['onKey'];
+}
+
+/** An audio track: its clips with their waveforms, and volume keyframes. */
+const SoundRow = memo(function SoundRow({ track, files, frames, fps, active, selected, selectedKeys, preview, onGrip, onKey }: SoundRowProps) {
+  const clips = preview?.clips ?? track.clips;
+  const keys = (preview?.keys ?? track.keys) as SoundTrack['keys'];
+  const starts = new Set(selected ? selected.split(',').map(Number) : []);
+  const keySel = new Set(selectedKeys ? selectedKeys.split(',').map(Number) : []);
+  const lane = useRef<HTMLDivElement>(null);
+  const frameAt = (clientX: number) => Math.floor((clientX - (lane.current?.getBoundingClientRect().left ?? 0)) / CELL) + 1;
+  const menu = (e: React.MouseEvent, f: number) => {
+    e.preventDefault();
+    sound.selectSoundTrack(track.id, f);
+    showMenu({ x: e.clientX, y: e.clientY }, [...clipItems(), { separator: true }, { label: 'Delete audio track', onClick: () => sound.deleteSoundTrack(track.id) }]);
+  };
+  return (
+    <div className={`tl-row tl-sound ${active ? 'active' : ''}`} data-testid="timeline-audio" data-track={track.name} data-track-id={track.id}>
+      <div className="tl-name" style={{ paddingLeft: 4 }}>
+        <span className="tl-twisty" />
+        <button className={`eye ${track.visible ? 'on' : ''}`} aria-label={track.visible ? 'Mute track' : 'Unmute track'} onClick={() => sound.setSoundTrack(track.id, { visible: !track.visible }, track.visible ? 'Mute audio track' : 'Unmute audio track')}>
+          <Icon name="eye" size={14} />
+        </button>
+        <span className="tl-track-icon">
+          <Icon name="audio" size={14} />
+        </span>
+        <button className="tl-track-name" title={track.name} onClick={() => sound.selectSoundTrack(track.id)}>
+          {track.name}
+        </button>
+      </div>
+      <div
+        ref={lane}
+        className="tl-lane"
+        onClick={(e) => {
+          anim.clearClipSelection();
+          anim.clearKeySelection();
+          sound.selectSoundTrack(track.id, frameAt(e.clientX));
+        }}
+        onContextMenu={(e) => menu(e, frameAt(e.clientX))}
+      >
+        {clips
+          .filter((c) => c.start <= frames)
+          .map((c) => {
+            const file = files.find((f) => f.id === c.sound);
+            const width = (Math.min(c.end, frames) - c.start + 1) * CELL;
+            return (
+              <div
+                key={c.start}
+                className={`tl-clip ${starts.has(c.start) ? 'selected' : ''}`}
+                data-testid="timeline-clip"
+                data-start={c.start}
+                data-end={c.end}
+                title={file?.name}
+                style={{ left: (c.start - 1) * CELL, width }}
+              >
+                {file && <Waveform sound={file.id} offset={c.offset ?? 0} seconds={(Math.min(c.end, frames) - c.start + 1) / fps} width={width} height={20} />}
+                <div
+                  className="tl-clip-grip"
+                  title="Clip: drag to move, drag an end to trim; Ctrl/⌘-click selects several"
+                  onPointerDown={(e) => lane.current && onGrip(e, track.id, c.start, lane.current)}
+                  onClick={(e) => e.stopPropagation()}
+                  onContextMenu={(e) => menu(e, c.start)}
+                />
+              </div>
+            );
+          })}
+        <KeyMarks keys={keys} frames={frames} selected={keySel} track={track.id} onKey={onKey} menu={menu} />
+      </div>
+    </div>
+  );
+});
+
+/** Selects a frame of a track: a layer's (and the cel shown there) or an audio track's. */
+function selectAt(track: Id, frame: number): void {
+  if (getState().doc.sound?.tracks.some((t) => t.id === track)) sound.selectSoundTrack(track, frame);
+  else anim.selectTrackFrame(track, frame);
+}
 
 /** The current version of a track (rows may hold an older one in a menu). */
 const findTrack = (id: Id) => timelineTracks(getState().doc.layers).find((r) => r.layer.id === id)?.layer ?? null;
@@ -247,18 +366,20 @@ export function TimelinePalette() {
   const { frame, playing, loop, onionSkin, clipSelection } = useStore(
     useShallow((s) => ({ frame: s.frame, playing: s.playing, loop: s.loop, onionSkin: s.onionSkin, clipSelection: s.clipSelection })),
   );
-  const activeId = useStore((s) => anim.currentTrack(s)?.id ?? null);
+  const activeId = useStore((s) => anim.currentTrackId(s));
+  const soundDoc = useStore((s) => s.doc.sound);
   const hasCels = useStore((s) => anim.activeTrack(s) !== null);
   const { keySelection, editKeyed } = useStore(useShallow((s) => ({ keySelection: s.keySelection, editKeyed: s.editKeyed })));
   const keyOn = useStore((s) => {
+    if (sound.activeSoundTrack(s)) return true;
     const t = anim.currentTrack(s);
     return Boolean(t && keysOn(t));
   });
   // The interpolation shown: the selected keyframe's, else the one for new keyframes.
   const shownInterp = useStore((s) => {
     const k = s.keySelection[0];
-    const l = k ? timelineTracks(s.doc.layers).find((r) => r.layer.id === k.track)?.layer : null;
-    return l?.keys?.frames.find((x) => x.frame === k!.frame)?.interp ?? s.keyInterp;
+    const keys = k ? (anim.trackContentOf(k.track, s)?.keys as { frame: number; interp: Interp }[] | undefined) : undefined;
+    return keys?.find((x) => x.frame === k!.frame)?.interp ?? s.keyInterp;
   });
   const rows = useMemo(() => timelineTracks(layers), [layers]);
   const scrub = useRef(false);
@@ -297,11 +418,11 @@ export function TimelinePalette() {
     window.addEventListener('pointerup', up, { once: true });
   };
 
-  const onGrip = (e: React.PointerEvent<HTMLDivElement>, track: Layer, start: number, lane: HTMLElement) => {
+  const onGrip = (e: React.PointerEvent<HTMLDivElement>, track: Id, start: number, lane: HTMLElement) => {
     if (e.button !== 0) return;
     e.stopPropagation();
     e.preventDefault();
-    const clip = trackContent(track, frames).clips.find((c) => c.start === start);
+    const clip = anim.trackContentOf(track)?.clips.find((c) => c.start === start);
     if (!clip) return;
     const left = lane.getBoundingClientRect().left;
     const x = e.clientX - left;
@@ -310,19 +431,19 @@ export function TimelinePalette() {
     const frameOf = (clientX: number) => Math.floor((clientX - left) / CELL) + 1;
     const add = e.ctrlKey || e.metaKey;
     if (add) {
-      anim.selectClip(track.id, start, true);
+      anim.selectClip(track, start, true);
       return;
     }
     if (atStart || atEnd) {
-      anim.selectClip(track.id, start);
+      anim.selectClip(track, start);
       const edge: ClipEdge = atStart ? 'start' : 'end';
-      const d: Drag = { kind: 'edge', track: track.id, start, edge, stretch: e.altKey, frame: edge === 'start' ? clip.start : clip.end };
+      const d: Drag = { kind: 'edge', track, start, edge, stretch: e.altKey, frame: edge === 'start' ? clip.start : clip.end };
       setDragBoth(d);
       follow((ev, cur) => (cur.kind === 'edge' ? { ...cur, stretch: ev.altKey, frame: frameOf(ev.clientX) } : null));
       return;
     }
-    if (!getState().clipSelection.some((c) => c.track === track.id && c.start === start)) anim.selectClip(track.id, start);
-    anim.selectTrackFrame(track.id, Math.max(clip.start, Math.min(clip.end, frameOf(e.clientX))));
+    if (!getState().clipSelection.some((c) => c.track === track && c.start === start)) anim.selectClip(track, start);
+    selectAt(track, Math.max(clip.start, Math.min(clip.end, frameOf(e.clientX))));
     const x0 = e.clientX;
     setDragBoth({ kind: 'move', x0, delta: 0 });
     follow((ev, cur) => {
@@ -331,13 +452,13 @@ export function TimelinePalette() {
       return delta === cur.delta ? cur : { ...cur, delta };
     });
   };
-  const onKey = (e: React.PointerEvent<HTMLDivElement>, track: Layer, frame: number) => {
+  const onKey = (e: React.PointerEvent<HTMLDivElement>, track: Id, frame: number) => {
     if (e.button !== 0) return;
     e.stopPropagation();
     e.preventDefault();
     const add = e.ctrlKey || e.metaKey;
-    if (add || !getState().keySelection.some((k) => k.track === track.id && k.frame === frame)) anim.selectKeyframe(track.id, frame, add);
-    else anim.selectTrackFrame(track.id, frame);
+    if (add || !getState().keySelection.some((k) => k.track === track && k.frame === frame)) anim.selectKeyframe(track, frame, add);
+    else selectAt(track, frame);
     if (add) return;
     const x0 = e.clientX;
     setDragBoth({ kind: 'keys', x0, delta: 0, copy: e.altKey });
@@ -357,38 +478,38 @@ export function TimelinePalette() {
   const stableKey = useCallback<RowProps['onKey']>((...args) => keyRef.current(...args), []);
 
   // What dragged tracks look like before the drop.
+  const soundTracks = soundDoc?.tracks;
   const previews = useMemo(() => {
-    const out = new Map<Id, TrackContent<Keyframe>>();
+    const out = new Map<Id, TrackContent<Timed>>();
     if (!drag || !timeline) return out;
     const s = getState();
     if (drag.kind === 'edge') {
-      const track = rows.find((r) => r.layer.id === drag.track)?.layer;
-      if (!track) return out;
-      const t = trackContent(track, frames);
-      const i = t.clips.findIndex((c) => c.start === drag.start);
-      if (i >= 0) out.set(track.id, anim.draggedEdge(t, i, drag.edge, drag.frame, drag.stretch, fps));
+      const t = anim.trackContentOf(drag.track, s);
+      const i = t ? t.clips.findIndex((c) => c.start === drag.start) : -1;
+      if (t && i >= 0) out.set(drag.track, anim.draggedEdge(t, i, drag.edge, drag.frame, drag.stretch, fps));
       return out;
     }
+    const ids = [...rows.map((r) => r.layer.id), ...(soundTracks ?? []).map((t) => t.id)];
     if (drag.kind === 'keys') {
       if (!drag.delta) return out;
-      for (const r of rows) {
-        const frames0 = keySelection.filter((k) => k.track === r.layer.id).map((k) => k.frame);
-        if (!frames0.length || !r.layer.keys) continue;
-        const t = trackContent(r.layer, frames);
-        out.set(r.layer.id, { ...t, keys: moveKeys(r.layer.keys.frames, frames0, drag.delta, drag.copy) });
+      for (const id of ids) {
+        const frames0 = keySelection.filter((k) => k.track === id).map((k) => k.frame);
+        const t = frames0.length ? anim.trackContentOf(id, s) : null;
+        if (!t?.keys) continue;
+        out.set(id, { ...t, keys: moveKeys(t.keys as Keyframe[], frames0, drag.delta, drag.copy) });
       }
       return out;
     }
     const d = anim.clipMoveDelta(drag.delta, s);
     if (!d) return out;
-    for (const r of rows) {
-      const starts = clipSelection.filter((c) => c.track === r.layer.id).map((c) => c.start);
-      if (!starts.length) continue;
-      const t = trackContent(r.layer, frames);
-      out.set(r.layer.id, { ...t, clips: t.clips.map((c) => (starts.includes(c.start) ? { ...c, start: c.start + d, end: c.end + d } : c)) });
+    for (const id of ids) {
+      const starts = clipSelection.filter((c) => c.track === id).map((c) => c.start);
+      const t = starts.length ? anim.trackContentOf(id, s) : null;
+      if (!t) continue;
+      out.set(id, { ...t, clips: t.clips.map((c) => (starts.includes(c.start) ? { ...c, start: c.start + d, end: c.end + d } : c)) });
     }
     return out;
-  }, [drag, rows, frames, fps, timeline, clipSelection, keySelection]);
+  }, [drag, rows, soundTracks, fps, timeline, clipSelection, keySelection]);
 
   const keysOf = (id: Id) =>
     keySelection
@@ -474,6 +595,21 @@ export function TimelinePalette() {
                 selected={selectedOf(r.layer.id)}
                 selectedKeys={keysOf(r.layer.id)}
                 preview={previews.get(r.layer.id) ?? null}
+                onGrip={stableGrip}
+                onKey={stableKey}
+              />
+            ))}
+            {soundDoc?.tracks.map((t) => (
+              <SoundRow
+                key={t.id}
+                track={t}
+                files={soundDoc.files}
+                frames={frames}
+                fps={fps}
+                active={t.id === activeId}
+                selected={selectedOf(t.id)}
+                selectedKeys={keysOf(t.id)}
+                preview={previews.get(t.id) ?? null}
                 onGrip={stableGrip}
                 onKey={stableKey}
               />

@@ -4,6 +4,7 @@
  *   layers/<id>.png    – pixels of each raster layer and layer mask (document size, straight alpha);
  *                        vector and text layers store their lines, text and balloons in
  *                        document.json and are rendered on load
+ *   sounds/<id>        – the sound files of audio tracks, as imported
  *   preview.png        – merged image for previews (optional)
  * Pure (no DOM): PNG encoding/decoding happens in the browser layer.
  */
@@ -24,6 +25,7 @@ import { pruneTrack, sanitizeTimeline, sanitizeTrack } from '../paint/animation'
 import { sanitizeClips } from '../paint/clips';
 import { sanitizeKeyTrack } from '../paint/keyframes';
 import { sanitizeLightLayers } from '../paint/lightTable';
+import { sanitizeSound } from '../paint/sound';
 
 export const FORMAT = 'mad-studio-paint';
 /**
@@ -39,6 +41,8 @@ export interface DocumentFile {
   activeLayerId: Id | null;
   /** PNG bytes per raster layer and mask id. */
   layers: Map<Id, Uint8Array>;
+  /** Bytes of each sound file (by id). */
+  sounds?: Map<Id, Uint8Array>;
   preview?: Uint8Array;
 }
 
@@ -175,6 +179,7 @@ export function sanitizeDocument(raw: unknown): PaintDocument {
   const paper = (r.paper && typeof r.paper === 'object' ? r.paper : {}) as Record<string, unknown>;
   const timeline = sanitizeTimeline(r.timeline);
   const general = sanitizeLightLayers((r.lightTable as Record<string, unknown> | undefined)?.general);
+  const sound = sanitizeSound(r.sound);
   return {
     id: str(r.id, 'd-imported', 64),
     name: str(r.name, 'Untitled', 120),
@@ -185,6 +190,7 @@ export function sanitizeDocument(raw: unknown): PaintDocument {
     layers: layers.length ? layers : [createRasterLayer('Layer 1')],
     ...(timeline ? { timeline } : {}),
     ...(general ? { lightTable: { general } } : {}),
+    ...(sound ? { sound } : {}),
   };
 }
 
@@ -226,6 +232,8 @@ export function packDocument(file: DocumentFile): Uint8Array {
   };
   // PNGs are already compressed: store them.
   for (const [id, png] of file.layers) entries[`layers/${id}.png`] = [png, { level: 0 }];
+  // Sound files are compressed already (or barely compress).
+  for (const [id, bytes] of file.sounds ?? []) entries[`sounds/${id}`] = [bytes, { level: 0 }];
   if (file.preview) entries['preview.png'] = [file.preview, { level: 0 }];
   return zipSync(entries, { level: 6 });
 }
@@ -244,11 +252,14 @@ export function unpackDocument(bytes: Uint8Array): DocumentFile {
   if (typeof meta.version === 'number' && meta.version > FORMAT_VERSION) throw new Error('This document was saved by a newer version of MAD Studio Paint');
   const doc = sanitizeDocument(meta.document);
   const layers = new Map<Id, Uint8Array>();
+  const sounds = new Map<Id, Uint8Array>();
   for (const [path, data] of Object.entries(files)) {
     const m = /^layers\/([A-Za-z0-9_-]+)\.png$/.exec(path);
     if (m) layers.set(m[1], data);
+    const a = /^sounds\/([A-Za-z0-9_-]+)$/.exec(path);
+    if (a && doc.sound?.files.some((f) => f.id === a[1])) sounds.set(a[1], data);
   }
-  return { doc, activeLayerId: typeof meta.activeLayerId === 'string' ? meta.activeLayerId : null, layers, preview: files['preview.png'] };
+  return { doc, activeLayerId: typeof meta.activeLayerId === 'string' ? meta.activeLayerId : null, layers, sounds, preview: files['preview.png'] };
 }
 
 export function isDocumentFileName(name: string): boolean {

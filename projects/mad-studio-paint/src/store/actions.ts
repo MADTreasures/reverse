@@ -2,6 +2,7 @@
 import { celBlocker, celOf, isAnimationFolder, keyedTrackOf, nearestFrameOf, pruneTracks } from '../model/animation';
 import { celAt } from '../paint/animation';
 import { docLightImages } from '../paint/lightTable';
+import { pruneSounds } from '../engine/sounds';
 import { pushHistory } from '../model/color';
 import { createDocument } from '../model/document';
 import {
@@ -144,6 +145,7 @@ export function redo(): void {
 
 export function loadDocument(doc: PaintDocument, images: Map<Id, HTMLCanvasElement>, fileName: string | null): void {
   engine.load(doc, images, docLightImages(doc));
+  pruneSounds(new Set(doc.sound?.files.map((f) => f.id)));
   setState({
     textEdit: null,
     selectedObjects: [],
@@ -163,6 +165,7 @@ export function loadDocument(doc: PaintDocument, images: Map<Id, HTMLCanvasEleme
     keySelection: [],
     lightSelection: null,
     lockedCel: null,
+    activeSound: null,
     ...(doc.timeline ? { timelineShown: true } : {}),
   });
   fitToWindow();
@@ -269,7 +272,7 @@ export function selectLayer(id: Id, mask = false): void {
   const s = getState();
   const l = findLayer(s.doc.layers, id);
   if (!l) return;
-  setState({ activeLayerId: id, maskEditing: mask && Boolean(l.mask), ...(id !== s.activeLayerId ? { selectedObjects: [] } : {}) });
+  setState({ activeLayerId: id, activeSound: null, maskEditing: mask && Boolean(l.mask), ...(id !== s.activeLayerId ? { selectedObjects: [] } : {}) });
   // A cel that is not shown at the current frame: go to the nearest frame that shows it.
   const c = s.doc.timeline?.enabled && !s.playing ? celOf(s.doc.layers, id) : null;
   if (c && celAt(c.folder.animation, s.frame) !== c.cel.id) {

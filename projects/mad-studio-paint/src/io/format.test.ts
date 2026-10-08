@@ -48,6 +48,22 @@ describe('.madpaint format', () => {
     expect(odd.layers[1].keys).toBeUndefined();
   });
 
+  it('keeps audio tracks and their sound files', () => {
+    const doc = createDocument('Sound', 200, 100, 72);
+    doc.timeline = { enabled: true, fps: 12, frames: 12 };
+    doc.sound = {
+      files: [{ id: 'snd1', name: 'Beat', type: 'audio/wav', duration: 1.5 }],
+      tracks: [{ id: 's1', name: 'Beat', visible: true, volume: 0.8, clips: [{ start: 2, end: 9, offset: 0.25, sound: 'snd1' }], keys: [{ frame: 2, interp: 'smooth', volume: 0.4 }] }],
+    };
+    const bytes = new Uint8Array([82, 73, 70, 70, 1, 2, 3]);
+    const back = unpackDocument(packDocument({ doc, activeLayerId: null, layers: new Map(), sounds: new Map([['snd1', bytes]]) }));
+    expect(back.doc.sound).toEqual(doc.sound);
+    expect([...back.sounds!.get('snd1')!]).toEqual([...bytes]);
+    // Sound files the document does not list are not read.
+    const stray = unpackDocument(packDocument({ doc: { ...doc, sound: undefined }, activeLayerId: null, layers: new Map(), sounds: new Map([['snd1', bytes]]) }));
+    expect(stray.sounds!.size).toBe(0);
+  });
+
   it('keeps the clips of tracks', () => {
     const doc = createDocument('Clips', 200, 100, 72);
     doc.layers[0].clips = [

@@ -133,6 +133,8 @@ export interface PaintState {
   lightOpacityAll: boolean;
   /** The tab shown in the dock with the Layer palette. */
   layerDockTab: 'layer' | 'history' | 'cels';
+  /** The audio track selected in the Timeline palette (its clips and volume are edited). */
+  activeSound: Id | null;
 }
 
 /** A keyframe in the Timeline palette: the track (layer) and its frame. */
@@ -203,6 +205,7 @@ function initialState(): PaintState {
     lockedCel: null,
     lightOpacityAll: false,
     layerDockTab: 'layer',
+    activeSound: null,
   };
 }
 

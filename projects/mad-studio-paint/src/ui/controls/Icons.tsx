@@ -452,6 +452,13 @@ const paths: Record<string, ReactNode> = {
   ),
   newCel: <path d="M5.5 2.5h6l3 3v12h-9zM10 8.5v6M7 11.5h6" />,
   layer: <path d="M3 7.5l7-4 7 4-7 4zM3 12.5l7 4 7-4" />,
+  audio: <path d="M3.5 8v4h3l4 3.5v-11L6.5 8zM13.5 7.5a3.5 3.5 0 0 1 0 5M15.5 5a7 7 0 0 1 0 10" />,
+  movie: (
+    <>
+      <rect x="2.5" y="4.5" width="15" height="11" rx="1.5" />
+      <path d="M8.5 7.5v5l4-2.5z" />
+    </>
+  ),
   lightTable: (
     <>
       <path d="M3 15.5h14l-2-5H5z" />

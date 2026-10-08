@@ -13,6 +13,8 @@ export interface Clip {
   end: number;
   /** Audio tracks: seconds into the sound at the clip's first frame (negative: silence first). */
   offset?: number;
+  /** Audio tracks: the sound the clip plays (a track can hold clips of several sounds). */
+  sound?: string;
 }
 
 /** Anything placed on a frame of a track (keyframes). */
@@ -31,6 +33,7 @@ export interface TrackContent<K extends Timed = Timed> {
 export interface ClipCopy<K extends Timed = Timed> {
   length: number;
   offset?: number;
+  sound?: string;
   cels?: CelAssignment[];
   keys?: K[];
 }
@@ -240,7 +243,7 @@ export function setFirstDisplayed<K extends Timed>(t: TrackContent<K>, frame: nu
   const next = p.clips.find((c) => c.start > frame);
   const end = next ? next.start - 1 : Math.min(MAX_FRAMES, Math.max(frames, frame));
   const last = p.cels ? (assignmentAt({ cels: p.cels }, prev.end)?.cel ?? null) : null;
-  const clip: Clip = { start: frame, end, ...(prev.offset !== undefined ? { offset: prev.offset + (frame - prev.start) / fps } : {}) };
+  const clip: Clip = { ...prev, start: frame, end, ...(prev.offset !== undefined ? { offset: prev.offset + (frame - prev.start) / fps } : {}) };
   return tidy({
     ...p,
     clips: [...p.clips, clip],
@@ -298,7 +301,7 @@ export function splitClip<K extends Timed>(t: TrackContent<K>, frame: number, fp
   const i = clipIndexAt(t.clips, frame);
   const c = t.clips[i];
   if (!c || c.start === frame) return null;
-  const second: Clip = { start: frame, end: c.end, ...(c.offset !== undefined ? { offset: c.offset + (frame - c.start) / fps } : {}) };
+  const second: Clip = { ...c, start: frame, ...(c.offset !== undefined ? { offset: c.offset + (frame - c.start) / fps } : {}) };
   // The cel shown at the split keeps showing in the second part.
   return tidy(pinStarts({ ...t, clips: [...t.clips.slice(0, i), { ...c, end: frame - 1 }, second, ...t.clips.slice(i + 1)] }));
 }
@@ -312,6 +315,7 @@ export function copyClip<K extends Timed>(t: TrackContent<K>, i: number): ClipCo
   return {
     length: c.end - c.start + 1,
     ...(c.offset !== undefined ? { offset: c.offset } : {}),
+    ...(c.sound !== undefined ? { sound: c.sound } : {}),
     ...(p.cels ? { cels: p.cels.filter((a) => inside(a.frame)).map((a) => ({ ...a, frame: a.frame - c.start })) } : {}),
     ...(p.keys ? { keys: p.keys.filter((k) => inside(k.frame)).map((k) => ({ ...k, frame: k.frame - c.start })) } : {}),
   };
@@ -350,7 +354,7 @@ export function pasteClip<K extends Timed>(t: TrackContent<K>, copy: ClipCopy<K>
   const cut = cutRange(t, start, end, fps);
   const place = <T extends Timed>(list: T[] | undefined) => (list ?? []).map((x) => ({ ...x, frame: x.frame + start })).filter((x) => x.frame <= end);
   return tidy({
-    clips: [...cut.clips, { start, end, ...(copy.offset !== undefined ? { offset: copy.offset } : {}) }],
+    clips: [...cut.clips, { start, end, ...(copy.offset !== undefined ? { offset: copy.offset } : {}), ...(copy.sound !== undefined ? { sound: copy.sound } : {}) }],
     ...(cut.cels || copy.cels ? { cels: [...(cut.cels ?? []), ...place(copy.cels)].sort(byFrame) } : {}),
     ...(cut.keys || copy.keys ? { keys: [...(cut.keys ?? []), ...place(copy.keys)].sort(byFrame) } : {}),
   });
@@ -402,7 +406,8 @@ export function sanitizeClips(raw: unknown): Clip[] | undefined {
     const end = typeof r.end === 'number' && Number.isFinite(r.end) ? Math.round(r.end) : NaN;
     if (!Number.isFinite(start) || !Number.isFinite(end)) continue;
     const offset = typeof r.offset === 'number' && Number.isFinite(r.offset) ? clamp(r.offset, -3600, 36000) : undefined;
-    clips.push({ start, end, ...(offset !== undefined ? { offset } : {}) });
+    const sound = typeof r.sound === 'string' && /^[A-Za-z0-9_-]{1,64}$/.test(r.sound) ? r.sound : undefined;
+    clips.push({ start, end, ...(offset !== undefined ? { offset } : {}), ...(sound !== undefined ? { sound } : {}) });
   }
   return tidy({ clips }).clips;
 }

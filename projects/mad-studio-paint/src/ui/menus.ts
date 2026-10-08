@@ -21,9 +21,9 @@ export const MENUS: MenuSpec[] = [
       'saveAs',
       { label: 'Save duplicate', items: ['saveDuplicate', 'saveDuplicatePsd'] },
       '-',
-      'importImage',
+      { label: 'Import', items: ['importImage', 'importAudio'] },
       'export',
-      { label: 'Export animation', items: ['exportSequence', 'exportGif', 'exportApng'] },
+      { label: 'Export animation', items: ['exportSequence', 'exportGif', 'exportApng', 'exportMovie'] },
       '-',
       'renameCanvas',
       '-',
@@ -58,7 +58,7 @@ export const MENUS: MenuSpec[] = [
   {
     label: 'Animation',
     items: [
-      { label: 'New animation layer', items: ['newAnimationFolder', 'newCameraFolder'] },
+      { label: 'New animation layer', items: ['newAnimationFolder', 'newCameraFolder', 'newAudioTrack'] },
       'newAnimationCel',
       '-',
       {

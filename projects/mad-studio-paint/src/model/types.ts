@@ -3,6 +3,7 @@ import type { AnimationTrack, Timeline } from '../paint/animation';
 import type { Clip } from '../paint/clips';
 import type { KeyTrack } from '../paint/keyframes';
 import type { LightLayer, LightTable } from '../paint/lightTable';
+import type { DocSound } from '../paint/sound';
 import type { LayerEffects } from '../paint/effects';
 import type { Ruler } from '../paint/rulers';
 import type { Correction } from '../paint/tonal';
@@ -179,4 +180,6 @@ export interface PaintDocument {
   timeline?: Timeline;
   /** The general light table (shown for every cel). */
   lightTable?: LightTable;
+  /** Audio tracks of the timeline and the sound files they play. */
+  sound?: DocSound;
 }

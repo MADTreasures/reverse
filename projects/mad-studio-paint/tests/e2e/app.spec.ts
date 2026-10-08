@@ -2249,6 +2249,115 @@ test('light table: a cel and an image on the target cel, colour mode, Light tabl
   expect(errors).toEqual([]);
 });
 
+/** A stereo 16-bit WAV file with a sine tone. */
+function sineWav(seconds: number, rate: number, freq: number): Buffer {
+  const n = Math.round(seconds * rate);
+  const b = Buffer.alloc(44 + n * 4);
+  b.write('RIFF', 0);
+  b.writeUInt32LE(36 + n * 4, 4);
+  b.write('WAVE', 8);
+  b.write('fmt ', 12);
+  b.writeUInt32LE(16, 16);
+  b.writeUInt16LE(1, 20);
+  b.writeUInt16LE(2, 22);
+  b.writeUInt32LE(rate, 24);
+  b.writeUInt32LE(rate * 4, 28);
+  b.writeUInt16LE(4, 32);
+  b.writeUInt16LE(16, 34);
+  b.write('data', 36);
+  b.writeUInt32LE(n * 4, 40);
+  for (let i = 0; i < n; i++) {
+    const v = Math.round(Math.sin((2 * Math.PI * freq * i) / rate) * 12000);
+    b.writeInt16LE(v, 44 + i * 4);
+    b.writeInt16LE(v, 46 + i * 4);
+  }
+  return b;
+}
+
+test('sound: audio as a clip, volume keyframes, mute; movies as MP4 and MOV; saved', async ({ page }) => {
+  const errors = await boot(page);
+  await page.evaluate(() => delete (window as any).showSaveFilePicker);
+  await page.evaluate(() => void window.__madPaint.runCommand('new'));
+  const dlg = page.getByRole('dialog', { name: 'New canvas' });
+  await dlg.getByLabel('Width').fill('160');
+  await dlg.getByLabel('Height').fill('120');
+  await dlg.getByText('Create animated illustration').click();
+  await dlg.getByLabel('Number of cels').fill('12');
+  await dlg.getByLabel('Frame rate').fill('12');
+  await dlg.getByRole('button', { name: 'OK' }).click();
+  await page.evaluate(() => {
+    const m = window.__madPaint;
+    m.actions.setDrawingColor('#d02020');
+    m.actions.fillWithColor();
+  });
+  const sound = () => page.evaluate(() => window.__madPaint.useStore.getState().doc.sound);
+  // File > Import > Audio: a one-second tone becomes a clip from frame 1 on a new audio track.
+  const [chooser] = await Promise.all([page.waitForEvent('filechooser'), page.evaluate(() => void window.__madPaint.runCommand('importAudio'))]);
+  await chooser.setFiles({ name: 'beep.wav', mimeType: 'audio/wav', buffer: sineWav(1, 48000, 440) });
+  await expect(page.getByTestId('timeline-audio')).toHaveCount(1);
+  let snd = (await sound())!;
+  expect(snd.tracks[0].name).toBe('beep');
+  expect(snd.tracks[0].clips.map((c: any) => [c.start, c.end, c.sound === snd.files[0].id])).toEqual([[1, 12, true]]);
+  expect(snd.files[0].duration).toBeGreaterThan(0.99);
+  // Clip commands work on the audio track: it ends before frame 7.
+  await page.getByTestId('timeline-ruler').locator('.tl-cell').nth(6).click();
+  await page.evaluate(() => window.__madPaint.runCommand('setLastDisplayed'));
+  expect((await sound())!.tracks[0].clips.map((c: any) => [c.start, c.end])).toEqual([[1, 6]]);
+  // Volume: the Object tool's settings; with keyframes it fades.
+  await selectTool(page, 'object');
+  await page.getByRole('button', { name: 'Tool Settings', exact: true }).click();
+  await expect(page.getByTestId('audio-info')).toContainText('beep');
+  await page.getByRole('spinbutton', { name: 'Volume' }).fill('50');
+  expect((await sound())!.tracks[0].volume).toBe(0.5);
+  await page.getByTestId('timeline-ruler').locator('.tl-cell').nth(0).click();
+  await page.getByRole('button', { name: 'Add keyframe' }).first().click();
+  await page.getByTestId('timeline-ruler').locator('.tl-cell').nth(5).click();
+  await page.getByRole('spinbutton', { name: 'Volume' }).fill('0');
+  snd = (await sound())!;
+  expect(snd.tracks[0].keys.map((k: any) => [k.frame, k.volume])).toEqual([
+    [1, 0.5],
+    [6, 0],
+  ]);
+  await expect(page.getByTestId('timeline-audio').getByTestId('timeline-key')).toHaveCount(2);
+  // File > Export animation > Movie: MP4 and MOV with the sound.
+  const exportMovie = async (format: 'mp4' | 'mov') => {
+    await page.evaluate(() => window.__madPaint.runCommand('exportMovie'));
+    const md = page.getByRole('dialog', { name: 'Movie export settings' });
+    await md.getByLabel('Format').selectOption(format);
+    await expect(md.getByTestId('movie-codecs')).not.toHaveText('…');
+    const codecs = await md.getByTestId('movie-codecs').textContent();
+    const [dl] = await Promise.all([page.waitForEvent('download'), md.getByRole('button', { name: 'OK' }).click()]);
+    expect(dl.suggestedFilename()).toBe(`Illustration.${format}`);
+    return { codecs, bytes: readFileSync((await dl.path())!) };
+  };
+  const mp4 = await exportMovie('mp4');
+  expect(mp4.bytes.subarray(4, 12).toString('latin1')).toBe('ftypisom');
+  expect(mp4.codecs).toMatch(/H\.264|VP9/);
+  expect(mp4.bytes.includes(Buffer.from('avc1')) || mp4.bytes.includes(Buffer.from('vp09'))).toBe(true);
+  expect(mp4.bytes.includes(Buffer.from('mp4a')) || mp4.bytes.includes(Buffer.from('Opus'))).toBe(true);
+  const mov = await exportMovie('mov');
+  expect(mov.bytes.subarray(4, 12).toString('latin1')).toBe('ftypqt  ');
+  expect(mov.bytes.includes(Buffer.from('mdat'))).toBe(true);
+  expect(mov.bytes.includes(Buffer.from('sowt')) || mov.bytes.includes(Buffer.from('mp4a'))).toBe(true);
+  // Muted: the movie has no sound.
+  await page.getByTestId('timeline-audio').getByRole('button', { name: 'Mute track' }).click();
+  const silent = await exportMovie('mov');
+  expect(silent.bytes.includes(Buffer.from('soun'))).toBe(false);
+  await page.getByTestId('timeline-audio').getByRole('button', { name: 'Unmute track' }).click();
+  // Saved and opened again: the track, its keyframes and the sound file come back.
+  const back = await page.evaluate(async () => {
+    const m = window.__madPaint;
+    await m.openFileBytes({ name: 'sound.madpaint', data: await m.buildDocumentBytes() });
+    const s = m.useStore.getState().doc.sound;
+    return { clips: s.tracks[0].clips.map((c: any) => [c.start, c.end]), keys: s.tracks[0].keys.length, files: s.files.length, bytes: (await m.buildDocumentBytes()).length };
+  });
+  expect(back.clips).toEqual([[1, 6]]);
+  expect(back.keys).toBe(2);
+  expect(back.files).toBe(1);
+  expect(back.bytes).toBeGreaterThan(48000 * 4);
+  expect(errors).toEqual([]);
+});
+
 test('frame borders snap strokes that start near them, not along their extension', async ({ page }) => {
   await boot(page);
   await page.evaluate(() => window.__madPaint.runCommand('newFrameFolder'));

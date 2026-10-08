@@ -14,6 +14,7 @@ import { confirmDialog, toast } from '../ui/overlays';
 import { EXTENSION, IMAGE_EXTENSIONS, isDocumentFileName, isImageFileName, isPsdFileName, mimeForName, packDocument, PSD_EXTENSIONS, unpackDocument } from './format';
 import { idbDelete, idbGet, idbSet } from './idb';
 import { docLightImages } from '../paint/lightTable';
+import { clearSounds, mixSound, setSoundBytes, soundBytes } from '../engine/sounds';
 // Type only: the PSD code (and ag-psd) loads when a PSD is opened or saved.
 import type { Pixels } from './psd';
 
@@ -57,9 +58,14 @@ export async function buildDocumentBytes(): Promise<Uint8Array> {
     const s = getSurface(id);
     if (s) layers.set(id, await canvasToBytes(s));
   }
+  const sounds = new Map<Id, Uint8Array>();
+  for (const f of doc.sound?.files ?? []) {
+    const b = soundBytes(f.id);
+    if (b) sounds.set(f.id, b.bytes);
+  }
   const previewScale = Math.min(1, 512 / Math.max(doc.width, doc.height));
   const preview = await canvasToBytes(renderMerged({ paper: true, skipDraft: true, scale: previewScale }));
-  return packDocument({ doc, activeLayerId, layers, preview });
+  return packDocument({ doc, activeLayerId, layers, sounds, preview });
 }
 
 export async function saveDocument(saveAs = false): Promise<boolean> {
@@ -96,6 +102,12 @@ export async function saveDuplicate(): Promise<boolean> {
 
 async function loadFromBytes(data: Uint8Array): Promise<{ doc: PaintDocument; images: Map<Id, HTMLCanvasElement>; activeLayerId: Id | null }> {
   const file = unpackDocument(data);
+  // The sound files come back before the document shows.
+  clearSounds();
+  for (const f of file.doc.sound?.files ?? []) {
+    const bytes = file.sounds?.get(f.id);
+    if (bytes) setSoundBytes(f.id, bytes, f.type);
+  }
   const images = new Map<Id, HTMLCanvasElement>();
   await Promise.all(
     [...file.layers].map(async ([id, png]) => {
@@ -383,6 +395,68 @@ export async function exportAnimation(o: AnimationExportOptions): Promise<boolea
       }
     }
     const saved = await saveFile(bytes, name, [filter], null, mime);
+    if (saved) toast(`Exported ${saved.name}`);
+    return Boolean(saved);
+  } catch (err) {
+    toast(`Export failed: ${(err as Error).message}`, 'error');
+    return false;
+  }
+}
+
+export interface MovieOptions {
+  format: 'mp4' | 'mov';
+  /** Width of the movie (the height keeps the canvas's aspect ratio; both even). */
+  width: number;
+  start: number;
+  end: number;
+  fps: number;
+  /** Apply 2D camera effects. */
+  camera: boolean;
+  sampleRate: number;
+  channels: number;
+}
+
+/** File > Export animation > Movie: MP4 or QuickTime with the sound of the audio tracks. */
+export async function exportMovie(o: MovieOptions, progress?: (done: number, total: number) => void): Promise<boolean> {
+  const { doc } = getState();
+  const t = doc.timeline;
+  if (!t) {
+    toast('The canvas has no timeline', 'error');
+    return false;
+  }
+  try {
+    const { exportFrames } = await import('./animationExport');
+    const { chooseCodecs, encodeMovie, evenSize } = await import('./movie');
+    const w = evenSize(o.width);
+    const h = evenSize(Math.round((o.width * doc.height) / doc.width));
+    const sound = doc.sound?.tracks.some((x) => x.visible && x.clips.length) ? doc.sound : undefined;
+    const codecs = await chooseCodecs(o.format, w, h, o.fps, o.sampleRate, o.channels, Boolean(sound));
+    if (!codecs) {
+      toast('This system cannot encode MP4 video: export a MOV movie instead', 'error');
+      return false;
+    }
+    const scale = w / doc.width;
+    // Frames shown several times in a row are drawn once.
+    let last: { frame: number; canvas: HTMLCanvasElement } | null = null;
+    const render = (frame: number) => {
+      if (last?.frame !== frame) last = { frame, canvas: renderMerged({ paper: true, skipDraft: true, scale, frame, camera: o.camera }) };
+      return last.canvas;
+    };
+    const bytes = await encodeMovie({
+      format: o.format,
+      codecs,
+      width: w,
+      height: h,
+      fps: o.fps,
+      frames: exportFrames(o.start, o.end, t.fps, o.fps),
+      channels: o.channels,
+      render,
+      mix: () => mixSound(sound, o.start, o.end, t.fps, codecs.sampleRate, o.channels),
+      progress,
+    });
+    const base = doc.name || 'Untitled';
+    const filter = o.format === 'mp4' ? { name: 'MPEG-4 movie', extensions: ['mp4'] } : { name: 'QuickTime movie', extensions: ['mov'] };
+    const saved = await saveFile(bytes, `${base}.${o.format}`, [filter], null, o.format === 'mp4' ? 'video/mp4' : 'video/quicktime');
     if (saved) toast(`Exported ${saved.name}`);
     return Boolean(saved);
   } catch (err) {

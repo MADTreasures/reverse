@@ -1,9 +1,9 @@
 /**
  * Animation dialogs: Animation > Timeline > New timeline / Change settings, Show animation cels >
- * Onion skin settings, and File > Export animation (animated GIF, APNG, image sequence).
+ * Onion skin settings, and File > Export animation (animated GIF, APNG, image sequence, movie).
  */
-import { useState } from 'react';
-import { exportAnimation, type AnimationFormat } from '../../io/documentIO';
+import { useEffect, useState } from 'react';
+import { exportAnimation, exportMovie, type AnimationFormat } from '../../io/documentIO';
 import { DEFAULT_TIMELINE, MAX_FPS, MAX_FRAMES, type OnionMode } from '../../paint/animation';
 import * as anim from '../../store/animationActions';
 import { getState, useStore } from '../../store/store';
@@ -235,6 +235,99 @@ export function AnimationExportDialog({ format }: { format: AnimationFormat }) {
         </label>
       </div>
       {format === 'sequence' && <p className="muted">The images are saved together in a ZIP file.</p>}
+      <Actions ok={busy ? 'Exporting…' : 'OK'} busy={busy} />
+    </form>
+  );
+}
+
+/** File > Export animation > Movie: MP4 or QuickTime (MOV), with the sound of the audio tracks. */
+export function MovieExportDialog() {
+  const doc = useStore((s) => s.doc);
+  const t = doc.timeline ?? DEFAULT_TIMELINE;
+  const [format, setFormat] = useState<'mp4' | 'mov'>('mp4');
+  const [width, setWidth] = useState(Math.min(doc.width, 1920));
+  const [start, setStart] = useState(1);
+  const [end, setEnd] = useState(t.frames);
+  const [fps, setFps] = useState(t.fps);
+  const [camera, setCamera] = useState(true);
+  const [sampleRate, setSampleRate] = useState(48000);
+  const [channels, setChannels] = useState(2);
+  const [busy, setBusy] = useState(false);
+  const [progress, setProgress] = useState('');
+  const [codecs, setCodecs] = useState('…');
+  const evenW = Math.max(2, Math.floor(width / 2) * 2);
+  const height = Math.max(2, Math.floor(Math.round((width * doc.height) / doc.width) / 2) * 2);
+  const sound = Boolean(doc.sound?.tracks.some((x) => x.visible && x.clips.length));
+  useEffect(() => {
+    let live = true;
+    void import('../../io/movie').then(async ({ chooseCodecs, codecLabel }) => {
+      const c = await chooseCodecs(format, evenW, height, fps, sampleRate, channels, sound);
+      if (live) setCodecs(c ? codecLabel(c) : 'not available on this system (choose MOV)');
+    });
+    return () => {
+      live = false;
+    };
+  }, [format, evenW, height, fps, sampleRate, channels, sound]);
+  const run = async () => {
+    setBusy(true);
+    await new Promise((r) => setTimeout(r, 30));
+    const ok = await exportMovie({ format, width, start, end, fps, camera, sampleRate, channels }, (done, total) => setProgress(`${done} / ${total}`));
+    setBusy(false);
+    setProgress('');
+    if (ok) closeDialog();
+  };
+  return (
+    <form
+      className="modal"
+      role="dialog"
+      aria-label="Movie export settings"
+      onSubmit={(e) => {
+        e.preventDefault();
+        void run();
+      }}
+    >
+      <h2>Movie export settings</h2>
+      <div className="form-grid">
+        <label htmlFor="mv-format">Format</label>
+        <select id="mv-format" value={format} onChange={(e) => setFormat(e.target.value as 'mp4' | 'mov')}>
+          <option value="mp4">MP4 (.mp4)</option>
+          <option value="mov">QuickTime (.mov)</option>
+        </select>
+        <label>Codecs</label>
+        <span className="muted" data-testid="movie-codecs">
+          {codecs}
+        </span>
+        <label htmlFor="mv-width">Width</label>
+        <span className="with-unit">
+          <input id="mv-width" type="number" min={16} max={doc.width * 4} value={width} onChange={(e) => setWidth(clampInt(e.target.value, 16, doc.width * 4, width))} /> × {height} px
+        </span>
+        <label>Export range</label>
+        <span className="with-unit">
+          <input type="number" aria-label="Start frame" min={1} max={end} value={start} onChange={(e) => setStart(clampInt(e.target.value, 1, end, start))} /> –{' '}
+          <input type="number" aria-label="End frame" min={start} max={t.frames} value={end} onChange={(e) => setEnd(clampInt(e.target.value, start, t.frames, end))} />
+        </span>
+        <label htmlFor="mv-fps">Frame rate</label>
+        <span className="with-unit">
+          <input id="mv-fps" type="number" min={1} max={MAX_FPS} value={fps} onChange={(e) => setFps(clampInt(e.target.value, 1, MAX_FPS, fps))} /> fps
+        </span>
+        <label />
+        <label className="check">
+          <input type="checkbox" checked={camera} onChange={(e) => setCamera(e.target.checked)} /> Apply 2D camera effects
+        </label>
+        <label htmlFor="mv-rate">Audio settings</label>
+        <span className="with-unit">
+          <select id="mv-rate" aria-label="Sampling frequency" value={sampleRate} disabled={!sound} onChange={(e) => setSampleRate(Number(e.target.value))}>
+            <option value={44100}>44.1 kHz</option>
+            <option value={48000}>48 kHz</option>
+          </select>
+          <select aria-label="Channels" value={channels} disabled={!sound} onChange={(e) => setChannels(Number(e.target.value))}>
+            <option value={2}>Stereo</option>
+            <option value={1}>Mono</option>
+          </select>
+          {!sound && <span className="muted">no audio tracks</span>}
+        </span>
+      </div>
+      {progress && <p className="muted" data-testid="movie-progress">Encoding frame {progress}</p>}
       <Actions ok={busy ? 'Exporting…' : 'OK'} busy={busy} />
     </form>
   );

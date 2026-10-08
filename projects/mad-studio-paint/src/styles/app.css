@@ -2297,6 +2297,25 @@
   color: var(--text-faint);
 }
 
+/* audio tracks: the clips' waveforms */
+.tl-sound .tl-clip {
+  overflow: hidden;
+  background: color-mix(in srgb, #3fb37f 22%, transparent);
+  border-color: color-mix(in srgb, #3fb37f 60%, transparent);
+}
+
+.tl-wave {
+  position: absolute;
+  left: 0;
+  bottom: 1px;
+  pointer-events: none;
+}
+
+.tl-wave path {
+  stroke: #3fb37f;
+  stroke-width: 1.2;
+}
+
 /* keyframes: yellow = hold, green = linear, blue = smooth */
 .tl-key {
   position: absolute;

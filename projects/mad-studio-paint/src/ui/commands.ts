@@ -6,6 +6,7 @@ import * as actions from '../store/actions';
 import { activeFrameFolder } from '../store/frameActions';
 import * as anim from '../store/animationActions';
 import * as light from '../store/lightTableActions';
+import * as sound from '../store/soundActions';
 import { copy, cut, hasClip, pasteImage } from '../store/clipboard';
 import { getState, setState } from '../store/store';
 import { cancelTransform, confirmTransform, isTransforming, startTransform } from '../tools/transform';
@@ -76,6 +77,21 @@ const layerFlag = (key: 'clip' | 'reference' | 'draft' | 'locked', label: string
 });
 
 const hasTimeline = () => Boolean(getState().doc.timeline?.enabled);
+
+/** File > Import > Audio: picks a sound file. */
+function pickAudioFile(): Promise<void> {
+  return new Promise((resolve) => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'audio/*,.wav,.mp3,.ogg,.m4a,.aac,.flac,.opus';
+    input.onchange = () => {
+      const f = input.files?.[0];
+      if (f) void sound.importAudio(f, f.name).then(() => resolve());
+      else resolve();
+    };
+    input.click();
+  });
+}
 
 /** Animation > Light table > Select and register file: picks an image file. */
 function pickLightFile(): Promise<void> {
@@ -339,6 +355,10 @@ export const COMMANDS: Command[] = [
   { id: 'exportSequence', label: 'Image sequence…', run: () => openDialog('exportSequence'), enabled: hasTimeline },
   { id: 'exportGif', label: 'Animated GIF…', run: () => openDialog('exportGif'), enabled: hasTimeline },
   { id: 'exportApng', label: 'Animated sticker (APNG)…', run: () => openDialog('exportApng'), enabled: hasTimeline },
+  { id: 'exportMovie', label: 'Movie…', run: () => openDialog('exportMovie'), enabled: hasTimeline },
+  { id: 'importAudio', label: 'Audio…', run: () => void pickAudioFile(), enabled: hasTimeline },
+  { id: 'newAudioTrack', label: 'Audio', run: () => void sound.newAudioTrack(), enabled: () => Boolean(getState().doc.timeline) },
+  { id: 'deleteAudioTrack', label: 'Delete audio track', run: () => sound.deleteSoundTrack(), enabled: () => getState().activeSound !== null },
   { id: 'toggleTimeline', label: 'Timeline', run: () => anim.toggleTimelinePalette(), checked: () => getState().timelineShown },
   // Filter
   { id: 'gaussianBlur', label: 'Blur: Gaussian blur…', run: () => openDialog('gaussianBlur'), enabled: canEdit },
