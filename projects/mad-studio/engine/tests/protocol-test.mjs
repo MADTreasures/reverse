@@ -318,9 +318,12 @@ async function testPlayback(engine) {
   engine.send({ type: 'project.sync', project: baseProject() });
   engine.send(timeline());
   engine.send({ type: 'transport.settings', metronome: true });
+  const idle = await engine.waitFor((m) => m.type === 'status' && !m.playing, 3000, 'status while stopped', 0);
+  check(idle.seq === 0, `status.seq is 0 before any transport command (${idle.seq})`);
   const since = engine.messages.length;
-  engine.send({ type: 'transport.play', fromTick: 0 });
+  engine.send({ type: 'transport.play', fromTick: 0, seq: 1 });
   const first = await engine.waitFor((m) => m.type === 'status' && m.playing, 5000, 'status playing', since);
+  check(first.seq === 1, `status.seq: the first playing status carries the play's seq (${first.seq})`);
   await sleep(700);
   const later = engine.messages.filter((m) => m.type === 'status' && m.playing).at(-1);
   check(later.tick > first.tick + 50, `status.tick advances while playing (${first.tick.toFixed(1)} -> ${later.tick.toFixed(1)})`);
@@ -345,13 +348,15 @@ async function testPlayback(engine) {
   check(active.some((m) => 'ch_kick' in m.activity), 'status.activity reports triggered channels');
 
   // Seek while playing, then stop.
-  engine.send({ type: 'transport.seek', tick: 288 });
+  engine.send({ type: 'transport.seek', tick: 288, seq: 2 });
   await sleep(150);
   const sought = engine.messages.filter((m) => m.type === 'status' && m.playing).at(-1);
   check(sought.tick >= 250 || sought.tick < 100, `seek relocates (tick ${sought.tick.toFixed(1)})`);
-  engine.send({ type: 'transport.stop' });
+  check(sought.seq === 2, `status.seq follows transport.seek (${sought.seq})`);
+  engine.send({ type: 'transport.stop', seq: 3 });
   const stopped = await engine.waitFor((m) => m.type === 'status' && !m.playing, 3000, 'status stopped');
   check(stopped.playing === false, 'transport.stop');
+  check(stopped.seq === 3, `status.seq follows transport.stop (${stopped.seq})`);
   engine.send({ type: 'transport.settings', metronome: false });
   await sleep(500);
 
@@ -382,6 +387,12 @@ async function testRender(engine) {
   const path = join(work, 'render.wav');
   const since = engine.messages.length;
   engine.send({ type: 'render.start', requestId: 'r1', path, sampleRate: 48000, bitDepth: 32, startTick: 0, endTick: 768, tailSeconds: 1 });
+  // transport.play is refused while rendering; the refusal is acknowledged as a stop under its seq.
+  engine.send({ type: 'transport.play', fromTick: 0, seq: 10 });
+  const refused = await engine.waitFor((m) => m.type === 'error' && m.request === 'transport.play', 5000, 'transport.play refused during a render', since);
+  check(/render/.test(refused.message), `transport.play is refused during a render (${refused.message})`);
+  const ack = await engine.waitFor((m) => m.type === 'status' && m.seq === 10, 5000, 'status acknowledging the refused play', since);
+  check(ack.playing === false, 'the refused play is acknowledged as stopped (status.seq)');
   const done = await engine.waitFor((m) => (m.type === 'render.done' && m.requestId === 'r1') || (m.type === 'error' && m.request === 'render.start'), 60000, 'render.done', since);
   check(done.type === 'render.done', `render.done (${done.message ?? ''})`);
   if (done.type !== 'render.done') return;

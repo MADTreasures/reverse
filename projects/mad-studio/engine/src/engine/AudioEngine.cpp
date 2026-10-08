@@ -187,6 +187,11 @@ void AudioEngine::handleCommands (GraphSnapshot* snap, const BlockContext& ctx) 
     EngineCommand cmd;
     while (commands.pop (cmd))
     {
+        const bool transportCommand = cmd.type == EngineCommand::Type::play || cmd.type == EngineCommand::Type::stop
+                                      || cmd.type == EngineCommand::Type::seek;
+        if (transportCommand && cmd.seq != 0)
+            transportSeq = cmd.seq;
+
         switch (cmd.type)
         {
             case EngineCommand::Type::play:
@@ -601,6 +606,7 @@ void AudioEngine::processBlock (const float* const* inputs, int numInputs, float
     position.loopStart = tl != nullptr ? tl->loopStart : 0.0;
     position.loopEnd = tl != nullptr ? tl->loopEnd : 0.0;
     position.nextStart = sequencer.nextStartTick();
+    position.seq = transportSeq;
     positions.publish();
 
     snapshots.release();

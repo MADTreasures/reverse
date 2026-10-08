@@ -41,6 +41,7 @@ struct EngineCommand
     std::array<uint8_t, 16> keys {};
     int numKeys = 0;
     double duration = 0.6;
+    uint32_t seq = 0; // play/stop/seek: the client's transport sequence number (0: none)
 };
 
 /** Audio thread -> message thread notification. */
@@ -76,6 +77,7 @@ struct PositionInfo
     int state = 0;          // 0 stopped, 1 count-in, 2 playing
     double loopStart = 0.0, loopEnd = 0.0;
     double nextStart = 0.0;
+    uint32_t seq = 0;       // sequence number of the last transport command applied
 };
 
 /** Renders a GraphSnapshot. The live engine is driven by the audio device (or the null
@@ -151,6 +153,7 @@ private:
     PositionInfo lastPosition; // reader side: the newest frame read so far
 
     Sequencer sequencer;
+    uint32_t transportSeq = 0; // audio thread: the last transport command's sequence number
 
     // Events pending dispatch (swing pushes some past the current block).
     static constexpr int maxPending = 4096;

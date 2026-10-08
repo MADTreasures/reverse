@@ -50,6 +50,9 @@ export class NativeEngine implements EngineApi {
   private failures = 0;
   private rate = 48000;
   private status: Status = { playing: false, tick: 0, at: 0, activity: {} };
+  /** Number of the last transport.play/stop/seek sent; `status` echoes the last one the engine applied. */
+  private transportSeq = 0;
+  private transportSentAt = 0;
   private meterPeaks: [number, number][] = [];
   private wave: number[] = [];
   private held = new Map<number, HeldNote>();
@@ -102,6 +105,12 @@ export class NativeEngine implements EngineApi {
     this.bridge.send(message);
   }
 
+  private sendTransport(message: EngineMessage): void {
+    this.transportSeq += 1;
+    this.transportSentAt = performance.now();
+    this.send({ ...message, seq: this.transportSeq });
+  }
+
   private request(message: EngineMessage, timeoutMs = 10000): Promise<EngineMessage> {
     const requestId = `r${++requestCounter}`;
     return new Promise((resolve, reject) => {
@@ -124,6 +133,11 @@ export class NativeEngine implements EngineApi {
         this.onReady(m);
         return;
       case 'status': {
+        // Produced before the engine applied our latest play/stop/seek (e.g. while it was still busy
+        // with the first project sync): it describes the old transport state, and taking it would stop
+        // a just-started transport or move the playhead back. Accepted after 5 s in case the engine
+        // never applied the command.
+        if (typeof m.seq === 'number' && m.seq < this.transportSeq && performance.now() - this.transportSentAt < 5000) return;
         const playing = m.playing === true;
         this.status = { playing, tick: Number(m.tick) || 0, at: performance.now(), activity: (m.activity as Record<string, number>) ?? {} };
         const s = useStore.getState();
@@ -138,6 +152,7 @@ export class NativeEngine implements EngineApi {
       case 'engine.exit':
         this.ready = false;
         this.sentSamples.clear();
+        this.transportSeq = 0; // a restarted engine counts from 0
         if (!this.everReady && ++this.failures >= 3) this.fail('The native audio engine keeps crashing on start.');
         else toast('The audio engine stopped unexpectedly – restarting…', 'error');
         setTransport({ playing: false });
@@ -352,12 +367,12 @@ export class NativeEngine implements EngineApi {
     this.recordMode = s.transport.mode;
     if (s.transport.mode === 'song') this.automation.update(s.project, from);
     this.status = { playing: true, tick: from - countIn, at: performance.now(), activity: {} };
-    this.send({ type: 'transport.play', fromTick: from, countInTicks: countIn, record });
+    this.sendTransport({ type: 'transport.play', fromTick: from, countInTicks: countIn, record });
     setTransport({ playing: true });
   }
 
   stop(): void {
-    this.send({ type: 'transport.stop' });
+    this.sendTransport({ type: 'transport.stop' });
     this.status = { ...this.status, playing: false };
     for (const [handle, note] of this.held) if (note.recordStart !== null) this.noteOff(handle);
     endCoalesce();
@@ -380,7 +395,7 @@ export class NativeEngine implements EngineApi {
     const s = useStore.getState();
     if (s.transport.playing && s.transport.mode === mode) {
       this.status = { ...this.status, tick: t, at: performance.now() };
-      this.send({ type: 'transport.seek', tick: t });
+      this.sendTransport({ type: 'transport.seek', tick: t });
     }
   }
 

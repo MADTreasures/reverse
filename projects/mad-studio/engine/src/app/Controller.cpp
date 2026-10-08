@@ -265,6 +265,9 @@ void Controller::handle (const juce::String& type, const juce::var& msg, const j
             logMessage ("engine command queue full");
     };
     const auto fail = [&] (const juce::String& message) { protocol::sendError (message, type, requestId); };
+    // Transport commands may carry the client's sequence number; status messages echo the last one
+    // the audio thread applied, so the client can tell which state a status describes.
+    const auto transportSeq = [&msg] { return (uint32_t) std::max (0, json::integer (msg, "seq", 0)); };
 
     // ---- project state ------------------------------------------------------------------
     if (type == "project.sync")
@@ -313,9 +316,17 @@ void Controller::handle (const juce::String& type, const juce::var& msg, const j
     if (type == "transport.play")
     {
         if (render != nullptr)
+        {
+            // Refused: the transport stays stopped, under this command's sequence number.
+            EngineCommand c;
+            c.type = EngineCommand::Type::stop;
+            c.seq = transportSeq();
+            post (c);
             return fail ("an offline render is running");
+        }
         EngineCommand c;
         c.type = EngineCommand::Type::play;
+        c.seq = transportSeq();
         c.tick = std::max (0.0, json::number (msg, "fromTick", 0.0));
         c.countIn = std::max (0.0, json::number (msg, "countInTicks", 0.0));
         if (json::boolean (msg, "record", false))
@@ -340,6 +351,7 @@ void Controller::handle (const juce::String& type, const juce::var& msg, const j
     {
         EngineCommand c;
         c.type = EngineCommand::Type::stop;
+        c.seq = transportSeq();
         post (c);
         return;
     }
@@ -347,6 +359,7 @@ void Controller::handle (const juce::String& type, const juce::var& msg, const j
     {
         EngineCommand c;
         c.type = EngineCommand::Type::seek;
+        c.seq = transportSeq();
         c.tick = std::max (0.0, json::number (msg, "tick", 0.0));
         post (c);
         return;
@@ -698,7 +711,8 @@ void Controller::sendStatus()
         .field ("playing", pos.state != 0)
         .field ("state", pos.state == 2 ? "playing" : (pos.state == 1 ? "countIn" : "stopped"))
         .field ("tick", tick, 9)
-        .field ("cpu", engine.cpuLoad(), 3);
+        .field ("cpu", engine.cpuLoad(), 3)
+        .field ("seq", (int64_t) pos.seq);
     w.key ("activity").beginObject();
     const double sr = engine.getSampleRate();
     const auto now = engine.sampleClock();

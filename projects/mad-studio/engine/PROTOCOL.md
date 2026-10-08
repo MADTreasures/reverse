@@ -108,10 +108,16 @@ Reversed playback (`sampler.reverse`) uses a reversed copy created by the engine
 
 | Command | Fields | Notes |
 | ------- | ------ | ----- |
-| `transport.play` | `fromTick`, `countInTicks?` (default 0), `record?` (bool) | Starts at `fromTick` (clamped into the loop). With `countInTicks > 0` the metronome clicks for that many ticks first (transport position negative, no events), then playback/recording starts at `fromTick`. |
-| `transport.stop` | – | Stops, kills voices with a 12 ms fade, finishes recordings (→ `record.done`). |
-| `transport.seek` | `tick` | While playing: relocate (voices are killed). While stopped: next start position. |
+| `transport.play` | `fromTick`, `countInTicks?` (default 0), `record?` (bool), `seq?` | Starts at `fromTick` (clamped into the loop). With `countInTicks > 0` the metronome clicks for that many ticks first (transport position negative, no events), then playback/recording starts at `fromTick`. |
+| `transport.stop` | `seq?` | Stops, kills voices with a 12 ms fade, finishes recordings (→ `record.done`). |
+| `transport.seek` | `tick`, `seq?` | While playing: relocate (voices are killed). While stopped: next start position. |
 | `transport.settings` | `metronome` (bool) | Metronome clicks on every beat (accent on bar start) whenever the transport runs. |
+
+`seq` (optional, integer ≥ 1) numbers the client's transport commands. The audio thread records the
+`seq` of the last play/stop/seek it applied and every `status` echoes it, so a status that was
+produced before the latest command took effect (still in flight when the client pressed play) can be
+recognised and ignored. A `transport.play` refused during a render is acknowledged as a stop with its
+`seq`.
 
 ## Live input and previews
 
@@ -126,10 +132,11 @@ Reversed playback (`sampler.reverse`) uses a reversed copy created by the engine
 
 ## Events (engine → renderer)
 
-* `{"type":"status","playing":true,"tick":1234.5,"cpu":0.12,"activity":{"ch_1":0.02}}` – ~30×/s while
+* `{"type":"status","playing":true,"tick":1234.5,"cpu":0.12,"seq":3,"activity":{"ch_1":0.02}}` – ~30×/s while
   playing, ~4×/s when stopped. `tick` is the position currently **heard** (output latency compensated);
   during count-in it is negative. `activity` lists channels that triggered a note in the last 0.2 s with
-  the age in seconds. `cpu` = audio callback load 0..1.
+  the age in seconds. `cpu` = audio callback load 0..1. `seq` = the last applied transport command's
+  `seq` (0 before any).
 * `{"type":"meters","peaks":[[0.5,0.48],[0.1,0.1],…],"waveform":[…256 floats…]}` – ~30×/s. `peaks` has one
   `[left,right]` entry per mixer track (index 0 = master): peak absolute value of the post-fader output
   over the last 1024 samples. `waveform`: last 256 samples of the master’s left channel.
