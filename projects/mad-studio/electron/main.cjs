@@ -159,6 +159,8 @@ function buildMenu() {
         item('Move Up', 'movePatternUp', 'Shift+CmdOrCtrl+Up'),
         item('Move Down', 'movePatternDown', 'Shift+CmdOrCtrl+Down'),
         sep,
+        item('Split by Channel', 'splitPattern'),
+        sep,
         item('Previous Pattern', 'prevPattern', '-'),
         item('Next Pattern', 'nextPattern', '='),
       ],

@@ -616,6 +616,39 @@ export function transposePattern(id: Id, semitones: number): void {
   }, { label: 'transpose pattern' });
 }
 
+/**
+ * FL Studio: Patterns › Split by channel. The pattern keeps the notes of its first channel and is named
+ * after it; every other channel with notes gets a new pattern named after the channel (inserted after
+ * the original). Playlist clips keep pointing at the original pattern. Returns the new pattern ids.
+ */
+export function splitPatternByChannel(id: Id): Id[] {
+  const project = useStore.getState().project;
+  const src = findPattern(project, id);
+  if (!src) return [];
+  const used = project.channels.filter((c) => (src.notes[c.id]?.length ?? 0) > 0);
+  if (used.length < 2) return [];
+  const names = project.patterns.filter((p) => p.id !== id).map((p) => p.name);
+  const firstName = uniqueName(names, used[0].name);
+  names.push(firstName);
+  const created = used.slice(1).map((ch, i) => {
+    const name = uniqueName(names, ch.name);
+    names.push(name);
+    const pattern = createPattern(name, paletteColor(project.patterns.length + 5 + i), project.beatsPerBar);
+    pattern.minLength = src.minLength;
+    pattern.notes[ch.id] = src.notes[ch.id].map((n) => ({ ...n, id: makeId('n') }));
+    return pattern;
+  });
+  const index = project.patterns.findIndex((p) => p.id === id);
+  edit((d) => {
+    const p = patternOf(d, id);
+    if (!p) return;
+    p.name = firstName;
+    for (const ch of used.slice(1)) delete p.notes[ch.id];
+    d.patterns.splice(index + 1, 0, ...created);
+  }, { label: 'split pattern by channel' });
+  return created.map((p) => p.id);
+}
+
 export function clonePattern(id: Id): Id | null {
   const project = useStore.getState().project;
   const src = findPattern(project, id);

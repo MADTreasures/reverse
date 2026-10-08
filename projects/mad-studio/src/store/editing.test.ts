@@ -12,6 +12,7 @@ import {
   findFirstEmptyPattern,
   insertPattern,
   movePattern,
+  splitPatternByChannel,
   transposePattern,
   deleteTrack,
   insertTrack,
@@ -217,5 +218,27 @@ describe('named undo steps (FL Studio: "Undo piano roll add note", "Level 2/34")
     expect(redo()).toEqual({ label: 'piano roll add note', level: 2, total: 3 });
     expect(redo()).toEqual({ label: 'tempo', level: 1, total: 3 });
     expect(state().project.bpm).toBe(140);
+  });
+});
+
+describe('split by channel (FL Studio)', () => {
+  it('keeps the first channel in the pattern and moves the others to new patterns', () => {
+    const { ui, project } = state();
+    const [a, b, c] = project.channels;
+    addNotes(ui.selectedPatternId, a.id, [{ key: 60, start: 0, length: 24, velocity: 0.8 }]);
+    addNotes(ui.selectedPatternId, c.id, [{ key: 62, start: 48, length: 24, velocity: 0.8 }]);
+    const clip = placePatternClip(ui.selectedPatternId, project.tracks[0].id, 0)!;
+    const created = splitPatternByChannel(ui.selectedPatternId);
+    const s = state().project;
+    expect(created).toHaveLength(1);
+    const original = s.patterns.find((p) => p.id === ui.selectedPatternId)!;
+    expect(original.name).toBe(a.name);
+    expect(Object.keys(original.notes).filter((k) => original.notes[k].length)).toEqual([a.id]);
+    const split = s.patterns.find((p) => p.id === created[0])!;
+    expect(split.name).toBe(c.name);
+    expect(split.notes[c.id].map((n) => n.start)).toEqual([48]);
+    expect(split.notes[b.id]).toBeUndefined();
+    expect(s.clips.find((x) => x.id === clip)).toMatchObject({ patternId: ui.selectedPatternId });
+    expect(splitPatternByChannel(ui.selectedPatternId)).toEqual([]);
   });
 });

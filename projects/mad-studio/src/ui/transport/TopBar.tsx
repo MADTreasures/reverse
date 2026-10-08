@@ -106,6 +106,10 @@ function patternsMenu(): MenuItem[] {
     { separator: true },
     cmd('Move up', 'movePatternUp', { disabled: index <= 0 }),
     cmd('Move down', 'movePatternDown', { disabled: index >= s.project.patterns.length - 1 }),
+    { separator: true },
+    cmd('Split by channel', 'splitPattern', {
+      disabled: !current || s.project.channels.filter((c) => (current.notes[c.id]?.length ?? 0) > 0).length < 2,
+    }),
     { label: 'Patterns', header: true },
     ...s.project.patterns.map((p) => ({
       label: p.name,

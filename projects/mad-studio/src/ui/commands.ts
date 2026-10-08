@@ -9,6 +9,7 @@ import {
   findFirstEmptyPattern,
   insertPattern,
   movePattern,
+  splitPatternByChannel,
   transposePattern,
   redo,
   renamePattern,
@@ -77,6 +78,7 @@ export type CommandId =
   | 'movePatternUp'
   | 'movePatternDown'
   | 'transposePattern'
+  | 'splitPattern'
   | 'closePluginWindows'
   | 'closeUnfocusedWindows'
   | 'startOnInput'
@@ -289,6 +291,12 @@ export async function runCommand(id: CommandId): Promise<void> {
     case 'movePatternDown':
       movePattern(s.ui.selectedPatternId, 1);
       return;
+    case 'splitPattern': {
+      const created = splitPatternByChannel(s.ui.selectedPatternId);
+      if (created.length === 0) toast('Only one channel has notes in this pattern – nothing to split.');
+      else toast(`Split into ${created.length + 1} patterns, one per channel. Place the new patterns in the playlist where you need them.`);
+      return;
+    }
     case 'transposePattern': {
       const answer = await promptDialog('Transpose pattern (semitones, e.g. -12 or 7)', '12');
       const semitones = Number(answer);
