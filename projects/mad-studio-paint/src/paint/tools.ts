@@ -26,12 +26,112 @@ export type ToolId =
   | 'object'
   | 'text'
   | 'balloon'
-  | 'frame';
+  | 'frame'
+  | 'correct';
 
 export type BrushMode = 'paint' | 'erase' | 'blend';
 export type TipTexture = 'none' | 'grain';
 export type SelectShape = 'rect' | 'ellipse' | 'lasso' | 'polyline' | 'pen' | 'erase';
 export type FigureShape = 'line' | 'rect' | 'ellipse';
+export type ControlPointMode = 'move' | 'add' | 'delete' | 'corner' | 'width' | 'opacity' | 'split';
+export type CorrectKind = 'controlPoint' | 'pinch' | 'simplify' | 'connect' | 'width' | 'redraw' | 'redrawWidth';
+export type WidthMode = 'thicken' | 'narrow' | 'scaleUp' | 'scaleDown';
+
+/** Correct line tools (vector layers). */
+export interface CorrectSettings {
+  kind: CorrectKind;
+  /** Control point: what a click or drag on a control point does. */
+  mode: ControlPointMode;
+  /** Pinch and redraw: the ends of the line stay where they are. */
+  fixEnds: boolean;
+  /** Pinch: how much of the line follows the drag (% of its length). */
+  pinchLevel: number;
+  /** Pinch: pen pressure makes the pinch reach further. */
+  pressure: boolean;
+  /** Pinch: how far (screen px) from the pointer a line can be grabbed. */
+  range: number;
+  /** Pinch: adds a control point where the line is grabbed. */
+  addPoint: boolean;
+  /** Pinch, simplify and redraw: ends that end up near another line's end are joined. */
+  connect: boolean;
+  /** How far apart (px) two ends may be to be joined. */
+  connectGap: number;
+  /** Connect: lines of other colours and sizes are joined too. */
+  anyProps: boolean;
+  /** Simplify and redraw: how much simpler the line gets (0–100). */
+  simplify: number;
+  /** Simplify: corners are smoothed out too. */
+  smoothCorners: boolean;
+  /** Simplify and adjust line width: the whole of every touched line. */
+  wholeLine: boolean;
+  /** Simplify: the curve afterwards. */
+  convert: 'keep' | 'polyline' | 'spline';
+  /** Simplify: touched lines shorter than this (px) are deleted (0 = off). */
+  deleteShort: number;
+  /** Adjust line width: how, and by how much (px to thicken/narrow, % to scale). */
+  widthMode: WidthMode;
+  widthAmount: number;
+  atLeast1: boolean;
+  /** Size (px) of the tool's brush (simplify, connect, adjust width, redraw width). */
+  size: number;
+  /** Redraw: stabilization of the new stroke (0–30). */
+  stabilization: number;
+}
+
+export const DEFAULT_CORRECT: CorrectSettings = {
+  kind: 'controlPoint',
+  mode: 'move',
+  fixEnds: false,
+  pinchLevel: 50,
+  pressure: true,
+  range: 20,
+  addPoint: true,
+  connect: false,
+  connectGap: 20,
+  anyProps: false,
+  simplify: 30,
+  smoothCorners: false,
+  wholeLine: false,
+  convert: 'keep',
+  deleteShort: 0,
+  widthMode: 'thicken',
+  widthAmount: 2,
+  atLeast1: true,
+  size: 40,
+  stabilization: 6,
+};
+
+const CONTROL_POINT_MODES: readonly ControlPointMode[] = ['move', 'add', 'delete', 'corner', 'width', 'opacity', 'split'];
+const WIDTH_MODES: readonly WidthMode[] = ['thicken', 'narrow', 'scaleUp', 'scaleDown'];
+
+/** Correct line settings from storage, validated (the kind is the sub tool's own). */
+function sanitizeCorrect(def: CorrectSettings, raw: unknown): CorrectSettings {
+  const r = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : {};
+  const num = (v: unknown, fallback: number, min: number, max: number) => (typeof v === 'number' && Number.isFinite(v) ? Math.min(max, Math.max(min, v)) : fallback);
+  const bool = (v: unknown, fallback: boolean) => (typeof v === 'boolean' ? v : fallback);
+  return {
+    kind: def.kind,
+    mode: CONTROL_POINT_MODES.includes(r.mode as ControlPointMode) ? (r.mode as ControlPointMode) : def.mode,
+    fixEnds: bool(r.fixEnds, def.fixEnds),
+    pinchLevel: num(r.pinchLevel, def.pinchLevel, 1, 100),
+    pressure: bool(r.pressure, def.pressure),
+    range: num(r.range, def.range, 1, 500),
+    addPoint: bool(r.addPoint, def.addPoint),
+    connect: bool(r.connect, def.connect),
+    connectGap: num(r.connectGap, def.connectGap, 1, 500),
+    anyProps: bool(r.anyProps, def.anyProps),
+    simplify: num(r.simplify, def.simplify, 0, 100),
+    smoothCorners: bool(r.smoothCorners, def.smoothCorners),
+    wholeLine: bool(r.wholeLine, def.wholeLine),
+    convert: r.convert === 'polyline' || r.convert === 'spline' || r.convert === 'keep' ? r.convert : def.convert,
+    deleteShort: num(r.deleteShort, def.deleteShort, 0, 1000),
+    widthMode: WIDTH_MODES.includes(r.widthMode as WidthMode) ? (r.widthMode as WidthMode) : def.widthMode,
+    widthAmount: num(r.widthAmount, def.widthAmount, 0.1, 500),
+    atLeast1: bool(r.atLeast1, def.atLeast1),
+    size: num(r.size, def.size, 1, 1000),
+    stabilization: num(r.stabilization, def.stabilization, 0, 30),
+  };
+}
 export type SpecialRuler = 'parallel' | 'parallelCurve' | 'multiCurve' | 'radial' | 'radialCurve' | 'concentric';
 export const SPECIAL_RULERS: readonly SpecialRuler[] = ['parallel', 'parallelCurve', 'multiCurve', 'radial', 'radialCurve', 'concentric'];
 /** Special rulers that are made of a curve (placed point by point). */
@@ -174,6 +274,8 @@ export interface SubTool {
   gutterTopBottom?: number;
   gutterLeftRight?: number;
   divideFolder?: boolean;
+  /** Correct line tools. */
+  correct?: CorrectSettings;
 }
 
 export const DEFAULT_BRUSH: BrushSettings = {
@@ -249,6 +351,7 @@ export const TOOLS: ToolInfo[] = [
   { id: 'object', label: 'Object', key: 'O', hint: 'Click a vector line, text, balloon or ruler to select it · drag to move, handles to scale and rotate · Delete removes it' },
   { id: 'text', label: 'Text', key: 'T', hint: 'Click to type, drag to type in a frame (the text wraps at it) · click text to edit it · ⌘Enter or a click outside confirms' },
   { id: 'balloon', label: 'Balloon', key: 'T', hint: 'Drag to draw a speech balloon · balloon tail: drag from inside a balloon' },
+  { id: 'correct', label: 'Correct line', key: 'Y', hint: 'Correct the lines of a vector layer: control points, pinch, simplify, connect, line width, redraw' },
 ];
 
 export const toolInfo = (id: ToolId): ToolInfo => TOOLS.find((t) => t.id === id)!;
@@ -491,6 +594,14 @@ export const DEFAULT_SUB_TOOLS: SubTool[] = [
   { id: 'ruler-guide', tool: 'ruler', name: 'Guide', rulerKind: 'guide' },
   { id: 'ruler-perspective', tool: 'ruler', name: 'Perspective ruler', rulerKind: 'perspective' },
   { id: 'ruler-symmetry', tool: 'ruler', name: 'Symmetrical ruler', rulerKind: 'symmetry', symmetryLines: 2, symmetryMirror: true },
+  // Correct line
+  { id: 'correct-point', tool: 'correct', name: 'Control point', correct: { ...DEFAULT_CORRECT } },
+  { id: 'correct-pinch', tool: 'correct', name: 'Pinch vector line', correct: { ...DEFAULT_CORRECT, kind: 'pinch' } },
+  { id: 'correct-simplify', tool: 'correct', name: 'Simplify vector line', correct: { ...DEFAULT_CORRECT, kind: 'simplify' } },
+  { id: 'correct-connect', tool: 'correct', name: 'Connect vector line', correct: { ...DEFAULT_CORRECT, kind: 'connect' } },
+  { id: 'correct-width', tool: 'correct', name: 'Adjust line width', correct: { ...DEFAULT_CORRECT, kind: 'width' } },
+  { id: 'correct-redraw', tool: 'correct', name: 'Redraw vector line', correct: { ...DEFAULT_CORRECT, kind: 'redraw', simplify: 10 } },
+  { id: 'correct-redraw-width', tool: 'correct', name: 'Redraw vector line width', correct: { ...DEFAULT_CORRECT, kind: 'redrawWidth', size: 20 } },
   // Text & balloons
   { id: 'text', tool: 'text', name: 'Text', textStyle: { ...DEFAULT_TEXT_STYLE, size: 24 } },
   { id: 'text-vertical', tool: 'text', name: 'Vertical text', textStyle: { ...DEFAULT_TEXT_STYLE, size: 24, vertical: true } },
@@ -560,6 +671,7 @@ export function mergeSubTools(saved: unknown): SubTool[] {
       ...(def.gutterTopBottom !== undefined && typeof s.gutterTopBottom === 'number' && Number.isFinite(s.gutterTopBottom) ? { gutterTopBottom: Math.max(0, Math.min(100, s.gutterTopBottom)) } : {}),
       ...(def.gutterLeftRight !== undefined && typeof s.gutterLeftRight === 'number' && Number.isFinite(s.gutterLeftRight) ? { gutterLeftRight: Math.max(0, Math.min(100, s.gutterLeftRight)) } : {}),
       ...(def.divideFolder !== undefined && typeof s.divideFolder === 'boolean' ? { divideFolder: s.divideFolder } : {}),
+      ...(def.correct ? { correct: sanitizeCorrect(def.correct, s.correct) } : {}),
       ...(def.tail && s.tail && typeof s.tail === 'object'
         ? {
             tail: {
@@ -665,6 +777,7 @@ export const PALETTE_ENTRIES: PaletteEntry[] = [
   { id: 'frame', label: 'Frame border', icon: 'frame', tools: ['frame'] },
   { id: 'ruler', label: 'Ruler', icon: 'ruler', tools: ['ruler'] },
   { id: 'text', label: 'Text (Text, Balloon)', icon: 'text', tools: ['text', 'balloon'] },
+  { id: 'correct', label: 'Correct line', icon: 'correct', tools: ['correct'] },
 ];
 
 export type WorkspaceId = 'default' | 'classic';
@@ -678,12 +791,12 @@ export const PALETTE_LAYOUT: Record<WorkspaceId, string[][]> = {
   default: [
     ['pen', 'pencil', 'brush', 'eraser', 'airbrush', 'blend'],
     ['select', 'autoSelect', 'fill', 'gradient'],
-    ['operation', 'figure', 'frame', 'ruler', 'text', 'navigate', 'eyedropper'],
+    ['operation', 'figure', 'frame', 'ruler', 'text', 'correct', 'navigate', 'eyedropper'],
   ],
   classic: [
     ['zoom', 'navigate', 'operation', 'select', 'autoSelect', 'eyedropper'],
     ['pen', 'pencil', 'brush', 'airbrush', 'eraser', 'blend'],
-    ['fill', 'gradient', 'figure', 'frame', 'ruler', 'text'],
+    ['fill', 'gradient', 'figure', 'frame', 'ruler', 'text', 'correct'],
   ],
 };
 

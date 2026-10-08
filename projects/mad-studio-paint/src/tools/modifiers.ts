@@ -50,6 +50,7 @@ export function cursorFor(t: EffectiveTool): string {
     case 'frame':
       return 'crosshair';
     case 'ruler':
+    case 'correct':
     case 'eyedropper':
     case 'select':
     case 'autoSelect':

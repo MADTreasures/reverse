@@ -4,7 +4,7 @@ import type { Id } from '../model/types';
 import { evalPressureCurve } from '../paint/curve';
 import { applyWatercolorEdge } from '../paint/effects';
 import { amountAt, densityFactor, nextDab, type Paint } from '../paint/mixing';
-import { strokeBounds, type VectorPoint, type VectorStroke } from '../paint/vector';
+import { linePath, strokeBounds, type VectorPoint, type VectorStroke } from '../paint/vector';
 import { circleBounds, inflate, intersect, union, type Rect } from '../paint/rect';
 import { affineAngle, applyAffine, type Affine, type Constraint } from '../paint/rulers';
 import { dabAlpha, interpolateDabs, pressureCurve, seededRandom, Stabilizer, stabilizerWindow, taperFactor, type Dab, type StrokePoint } from '../paint/stroke';
@@ -506,7 +506,7 @@ export function renderVectorStroke(ctx: Ctx, line: VectorStroke): void {
     const angle = b.angleSource === 'line' ? base + dir : b.angleSource === 'tilt' ? base + (p.az ?? 0) : base;
     tips.draw(buf, x, y, r, a, angle, b.thickness, null);
   };
-  const pts = line.points;
+  const pts = linePath(line);
   dab(pts[0], pts.length > 1 ? Math.atan2(pts[1].y - pts[0].y, pts[1].x - pts[0].x) : 0);
   let carry = 0;
   for (let i = 1; i < pts.length; i++) {

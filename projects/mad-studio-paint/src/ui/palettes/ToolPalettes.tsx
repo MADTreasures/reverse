@@ -9,7 +9,7 @@ import type { Balloon } from '../../paint/text';
 import type { GradientEdge, GradientSpec } from '../../paint/gradient';
 import { GradientBar } from '../controls/GradientBar';
 import { openDialog } from '../overlays';
-import { entryForTool, isSpecialCurve, PALETTE_ENTRIES, PALETTE_LAYOUT, subToolsOf, toolInfo, type FillReference, type SubTool, type ToolId } from '../../paint/tools';
+import { entryForTool, isSpecialCurve, PALETTE_ENTRIES, PALETTE_LAYOUT, subToolsOf, toolInfo, type CorrectSettings, type FillReference, type SubTool, type ToolId } from '../../paint/tools';
 import { Icon } from '../controls/Icons';
 import { PropSlider } from '../controls/PropSlider';
 import { DynamicsPopover, dynamicsOn, type DynamicsKind } from './BrushSettingsPanels';
@@ -238,6 +238,7 @@ export function ToolProperty() {
       {sub.tool === 'balloon' && sub.balloon && <BalloonToolSettings sub={sub} update={update} />}
       {sub.tool === 'balloon' && sub.tail && <TailSettings sub={sub} update={update} />}
       {sub.tool === 'frame' && <FrameToolSettings sub={sub} update={update} />}
+      {sub.tool === 'correct' && sub.correct && <CorrectToolSettings c={sub.correct} update={(patch) => update({ correct: { ...sub.correct!, ...patch } })} />}
       {sub.tool === 'select' && <SelectionModeRow />}
       {sub.tool === 'ruler' && sub.rulerKind === 'symmetry' && (
         <>
@@ -292,7 +293,7 @@ export function ToolProperty() {
         </>
       )}
       {sub.tool === 'gradient' && <GradientSettings sub={sub} update={update} />}
-      {!b && !f && !['select', 'gradient', 'object', 'text', 'balloon', 'frame'].includes(sub.tool) && <div className="prop-note">{toolInfo(sub.tool).hint}</div>}
+      {!b && !f && !['select', 'gradient', 'object', 'text', 'balloon', 'frame', 'correct'].includes(sub.tool) && <div className="prop-note">{toolInfo(sub.tool).hint}</div>}
       <div className="prop-footer">
         <button className="icon-btn" title="Reset to the default settings" aria-label="Reset sub tool" onClick={() => actions.resetSubTool(sub.id)}>
           <Icon name="resetRotation" size={15} />
@@ -629,6 +630,130 @@ function GradientSettings({ sub, update }: { sub: SubTool | null; update: (patch
 }
 
 /** Frame tools: border width; dividing: gutters and folders. */
+/** Correct line tools: the settings of each kind. */
+function CorrectToolSettings({ c, update }: { c: CorrectSettings; update: (patch: Partial<CorrectSettings>) => void }) {
+  const check = (label: string, key: 'fixEnds' | 'pressure' | 'addPoint' | 'connect' | 'anyProps' | 'smoothCorners' | 'wholeLine' | 'atLeast1') => (
+    <label className="check prop-check">
+      <input type="checkbox" checked={c[key]} onChange={(e) => update({ [key]: e.target.checked })} />
+      {label}
+    </label>
+  );
+  const size = <PropSlider label="Brush Size" unit="px" value={c.size} min={1} max={500} onChange={(v) => update({ size: v })} />;
+  const gap = c.connect && <PropSlider label="Connect gap" unit="px" value={c.connectGap} min={1} max={200} onChange={(v) => update({ connectGap: v })} />;
+  switch (c.kind) {
+    case 'controlPoint':
+      return (
+        <>
+          <Segmented
+            label="Mode"
+            value={c.mode}
+            options={[
+              ['move', 'Move control point'],
+              ['add', 'Add control point'],
+              ['delete', 'Delete control point'],
+              ['corner', 'Switch corner'],
+              ['width', 'Adjust line width'],
+              ['opacity', 'Adjust opacity'],
+              ['split', 'Split line'],
+            ]}
+            onChange={(mode) => update({ mode })}
+          />
+          <div className="prop-note">{CONTROL_POINT_NOTES[c.mode]}</div>
+        </>
+      );
+    case 'pinch':
+      return (
+        <>
+          {check('Fix end', 'fixEnds')}
+          <PropSlider label="Pinch level" unit="%" value={c.pinchLevel} min={1} max={100} onChange={(v) => update({ pinchLevel: v })} />
+          {check('Pen pressure', 'pressure')}
+          <PropSlider label="Effect range" unit="px" value={c.range} min={1} max={200} onChange={(v) => update({ range: v })} />
+          {check('Add control point', 'addPoint')}
+          {check('Connect lines', 'connect')}
+          {gap}
+        </>
+      );
+    case 'simplify':
+      return (
+        <>
+          <PropSlider label="Simplify" value={c.simplify} min={0} max={100} onChange={(v) => update({ simplify: v })} />
+          {check('Smooth corner', 'smoothCorners')}
+          {check('Process whole line', 'wholeLine')}
+          <Segmented
+            label="Convert curve"
+            value={c.convert}
+            options={[
+              ['keep', 'Keep'],
+              ['polyline', 'Straight line'],
+              ['spline', 'Spline'],
+            ]}
+            onChange={(convert) => update({ convert })}
+          />
+          {check('Connect lines', 'connect')}
+          {gap}
+          <PropSlider label="Delete short lines" unit="px" value={c.deleteShort} min={0} max={200} onChange={(v) => update({ deleteShort: v })} />
+          {size}
+        </>
+      );
+    case 'connect':
+      return (
+        <>
+          <PropSlider label="Connect lines" unit="px" value={c.connectGap} min={1} max={200} onChange={(v) => update({ connectGap: v })} />
+          {check('Connect lines with different properties', 'anyProps')}
+          {size}
+        </>
+      );
+    case 'width':
+      return (
+        <>
+          <Segmented
+            label="Adjust"
+            value={c.widthMode}
+            options={[
+              ['thicken', 'Thicken'],
+              ['narrow', 'Narrow'],
+              ['scaleUp', 'Scale up width'],
+              ['scaleDown', 'Scale down width'],
+            ]}
+            onChange={(widthMode) => update({ widthMode })}
+          />
+          <PropSlider label="Amount" unit={c.widthMode === 'thicken' || c.widthMode === 'narrow' ? 'px' : '%'} value={c.widthAmount} min={0.1} max={c.widthMode === 'thicken' || c.widthMode === 'narrow' ? 50 : 100} step={0.1} decimals={1} onChange={(v) => update({ widthAmount: v })} />
+          {c.widthMode === 'narrow' && check('At least 1 pixel', 'atLeast1')}
+          {check('Process whole line', 'wholeLine')}
+          {size}
+        </>
+      );
+    case 'redraw':
+      return (
+        <>
+          {check('Fix end', 'fixEnds')}
+          {check('Connect lines', 'connect')}
+          {gap}
+          <PropSlider label="Simplify" value={c.simplify} min={0} max={100} onChange={(v) => update({ simplify: v })} />
+          <PropSlider label="Stabilization" value={c.stabilization} min={0} max={30} onChange={(v) => update({ stabilization: v })} />
+          <div className="prop-note">Draw over a line to draw that part of it again.</div>
+        </>
+      );
+    case 'redrawWidth':
+      return (
+        <>
+          {size}
+          <div className="prop-note">Trace a line: the pen pressure sets its width.</div>
+        </>
+      );
+  }
+}
+
+const CONTROL_POINT_NOTES: Record<CorrectSettings['mode'], string> = {
+  move: 'Drag a control point to move it.',
+  add: 'Click the line to add a control point (and drag it).',
+  delete: 'Click a control point to delete it.',
+  corner: 'Click a control point to switch it between curve and corner.',
+  width: 'Drag a control point right to thicken the line around it, left to thin it.',
+  opacity: 'Drag a control point right to make the line more opaque around it, left more transparent.',
+  split: 'Click a control point to split the line there.',
+};
+
 /** A labelled row of choices (a radio group of buttons). */
 function Segmented<T extends string>({ label, value, options, onChange }: { label: string; value: T; options: [T, string][]; onChange: (v: T) => void }) {
   return (

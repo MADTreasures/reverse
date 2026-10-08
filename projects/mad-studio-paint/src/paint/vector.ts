@@ -1,8 +1,9 @@
 /**
- * Vector lines: strokes stored as their path with a width (and density) factor per point, so they
- * can be erased up to intersections, moved, recoloured and scaled without losing quality.
- * Pure geometry, unit tested.
+ * Vector lines: strokes stored as control points with a width (and density) factor each, the line
+ * running through them as a spline, so they can be erased up to intersections, moved, recoloured,
+ * scaled and corrected point by point without losing quality. Pure geometry, unit tested.
  */
+import { bezierAt, bezierSteps, splineSegments } from './curves';
 import type { Affine, Pt } from './rulers';
 import type { BrushSettings } from './tools';
 
@@ -22,7 +23,15 @@ export interface VectorStroke {
   color: string;
   /** Brush the line was drawn with (its size is the full width). */
   brush: BrushSettings;
+  /** The control points the line runs through. */
   points: VectorPoint[];
+  /**
+   * 'spline': the line is a smooth curve through the points, bending sharply at `corners`.
+   * 'polyline': straight from point to point. Lines of older files have neither: dense paths that
+   * run straight from point to point too.
+   */
+  curve?: 'spline' | 'polyline';
+  corners?: number[];
   /** Drawn with the transparent colour: the line erases the lines below it on its layer. */
   erase?: boolean;
 }
@@ -34,6 +43,181 @@ export const newStrokeId = () => `v${Math.random().toString(36).slice(2, 10)}`;
 /** Radius of the line at a point. */
 export const radiusAt = (s: VectorStroke, p: VectorPoint) => (s.brush.size / 2) * p.s;
 
+// ------------------------------------------------------------------ path and control points
+
+const pathCache = new WeakMap<VectorStroke, VectorPoint[]>();
+
+/**
+ * The path the line runs along, dense enough to draw and measure: its control points joined by a
+ * spline (or straight). Path positions (index + fraction) in the functions below refer to it.
+ */
+export function linePath(s: VectorStroke): VectorPoint[] {
+  if (s.curve !== 'spline' || s.points.length < 3) return s.points;
+  let path = pathCache.get(s);
+  if (!path) pathCache.set(s, (path = splinePath(s.points, s.corners ?? [])));
+  return path;
+}
+
+const lerpPoint = (a: VectorPoint, b: VectorPoint, t: number, at: Pt): VectorPoint => ({
+  x: at.x,
+  y: at.y,
+  s: a.s + (b.s - a.s) * t,
+  d: a.d + (b.d - a.d) * t,
+  ...(b.az !== undefined ? { az: a.az !== undefined ? a.az + (b.az - a.az) * t : b.az } : {}),
+});
+
+/** The spline's piece between each pair of neighbouring points (smooth runs split at the corners). */
+function splinePieces(pts: Pt[], corners: Set<number>): ([Pt, Pt, Pt, Pt] | null)[] {
+  const out: ([Pt, Pt, Pt, Pt] | null)[] = [];
+  let start = 0;
+  for (let i = 1; i < pts.length; i++) {
+    if (i < pts.length - 1 && !corners.has(i)) continue;
+    out.push(...splineSegments(pts.slice(start, i + 1)));
+    start = i;
+  }
+  return out;
+}
+
+/** Spline through the points, sampled about every 3 px; widths and densities change evenly between points. */
+function splinePath(pts: VectorPoint[], corners: number[]): VectorPoint[] {
+  const out: VectorPoint[] = [pts[0]];
+  splinePieces(pts, new Set(corners)).forEach((seg, k) => {
+    const a = pts[k];
+    const b = pts[k + 1];
+    if (seg) {
+      const n = bezierSteps(seg, 3);
+      for (let j = 1; j < n; j++) out.push(lerpPoint(a, b, j / n, bezierAt(seg, j / n)));
+    }
+    out.push(b);
+  });
+  return out;
+}
+
+/** Distance from p to a polyline. */
+function distanceToPolyline(p: Pt, line: Pt[]): number {
+  let best = Infinity;
+  for (let i = 1; i < line.length; i++) {
+    const a = line[i - 1];
+    const dx = line[i].x - a.x;
+    const dy = line[i].y - a.y;
+    const l2 = dx * dx + dy * dy;
+    const t = l2 ? Math.max(0, Math.min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / l2)) : 0;
+    best = Math.min(best, Math.hypot(p.x - (a.x + dx * t), p.y - (a.y + dy * t)));
+  }
+  return best;
+}
+
+/** Path positions per control point (where each lies along the path). */
+export function controlPositions(s: VectorStroke): number[] {
+  const path = linePath(s);
+  if (path === s.points) return s.points.map((_, i) => i);
+  const out: number[] = [];
+  let k = 0;
+  for (let i = 0; i < path.length && k < s.points.length; i++) if (path[i] === s.points[k]) out.push(i), k++;
+  return out;
+}
+
+/** How far (px) the width of a fitted line may differ, per unit of density. */
+const DENSITY_PX = 10;
+
+/**
+ * A dense path (a drawn stroke, or a piece of a line) as few control points with a spline through
+ * them: positions and widths stay within `tol` px (`size` is the brush size), sharp bends become
+ * corners.
+ */
+export function fitLine(path: VectorPoint[], size: number, tol = 0.5): { points: VectorPoint[]; corners: number[] } {
+  const unique = path.filter((q, i) => i === 0 || Math.hypot(q.x - path[i - 1].x, q.y - path[i - 1].y) > 1e-6 || q.s !== path[i - 1].s || q.d !== path[i - 1].d);
+  if (unique.length < 3) return { points: unique, corners: [] };
+  // Points at most 4 px apart, so the fitted spline can be checked all along.
+  const p: VectorPoint[] = [unique[0]];
+  for (let i = 1; i < unique.length; i++) {
+    const a = unique[i - 1];
+    const b = unique[i];
+    const n = Math.ceil(Math.hypot(b.x - a.x, b.y - a.y) / 4);
+    for (let k = 1; k < n; k++) p.push(lerpPoint(a, b, k / n, { x: a.x + ((b.x - a.x) * k) / n, y: a.y + ((b.y - a.y) * k) / n }));
+    p.push(b);
+  }
+  const keep = new Uint8Array(p.length);
+  keep[0] = keep[p.length - 1] = 1;
+  const off = (q: VectorPoint, a: VectorPoint, b: VectorPoint) => {
+    const dx = b.x - a.x;
+    const dy = b.y - a.y;
+    const l2 = dx * dx + dy * dy;
+    const t = l2 ? Math.max(0, Math.min(1, ((q.x - a.x) * dx + (q.y - a.y) * dy) / l2)) : 0;
+    const along = Math.hypot(q.x - (a.x + dx * t), q.y - (a.y + dy * t));
+    const width = (Math.abs(q.s - (a.s + (b.s - a.s) * t)) * size) / 2;
+    const density = Math.abs(q.d - (a.d + (b.d - a.d) * t)) * DENSITY_PX;
+    return Math.max(along, width, density);
+  };
+  const stack: [number, number][] = [[0, p.length - 1]];
+  while (stack.length) {
+    const [a, b] = stack.pop()!;
+    let worst = -1;
+    let far = tol;
+    for (let i = a + 1; i < b; i++) {
+      const e = off(p[i], p[a], p[b]);
+      if (e > far) {
+        far = e;
+        worst = i;
+      }
+    }
+    if (worst > 0) {
+      keep[worst] = 1;
+      stack.push([a, worst], [worst, b]);
+    }
+  }
+  // The spline bulges where the points are far apart next to a bend: add points where it strays
+  // from the path until it stays within the tolerance.
+  let idx = p.flatMap((_, i) => (keep[i] ? [i] : []));
+  for (let round = 0; round < 12; round++) {
+    const pts = idx.map((i) => p[i]);
+    const pieces = splinePieces(pts, new Set(cornersOf(pts)));
+    const add: number[] = [];
+    pieces.forEach((seg, k) => {
+      const a = idx[k];
+      const b = idx[k + 1];
+      if (!seg || b - a < 2) return;
+      const n = bezierSteps(seg, 2);
+      const curve = Array.from({ length: n + 1 }, (_, j) => bezierAt(seg, j / n));
+      let worst = -1;
+      let far = tol;
+      for (let j = a + 1; j < b; j++) {
+        const e = distanceToPolyline(p[j], curve);
+        if (e > far) {
+          far = e;
+          worst = j;
+        }
+      }
+      if (worst > 0) add.push(worst);
+    });
+    if (add.length === 0) break;
+    idx = [...idx, ...add].sort((x, y) => x - y);
+  }
+  const points = idx.map((i) => p[i]);
+  return { points, corners: cornersOf(points) };
+}
+
+/** Bends sharper than this (radians) are corners. */
+const CORNER_BEND = 1;
+
+/** The control points where the line bends sharply. */
+export function cornersOf(pts: Pt[]): number[] {
+  const out: number[] = [];
+  for (let i = 1; i < pts.length - 1; i++) {
+    const a = Math.atan2(pts[i].y - pts[i - 1].y, pts[i].x - pts[i - 1].x);
+    const b = Math.atan2(pts[i + 1].y - pts[i].y, pts[i + 1].x - pts[i].x);
+    if (Math.abs(Math.atan2(Math.sin(b - a), Math.cos(b - a))) > CORNER_BEND) out.push(i);
+  }
+  return out;
+}
+
+/** A line along a dense path, as control points with a spline (keeping the line's other properties). */
+export function splineLine(base: Omit<VectorStroke, 'points' | 'curve' | 'corners'>, path: VectorPoint[], tol?: number): VectorStroke {
+  const { id, color, brush, erase } = base;
+  const fit = fitLine(path, brush.size, tol);
+  return { id, color, brush, points: fit.points, curve: 'spline', ...(fit.corners.length ? { corners: fit.corners } : {}), ...(erase ? { erase } : {}) };
+}
+
 const boundsCache = new WeakMap<VectorStroke, { x: number; y: number; w: number; h: number } | null>();
 
 /** Pixel bounds of a line (lines never change in place, so the result is cached). */
@@ -41,14 +225,15 @@ export function strokeBounds(s: VectorStroke): { x: number; y: number; w: number
   const cached = boundsCache.get(s);
   if (cached !== undefined) return cached;
   let box: { x: number; y: number; w: number; h: number } | null = null;
-  if (s.points.length) {
+  const path = linePath(s);
+  if (path.length) {
     let x0 = Infinity;
     let y0 = Infinity;
     let x1 = -Infinity;
     let y1 = -Infinity;
     // Sprayed dabs land up to `scatter` diameters away.
     const spread = (s.brush.scatter ?? 0) * s.brush.size + 2;
-    for (const p of s.points) {
+    for (const p of path) {
       const r = radiusAt(s, p) + spread;
       x0 = Math.min(x0, p.x - r);
       y0 = Math.min(y0, p.y - r);
@@ -81,7 +266,7 @@ function closestOnSegment(p: Pt, a: Pt, b: Pt): { t: number; d: number } {
  * (index + fraction) of the closest point.
  */
 export function distanceToStroke(s: VectorStroke, p: Pt): { d: number; at: number } {
-  const pts = s.points;
+  const pts = linePath(s);
   if (pts.length === 1) return { d: Math.max(0, Math.hypot(p.x - pts[0].x, p.y - pts[0].y) - radiusAt(s, pts[0])), at: 0 };
   let best = { d: Infinity, at: 0 };
   for (let i = 1; i < pts.length; i++) {
@@ -95,23 +280,33 @@ export function distanceToStroke(s: VectorStroke, p: Pt): { d: number; at: numbe
 
 /** The point at a path position (index + fraction). */
 export function pointAt(s: VectorStroke, at: number): VectorPoint {
-  const i = Math.max(0, Math.min(s.points.length - 1, Math.floor(at)));
-  const a = s.points[i];
-  const b = s.points[Math.min(s.points.length - 1, i + 1)];
+  const path = linePath(s);
+  const i = Math.max(0, Math.min(path.length - 1, Math.floor(at)));
+  const a = path[i];
+  const b = path[Math.min(path.length - 1, i + 1)];
   const f = at - i;
-  return { x: a.x + (b.x - a.x) * f, y: a.y + (b.y - a.y) * f, s: a.s + (b.s - a.s) * f, d: a.d + (b.d - a.d) * f, az: a.az };
+  return { x: a.x + (b.x - a.x) * f, y: a.y + (b.y - a.y) * f, s: a.s + (b.s - a.s) * f, d: a.d + (b.d - a.d) * f, ...(a.az !== undefined ? { az: a.az } : {}) };
 }
 
-/** The part of a stroke between two path positions (keeps id when it is the whole stroke). */
+/** The dense path between two path positions. */
+export function pathBetween(s: VectorStroke, from: number, to: number): VectorPoint[] {
+  const path = linePath(s);
+  const pts: VectorPoint[] = [pointAt(s, from)];
+  for (let i = Math.floor(from) + 1; i < to; i++) pts.push(path[i]);
+  pts.push(pointAt(s, to));
+  return pts;
+}
+
+/** The part of a stroke between two path positions (the stroke itself when that is all of it). */
 export function sliceStroke(s: VectorStroke, from: number, to: number): VectorStroke | null {
-  const last = s.points.length - 1;
+  const last = linePath(s).length - 1;
   const a = Math.max(0, from);
   const b = Math.min(last, to);
   if (b - a < 1e-6) return null;
-  const pts: VectorPoint[] = [pointAt(s, a)];
-  for (let i = Math.floor(a) + 1; i < b; i++) pts.push(s.points[i]);
-  pts.push(pointAt(s, b));
-  return { ...s, id: a === 0 && b === last ? s.id : newStrokeId(), points: pts };
+  if (a === 0 && b === last) return s;
+  const pts = pathBetween(s, a, b);
+  // A spline piece gets control points of its own.
+  return s.curve === 'spline' ? splineLine({ ...s, id: newStrokeId() }, pts) : { ...s, id: newStrokeId(), points: pts };
 }
 
 // ------------------------------------------------------------------ intersections
@@ -130,12 +325,13 @@ function segmentCross(a: Pt, b: Pt, c: Pt, d: Pt): number | null {
 /** Path positions where `s` crosses any of the other strokes (or itself, away from the touch). */
 export function intersections(s: VectorStroke, others: VectorStroke[]): number[] {
   const out: number[] = [];
-  const pts = s.points;
+  const pts = linePath(s);
   for (const o of others) {
     if (o === s) continue;
+    const op = linePath(o);
     for (let i = 1; i < pts.length; i++) {
-      for (let k = 1; k < o.points.length; k++) {
-        const t = segmentCross(pts[i - 1], pts[i], o.points[k - 1], o.points[k]);
+      for (let k = 1; k < op.length; k++) {
+        const t = segmentCross(pts[i - 1], pts[i], op[k - 1], op[k]);
         if (t !== null) out.push(i - 1 + t);
       }
     }
@@ -151,7 +347,7 @@ export function intersections(s: VectorStroke, others: VectorStroke[]): number[]
  * ends of each run are refined between samples.
  */
 function runsWhere(s: VectorStroke, hit: (p: VectorPoint) => boolean, step: number): [number, number][] {
-  const pts = s.points;
+  const pts = linePath(s);
   if (pts.length === 1) return hit(pts[0]) ? [[0, 0]] : [];
   const test = (at: number) => hit(pointAt(s, at));
   /** Position between `a` (test ≠ want) and `b` (test = want) where the test changes. */
@@ -185,7 +381,7 @@ function runsWhere(s: VectorStroke, hit: (p: VectorPoint) => boolean, step: numb
 
 /** The pieces of a line outside the given runs of path positions. */
 function withoutRuns(s: VectorStroke, cuts: [number, number][], out: VectorStroke[]): void {
-  const last = s.points.length - 1;
+  const last = linePath(s).length - 1;
   let pos = 0;
   for (const [a, b] of cuts) {
     if (a > pos) {
@@ -218,7 +414,7 @@ export function eraseAt(strokes: VectorStroke[], c: Pt, r: number, mode: VectorE
       withoutRuns(s, runs, out);
       continue;
     }
-    const last = s.points.length - 1;
+    const last = linePath(s).length - 1;
     const xs = intersections(s, others);
     withoutRuns(
       s,
@@ -306,13 +502,22 @@ export function linesBounds(strokes: VectorStroke[]): { x: number; y: number; w:
 
 const n = (v: unknown, fallback: number, min = -1e6, max = 1e6) => (typeof v === 'number' && Number.isFinite(v) ? Math.min(max, Math.max(min, v)) : fallback);
 
-/** Compact form for files: points as one flat array [x, y, s, d, …] rounded to 0.01. */
-export function packStroke(s: VectorStroke): { id: string; color: string; brush: BrushSettings; p: number[]; a?: number[]; e?: 1 } {
+/** Compact form for files: points as one flat array [x, y, s, d, …] rounded to 0.01; `c` marks splines, `k` their corners. */
+export function packStroke(s: VectorStroke): { id: string; color: string; brush: BrushSettings; p: number[]; a?: number[]; e?: 1; c?: 1 | 2; k?: number[] } {
   const p: number[] = [];
   for (const q of s.points) p.push(Math.round(q.x * 100) / 100, Math.round(q.y * 100) / 100, Math.round(q.s * 1000) / 1000, Math.round(q.d * 1000) / 1000);
   // Tip angles only matter for brushes that follow the pen's direction.
   const a = s.points.some((q) => q.az !== undefined) ? s.points.map((q) => Math.round((q.az ?? 0) * 1000) / 1000) : null;
-  return { id: s.id, color: s.color, brush: s.brush, p, ...(a ? { a } : {}), ...(s.erase ? { e: 1 } : {}) };
+  return {
+    id: s.id,
+    color: s.color,
+    brush: s.brush,
+    p,
+    ...(a ? { a } : {}),
+    ...(s.erase ? { e: 1 } : {}),
+    ...(s.curve === 'spline' ? { c: 1 } : s.curve === 'polyline' ? { c: 2 } : {}),
+    ...(s.corners?.length ? { k: s.corners } : {}),
+  };
 }
 
 /** Reads a stroke from a file (validated); `brushOf` validates the brush settings. */
@@ -327,11 +532,14 @@ export function unpackStroke(raw: unknown, brushOf: (b: unknown) => BrushSetting
     if (az) p.az = n(az[i / 4], 0, -100, 100);
     pts.push(p);
   }
+  const corners = r.c === 1 && Array.isArray(r.k) ? [...new Set(r.k.filter((i): i is number => Number.isInteger(i) && i > 0 && i < pts.length - 1))].sort((x, y) => x - y) : [];
   return {
     id: typeof r.id === 'string' && /^[A-Za-z0-9_-]{1,64}$/.test(r.id) ? r.id : newStrokeId(),
     color: typeof r.color === 'string' && /^#[0-9a-f]{6}$/i.test(r.color) ? r.color.toLowerCase() : '#000000',
     brush: brushOf(r.brush),
     points: pts,
+    ...(r.c === 1 ? { curve: 'spline' as const } : r.c === 2 ? { curve: 'polyline' as const } : {}),
+    ...(corners.length ? { corners } : {}),
     ...(r.e === 1 ? { erase: true } : {}),
   };
 }

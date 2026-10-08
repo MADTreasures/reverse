@@ -28,6 +28,7 @@ import {
 } from './sessions';
 import { drawRulers, rulerSession } from './rulerTool';
 import { CurveInput } from './curveInput';
+import { correctSession, drawCorrectHover, drawSelectedControlPoints } from './correctTool';
 import { drawGradientHandles, drawLineSelection, lineHandleCursor, objectSession } from './objectTool';
 import { balloonSession, textSession } from './textTool';
 import { frameSession } from './frameTool';
@@ -170,6 +171,8 @@ class Controller {
         return balloonSession(sub, p);
       case 'frame':
         return frameSession(sub, p);
+      case 'correct':
+        return correctSession(sub, p, this.view);
       default:
         return null;
     }
@@ -205,8 +208,13 @@ class Controller {
   /** Draws tool feedback (brush outline, selection preview, transform box) in viewport space. */
   overlay(ctx: CanvasRenderingContext2D): void {
     drawRulers(ctx, this.view);
-    // The Object tool (also ⌘ with drawing tools) shows the selected vector lines.
-    if (!this.session?.overlay && this.current() === 'object') drawLineSelection(ctx, this.view);
+    // The Object tool (also ⌘ with drawing tools) shows the selected vector lines and their control points.
+    if (!this.session?.overlay && this.current() === 'object') {
+      drawLineSelection(ctx, this.view);
+      drawSelectedControlPoints(ctx, this.view);
+    }
+    // Correct line: control points near the pointer, or the tool's brush circle.
+    if (!this.session?.overlay && this.current() === 'correct') drawCorrectHover(ctx, this.view, this.hover, currentSubTool());
     if (!this.session && (this.current() === 'object' || this.current() === 'gradient')) drawGradientHandles(ctx, this.view);
     drawTransformOverlay(ctx, this.view);
     PolylineSelect.overlay(ctx, this.view);

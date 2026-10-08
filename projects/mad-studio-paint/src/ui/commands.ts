@@ -182,6 +182,7 @@ export const COMMANDS: Command[] = [
   },
   { id: 'deleteRulers', label: 'Delete ruler', run: () => actions.deleteLayerRulers(), enabled: () => Boolean(actions.activeLayer()?.rulers) },
   { id: 'drawAlongRuler', label: 'Draw along ruler…', run: () => openDialog('drawAlongRuler'), enabled: () => actions.rulerToDrawAlong() !== null },
+  { id: 'rulerFromVector', label: 'Ruler from vector', run: () => actions.rulerFromVector(), enabled: () => actions.selectedVectorLines() !== null },
   // Layer > Layer mask
   { id: 'maskOutside', label: 'Mask outside selection', run: () => actions.maskLayer(true), enabled: hasLayer },
   { id: 'maskSelection', label: 'Mask selection', run: () => actions.maskLayer(false), enabled: hasLayer },

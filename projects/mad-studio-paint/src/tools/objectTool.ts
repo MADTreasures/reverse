@@ -11,6 +11,7 @@ import type { GradientFill } from '../paint/gradient';
 import type { GradientLayer } from '../model/types';
 import { union, type Rect } from '../paint/rect';
 import type { Affine } from '../paint/rulers';
+import { linePath } from '../paint/vector';
 import { balloonBody, frameCorners, tailShapes } from '../paint/text';
 import { apply as applyMatrix } from '../paint/viewMath';
 import { engine } from '../engine/engine';
@@ -18,6 +19,7 @@ import * as actions from '../store/actions';
 import { currentSubTool, getState, setState } from '../store/store';
 import { editTextBox } from '../store/textActions';
 import { hitHandle as hitRulerHandle, rulerObjectSession } from './rulerTool';
+import { selectedPointSession } from './correctTool';
 import type { Modifiers, OverlayView, PointerInfo, ToolSession } from './types';
 
 const PICK_PX = 6;
@@ -264,6 +266,9 @@ export function objectSession(p: PointerInfo, view: OverlayView): ToolSession | 
   const handle0 = gradientHandleAt(p, view);
   if (handle0) return editable() ? new GradientHandleSession(handle0.layer, handle0.end) : null;
   if (hitRulerHandle(p, view)) return rulerObjectSession(p, view);
+  // Control points of the selected vector lines move one by one.
+  const point = p.shift ? null : selectedPointSession(p, view);
+  if (point) return point;
   const sel = selection();
   const handle = sel && hitObjectHandle(p, view, sel.box);
   if (sel && handle && handle.kind !== 'move' && !p.shift) return editable() ? new ObjectEditSession(sel.layer, handle, p, sel.box) : null;
@@ -318,7 +323,7 @@ function drawOutlines(ctx: CanvasRenderingContext2D, view: OverlayView, c: Conte
     }
     ctx.stroke();
   };
-  for (const line of c.strokes) if (ids.has(line.id)) poly(line.points, false);
+  for (const line of c.strokes) if (ids.has(line.id)) poly(linePath(line), false);
   for (const b of c.balloons) {
     if (!ids.has(b.id)) continue;
     poly(balloonBody(b), true);

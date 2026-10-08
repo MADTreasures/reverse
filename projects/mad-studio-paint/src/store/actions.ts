@@ -32,6 +32,7 @@ import {
 import type { FolderLayer, GradientLayer, Id, Layer, LayerMask, PaintDocument, RasterLayer, RulerRange, TextLayer, VectorLayer } from '../model/types';
 import { defaultPerspective, rulerLine, type Affine, type Ruler, type RulerInput } from '../paint/rulers';
 import { eraseWhere, keepWhere, type VectorStroke } from '../paint/vector';
+import { editable } from '../paint/vectorEdit';
 import type { Rect } from '../paint/rect';
 import { contentOf, EMPTY_CONTENT, idsTouching, objectIds, removeObjects, transformContent, type Content } from '../paint/objects';
 import type { Balloon, TextBox } from '../paint/text';
@@ -936,6 +937,31 @@ export function rulerToDrawAlong(s: PaintState = getState()): Ruler | null {
   const list = activeRulers(s).filter((x) => rulerLine(x.ruler, size) !== null);
   const selected = list.find((x) => x.ruler.id === s.selectedRuler?.rulerId);
   return selected?.ruler ?? (list.length === 1 ? list[0].ruler : null);
+}
+
+/** Layer > Ruler/Frame > Ruler from vector: a curve ruler along each selected vector line (one undo step). */
+export function rulerFromVector(): void {
+  const sel = selectedVectorLines();
+  if (!sel) {
+    setState({ hint: 'Select vector lines with the Object tool first' });
+    return;
+  }
+  const rulers: Ruler[] = sel.lines.map((line) => {
+    const e = editable(line);
+    return {
+      kind: 'curve',
+      id: newRulerId(),
+      curve: e.curve === 'polyline' ? 'polyline' : 'spline',
+      points: e.points.map(({ x, y }) => ({ x, y })),
+      ...(e.corners?.length ? { corners: [...e.corners] } : {}),
+    };
+  });
+  changeDoc('Ruler from vector', (doc) => {
+    const l = findLayer(doc.layers, sel.layer.id);
+    if (!l) return;
+    l.rulers = { items: [...(l.rulers?.items ?? []), ...rulers], range: l.rulers?.range ?? 'all', visible: true };
+  });
+  setState({ selectedRuler: { layerId: sel.layer.id, rulerId: rulers[rulers.length - 1].id } });
 }
 
 /** Layer > Ruler/Frame > Create perspective ruler: 1, 2 or 3 vanishing points at default places. */

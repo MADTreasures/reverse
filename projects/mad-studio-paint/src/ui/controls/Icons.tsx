@@ -224,6 +224,13 @@ const paths: Record<string, ReactNode> = {
       <path d="M2.5 4 6.4 7.5M17.5 4l-3.9 3.5M2.5 16l3.9-3.5M17.5 16l-3.9-3.5" />
     </>
   ),
+  correct: (
+    <>
+      <path d="M2.5 15c3-6 6.5-9 9.5-9.5S16 7 17.5 4" />
+      <rect x="9.6" y="3.6" width="3.8" height="3.8" />
+      <path d="M3 18.5l2-1.2M2 16.6l1.1-.6" />
+    </>
+  ),
   ruler: (
     <>
       <path d="M2.5 13.5 13.5 2.5l4 4-11 11z" />

@@ -9,7 +9,7 @@ import { distanceToRuler, isSpecial, perspectiveConstraint, rulerConstraint, rul
 import { ellipsePoints, rectPoints, snapAngle, type StrokePoint } from '../paint/stroke';
 import { evalPressureCurve } from '../paint/curve';
 import { DEFAULT_BRUSH, type FillReference, type SubTool } from '../paint/tools';
-import { eraseAt, linesBounds, newStrokeId, transformStrokes, type VectorEraseMode, type VectorStroke } from '../paint/vector';
+import { eraseAt, linesBounds, newStrokeId, splineLine, transformStrokes, type VectorEraseMode, type VectorStroke } from '../paint/vector';
 import { contentBounds, contentOf, EMPTY_CONTENT, pickContent, transformContent, type Content } from '../paint/objects';
 import { renderGradient, resolveStops, type GradientFill, type GradientSpec } from '../paint/gradient';
 import { newObjectId } from '../paint/text';
@@ -69,13 +69,16 @@ function strokeLines(sub: SubTool, stroke: BrushStroke, erase: boolean): VectorS
   const points = stroke.endAsLine();
   if (points.length === 0) return [];
   const s = getState();
-  const line: VectorStroke = {
-    id: newStrokeId(),
-    color: drawingColor(s.colors),
-    brush: { ...sub.brush!, mixing: 'none', watercolorEdge: false, stabilization: 0 },
+  // Like the reference's post correction: the line keeps few control points with a spline through them.
+  const line = splineLine(
+    {
+      id: newStrokeId(),
+      color: drawingColor(s.colors),
+      brush: { ...sub.brush!, mixing: 'none', watercolorEdge: false, stabilization: 0 },
+      ...(erase ? { erase: true } : {}),
+    },
     points,
-    ...(erase ? { erase: true } : {}),
-  };
+  );
   return (stroke.copies ?? [null]).map((m) => (m ? { ...transformStrokes([line], m)[0], id: newStrokeId() } : line));
 }
 

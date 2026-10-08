@@ -1096,8 +1096,27 @@ const lines = (page: Page) =>
   page.evaluate(() => {
     const s = window.__madPaint.useStore.getState();
     const find = (ls: any[]): any => ls.map((l) => (l.id === s.activeLayerId ? l : l.children ? find(l.children) : null)).find(Boolean);
-    return (find(s.doc.layers)?.strokes ?? []).map((x: any) => ({ id: x.id, color: x.color, size: x.brush.size, erase: Boolean(x.erase), n: x.points.length }));
+    return (find(s.doc.layers)?.strokes ?? []).map((x: any) => ({ id: x.id, color: x.color, size: x.brush.size, erase: Boolean(x.erase), n: x.points.length, curve: x.curve ?? null }));
   });
+
+/** Changes settings of a Correct line sub tool and selects it. */
+const correctWith = (page: Page, id: string, patch: Record<string, unknown> = {}) =>
+  page.evaluate(
+    ([sid, p]) => {
+      const m = window.__madPaint;
+      const t = m.useStore.getState().subTools.find((x: any) => x.id === sid);
+      m.actions.updateSubTool(sid, { correct: { ...t.correct, ...p } });
+      m.actions.setSubTool('correct', sid);
+    },
+    [id, patch] as const,
+  );
+
+/** Half the thickness of the active layer's line at x, measured downwards from y. */
+async function halfThickness(page: Page, x: number, y: number): Promise<number> {
+  let d = 0;
+  while (d < 40 && (await layerAlpha(page, x, y + d + 1)) > 100) d++;
+  return d;
+}
 
 test('vector layer: strokes become lines; the vector eraser erases up to intersections or whole lines', async ({ page }) => {
   const errors = await boot(page);
@@ -1139,6 +1158,114 @@ test('vector layer: strokes become lines; the vector eraser erases up to interse
   expect(await layerAlpha(page, 80, 150)).toBe(0);
   expect((await lines(page)).filter((l: any) => l.erase)).toHaveLength(1);
   expect(errors).toEqual([]);
+});
+
+test('Correct line: drawn lines keep few control points; the Control point tool moves, adds, deletes, splits and widens', async ({ page }) => {
+  const errors = await boot(page);
+  await page.evaluate(() => window.__madPaint.actions.addVectorLayer());
+  await thinPen(page);
+  await drag(page, [40, 150], [360, 150], 12);
+  const [line] = await lines(page);
+  expect(line.curve).toBe('spline');
+  expect(line.n).toBeLessThanOrEqual(3);
+  // Move: drag the end point down.
+  await correctWith(page, 'correct-point', { mode: 'move' });
+  await drag(page, [360, 150], [360, 250], 8);
+  expect(await layerAlpha(page, 359, 249)).toBeGreaterThan(150);
+  expect(await layerAlpha(page, 350, 150)).toBe(0);
+  await page.keyboard.press('ControlOrMeta+z');
+  expect(await layerAlpha(page, 350, 150)).toBeGreaterThan(200);
+  // Add: click the line and drag the new point up (Tool Settings > Mode).
+  await page.getByRole('button', { name: 'Tool Settings', exact: true }).click();
+  await page.getByRole('radio', { name: 'Add control point' }).click();
+  await drag(page, [200, 150], [200, 100], 8);
+  expect((await lines(page))[0].n).toBe(line.n + 1);
+  expect(await layerAlpha(page, 200, 100)).toBeGreaterThan(150);
+  // Width: drag the new point to the right; the line gets thicker around it.
+  const thin = await halfThickness(page, 200, 100);
+  await correctWith(page, 'correct-point', { mode: 'width' });
+  await drag(page, [200, 100], [290, 100], 8);
+  expect(await halfThickness(page, 200, 100)).toBeGreaterThan(thin + 2);
+  await page.keyboard.press('ControlOrMeta+z');
+  // Split there: two lines.
+  await correctWith(page, 'correct-point', { mode: 'split' });
+  await drag(page, [200, 100], [200, 100], 1);
+  expect(await lines(page)).toHaveLength(2);
+  await page.keyboard.press('ControlOrMeta+z');
+  // Delete the point: straight again.
+  await correctWith(page, 'correct-point', { mode: 'delete' });
+  await drag(page, [200, 100], [200, 100], 1);
+  expect((await lines(page))[0].n).toBe(line.n);
+  expect(await layerAlpha(page, 200, 150)).toBeGreaterThan(200);
+  expect(await layerAlpha(page, 200, 100)).toBe(0);
+  expect(errors).toEqual([]);
+});
+
+test('Correct line: connect, pinch, adjust width, redraw and simplify vector lines', async ({ page }) => {
+  const errors = await boot(page);
+  await page.evaluate(() => window.__madPaint.actions.addVectorLayer());
+  await thinPen(page);
+  await drag(page, [40, 100], [190, 100], 10);
+  await drag(page, [200, 100], [360, 100], 10);
+  expect(await lines(page)).toHaveLength(2);
+  // Connect: brush over the gap.
+  await correctWith(page, 'correct-connect');
+  await drag(page, [194, 100], [196, 100], 2);
+  expect(await lines(page)).toHaveLength(1);
+  expect(await layerAlpha(page, 195, 100)).toBeGreaterThan(200);
+  // Pinch: grab the line and pull it up.
+  await correctWith(page, 'correct-pinch', { fixEnds: true });
+  await drag(page, [120, 100], [120, 60], 8);
+  expect(await layerAlpha(page, 120, 60)).toBeGreaterThan(150);
+  expect(await layerAlpha(page, 41, 100)).toBeGreaterThan(150);
+  await page.keyboard.press('ControlOrMeta+z');
+  // Adjust line width: thicker where the brush went, not elsewhere.
+  await correctWith(page, 'correct-width', { widthMode: 'thicken', widthAmount: 8, size: 30 });
+  await drag(page, [280, 100], [300, 100], 4);
+  expect(await halfThickness(page, 290, 100)).toBeGreaterThan(5);
+  expect(await halfThickness(page, 80, 100)).toBeLessThan(4);
+  await page.keyboard.press('ControlOrMeta+z');
+  // Redraw: a bump drawn over part of the line replaces that part.
+  await correctWith(page, 'correct-redraw');
+  await strokeThrough(page, [
+    [60, 100],
+    [100, 75],
+    [140, 65],
+    [180, 75],
+    [220, 100],
+  ]);
+  expect(await layerAlpha(page, 140, 66)).toBeGreaterThan(150);
+  expect(await layerAlpha(page, 140, 100)).toBe(0);
+  expect(await layerAlpha(page, 300, 100)).toBeGreaterThan(200);
+  // Simplify the whole line: fewer control points.
+  const before = (await lines(page))[0].n;
+  expect(before).toBeGreaterThan(3);
+  await correctWith(page, 'correct-simplify', { wholeLine: true, simplify: 100, size: 20 });
+  await drag(page, [300, 100], [302, 100], 2);
+  expect((await lines(page))[0].n).toBeLessThan(before);
+  expect(errors).toEqual([]);
+});
+
+test('Object tool drags the control points of selected lines; Ruler from vector', async ({ page }) => {
+  await boot(page);
+  await page.evaluate(() => window.__madPaint.actions.addVectorLayer());
+  await thinPen(page);
+  await strokeThrough(page, [
+    [60, 200],
+    [200, 120],
+    [340, 200],
+  ]);
+  await selectTool(page, 'object');
+  const at = await docToScreen(page, 60, 200);
+  await page.mouse.click(at.x, at.y);
+  expect(await page.evaluate(() => window.__madPaint.useStore.getState().selectedObjects)).toHaveLength(1);
+  await drag(page, [60, 200], [60, 260], 6);
+  expect(await layerAlpha(page, 61, 258)).toBeGreaterThan(150);
+  // Layer > Ruler/Frame > Ruler from vector.
+  await page.evaluate(() => window.__madPaint.runCommand('rulerFromVector'));
+  const ruler = (await state(page)).layers[0].rulers.items[0];
+  expect(ruler.kind).toBe('curve');
+  expect(ruler.points.length).toBe((await lines(page))[0].n);
 });
 
 test('Object tool: select, move, recolour and delete vector lines; transforms stay lossless', async ({ page }) => {

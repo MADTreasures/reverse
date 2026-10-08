@@ -80,11 +80,15 @@ function cubicTo(a: Pt, c1: Pt, c2: Pt, b: Pt, out: Pt[]): void {
   }
 }
 
-/** Centripetal Catmull-Rom spline through `run` (no cusps or loops between close points); appends all but the first point. */
-function splineThrough(run: Pt[], out: Pt[]): void {
+/**
+ * Centripetal Catmull-Rom spline through `run` (no cusps or loops between close points), as cubic
+ * Bezier control points per segment (null for segments of zero length).
+ */
+export function splineSegments(run: Pt[]): ([Pt, Pt, Pt, Pt] | null)[] {
   const n = run.length;
   // Beyond the ends the line continues in the direction of its first and last pieces.
   const at = (i: number): Pt => (i < 0 ? sub(run[0], sub(run[1], run[0])) : i >= n ? sub(run[n - 1], sub(run[n - 2], run[n - 1])) : run[i]);
+  const out: ([Pt, Pt, Pt, Pt] | null)[] = [];
   for (let i = 0; i < n - 1; i++) {
     const p0 = at(i - 1);
     const p1 = run[i];
@@ -93,7 +97,10 @@ function splineThrough(run: Pt[], out: Pt[]): void {
     const d1 = Math.sqrt(dist(p0, p1));
     const d2 = Math.sqrt(dist(p1, p2));
     const d3 = Math.sqrt(dist(p2, p3));
-    if (d2 < 1e-9) continue;
+    if (d2 < 1e-9) {
+      out.push(null);
+      continue;
+    }
     const c1 =
       d1 > 1e-9
         ? {
@@ -108,8 +115,27 @@ function splineThrough(run: Pt[], out: Pt[]): void {
             y: (d3 * d3 * p1.y - d2 * d2 * p3.y + (2 * d3 * d3 + 3 * d3 * d2 + d2 * d2) * p2.y) / (3 * d3 * (d3 + d2)),
           }
         : p2;
-    cubicTo(p1, c1, c2, p2, out);
+    out.push([p1, c1, c2, p2]);
   }
+  return out;
+}
+
+/** A point of a cubic Bezier curve. */
+export function bezierAt([a, c1, c2, b]: [Pt, Pt, Pt, Pt], t: number): Pt {
+  const u = 1 - t;
+  const k0 = u * u * u;
+  const k1 = 3 * u * u * t;
+  const k2 = 3 * u * t * t;
+  const k3 = t * t * t;
+  return { x: k0 * a.x + k1 * c1.x + k2 * c2.x + k3 * b.x, y: k0 * a.y + k1 * c1.y + k2 * c2.y + k3 * b.y };
+}
+
+/** Samples for a cubic Bezier segment (about every `px` px of its control polygon). */
+export const bezierSteps = ([a, c1, c2, b]: [Pt, Pt, Pt, Pt], px = 4) => Math.max(2, Math.min(200, Math.ceil((dist(a, c1) + dist(c1, c2) + dist(c2, b)) / px)));
+
+/** Appends the spline through `run`, all but its first point. */
+function splineThrough(run: Pt[], out: Pt[]): void {
+  for (const seg of splineSegments(run)) if (seg) cubicTo(seg[0], seg[1], seg[2], seg[3], out);
 }
 
 /** The curve as a polyline dense enough to stand for it. */
