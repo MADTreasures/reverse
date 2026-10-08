@@ -283,13 +283,12 @@ function LayerRow({ layer, depth, drag, setDrag, drop, setDrop }: RowsProps & { 
           <input
             className="rename"
             ref={(el) => {
-              // Select the whole name once the input is in place (after the double click settles).
+              // Focus and select the whole name in the same commit as the double click: deferring it
+              // lets keys typed right away reach the tool shortcuts instead of the field.
               if (el && !el.dataset.ready) {
                 el.dataset.ready = '1';
-                setTimeout(() => {
-                  el.focus();
-                  el.select();
-                }, 0);
+                el.focus();
+                el.select();
               }
             }}
             defaultValue={layer.name}

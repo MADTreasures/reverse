@@ -224,6 +224,7 @@ test('layers: new layer, rename, clip, merge down, undo', async ({ page }) => {
   await expect(page.locator('[data-testid=layer-row]')).toHaveCount(2);
   const row = page.locator('[data-testid=layer-row]').first();
   await row.locator('.layer-name').dblclick();
+  // Type at once, like a user: the keys must reach the name field, not the tool shortcuts (I, K).
   await page.keyboard.type('Ink');
   await page.keyboard.press('Enter');
   await expect(row.locator('.layer-name')).toHaveText('Ink');
