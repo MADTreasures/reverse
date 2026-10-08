@@ -20,8 +20,12 @@
     "app:dev": "node scripts/electron-dev.mjs",
     "app:smoke": "electron . --smoke-test",
     "icon": "node scripts/make-icon.mjs",
-    "dist:mac": "npm run build && electron-builder --mac --publish never",
-    "dist:dir": "npm run build && electron-builder --dir --publish never"
+    "dist:mac": "npm run build && node scripts/stage-engine.mjs && electron-builder --mac --publish never",
+    "dist:dir": "npm run build && node scripts/stage-engine.mjs && electron-builder --dir --publish never",
+    "engine:configure": "cmake -S engine -B engine/build -G Ninja -DCMAKE_BUILD_TYPE=Release",
+    "engine:build": "cmake --build engine/build --config Release",
+    "engine:test": "node engine/tests/protocol-test.mjs",
+    "engine:stage": "node scripts/stage-engine.mjs"
   },
   "devDependencies": {
     "@playwright/test": "1.56.1",
@@ -94,6 +98,15 @@
         "nsis"
       ]
     },
-    "publish": null
+    "publish": null,
+    "extraResources": [
+      {
+        "from": "build/engine-staging",
+        "to": "engine",
+        "filter": [
+          "**/*"
+        ]
+      }
+    ]
   }
 }
