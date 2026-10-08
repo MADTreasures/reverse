@@ -23,6 +23,7 @@ import {
   type DropPosition,
 } from '../model/layers';
 import type { FolderLayer, Id, Layer, LayerMask, PaintDocument, RasterLayer } from '../model/types';
+import type { LayerEffects } from '../paint/effects';
 import { applyCorrection, correctionLabel, type Correction } from '../paint/tonal';
 import { combine, createMask, expandMask, invertMask, isMaskEmpty, maskBounds, rectMask, type Mask, type SelectionOp } from '../paint/mask';
 import { mergeSubTools, type SubTool, type ToolId } from '../paint/tools';
@@ -339,6 +340,24 @@ export function setLayerProps(id: Id, patch: Partial<RasterLayer> | Partial<Fold
       if (l) Object.assign(l, patch);
     },
     { key: key ?? `${label}:${id}` },
+  );
+}
+
+/** Layer Property palette: changes one effect (slider drags merge into one undo step). */
+export function setLayerEffects(id: Id, effects: LayerEffects, label = 'Layer property'): void {
+  const l = findLayer(getState().doc.layers, id);
+  if (!l) return;
+  if (isEffectivelyLocked(getState().doc.layers, id)) {
+    setState({ hint: 'The layer is locked' });
+    return;
+  }
+  changeDoc(
+    label,
+    (doc) => {
+      const x = findLayer(doc.layers, id);
+      if (x) x.effects = effects;
+    },
+    { key: `effects:${id}` },
   );
 }
 

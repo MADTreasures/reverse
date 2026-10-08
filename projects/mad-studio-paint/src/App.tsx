@@ -11,6 +11,7 @@ import { ColorSet } from './ui/palettes/ColorSet';
 import { ColorHistory, ColorSliders, ColorWheelPanel } from './ui/palettes/ColorWheel';
 import { HistoryPalette } from './ui/palettes/HistoryPalette';
 import { LayerActionBar, LayerFlagBar, LayerList, LayerPropertyBar } from './ui/palettes/LayerPalette';
+import { LayerPropertyPalette } from './ui/palettes/LayerPropertyPalette';
 import { Navigator } from './ui/palettes/Navigator';
 import { ToolSliders } from './ui/palettes/ToolSliders';
 import { BrushSizePalette, SubToolPalette, ToolPalette, ToolProperty } from './ui/palettes/ToolPalettes';
@@ -90,6 +91,7 @@ function RightDock() {
     <aside className="dock dock-right">
       <div className="dock-column right-column">
         <Palette testId="navigator-panel" tabs={[{ id: 'nav', label: 'Navigator', content: <Navigator /> }]} />
+        <Palette testId="layer-property-panel" className="layer-property-palette" tabs={[{ id: 'lprop', label: 'Layer Property', content: <LayerPropertyPalette /> }]} />
         <Palette
           grow
           testId="layer-panel"

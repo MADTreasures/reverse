@@ -10,6 +10,7 @@ import { isBlendMode } from '../model/blend';
 import { clampCanvasSide } from '../model/document';
 import { createRasterLayer } from '../model/layers';
 import type { CorrectionLayer, FolderLayer, Id, Layer, LayerMask, PaintDocument, RasterLayer } from '../model/types';
+import { sanitizeEffects } from '../paint/effects';
 import { sanitizeCorrection } from '../paint/tonal';
 
 export const FORMAT = 'mad-studio-paint';
@@ -50,6 +51,7 @@ function sanitizeLayer(raw: unknown, seen: Set<string>, depth: number): Layer | 
   if (!ID.test(id) || seen.has(id)) id = createRasterLayer('x').id;
   seen.add(id);
   const mask = sanitizeMask(r.mask, seen);
+  const effects = sanitizeEffects(r.effects);
   const common = {
     id,
     name: str(r.name, 'Layer', 120),
@@ -60,6 +62,7 @@ function sanitizeLayer(raw: unknown, seen: Set<string>, depth: number): Layer | 
     reference: bool(r.reference, false),
     draft: bool(r.draft, false),
     ...(mask ? { mask } : {}),
+    ...(effects ? { effects } : {}),
   };
   if (r.kind === 'folder') {
     const children = Array.isArray(r.children) ? r.children.map((c) => sanitizeLayer(c, seen, depth + 1)).filter((c): c is Layer => c !== null) : [];

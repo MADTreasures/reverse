@@ -714,3 +714,33 @@ test('gradient map correction layers are saved and reopened', async ({ page }) =
   expect(px.slice(0, 3)).toEqual([255, 0, 0]);
   await expect(page.locator('[data-testid=correction-icon]')).toHaveCount(1);
 });
+
+test('Layer Property palette: border effect and layer colour change the display, not the pixels', async ({ page }) => {
+  await boot(page);
+  await page.evaluate(() => {
+    const a = window.__madPaint.actions;
+    a.setDrawingColor('#000000');
+    a.setSelection({ width: 400, height: 300, data: new Uint8Array(400 * 300).map((_: number, i: number) => (i % 400 >= 100 && i % 400 < 200 && i / 400 >= 100 && i / 400 < 200 ? 255 : 0)) });
+    a.fillWithColor();
+    a.deselect();
+  });
+  const panel = page.getByTestId('layer-property-panel');
+  await panel.getByRole('button', { name: 'Border effect' }).click();
+  await panel.getByLabel('Edge color').fill('#ff0000');
+  // Two pixels outside the square: edge colour; ten pixels outside: paper.
+  expect((await page.evaluate(() => window.__madPaint.engine.sampleDisplayed(97, 150, '#ffffff'))).slice(0, 3)).toEqual([255, 0, 0]);
+  expect(await shown(page, 90, 150)).toBe(255);
+  expect(await layerAlpha(page, 97, 150)).toBe(0);
+  // Layer colour shows black in the chosen colour.
+  await panel.getByRole('button', { name: 'Layer color' }).click();
+  await panel.getByLabel('Layer color value').fill('#0000ff');
+  expect((await page.evaluate(() => window.__madPaint.engine.sampleDisplayed(150, 150, '#ffffff'))).slice(0, 3)).toEqual([0, 0, 255]);
+  // Saved with the document.
+  const fx = await page.evaluate(async () => {
+    const m = window.__madPaint;
+    await m.openFileBytes({ name: 'fx.madpaint', data: await m.buildDocumentBytes() });
+    return m.useStore.getState().doc.layers[0].effects;
+  });
+  expect(fx.border).toMatchObject({ enabled: true, kind: 'edge', color: '#ff0000' });
+  expect(fx.layerColor).toMatchObject({ enabled: true, color: '#0000ff' });
+});

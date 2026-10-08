@@ -41,3 +41,6 @@ export function fromPoints(x0: number, y0: number, x1: number, y1: number): Rect
 }
 
 export const clampToCanvas = (r: Rect, width: number, height: number) => intersect(r, { x: 0, y: 0, w: width, h: height });
+
+/** The rect grown by `n` px on every side. */
+export const inflate = (r: Rect, n: number): Rect => ({ x: r.x - n, y: r.y - n, w: r.w + 2 * n, h: r.h + 2 * n });

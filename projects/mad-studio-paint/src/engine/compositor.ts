@@ -4,9 +4,10 @@
  * correction layers. Only the dirty region is recomposed, so painting stays fast on large canvases.
  */
 import { nativeOp } from '../model/blend';
-import { clipGroups } from '../model/layers';
-import type { BlendMode, CorrectionLayer, FolderBlendMode, Layer, PaintDocument } from '../model/types';
-import { intersect, union, type Rect } from '../paint/rect';
+import { clipGroups, flatten } from '../model/layers';
+import type { BlendMode, CorrectionLayer, FolderBlendMode, FolderLayer, Layer, PaintDocument, RasterLayer } from '../model/types';
+import { applyEdge, applyLayerColor, applyWatercolorEdge, effectReach } from '../paint/effects';
+import { inflate, intersect, union, type Rect } from '../paint/rect';
 import { applyCorrection } from '../paint/tonal';
 import { blendInto } from './blendPixels';
 import { clearRect, createCanvas, ctx2d, type Ctx } from './canvas';
@@ -101,15 +102,22 @@ export class Compositor {
     if (clipped) this.dirty = union(this.dirty, clipped);
   }
 
+  private get bounds(): Rect {
+    return { x: 0, y: 0, w: this.canvas.width, h: this.canvas.height };
+  }
+
   get isDirty(): boolean {
     return this.dirty !== null;
   }
 
   /** Recomposes the dirty region. Returns the region that changed, or null. */
   update(doc: PaintDocument): Rect | null {
-    const r = this.dirty;
+    let r = this.dirty;
     if (!r) return null;
     this.dirty = null;
+    // Border effects reach beyond the changed pixels.
+    const reach = flatten(doc.layers).reduce((n, l) => n + (l.visible ? effectReach(l.effects) : 0), 0);
+    if (reach) r = intersect(inflate(r, reach), this.bounds) ?? r;
     this.compose(doc, this.ctx, r, { paper: doc.paper.visible ? doc.paper.color : null });
     return r;
   }
@@ -202,16 +210,13 @@ export class Compositor {
     if (layer.kind === 'raster') {
       const s = getSurface(layer.id);
       if (!s) return;
-      const mask = maskOf(layer);
-      if (!mask) {
+      if (!maskOf(layer) && !hasEffects(layer)) {
         paint(target, s, r, layer.opacity, layer.blend);
         return;
       }
-      const tmp = this.pool.acquire(r);
-      tmp.drawImage(s, 0, 0);
-      applyMask(tmp, mask);
-      paint(target, tmp.canvas, r, layer.opacity, layer.blend);
-      this.pool.release(tmp);
+      const c = this.content(layer, r, opts);
+      paint(target, c.canvas, r, layer.opacity, layer.blend);
+      this.pool.release(c);
       return;
     }
     const mask = maskOf(layer);
@@ -229,11 +234,37 @@ export class Compositor {
       this.pool.release(tmp);
       return;
     }
-    const tmp = this.pool.acquire(r);
-    this.composeList(layer.children, tmp, r, opts);
-    if (mask) applyMask(tmp, mask);
-    paint(target, tmp.canvas, r, layer.opacity, layer.blend);
-    this.pool.release(tmp);
+    const c = this.content(layer, r, opts);
+    paint(target, c.canvas, r, layer.opacity, layer.blend);
+    this.pool.release(c);
+  }
+
+  /**
+   * A layer's own pixels (raster surface or isolated folder) with its mask and effects applied,
+   * valid inside `r`. Border effects need the pixels around `r`, so they are drawn wider. The
+   * caller releases the canvas.
+   */
+  private content(layer: RasterLayer | FolderLayer, r: Rect, opts: ComposeOptions): Ctx {
+    const rr = intersect(inflate(r, effectReach(layer.effects)), this.bounds) ?? r;
+    const ctx = this.pool.acquire(rr);
+    if (layer.kind === 'raster') {
+      const s = getSurface(layer.id);
+      if (s) ctx.drawImage(s, 0, 0);
+    } else this.composeList(layer.children, ctx, rr, opts);
+    const mask = maskOf(layer);
+    if (mask) applyMask(ctx, mask);
+    const fx = layer.effects;
+    if (fx && hasEffects(layer)) {
+      const img = ctx.getImageData(rr.x, rr.y, rr.w, rr.h);
+      let data: Uint8ClampedArray<ArrayBuffer> = img.data;
+      if (fx.layerColor?.enabled) applyLayerColor(data, fx.layerColor);
+      if (fx.border?.enabled) {
+        if (fx.border.kind === 'edge') data = applyEdge(data, rr.w, rr.h, fx.border);
+        else applyWatercolorEdge(data, rr.w, rr.h, fx.border);
+      }
+      ctx.putImageData(new ImageData(data, rr.w, rr.h), rr.x, rr.y);
+    }
+    return ctx;
   }
 
   /**
@@ -241,14 +272,19 @@ export class Compositor {
    * clipping groups apply opacity and blending later.
    */
   private drawContent(layer: Layer, target: Ctx, r: Rect, opts: ComposeOptions): void {
-    if (layer.kind === 'raster') {
+    if (layer.kind === 'correction') return;
+    if (layer.kind === 'raster' && !maskOf(layer) && !hasEffects(layer)) {
       const s = getSurface(layer.id);
       if (s) target.drawImage(s, 0, 0);
-    } else if (layer.kind === 'folder') this.composeList(layer.children, target, r, opts);
-    const mask = maskOf(layer);
-    if (mask) applyMask(target, mask);
+      return;
+    }
+    const c = this.content(layer, r, opts);
+    target.drawImage(c.canvas, 0, 0);
+    this.pool.release(c);
   }
 }
+
+const hasEffects = (layer: Layer) => Boolean(layer.effects?.border?.enabled || layer.effects?.layerColor?.enabled);
 
 /** The surface of a layer's enabled mask, or null. */
 function maskOf(layer: Layer): HTMLCanvasElement | null {

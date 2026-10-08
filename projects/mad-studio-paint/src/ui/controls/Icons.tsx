@@ -208,6 +208,19 @@ const paths: Record<string, ReactNode> = {
       <path d="M2.5 4 6.4 7.5M17.5 4l-3.9 3.5M2.5 16l3.9-3.5M17.5 16l-3.9-3.5" />
     </>
   ),
+  borderEffect: (
+    <>
+      <path d="M10 4.5c3.5 0 6 2.4 6 5.5s-2.5 5.5-6 5.5S4 13.1 4 10s2.5-5.5 6-5.5z" />
+      <path d="M10 7.5c1.8 0 3 1.1 3 2.5s-1.2 2.5-3 2.5S7 11.4 7 10s1.2-2.5 3-2.5z" fill="currentColor" />
+    </>
+  ),
+  layerColor: (
+    <>
+      <rect x="3" y="4" width="14" height="12" rx="1.5" />
+      <path d="M3 12.5h14" />
+      <rect x="3" y="12.5" width="14" height="3.5" fill="currentColor" />
+    </>
+  ),
   correction: (
     <>
       <circle cx="10" cy="10" r="6.5" />

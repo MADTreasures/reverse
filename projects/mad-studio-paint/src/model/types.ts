@@ -1,4 +1,5 @@
 /** Document model of MAD Studio Paint. Pixel data lives in surfaces (see engine/surfaces.ts), keyed by layer id. */
+import type { LayerEffects } from '../paint/effects';
 import type { Correction } from '../paint/tonal';
 
 export type Id = string;
@@ -60,6 +61,8 @@ interface LayerBase {
   /** Draft layers are hidden in exports. */
   draft: boolean;
   mask?: LayerMask;
+  /** Layer Property palette: border effect, layer colour. */
+  effects?: LayerEffects;
 }
 
 export interface RasterLayer extends LayerBase {
