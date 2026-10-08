@@ -349,7 +349,7 @@ const ChannelRow = memo(function ChannelRow({ channel, patternId, stepCount }: R
           />
         )}
         <button
-          className={`channel-name ${channel.kind}`}
+          className={`channel-name kind-${channel.kind}`}
           style={{ ['--ch' as string]: channel.color }}
           data-hint={`${channel.name} – click: show/hide the channel window, right-click: options`}
           onClick={() => {

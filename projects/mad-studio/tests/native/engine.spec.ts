@@ -94,6 +94,18 @@ test('desktop app drives the native engine: playback, VST3 plugins, render, plug
       .poll(() => page.evaluate((k) => [k.channel, k.slot].map((key) => window.__madStudio.usePlugins.getState().instances[key]?.state), keys))
       .toEqual(['ready', 'ready']);
 
+    // The plugin channel's row in the channel rack keeps its layout: name button after the mute switch.
+    const row = await page.evaluate(() => {
+      const rows = [...document.querySelectorAll('.rack-row')];
+      const last = rows[rows.length - 1];
+      const box = (selector: string) => {
+        const r = last?.querySelector(selector)?.getBoundingClientRect();
+        return r ? { x: r.x, width: r.width } : null;
+      };
+      return { mute: box('.mute-led'), name: box('.channel-name') };
+    });
+    expect(row.mute && row.name && row.name.x >= row.mute.x + row.mute.width).toBe(true);
+
     step('plugins loaded');
     // Parameters come from the plugin and can be set.
     await page.evaluate((k) => window.__madStudio.engine.requestPluginParams(k.slot), keys);

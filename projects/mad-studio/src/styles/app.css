@@ -1689,15 +1689,15 @@ kbd {
   color: #ff9b8f;
 }
 
-.channel-name.automation {
+.channel-name.kind-automation {
   background: linear-gradient(#7a4747, #5d3838);
 }
 
-.channel-name.automation:hover {
+.channel-name.kind-automation:hover {
   background: linear-gradient(#8a5252, #6a4040);
 }
 
-.channel-name.plugin svg {
+.channel-name.kind-plugin svg {
   flex-shrink: 0;
   opacity: 0.8;
 }
