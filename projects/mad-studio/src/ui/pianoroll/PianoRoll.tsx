@@ -12,11 +12,12 @@ import {
   selectChannel,
   setTransport,
   setUi,
+  sliceNotes,
   updateNotes,
 } from '../../store/actions';
 import { useStore, type ToolId } from '../../store/store';
 import { prepareCanvas, useElementSize, useFrame } from '../animation';
-import { IconBrush, IconEraser, IconGhost, IconPencil, IconPiano, IconSelect } from '../controls/Icons';
+import { IconBrush, IconEraser, IconGhost, IconPencil, IconPiano, IconSelect, IconSlice } from '../controls/Icons';
 import { setHint } from '../hint';
 import { registerWindowKeys } from '../keyboard';
 import { openNoteProperties } from '../overlays';
@@ -34,6 +35,7 @@ type Drag =
   | { kind: 'paint'; key: string; row: number; last: number }
   | { kind: 'keys'; handle: number; note: number }
   | { kind: 'velocity'; key: string }
+  | { kind: 'slice'; key: string; tick: number }
   | { kind: 'seek' }
   | { kind: 'pan'; x: number; y: number; scrollTick: number; scrollY: number };
 
@@ -142,6 +144,14 @@ export function PianoRoll() {
     return null;
   };
 
+  /** Cuts the notes of `key` that span `tick`. */
+  const sliceKey = (key: number, tick: number, gesture: string) => {
+    if (!channel) return;
+    const current = useStore.getState().project.patterns.find((p) => p.id === patternId)?.notes[channel.id] ?? [];
+    const ids = current.filter((n) => n.key === key && tick > n.start && tick < n.start + n.length).map((n) => n.id);
+    if (ids.length) sliceNotes(patternId, channel.id, ids, tick, { coalesce: gesture });
+  };
+
   const local = (e: { clientX: number; clientY: number }) => {
     const r = canvasRef.current!.getBoundingClientRect();
     return { x: e.clientX - r.left, y: e.clientY - r.top };
@@ -216,6 +226,15 @@ export function PianoRoll() {
     const hit = noteAt(x, y);
     const tool: ToolId = e.button === 2 ? 'delete' : view.tool;
 
+    if (tool === 'slice') {
+      // FL Studio's slice tool: cuts the note under the mouse at the snapped position; drag up or
+      // down to cut the notes of other keys at the same position.
+      const gk = gestureKey('slice-notes');
+      const at = Math.max(0, snapRound(tick, g));
+      drag.current = { kind: 'slice', key: gk, tick: at };
+      sliceKey(key, at, gk);
+      return;
+    }
     if (tool === 'delete') {
       const gk = gestureKey('erase');
       drag.current = { kind: 'delete', key: gk };
@@ -285,7 +304,7 @@ export function PianoRoll() {
     if (!d) {
       if (x > KEYS_W && y > RULER_H && y < gridBottom(rollView)) {
         const hit = noteAt(x, y);
-        e.currentTarget.style.cursor = hit?.edge ? 'ew-resize' : hit ? 'move' : view.tool === 'delete' ? 'not-allowed' : 'crosshair';
+        e.currentTarget.style.cursor = view.tool === 'slice' ? 'col-resize' : hit?.edge ? 'ew-resize' : hit ? 'move' : view.tool === 'delete' ? 'not-allowed' : 'crosshair';
         // FL Studio's hint: position and length, note name and number.
         if (hit) {
           const n = hit.note;
@@ -327,6 +346,9 @@ export function PianoRoll() {
         if (hit) deleteNotes(patternId, channel.id, [hit.note.id], { coalesce: d.key });
         break;
       }
+      case 'slice':
+        sliceKey(key, d.tick, d.key);
+        break;
       case 'rubber': {
         d.t1 = tick;
         d.k1 = key;
@@ -525,9 +547,9 @@ export function PianoRoll() {
           legatoNotes(pid, ch.id, sel);
           return true;
         }
-        // FL Studio tool keys: P draw, B paint, D delete, E select.
+        // FL Studio tool keys: P draw, B paint, D delete, C slice, E select.
         if (plain) {
-          const tool = ({ KeyP: 'draw', KeyB: 'paint', KeyD: 'delete', KeyE: 'select' } as const)[e.code as 'KeyP'];
+          const tool = ({ KeyP: 'draw', KeyB: 'paint', KeyD: 'delete', KeyC: 'slice', KeyE: 'select' } as const)[e.code as 'KeyP'];
           if (tool) {
             setUi((d) => void (d.pianoRoll.tool = tool));
             return true;
@@ -608,6 +630,7 @@ export function PianoRoll() {
         {toolButton('draw', <IconPencil size={12} />, 'Draw tool: click to add, drag to move')}
         {toolButton('paint', <IconBrush size={12} />, 'Paint tool: drag to paint notes')}
         {toolButton('delete', <IconEraser size={12} />, 'Delete tool (right mouse button works in every tool)')}
+        {toolButton('slice', <IconSlice size={12} />, 'Slice tool (C): click a note to cut it at the snap position')}
         {toolButton('select', <IconSelect size={12} />, 'Select tool: drag a rectangle')}
       </div>
       <select className="tb-select" value={view.snap} data-hint="Snap (Main follows the main snap in the toolbar; Alt while dragging: no snap)" onChange={(e) => setView({ snap: e.target.value as SnapId })}>

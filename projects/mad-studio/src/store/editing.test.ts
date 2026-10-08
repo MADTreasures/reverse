@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { compileAutomationLanes } from '../model/automation';
-import { songTimeline } from '../model/timeline';
+import { foldIntoLoop, songTimeline, withLoop } from '../model/timeline';
 import { PPQ, TICKS_PER_STEP, formatDuration, gridLineTicks, snapTicks } from '../model/timing';
 import {
   addNotes,
@@ -19,6 +19,8 @@ import {
   setClipPattern,
   setClipsMuted,
   setTrackClipsMuted,
+  sliceClips,
+  sliceNotes,
 } from './actions';
 import { createAutomationClip } from './automationActions';
 import { pianoRollSnap, patternStartTick } from './snap';
@@ -156,5 +158,43 @@ describe('patterns menu (FL Studio)', () => {
     expect(state().project.patterns[0].notes[ch][0].key).toBe(72);
     transposePattern(first, 100);
     expect(state().project.patterns[0].notes[ch][0].key).toBe(127);
+  });
+});
+
+describe('time selection (loop)', () => {
+  it('limits the song timeline and folds positions into it', () => {
+    const tl = { events: [], start: 0, end: 4000 };
+    expect(withLoop(tl, null)).toBe(tl);
+    expect(withLoop(tl, { start: 384, end: 768 })).toMatchObject({ start: 384, end: 768 });
+    expect(withLoop(tl, { start: 500, end: 500 })).toBe(tl);
+    expect(foldIntoLoop(1000, { start: 384, end: 768 })).toBe(616);
+    expect(foldIntoLoop(100, { start: 384, end: 768 })).toBe(484);
+    expect(foldIntoLoop(400, { start: 384, end: 768 })).toBe(400);
+    expect(foldIntoLoop(1000, null)).toBe(1000);
+  });
+});
+
+describe('slice tool', () => {
+  it('cuts clips and keeps the source position of the right part', () => {
+    const { ui, project } = state();
+    const id = placePatternClip(ui.selectedPatternId, project.tracks[0].id, 384)!;
+    const before = state().project.clips.find((c) => c.id === id)!;
+    const [right] = sliceClips([id], 384 + 96);
+    const s = state().project;
+    expect(s.clips.find((c) => c.id === id)).toMatchObject({ start: 384, length: 96, offset: 0 });
+    expect(s.clips.find((c) => c.id === right)).toMatchObject({ start: 480, length: before.length - 96, offset: 96 });
+    expect(sliceClips([id], 384)).toEqual([]); // at the edge: nothing to cut
+  });
+
+  it('cuts notes', () => {
+    const { ui, project } = state();
+    const ch = project.channels[0].id;
+    const [id] = addNotes(ui.selectedPatternId, ch, [{ key: 60, start: 0, length: 96, velocity: 0.5 }]);
+    sliceNotes(ui.selectedPatternId, ch, [id], 24);
+    const notes = state().project.patterns[0].notes[ch].filter((n) => n.key === 60);
+    expect(notes.map((n) => [n.start, n.length, n.velocity])).toEqual([
+      [0, 24, 0.5],
+      [24, 72, 0.5],
+    ]);
   });
 });

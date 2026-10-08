@@ -3,6 +3,7 @@ import { engine } from '../../audio/engine';
 import { segmentMidValue } from '../../model/automation';
 import { describeTarget, fromNorm } from '../../model/automationTargets';
 import { findPattern, songLength } from '../../model/patterns';
+import { foldIntoLoop } from '../../model/timeline';
 import { PALETTE, PALETTE_NAMES } from '../../model/colors';
 import { SNAP_OPTIONS, formatPosition, gridLineTicks, snapFloor, snapLabel, snapRound, snapTicks, ticksPerBar, type SnapId } from '../../model/timing';
 import { makeId } from '../../model/ids';
@@ -30,6 +31,7 @@ import {
   setPatternColor,
   setTrackClipsMuted,
   setTransport,
+  sliceClips,
   setUi,
   toggleTrackMute,
   updateClips,
@@ -39,7 +41,7 @@ import { useStore, type PlaylistPick, type ToolId } from '../../store/store';
 import { prepareCanvas, useElementSize, useFrame } from '../animation';
 import { hitTestCurve, tensionFromDrag, xToTick, yToValue, type CurveView } from '../automation/curve';
 import { pointMenu } from '../automation/pointMenu';
-import { IconEraser, IconMute, IconPencil, IconPlaylist, IconSelect, IconBrush } from '../controls/Icons';
+import { IconEraser, IconMute, IconPencil, IconPlaylist, IconSelect, IconSlice, IconBrush } from '../controls/Icons';
 import { audioFilesFromDrop, getDragItem, hasDragItem, hasFiles, sampleInfoFor } from '../dnd';
 import { setHint } from '../hint';
 import { registerWindowKeys } from '../keyboard';
@@ -56,9 +58,11 @@ type Drag =
   | { kind: 'resize'; key: string; side: 'left' | 'right'; originTick: number; orig: Map<string, Clip>; anchor: string }
   | { kind: 'delete'; key: string }
   | { kind: 'mute'; key: string; muted: boolean | null; done: Set<string> }
+  | { kind: 'slice'; key: string; tick: number }
   | { kind: 'rubber'; t0: number; r0: number; t1: number; r1: number; base: Set<string> }
   | { kind: 'paint'; key: string; track: number; last: number }
   | { kind: 'seek' }
+  | { kind: 'loop'; anchor: number; rawTick: number; x0: number; prev: { start: number; end: number } | null; moved: boolean }
   | { kind: 'pan'; x: number; y: number; scrollTick: number; scrollY: number }
   | { kind: 'autoPoint'; key: string; channelId: Id; clipId: Id; index: number; view: CurveView }
   | { kind: 'autoTension'; key: string; channelId: Id; index: number; startY: number; startTension: number };
@@ -174,6 +178,7 @@ export function Playlist() {
   const project = useStore((s) => s.project);
   const view = useStore((s) => s.ui.playlist);
   const songStart = useStore((s) => s.transport.songStart);
+  const loop = useStore((s) => s.transport.loop);
   const pick = usePick();
   const [selected, setSelected] = useState<Set<string>>(() => new Set());
   const autoFocus = useRef<{ clipId: string; point: number | null; handle: number | null } | null>(null);
@@ -195,8 +200,8 @@ export function Playlist() {
   );
   const songEnd = useMemo(() => songLength(project), [project]);
 
-  const scene = useRef({ vp, project, selected, songStart, songEnd, lineTicks });
-  scene.current = { vp, project, selected, songStart, songEnd, lineTicks };
+  const scene = useRef({ vp, project, selected, songStart, songEnd, lineTicks, loop });
+  scene.current = { vp, project, selected, songStart, songEnd, lineTicks, loop };
   dirty.current = true;
 
   useFrame(() => {
@@ -221,6 +226,7 @@ export function Playlist() {
       dropHint: dropHint.current,
       autoFocus: autoFocus.current,
       lineTicks: sc.lineTicks,
+      loop: sc.loop,
     });
   });
 
@@ -253,6 +259,17 @@ export function Playlist() {
     return null;
   };
 
+  /** Cuts the clips of track `ti` that span `tick`. */
+  const sliceAt = (ti: number, tick: number, key: string) => {
+    const track = project.tracks[ti];
+    if (!track) return;
+    const ids = useStore
+      .getState()
+      .project.clips.filter((c) => c.trackId === track.id && tick > c.start && tick < c.start + c.length)
+      .map((c) => c.id);
+    if (ids.length) sliceClips(ids, tick, { coalesce: key });
+  };
+
   /** True when (x, y) is on the menu icon at the left of the clip's title bar. */
   const onClipIcon = (clip: Clip, x: number, y: number) => {
     const ti = project.tracks.findIndex((t) => t.id === clip.trackId);
@@ -282,9 +299,21 @@ export function Playlist() {
   };
 
   const seekTo = (x: number) => {
-    const tick = Math.max(0, snapFloor(tickAtX(vp, x), snapTicks('beat', project.beatsPerBar)));
+    // With a time selection the position folds into it, the way playback loops (FL Studio).
+    const tick = foldIntoLoop(Math.max(0, snapFloor(tickAtX(vp, x), snapTicks('beat', project.beatsPerBar))), useStore.getState().transport.loop);
     if (useStore.getState().transport.mode !== 'song') setTransport({ mode: 'song' });
     engine.seek(tick);
+  };
+
+  /** FL Studio: right-drag in the ruler selects a time range; song playback loops inside it. */
+  const setLoopFromDrag = (d: Extract<Drag, { kind: 'loop' }>, x: number, free: boolean) => {
+    const g = free ? 1 : grid;
+    const cur = Math.max(0, snapRound(tickAtX(vp, x), g));
+    const start = Math.min(d.anchor, cur);
+    const end = Math.max(Math.max(d.anchor, cur), start + g);
+    setTransport({ loop: { start, end } });
+    if (useStore.getState().transport.mode !== 'song') setTransport({ mode: 'song' });
+    engine.seek(start);
   };
 
   // ------------------------------------------------------------ pointer input
@@ -298,7 +327,10 @@ export function Playlist() {
       return;
     }
     if (y < RULER_H) {
-      if (x > TRACK_W) {
+      if (x > TRACK_W && e.button === 2) {
+        const raw = Math.max(0, tickAtX(vp, x));
+        drag.current = { kind: 'loop', anchor: snapRound(raw, e.altKey ? 1 : grid), rawTick: raw, x0: x, prev: useStore.getState().transport.loop, moved: false };
+      } else if (x > TRACK_W) {
         drag.current = { kind: 'seek' };
         seekTo(x);
       }
@@ -317,13 +349,14 @@ export function Playlist() {
     const g = e.altKey ? 1 : grid;
     lastClick.current = { tick: snapFloor(Math.max(0, tick), g), track: ti };
     const hit = clipAt(x, y);
-    if (hit && e.button === 0 && view.tool !== 'delete' && view.tool !== 'mute' && onClipIcon(hit.clip, x, y)) {
+    const editTool = view.tool !== 'delete' && view.tool !== 'mute' && view.tool !== 'slice';
+    if (hit && e.button === 0 && editTool && onClipIcon(hit.clip, x, y)) {
       drag.current = null;
       showMenu(e, clipMenu(project, hit.clip, (ids) => setSelected(ids)));
       return;
     }
     const auto = hit && !hit.edge ? automationAt(hit.clip, x, y) : null;
-    if (auto && hit && view.tool !== 'delete' && view.tool !== 'mute') {
+    if (auto && hit && editTool) {
       const { ch, cv } = auto;
       const key = gestureKey('automation');
       const pts = ch.automation.points;
@@ -363,6 +396,15 @@ export function Playlist() {
       const key = gestureKey('erase-clips');
       drag.current = { kind: 'delete', key };
       if (hit) deleteClips([hit.clip.id], { coalesce: key });
+      return;
+    }
+    if (tool === 'slice') {
+      // FL Studio's slice tool: cuts the clips under the mouse at the snapped position; drag
+      // up or down to cut the clips on other tracks at the same position.
+      const key = gestureKey('slice-clips');
+      const at = Math.max(0, snapRound(tick, g));
+      drag.current = { kind: 'slice', key, tick: at };
+      sliceAt(ti, at, key);
       return;
     }
     if (tool === 'mute') {
@@ -444,7 +486,7 @@ export function Playlist() {
     if (!d) {
       if (y < RULER_H) {
         e.currentTarget.style.cursor = 'text';
-        setHint('Click to set the song position');
+        setHint('Click: song position · right-drag: select a time range, playback loops in it (Ctrl+D clears it)');
         return;
       }
       if (x < TRACK_W) {
@@ -483,14 +525,17 @@ export function Playlist() {
         return;
       }
       setAutoFocus(hit?.clip.kind === 'automation' ? { clipId: hit.clip.id, point: null, handle: null } : null);
-      e.currentTarget.style.cursor = hit?.edge ? 'ew-resize' : hit ? (view.tool === 'mute' ? 'pointer' : 'move') : view.tool === 'delete' ? 'not-allowed' : 'copy';
+      e.currentTarget.style.cursor =
+        view.tool === 'slice' ? 'col-resize' : hit?.edge ? 'ew-resize' : hit ? (view.tool === 'mute' ? 'pointer' : 'move') : view.tool === 'delete' ? 'not-allowed' : 'copy';
       if (hit) {
         const label =
           hit.clip.kind === 'pattern'
             ? project.patterns.find((p) => p.id === (hit.clip as Extract<Clip, { kind: 'pattern' }>).patternId)?.name
             : (project.channels.find((c) => c.id === (hit.clip as Extract<Clip, { kind: 'audio' | 'automation' }>).channelId)?.name ?? 'Clip');
         setHint(
-          view.tool === 'mute'
+          view.tool === 'slice'
+            ? `${label} – click: cut here, drag up/down: cut the clips on other tracks too`
+            : view.tool === 'mute'
             ? `${label} – click: mute/unmute`
             : `${label}${hit.clip.muted ? ' (muted)' : ''} – drag: move, edges: resize, Shift+drag: duplicate, double-click: edit, right-click: delete`,
         );
@@ -507,11 +552,19 @@ export function Playlist() {
       case 'seek':
         seekTo(x);
         break;
+      case 'loop':
+        if (!d.moved && Math.abs(x - d.x0) < 4) break;
+        d.moved = true;
+        setLoopFromDrag(d, x, e.altKey);
+        break;
       case 'delete': {
         const hit = clipAt(x, y);
         if (hit) deleteClips([hit.clip.id], { coalesce: d.key });
         break;
       }
+      case 'slice':
+        sliceAt(ti, d.tick, d.key);
+        break;
       case 'mute': {
         const hit = clipAt(x, y);
         if (hit && !d.done.has(hit.clip.id)) {
@@ -621,7 +674,14 @@ export function Playlist() {
   };
 
   const onPointerUp = () => {
+    const d = drag.current;
     drag.current = null;
+    if (d?.kind === 'loop' && !d.moved && d.prev) {
+      // A right-click outside the time selection extends it to the clicked position.
+      const { start, end } = d.prev;
+      if (d.rawTick >= end) setTransport({ loop: { start, end: Math.ceil(d.rawTick / grid) * grid } });
+      else if (d.rawTick < start) setTransport({ loop: { start: snapFloor(d.rawTick, grid), end } });
+    }
     endCoalesce();
     dirty.current = true;
   };
@@ -714,9 +774,9 @@ export function Playlist() {
         const { project: p, selected: sel } = keyState.current;
         const mod = e.metaKey || e.ctrlKey;
         const chosen = p.clips.filter((c) => sel.has(c.id));
-        // FL Studio tool keys: P draw, B paint, D delete, T mute, E select.
+        // FL Studio tool keys: P draw, B paint, D delete, T mute, C slice, E select.
         if (!mod && !e.altKey && !e.shiftKey) {
-          const tool = ({ KeyP: 'draw', KeyB: 'paint', KeyD: 'delete', KeyT: 'mute', KeyE: 'select' } as const)[e.code as 'KeyP'];
+          const tool = ({ KeyP: 'draw', KeyB: 'paint', KeyD: 'delete', KeyT: 'mute', KeyC: 'slice', KeyE: 'select' } as const)[e.code as 'KeyP'];
           if (tool) {
             setUi((d) => void (d.playlist.tool = tool));
             return true;
@@ -732,8 +792,9 @@ export function Playlist() {
           return true;
         }
         if (mod && e.code === 'KeyD') {
-          // FL Studio: Ctrl+D deselects.
+          // FL Studio: Ctrl+D deselects clips and the time selection.
           setSelected(new Set());
+          if (useStore.getState().transport.loop) setTransport({ loop: null });
           return true;
         }
         if (mod && !e.shiftKey && e.code === 'KeyC' && chosen.length) {
@@ -784,6 +845,7 @@ export function Playlist() {
         {toolButton('paint', <IconBrush size={12} />, 'Paint (B): drag to place several clips')}
         {toolButton('delete', <IconEraser size={12} />, 'Delete (D) – the right mouse button deletes in every tool')}
         {toolButton('mute', <IconMute size={12} />, 'Mute (T): click clips to mute or unmute them')}
+        {toolButton('slice', <IconSlice size={12} />, 'Slice (C): click a clip to cut it at the snap position')}
         {toolButton('select', <IconSelect size={12} />, 'Select (E): drag a rectangle')}
       </div>
       <select className="tb-select" value={view.snap} data-hint="Snap (Main follows the main snap in the toolbar; Alt while dragging: no snap)" onChange={(e) => setView({ snap: e.target.value as SnapId })}>

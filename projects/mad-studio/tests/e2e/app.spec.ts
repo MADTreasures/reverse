@@ -458,3 +458,77 @@ test('score logger: notes played while stopped can be dumped into the pattern; s
   await page.keyboard.up('x');
   await page.keyboard.press('Space');
 });
+
+test('playlist: right-drag in the ruler selects a time range that song playback loops in, Ctrl+D clears it', async ({ page }) => {
+  await boot(page);
+  await page.evaluate(() => window.__madStudio.actions.setUi((d: any) => void (d.windows.channelRack.open = false)));
+  const view = (await state(page)).ui.playlist;
+  const box = (await page.locator('[data-window="playlist"] canvas').boundingBox())!;
+  const xAt = (tick: number) => box.x + 150 + (tick - view.scrollTick) * view.pxPerTick;
+  await page.mouse.move(xAt(384) + 2, box.y + 10);
+  await page.mouse.down({ button: 'right' });
+  await page.mouse.move(xAt(576), box.y + 10, { steps: 5 });
+  await page.mouse.move(xAt(768) + 2, box.y + 10, { steps: 5 });
+  await page.mouse.up({ button: 'right' });
+  const t = (await state(page)).transport;
+  expect(t.loop).toEqual({ start: 384, end: 768 });
+  expect(t.mode).toBe('song');
+  expect(t.songStart).toBe(384);
+
+  await page.evaluate(() => window.__madStudio.actions.setBpm(240));
+  await page.locator('.transport-btn.play').click();
+  await page.waitForTimeout(1600); // more than one pass through the 1-bar loop at 240 BPM
+  const ticks: number[] = [];
+  for (let i = 0; i < 5; i++) {
+    ticks.push(await page.evaluate(() => window.__madStudio.engine.playheadTick()));
+    await page.waitForTimeout(150);
+  }
+  await page.keyboard.press('Space');
+  for (const tick of ticks) {
+    expect(tick).toBeGreaterThanOrEqual(384);
+    expect(tick).toBeLessThan(768);
+  }
+
+  await page.mouse.click(xAt(2000), box.y + 200, { button: 'middle' }); // focus the playlist without editing
+  await page.keyboard.press('ControlOrMeta+d');
+  expect((await state(page)).transport.loop).toBeNull();
+});
+
+test('slice tool (C) cuts a playlist clip and a piano roll note', async ({ page }) => {
+  await boot(page);
+  await page.evaluate(() => window.__madStudio.actions.setUi((d: any) => void (d.windows.channelRack.open = false)));
+  const s = await state(page);
+  const view = s.ui.playlist;
+  const clip = s.project.clips.find((c: any) => c.kind === 'pattern' && c.start === 0 && c.length >= 768);
+  const ti = s.project.tracks.findIndex((t: any) => t.id === clip.trackId);
+  const box = (await page.locator('[data-window="playlist"] canvas').boundingBox())!;
+  const y = box.y + 24 + ti * view.trackHeight - view.scrollY + view.trackHeight / 2;
+  await page.mouse.click(box.x + 150 + 2000 * view.pxPerTick, box.y + 200, { button: 'middle' }); // focus
+  await page.keyboard.press('c');
+  expect((await state(page)).ui.playlist.tool).toBe('slice');
+  await page.mouse.click(box.x + 150 + (384 - view.scrollTick) * view.pxPerTick + 1, y);
+  const parts = (await state(page)).project.clips.filter((c: any) => c.trackId === clip.trackId && c.kind === 'pattern' && c.start < clip.start + clip.length && c.start + c.length > clip.start);
+  expect(parts.map((c: any) => [c.start, c.offset])).toEqual(expect.arrayContaining([[0, 0], [384, 384]]));
+  await page.keyboard.press('p');
+
+  const roll = await openLeadInPianoRoll(page);
+  const key = 59;
+  const p = roll.at(0 + 4, key);
+  await page.mouse.click(p.x, p.y); // a note of the default length at the start
+  await page.evaluate(
+    ({ channelId, patternId }) => {
+      window.__madStudio.actions.updateNotes(patternId, channelId, (list: any[]) => {
+        for (const n of list) if (n.key === 59) n.length = 96;
+      });
+    },
+    { channelId: roll.channelId, patternId: roll.patternId },
+  );
+  await page.keyboard.press('c');
+  const cut = roll.at(48, key);
+  await page.mouse.click(cut.x + 1, cut.y);
+  const notes = (await roll.notes()).filter((n: any) => n.key === key).map((n: any) => [n.start, n.length]);
+  expect(notes).toEqual([
+    [0, 48],
+    [48, 48],
+  ]);
+});

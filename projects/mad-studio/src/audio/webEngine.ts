@@ -1,7 +1,7 @@
 import { DEFAULT_VELOCITY } from '../model/defaults';
 import { findPattern, patternLength } from '../model/patterns';
 import { findPreset } from '../model/presets';
-import { patternTimeline, songTimeline, type Timeline } from '../model/timeline';
+import { patternTimeline, songTimeline, withLoop, type Timeline } from '../model/timeline';
 import { snapRound } from '../model/timing';
 import type { Id, SynthChannel } from '../model/types';
 import { addNotes, endCoalesce, setTransport } from '../store/actions';
@@ -98,7 +98,7 @@ export class WebAudioEngine implements EngineApi {
       this.graph?.sync(this.automation.apply(state.project));
       this.timeline = null;
     }
-    if (state.ui.selectedPatternId !== prev.ui.selectedPatternId) this.timeline = null;
+    if (state.ui.selectedPatternId !== prev.ui.selectedPatternId || state.transport.loop !== prev.transport.loop) this.timeline = null;
     if (state.project.mixer !== prev.project.mixer || state.transport.monitoring !== prev.transport.monitoring) void this.updateMonitoring();
     if (state.transport.mode !== prev.transport.mode && state.transport.playing) {
       this.stop();
@@ -110,7 +110,7 @@ export class WebAudioEngine implements EngineApi {
     if (!this.timeline) {
       const s = useStore.getState();
       this.timeline =
-        s.transport.mode === 'song' ? songTimeline(s.project) : patternTimeline(s.project, s.ui.selectedPatternId);
+        s.transport.mode === 'song' ? withLoop(songTimeline(s.project), s.transport.loop) : patternTimeline(s.project, s.ui.selectedPatternId);
     }
     return this.timeline;
   }

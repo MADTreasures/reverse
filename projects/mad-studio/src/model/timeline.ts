@@ -102,3 +102,16 @@ export function firstEventAtOrAfter(events: SequencedEvent[], tick: number): num
   }
   return lo;
 }
+
+/** The song timeline looping inside a time selection (FL Studio: playback loops in the selected range). */
+export function withLoop(tl: Timeline, loop: { start: number; end: number } | null): Timeline {
+  if (!loop || loop.end <= loop.start) return tl;
+  return { events: tl.events, start: Math.max(0, loop.start), end: loop.end };
+}
+
+/** Maps a position into a loop range the way playback wraps (positions outside fold back in). */
+export function foldIntoLoop(tick: number, loop: { start: number; end: number } | null): number {
+  if (!loop || loop.end <= loop.start || (tick >= loop.start && tick < loop.end)) return tick;
+  const len = loop.end - loop.start;
+  return loop.start + ((((tick - loop.start) % len) + len) % len);
+}

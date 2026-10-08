@@ -140,7 +140,7 @@ export function loadProject(project: Project, fileName: string | null = null): v
     dirty: false,
     fileName,
     ui: { ...fresh, windows: s.ui.windows, topZ: s.ui.topZ, browserOpen: s.ui.browserOpen, browserWidth: s.ui.browserWidth, mainSnap: s.ui.mainSnap },
-    transport: { ...s.transport, songStart: 0, patternStart: 0 },
+    transport: { ...s.transport, songStart: 0, patternStart: 0, loop: null },
   });
   setUi((d) => {
     for (const key of Object.keys(d.windows)) {
@@ -488,6 +488,22 @@ export function deleteNotes(patternId: Id, channelId: Id, ids: Id[], opts?: Edit
   }, opts);
 }
 
+/** Cuts notes at `tick` (FL Studio's slice tool in the piano roll). */
+export function sliceNotes(patternId: Id, channelId: Id, ids: Id[], tick: number, opts?: EditOptions): void {
+  const set = new Set(ids);
+  edit((d) => {
+    const list = notesOf(d, patternId, channelId);
+    if (!list) return;
+    for (const n of [...list]) {
+      if (!set.has(n.id) || tick <= n.start || tick >= n.start + n.length) continue;
+      const cut = Math.round(tick - n.start);
+      list.push({ ...n, id: makeId('n'), start: n.start + cut, length: n.length - cut });
+      n.length = cut;
+    }
+    list.sort((a, b) => a.start - b.start || a.key - b.key);
+  }, opts);
+}
+
 /** FL Studio's quick legato (Ctrl+L): each note (of the selection, or all) lasts until the next note starts. */
 export function legatoNotes(patternId: Id, channelId: Id, selected: ReadonlySet<Id>): void {
   updateNotes(patternId, channelId, (list) => {
@@ -683,6 +699,23 @@ export function setClipsMuted(ids: Id[], muted?: boolean, opts?: EditOptions): v
       else delete c.muted;
     }
   }, opts);
+}
+
+/** Cuts clips at `tick` (FL Studio's slice tool); returns the ids of the new right-hand parts. */
+export function sliceClips(ids: Id[], tick: number, opts?: EditOptions): Id[] {
+  const set = new Set(ids);
+  const created: Id[] = [];
+  edit((d) => {
+    for (const c of [...d.clips]) {
+      if (!set.has(c.id) || tick <= c.start || tick >= c.start + c.length) continue;
+      const cut = Math.round(tick - c.start);
+      const id = makeId('clip');
+      d.clips.push({ ...c, id, start: c.start + cut, length: c.length - cut, offset: c.offset + cut });
+      c.length = cut;
+      created.push(id);
+    }
+  }, opts);
+  return created;
 }
 
 /** Points a pattern clip at another pattern (FL Studio: clip menu › Select source pattern). */

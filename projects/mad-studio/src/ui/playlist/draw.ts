@@ -44,6 +44,8 @@ export interface PlaylistScene {
   autoFocus: { clipId: string; point: number | null; handle: number | null } | null;
   /** Spacing of the finest grid lines (ticks), see gridLineTicks(). */
   lineTicks: number;
+  /** Time selection (song playback loops inside it). */
+  loop: { start: number; end: number } | null;
 }
 
 /** Width of the clip menu icon at the left of a clip's title bar (FL Studio opens the clip menu there). */
@@ -202,6 +204,16 @@ export function drawPlaylist(ctx: CanvasRenderingContext2D, v: PlaylistViewport,
     ctx.stroke();
   }
 
+  // --- time selection
+  if (s.loop) {
+    const lx0 = Math.max(TRACK_W, xOfTick(v, s.loop.start));
+    const lx1 = Math.min(width, xOfTick(v, s.loop.end));
+    if (lx1 > lx0) {
+      ctx.fillStyle = '#ffffff0d';
+      ctx.fillRect(lx0, RULER_H, lx1 - lx0, Math.min(height, below) - RULER_H);
+    }
+  }
+
   // --- song end
   const endX = xOfTick(v, s.songEnd);
   if (endX > TRACK_W && endX < width && project.clips.length) {
@@ -289,6 +301,14 @@ export function drawPlaylist(ctx: CanvasRenderingContext2D, v: PlaylistViewport,
   ctx.fillRect(TRACK_W, RULER_H - 1, width - TRACK_W, 1);
   ctx.font = '10px -apple-system, sans-serif';
   ctx.textBaseline = 'middle';
+  if (s.loop) {
+    const lx0 = Math.max(TRACK_W, xOfTick(v, s.loop.start));
+    const lx1 = Math.min(width, xOfTick(v, s.loop.end));
+    if (lx1 > lx0) {
+      ctx.fillStyle = '#e0705a99';
+      ctx.fillRect(lx0, 0, lx1 - lx0, RULER_H - 1);
+    }
+  }
   const barPx = bar * pxPerTick;
   const every = barPx < 26 ? Math.ceil(26 / barPx) : 1;
   for (let t = Math.floor(v.scrollTick / bar) * bar; t <= endTick; t += bar) {

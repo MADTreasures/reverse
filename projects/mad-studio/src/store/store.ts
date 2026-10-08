@@ -3,7 +3,7 @@ import { DEFAULT_VELOCITY, createEmptyProject } from '../model/defaults';
 import type { SnapId } from '../model/timing';
 import type { Id, Project } from '../model/types';
 
-export type ToolId = 'draw' | 'paint' | 'delete' | 'mute' | 'select';
+export type ToolId = 'draw' | 'paint' | 'delete' | 'mute' | 'slice' | 'select';
 export type PlayMode = 'pattern' | 'song';
 
 /** Fixed windows plus dynamic ones: `channel:<channelId>` and `effect:<mixerIndex>:<slotId>`. */
@@ -94,6 +94,8 @@ export interface TransportState {
   songStart: number;
   /** Where pattern playback starts (ticks into the pattern; set from the piano roll's ruler). */
   patternStart: number;
+  /** Time selection in the playlist (FL Studio: right-drag in the ruler); song playback loops inside it. */
+  loop: { start: number; end: number } | null;
   /** Metronome count-in before recording (FL: recording precount, Ctrl+P). */
   precount: boolean;
   recordFilter: RecordFilter;
@@ -186,6 +188,7 @@ function initialState(): AppState {
       metronome: false,
       songStart: 0,
       patternStart: 0,
+      loop: null,
       precount: false,
       recordFilter: { notes: true, audio: true, automation: true },
       monitoring: 'off',

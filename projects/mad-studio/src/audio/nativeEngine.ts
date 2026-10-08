@@ -7,7 +7,7 @@ import { registerPluginParamName } from '../model/automationTargets';
 import { DEFAULT_VELOCITY } from '../model/defaults';
 import { findPattern, patternLength } from '../model/patterns';
 import { findPreset } from '../model/presets';
-import { patternTimeline, songTimeline, type Timeline } from '../model/timeline';
+import { patternTimeline, songTimeline, withLoop, type Timeline } from '../model/timeline';
 import { secondsPerTick, snapRound } from '../model/timing';
 import type { Id, Project } from '../model/types';
 import type { EngineMessage, NativeEngineBridge } from '../platform/platform';
@@ -56,7 +56,7 @@ export class NativeEngine implements EngineApi {
   private nextHandle = 1;
   private take = 0;
   private timeline: Timeline | null = null;
-  private timelineSentFor: { project: Project; mode: string; pattern: string } | null = null;
+  private timelineSentFor: { project: Project; mode: string; pattern: string; loop: { start: number; end: number } | null } | null = null;
   private lanesSent: unknown = null;
   private syncTimer: ReturnType<typeof setTimeout> | null = null;
   private sentSamples = new Map<string, AudioBuffer>();
@@ -245,7 +245,7 @@ export class NativeEngine implements EngineApi {
       this.markPluginInstances(state.project);
       this.scheduleSync();
     }
-    if (state.ui.selectedPatternId !== prev.ui.selectedPatternId || state.transport.mode !== prev.transport.mode) {
+    if (state.ui.selectedPatternId !== prev.ui.selectedPatternId || state.transport.mode !== prev.transport.mode || state.transport.loop !== prev.transport.loop) {
       this.timeline = null;
       this.scheduleSync();
     }
@@ -280,7 +280,7 @@ export class NativeEngine implements EngineApi {
   private currentTimeline(): Timeline {
     if (!this.timeline) {
       const s = useStore.getState();
-      this.timeline = s.transport.mode === 'song' ? songTimeline(s.project) : patternTimeline(s.project, s.ui.selectedPatternId);
+      this.timeline = s.transport.mode === 'song' ? withLoop(songTimeline(s.project), s.transport.loop) : patternTimeline(s.project, s.ui.selectedPatternId);
     }
     return this.timeline;
   }
@@ -289,9 +289,9 @@ export class NativeEngine implements EngineApi {
     if (!this.ready) return;
     const s = useStore.getState();
     this.send({ type: 'project.sync', project: s.project });
-    const key = { project: s.project, mode: s.transport.mode, pattern: s.ui.selectedPatternId };
+    const key = { project: s.project, mode: s.transport.mode, pattern: s.ui.selectedPatternId, loop: s.transport.loop };
     const t = this.timelineSentFor;
-    if (!t || t.project !== key.project || t.mode !== key.mode || t.pattern !== key.pattern) {
+    if (!t || t.project !== key.project || t.mode !== key.mode || t.pattern !== key.pattern || t.loop !== key.loop) {
       const tl = this.currentTimeline();
       this.send({ type: 'timeline.set', mode: s.transport.mode, loopStart: tl.start, loopEnd: tl.end, events: tl.events });
       this.timelineSentFor = key;

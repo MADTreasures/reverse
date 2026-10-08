@@ -116,6 +116,12 @@ export const IconEraser = (p: IconProps) => (
     <path d="M6 13.5h8M2.8 9.7l6.5-6.5 3.5 3.5-6.5 6.5H5z" />
   </Svg>
 );
+/** Slice tool: a knife. */
+export const IconSlice = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M3 13l7.5-7.5M10.5 5.5l2-2 1 1-2 2zM8 2.5v4M8 9.5v4" />
+  </Svg>
+);
 /** Mute tool: a speaker with a cross. */
 export const IconMute = (p: IconProps) => (
   <Svg {...p}>
