@@ -93,6 +93,10 @@ export const MENUS: MenuSpec[] = [
       { label: 'Move frame', items: ['firstFrame', 'prevFrame', 'nextFrame', 'lastFrame'] },
       '-',
       { label: 'Show animation cels', items: ['onionSkin', 'onionSkinSettings', '-', 'cameraView'] },
+      {
+        label: 'Light table',
+        items: ['enableLightTable', '-', 'registerLayer', 'registerFile', 'registerOnion', '-', 'deregisterLight', 'deregisterAllLight', '-', 'lockCel'],
+      },
       '-',
       'playStop',
       { label: 'Playback settings', items: ['loopPlay'] },
@@ -164,7 +168,7 @@ export const MENUS: MenuSpec[] = [
     ],
   },
   { label: 'Filter', items: ['gaussianBlur'] },
-  { label: 'Window', items: ['workspaceDefault', 'workspaceClassic', '-', 'toggleTimeline', '-', 'togglePalettes', 'toggleMenuBar'] },
+  { label: 'Window', items: ['workspaceDefault', 'workspaceClassic', '-', 'toggleTimeline', 'animationCels', '-', 'togglePalettes', 'toggleMenuBar'] },
   { label: 'Help', items: ['shortcuts', 'about'] },
 ];
 

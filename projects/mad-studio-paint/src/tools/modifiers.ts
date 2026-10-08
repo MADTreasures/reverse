@@ -43,6 +43,7 @@ export function cursorFor(t: EffectiveTool): string {
     case 'selectLayer':
       return 'pointer';
     case 'object':
+    case 'lightTable':
       return 'default';
     case 'text':
       return 'text';

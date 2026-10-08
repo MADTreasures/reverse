@@ -2158,6 +2158,97 @@ test('keyframes move a track over time; a 2D camera folder frames the output', a
   expect(errors).toEqual([]);
 });
 
+test('light table: a cel and an image on the target cel, colour mode, Light table tool, saved', async ({ page }) => {
+  const errors = await boot(page);
+  await page.evaluate(() => void window.__madPaint.runCommand('new'));
+  const dlg = page.getByRole('dialog', { name: 'New canvas' });
+  await dlg.getByLabel('Width').fill('400');
+  await dlg.getByLabel('Height').fill('300');
+  await dlg.getByText('Create animated illustration').click();
+  await dlg.getByLabel('Number of cels').fill('4');
+  await dlg.getByLabel('Frame rate').fill('4');
+  await dlg.getByRole('button', { name: 'OK' }).click();
+  const ruler = (f: number) => page.getByTestId('timeline-ruler').locator('.tl-cell').nth(f - 1).click();
+  const lightOf = (name: string) =>
+    page.evaluate((n) => {
+      const a = window.__madPaint.useStore.getState().doc.layers[0];
+      return (a.children.find((c: any) => c.name === n).lightTable ?? []).map((l: any) => ({ kind: l.source.kind, mode: l.mode, y: Math.round(l.y) }));
+    }, name);
+  // Cel 1: a line at y = 100. Cel 2 on frame 2 is the target cel, locked.
+  await thinPen(page);
+  await drag(page, [50, 100], [350, 100]);
+  await page.getByRole('button', { name: 'New animation cel' }).first().click();
+  await page.locator('[data-testid=layer-panel] .palette-tab', { hasText: 'Animation cels' }).click();
+  const cels = page.getByTestId('animation-cels');
+  await cels.getByRole('button', { name: 'Lock current animation cel as editing target' }).click();
+  await expect(cels.getByTestId('target-cel')).toContainText('A / 2');
+  // Register cel 1 on cel 2's light table.
+  await page.evaluate(() => {
+    const m = window.__madPaint;
+    const a = m.useStore.getState().doc.layers[0];
+    m.actions.selectLayer(a.children.find((c: any) => c.name === '1').id);
+  });
+  await expect(cels.getByTestId('target-cel')).toContainText('A / 2');
+  await cels.getByRole('button', { name: 'Register selected layer' }).click();
+  expect(await lightOf('2')).toEqual([{ kind: 'layer', mode: 'color', y: 0 }]);
+  await expect(cels.getByTestId('cel-light-table').getByTestId('light-layer')).toHaveCount(1);
+  // On frame 2 (cel 2), cel 1 shows faintly; Monochrome in red recolours it.
+  await ruler(2);
+  const faint = await shown(page, 200, 100);
+  expect(faint).toBeGreaterThan(60);
+  expect(faint).toBeLessThan(250);
+  await cels.getByLabel('Color mode').selectOption('mono');
+  await cels.getByLabel('Light table layer color').fill('#ff0000');
+  const red = await page.evaluate(() => window.__madPaint.engine.sampleDisplayed(200, 100, '#ffffff'));
+  expect(red[0]).toBeGreaterThan(200);
+  expect(red[1]).toBeLessThan(200);
+  // Light table tool: dragged 50 px down, without changing cel 1.
+  await cels.getByRole('button', { name: 'Light table tool' }).click();
+  await drag(page, [200, 200], [200, 250], 6);
+  expect(await lightOf('2')).toEqual([{ kind: 'layer', mode: 'mono', y: 50 }]);
+  expect(await shown(page, 200, 100)).toBe(255);
+  expect((await page.evaluate(() => window.__madPaint.engine.sampleDisplayed(200, 150, '#ffffff')))[1]).toBeLessThan(200);
+  // An image file: centred on the canvas.
+  const png = await page.evaluate(async () => {
+    const c = document.createElement('canvas');
+    c.width = 100;
+    c.height = 60;
+    const x = c.getContext('2d')!;
+    x.fillStyle = '#000000';
+    x.fillRect(0, 0, 100, 60);
+    const blob = await new Promise<Blob>((r) => c.toBlob((b) => r(b!), 'image/png'));
+    return [...new Uint8Array(await blob.arrayBuffer())];
+  });
+  await cels.getByTestId('light-file').setInputFiles({ name: 'ref.png', mimeType: 'image/png', buffer: Buffer.from(png) });
+  await expect(cels.getByTestId('cel-light-table').getByTestId('light-layer')).toHaveCount(2);
+  await expect(cels.getByTestId('cel-light-table')).toContainText('ref');
+  const grey = await shown(page, 200, 130);
+  expect(grey).toBeGreaterThan(60);
+  expect(grey).toBeLessThan(250);
+  // Enable light table off: nothing shows.
+  await cels.getByRole('button', { name: 'Enable light table' }).click();
+  expect(await shown(page, 200, 130)).toBe(255);
+  await cels.getByRole('button', { name: 'Enable light table' }).click();
+  // Saved and opened again (with the image).
+  await page.evaluate(async () => {
+    const m = window.__madPaint;
+    await m.openFileBytes({ name: 'light.madpaint', data: await m.buildDocumentBytes() });
+    const a = m.useStore.getState().doc.layers[0];
+    m.actions.selectLayer(a.children.find((c: any) => c.name === '2').id);
+  });
+  expect(await lightOf('2')).toEqual([
+    { kind: 'image', mode: 'color', y: 0 },
+    { kind: 'layer', mode: 'mono', y: 50 },
+  ]);
+  const again = await shown(page, 200, 130);
+  expect(again).toBeGreaterThan(60);
+  expect(again).toBeLessThan(250);
+  // Deregister all.
+  await cels.getByRole('button', { name: 'Deregister all images from light table' }).click();
+  expect(await lightOf('2')).toEqual([]);
+  expect(errors).toEqual([]);
+});
+
 test('frame borders snap strokes that start near them, not along their extension', async ({ page }) => {
   await boot(page);
   await page.evaluate(() => window.__madPaint.runCommand('newFrameFolder'));

@@ -121,6 +121,18 @@ export interface PaintState {
   editKeyed: boolean;
   /** Show camera's field of view: the display applies 2D camera effects. */
   cameraView: boolean;
+  /** Animation cels palette: Enable light table, Show cel-specific / general light table. */
+  lightOn: boolean;
+  lightShowCel: boolean;
+  lightShowGeneral: boolean;
+  /** The light table layer selected in the Animation cels palette. */
+  lightSelection: string | null;
+  /** Lock current animation cel as editing target: that cel stays the target cel. */
+  lockedCel: Id | null;
+  /** Switch opacity target between All or Individual: on changes all light table layers. */
+  lightOpacityAll: boolean;
+  /** The tab shown in the dock with the Layer palette. */
+  layerDockTab: 'layer' | 'history' | 'cels';
 }
 
 /** A keyframe in the Timeline palette: the track (layer) and its frame. */
@@ -184,6 +196,13 @@ function initialState(): PaintState {
     keyInterp: 'linear',
     editKeyed: false,
     cameraView: false,
+    lightOn: true,
+    lightShowCel: true,
+    lightShowGeneral: true,
+    lightSelection: null,
+    lockedCel: null,
+    lightOpacityAll: false,
+    layerDockTab: 'layer',
   };
 }
 

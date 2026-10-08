@@ -15,6 +15,7 @@ import { renderTextLayer } from './textRender';
 import { createCanvas, ctx2d, maskToCanvas } from './canvas';
 import type { OnionSkin } from '../paint/animation';
 import type { Placement } from '../paint/keyframes';
+import { docLightImages, type LightLayer } from '../paint/lightTable';
 import { Compositor } from './compositor';
 import { patchBytes, type PixelPatch } from './edit';
 import { deleteSurface, ensureSurface, getSurface, resizeSurfaces, setSurface, surfaceIds, touch } from './surfaces';
@@ -77,8 +78,13 @@ class PaintEngine {
   }
 
   /** Sets up surfaces and compositor for a (new or opened) document. */
-  load(doc: PaintDocument, images: Map<Id, HTMLCanvasElement> = new Map()): void {
+  load(doc: PaintDocument, images: Map<Id, HTMLCanvasElement> = new Map(), lightImages: Id[] = []): void {
     for (const id of surfaceIds()) deleteSurface(id);
+    // Light table images keep their own size.
+    for (const id of lightImages) {
+      const img = images.get(id);
+      if (img) setSurface(id, img);
+    }
     const masks = new Set(maskIds(doc.layers));
     for (const id of pixelIds(doc.layers)) {
       const s = ensureSurface(id, doc.width, doc.height);
@@ -268,6 +274,15 @@ class PaintEngine {
     this.invalidate();
   }
 
+  /** The light table layers the display shows (null: none). */
+  setLightTable(light: { folder: string | null; layers: LightLayer[] } | null): void {
+    if (!this.compositor) return;
+    const before = this.compositor.light;
+    if (before === light || (before && light && before.folder === light.folder && before.layers.length === light.layers.length && before.layers.every((l, i) => l === light.layers[i]))) return;
+    this.compositor.light = light;
+    this.invalidate();
+  }
+
   /** Edit layers with active keyframes: the track drawn as it is (null: none). */
   setUnkeyed(id: string | null): void {
     if (!this.compositor || this.compositor.unkeyed === id) return;
@@ -332,7 +347,8 @@ class PaintEngine {
 
   /** Resizes all surfaces (canvas size changes). Pixels are anchored at the offset. */
   resizeCanvas(width: number, height: number, offsetX = 0, offsetY = 0): void {
-    resizeSurfaces(width, height, offsetX, offsetY);
+    // Light table images keep their size.
+    resizeSurfaces(width, height, offsetX, offsetY, new Set(this.currentDoc ? docLightImages(this.currentDoc) : []));
     this.compositor.resize(width, height);
   }
 
@@ -340,7 +356,7 @@ class PaintEngine {
   gc(): void {
     const keep = new Set<Id>();
     const add = (doc: PaintDocument | undefined) => {
-      if (doc) for (const id of [...pixelIds(doc.layers), ...renderedIds(doc.layers)]) keep.add(id);
+      if (doc) for (const id of [...pixelIds(doc.layers), ...renderedIds(doc.layers), ...docLightImages(doc)]) keep.add(id);
     };
     add(this.currentDoc ?? undefined);
     for (const e of this.history.entries()) {

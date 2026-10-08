@@ -31,6 +31,7 @@ import { CurveInput } from './curveInput';
 import { correctSession, drawCorrectHover, drawSelectedControlPoints } from './correctTool';
 import { drawGradientHandles, drawLineSelection, lineHandleCursor, objectSession } from './objectTool';
 import { drawCameraGuides, drawKeyBox, keyframeTarget, keyHandleCursor } from './keyframeTool';
+import { drawLightBox, lightHandleCursor, lightTableSession } from './lightTableTool';
 import { isCameraFolder, tracksOf } from '../model/animation';
 import { balloonSession, textSession } from './textTool';
 import { frameSession } from './frameTool';
@@ -71,6 +72,7 @@ class Controller {
     const t = this.current();
     const keyed = t === 'object' ? keyframeTarget() : null;
     if (keyed) return (this.hover && keyHandleCursor(this.hover, this.view, keyed)) ?? 'default';
+    if (t === 'lightTable') return (this.hover && lightHandleCursor(this.hover, this.view)) ?? 'default';
     const line = t === 'object' && this.hover ? lineHandleCursor(this.hover, this.view) : null;
     if (line) return line;
     if (t === 'select' && currentSubTool().brush) return 'none';
@@ -178,6 +180,8 @@ class Controller {
         return frameSession(sub, p);
       case 'correct':
         return correctSession(sub, p, this.view);
+      case 'lightTable':
+        return lightTableSession(p, this.view);
       default:
         return null;
     }
@@ -228,6 +232,7 @@ class Controller {
     // Correct line: control points near the pointer, or the tool's brush circle.
     if (!this.session?.overlay && this.current() === 'correct') drawCorrectHover(ctx, this.view, this.hover, currentSubTool());
     if (!this.session && (this.current() === 'object' || this.current() === 'gradient')) drawGradientHandles(ctx, this.view);
+    if (!this.session && this.current() === 'lightTable') drawLightBox(ctx, this.view);
     drawTransformOverlay(ctx, this.view);
     PolylineSelect.overlay(ctx, this.view);
     CurveInput.overlay(ctx, this.view);

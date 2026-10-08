@@ -6,6 +6,7 @@ import { buildDocumentBytes, listenForNativeOpen, openFileBytes, restoreAutosave
 import { native, isElectron, isMac } from './platform/platform';
 import { keyedTrackOf } from './model/animation';
 import { sanitizeOnion } from './paint/animation';
+import { shownLightLayers } from './store/lightTableActions';
 import * as actions from './store/actions';
 import { getState, useStore } from './store/store';
 import { controller } from './tools/controller';
@@ -71,6 +72,8 @@ function connectEngine(): void {
     if (s.frame !== prev.frame) engine.setFrame(s.frame);
     if (s.onionSkin !== prev.onionSkin || s.onion !== prev.onion) engine.setOnion(s.onionSkin ? s.onion : null);
     if (s.cameraView !== prev.cameraView) engine.setCameraView(s.cameraView);
+    const lightKeys = ['doc', 'activeLayerId', 'lockedCel', 'lightOn', 'lightShowCel', 'lightShowGeneral'] as const;
+    if (lightKeys.some((k) => s[k] !== prev[k])) engine.setLightTable(shownLightLayers(s));
     // Edit layers with active keyframes: the current track is drawn as it is; another track turns it off.
     if (s.editKeyed !== prev.editKeyed || s.activeLayerId !== prev.activeLayerId || s.doc !== prev.doc) {
       const track = s.editKeyed ? (keyedTrackOf(s.doc.layers, s.activeLayerId)?.id ?? null) : null;

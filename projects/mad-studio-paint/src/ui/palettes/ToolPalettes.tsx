@@ -36,7 +36,7 @@ export function ToolPalette() {
           {section.map((id) => {
             const e = PALETTE_ENTRIES.find((x) => x.id === id)!;
             const active = e.id === current.id;
-            const keys = [...new Set(e.tools.map((t) => toolInfo(t).key))].join(', ');
+            const keys = [...new Set(e.tools.map((t) => toolInfo(t).key).filter(Boolean))].join(', ');
             return (
               <button
                 key={e.id}

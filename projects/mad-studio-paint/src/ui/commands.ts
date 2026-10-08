@@ -5,6 +5,7 @@ import { importImages, openDocument, saveDocument, saveDuplicate } from '../io/d
 import * as actions from '../store/actions';
 import { activeFrameFolder } from '../store/frameActions';
 import * as anim from '../store/animationActions';
+import * as light from '../store/lightTableActions';
 import { copy, cut, hasClip, pasteImage } from '../store/clipboard';
 import { getState, setState } from '../store/store';
 import { cancelTransform, confirmTransform, isTransforming, startTransform } from '../tools/transform';
@@ -75,6 +76,21 @@ const layerFlag = (key: 'clip' | 'reference' | 'draft' | 'locked', label: string
 });
 
 const hasTimeline = () => Boolean(getState().doc.timeline?.enabled);
+
+/** Animation > Light table > Select and register file: picks an image file. */
+function pickLightFile(): Promise<void> {
+  return new Promise((resolve) => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'image/*';
+    input.onchange = () => {
+      const f = input.files?.[0];
+      if (f) void light.registerFile(f, f.name).then(resolve);
+      else resolve();
+    };
+    input.click();
+  });
+}
 
 export const COMMANDS: Command[] = [
   // File
@@ -297,6 +313,14 @@ export const COMMANDS: Command[] = [
   { id: 'editKeyed', label: 'Edit layers with active keyframes', run: () => anim.toggleEditKeyed(), enabled: hasTimeline, checked: () => getState().editKeyed },
   { id: 'newCameraFolder', label: '2D camera folder', run: () => void anim.newCameraFolder() },
   { id: 'cameraView', label: "Show camera's field of view", run: () => anim.toggleCameraView(), enabled: hasTimeline, checked: () => getState().cameraView },
+  { id: 'enableLightTable', label: 'Enable light table', run: () => light.toggleLightTable(), checked: () => getState().lightOn },
+  { id: 'registerLayer', label: 'Register selected layer', run: () => light.registerSelectedLayer() },
+  { id: 'registerFile', label: 'Select and register file…', run: () => void pickLightFile() },
+  { id: 'registerOnion', label: 'Register onion skin images', run: () => light.registerOnionSkins(), enabled: hasTimeline },
+  { id: 'deregisterLight', label: 'Deregister selected image from light table', run: () => light.deregisterSelected(), enabled: () => getState().lightSelection !== null },
+  { id: 'deregisterAllLight', label: 'Deregister all images from light table', run: () => light.deregisterAll() },
+  { id: 'lockCel', label: 'Lock current animation cel as editing target', run: () => light.toggleCelLock(), checked: () => getState().lockedCel !== null },
+  { id: 'animationCels', label: 'Animation cels', run: () => light.showCelsPalette(), checked: () => getState().layerDockTab === 'cels' },
   { id: 'selectPrevCel', label: 'Select previous cel', run: () => anim.selectNeighbourCel(-1), enabled: () => anim.activeTrack() !== null },
   { id: 'selectNextCel', label: 'Select next cel', run: () => anim.selectNeighbourCel(1), enabled: () => anim.activeTrack() !== null },
   { id: 'newTimeline', label: 'New timeline…', run: () => openDialog('timelineSettings'), enabled: () => !getState().doc.timeline },

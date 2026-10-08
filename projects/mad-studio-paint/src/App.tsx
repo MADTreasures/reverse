@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { handleDroppedFiles } from './io/documentIO';
 import { isElectron } from './platform/platform';
-import { useStore } from './store/store';
+import { setState, useStore } from './store/store';
 import { CanvasView } from './ui/canvas/CanvasView';
 import { CommandBar } from './ui/CommandBar';
 import { MenuBar } from './ui/MenuBar';
@@ -18,6 +18,7 @@ import { ToolSliders } from './ui/palettes/ToolSliders';
 import { BrushSizePalette, SubToolPalette, ToolPalette, ToolProperty } from './ui/palettes/ToolPalettes';
 import { StatusBar } from './ui/StatusBar';
 import { TimelinePalette } from './ui/palettes/TimelinePalette';
+import { AnimationCelsPalette } from './ui/palettes/AnimationCelsPalette';
 
 function LayerPaletteBody() {
   return (
@@ -89,6 +90,7 @@ function ClassicLeftDock() {
 }
 
 function RightDock() {
+  const tab = useStore((s) => s.layerDockTab);
   return (
     <aside className="dock dock-right">
       <div className="dock-column right-column">
@@ -97,9 +99,12 @@ function RightDock() {
         <Palette
           grow
           testId="layer-panel"
+          active={tab}
+          onSelect={(id) => setState({ layerDockTab: id as typeof tab })}
           tabs={[
             { id: 'layer', label: 'Layer', content: <LayerPaletteBody /> },
             { id: 'history', label: 'History', content: <HistoryPalette /> },
+            { id: 'cels', label: 'Animation cels', content: <AnimationCelsPalette /> },
           ]}
         />
       </div>

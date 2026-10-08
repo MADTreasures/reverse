@@ -452,6 +452,31 @@ const paths: Record<string, ReactNode> = {
   ),
   newCel: <path d="M5.5 2.5h6l3 3v12h-9zM10 8.5v6M7 11.5h6" />,
   layer: <path d="M3 7.5l7-4 7 4-7 4zM3 12.5l7 4 7-4" />,
+  lightTable: (
+    <>
+      <path d="M3 15.5h14l-2-5H5z" />
+      <path d="M10 2.5v3M5.5 4.5l1.5 2M14.5 4.5l-1.5 2" />
+    </>
+  ),
+  opacityAll: (
+    <>
+      <rect x="2.5" y="5.5" width="9" height="9" rx="1" />
+      <rect x="8.5" y="2.5" width="9" height="9" rx="1" strokeDasharray="2 1.6" />
+    </>
+  ),
+  registerLayer: <path d="M3 8.5l7-4 7 4-7 4zM10 13.5v4M8 15.5h4" />,
+  celLight: (
+    <>
+      <rect x="4.5" y="3.5" width="11" height="13" rx="1" />
+      <path d="M7.5 13.5h5l-1-3h-3z" />
+    </>
+  ),
+  generalLight: (
+    <>
+      <rect x="2.5" y="4.5" width="15" height="11" rx="1" />
+      <path d="M6 13.5h8l-1.5-4h-5z" />
+    </>
+  ),
   keyAdd: <path d="M8 4.5l4.5 4.5L8 13.5 3.5 9zM14.5 11v6M11.5 14h6" />,
   keyDelete: <path d="M8 4.5l4.5 4.5L8 13.5 3.5 9zM12.5 12.5l4 4M16.5 12.5l-4 4" />,
   keyEnable: <path d="M10 3l7 7-7 7-7-7zM10 7l3 3-3 3-3-3z" />,

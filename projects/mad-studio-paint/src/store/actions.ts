@@ -1,6 +1,7 @@
 /** Document operations. Every change that should be undoable goes through `commit`. */
 import { celBlocker, celOf, isAnimationFolder, keyedTrackOf, nearestFrameOf, pruneTracks } from '../model/animation';
 import { celAt } from '../paint/animation';
+import { docLightImages } from '../paint/lightTable';
 import { pushHistory } from '../model/color';
 import { createDocument } from '../model/document';
 import {
@@ -142,7 +143,7 @@ export function redo(): void {
 // ------------------------------------------------------------------ document
 
 export function loadDocument(doc: PaintDocument, images: Map<Id, HTMLCanvasElement>, fileName: string | null): void {
-  engine.load(doc, images);
+  engine.load(doc, images, docLightImages(doc));
   setState({
     textEdit: null,
     selectedObjects: [],
@@ -159,6 +160,9 @@ export function loadDocument(doc: PaintDocument, images: Map<Id, HTMLCanvasEleme
     frame: 1,
     playing: false,
     clipSelection: [],
+    keySelection: [],
+    lightSelection: null,
+    lockedCel: null,
     ...(doc.timeline ? { timelineShown: true } : {}),
   });
   fitToWindow();

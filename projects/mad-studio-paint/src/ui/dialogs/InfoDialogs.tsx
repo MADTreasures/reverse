@@ -59,7 +59,7 @@ export function ShortcutsDialog() {
           <h3>Tools</h3>
           <table>
             <tbody>
-              {TOOLS.map((t) => (
+              {TOOLS.filter((t) => t.key).map((t) => (
                 <tr key={t.id}>
                   <td className="kbd">{t.key}</td>
                   <td>{t.label}</td>

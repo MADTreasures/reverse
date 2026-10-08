@@ -44,8 +44,9 @@ export function clearAllSurfaces(): void {
 }
 
 /** Resizes every surface, keeping pixels anchored at (offsetX, offsetY) in the new canvas. */
-export function resizeSurfaces(width: number, height: number, offsetX = 0, offsetY = 0): void {
+export function resizeSurfaces(width: number, height: number, offsetX = 0, offsetY = 0, keep: Set<Id> = new Set()): void {
   for (const [id, old] of surfaces) {
+    if (keep.has(id)) continue;
     const c = createCanvas(width, height);
     ctx2d(c).drawImage(old, offsetX, offsetY);
     surfaces.set(id, c);

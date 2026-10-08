@@ -9,7 +9,8 @@ import { celAt, onionCels, onionOpacity, tintOnion, type OnionSkin } from '../pa
 import { inClips } from '../paint/clips';
 import { cameraMatrix, invert, isRest, placementAt, placementMatrix, type Placement } from '../paint/keyframes';
 import type { Affine } from '../paint/rulers';
-import { clipGroups, flatten } from '../model/layers';
+import { lightMatrix, type LightLayer } from '../paint/lightTable';
+import { clipGroups, findLayer, flatten } from '../model/layers';
 import type { BlendMode, CorrectionLayer, FolderBlendMode, FolderLayer, GradientLayer, Id, Layer, PaintDocument, RasterLayer, TextLayer, VectorLayer } from '../model/types';
 import { anyEffect, applyEdge, applyLayerColor, applyWatercolorEdge, effectReach } from '../paint/effects';
 import { applyDropShadow, applyInnerGlow, applyInnerShadow, applyOuterGlow } from '../paint/styles';
@@ -37,6 +38,8 @@ export interface ComposeOptions {
   onion?: OnionSkin | null;
   /** Apply 2D camera effects: 2D camera folders show what their camera frame sees. */
   camera?: boolean;
+  /** Show the light table layers (only the display does). */
+  light?: boolean;
 }
 
 /** A track placed by its keyframes (or a 2D camera folder seen through its camera). */
@@ -118,6 +121,11 @@ export class Compositor {
   /** Edit layers with active keyframes: this track is drawn without its keyframes. */
   unkeyed: string | null = null;
   private applyCamera = false;
+  /** Light table layers shown under the target cel (in its animation folder; null: over the paper). */
+  light: { folder: string | null; layers: LightLayer[] } | null = null;
+  /** The document being composed (light table layers refer to its layers). */
+  private doc: PaintDocument | null = null;
+  private inLight = false;
 
   constructor(width: number, height: number) {
     this.canvas = createCanvas(width, height);
@@ -159,7 +167,7 @@ export class Compositor {
     const reach = layers.reduce((n, l) => n + (l.visible ? effectReach(l.effects) : 0), 0);
     if (reach) r = intersect(inflate(r, reach), this.bounds) ?? r;
     if (this.camera && doc.timeline?.enabled && layers.some((l) => l.kind === 'folder' && l.camera)) r = this.bounds;
-    this.compose(doc, this.ctx, r, { paper: doc.paper.visible ? doc.paper.color : null, onion: this.onion, camera: this.camera });
+    this.compose(doc, this.ctx, r, { paper: doc.paper.visible ? doc.paper.color : null, onion: this.onion, camera: this.camera, light: true });
     return r;
   }
 
@@ -178,6 +186,9 @@ export class Compositor {
       target.fillStyle = opts.paper;
       target.fillRect(r.x, r.y, r.w, r.h);
     }
+    this.doc = doc;
+    // Without a target cel, the light table lies on the paper.
+    if (opts.light && this.light && this.light.folder === null) this.drawLightTable(target, r, opts);
     this.composeList(doc.layers, target, r, opts);
     target.restore();
   }
@@ -218,28 +229,12 @@ export class Compositor {
   private placedContent(layer: RasterLayer | VectorLayer | TextLayer | GradientLayer | FolderLayer, xf: Placed, r: Rect, opts: ComposeOptions): Ctx {
     const out = this.pool.acquire(r);
     // Only the part of the layer that lands in `r` is needed.
-    const inv = invert(xf.m);
-    const pts = [
-      [r.x, r.y],
-      [r.x + r.w, r.y],
-      [r.x, r.y + r.h],
-      [r.x + r.w, r.y + r.h],
-    ].map(([x, y]) => ({ x: inv[0] * x + inv[2] * y + inv[4], y: inv[1] * x + inv[3] * y + inv[5] }));
-    const x0 = Math.floor(Math.min(...pts.map((p) => p.x))) - 2;
-    const y0 = Math.floor(Math.min(...pts.map((p) => p.y))) - 2;
-    const src = intersect({ x: x0, y: y0, w: Math.ceil(Math.max(...pts.map((p) => p.x))) + 2 - x0, h: Math.ceil(Math.max(...pts.map((p) => p.y))) + 2 - y0 }, this.bounds);
+    const src = this.sourceOf(xf.m, r);
     if (!src) return out;
     const plain = layer.kind !== 'folder' && !maskOf(layer) && !hasEffects(layer);
     const c = plain ? null : this.content(layer, src, opts);
     const source = c ? c.canvas : getSurface(layer.id);
-    if (source) {
-      out.save();
-      out.setTransform(xf.m[0], xf.m[1], xf.m[2], xf.m[3], xf.m[4], xf.m[5]);
-      out.globalAlpha = xf.opacity;
-      out.imageSmoothingQuality = 'high';
-      out.drawImage(source, 0, 0);
-      out.restore();
-    }
+    if (source) this.drawPlaced(out, source, xf.m, xf.opacity);
     if (c) this.pool.release(c);
     return out;
   }
@@ -342,7 +337,7 @@ export class Compositor {
     const mask = maskOf(layer);
     // Frame border folders are always isolated (their panels clip the result), and so are
     // animation folders showing onion skins.
-    if (layer.blend === 'pass-through' && !layer.frame && !this.skinned(layer)) {
+    if (layer.blend === 'pass-through' && !layer.frame && !this.skinned(layer) && !this.lit(layer, opts)) {
       if (layer.opacity >= 1 && !mask) {
         this.composeChildren(layer, target, r, opts);
         return;
@@ -374,6 +369,8 @@ export class Compositor {
       if (s) ctx.drawImage(s, 0, 0);
     } else {
       if (this.skinned(layer)) this.drawOnionSkins(layer, ctx, rr, opts);
+      // The light table lies under the cels of the target cel's animation folder.
+      if (opts.light && this.light?.folder === layer.id) this.drawLightTable(ctx, rr, opts);
       this.composeChildren(layer, ctx, rr, opts);
     }
     const mask = maskOf(layer);
@@ -407,8 +404,81 @@ export class Compositor {
     return cel ? [cel] : [];
   }
 
+  /** Animation folders that show onion skins or the light table are composed on their own. */
   private skinned(layer: Layer): boolean {
     return layer.kind === 'folder' && Boolean(layer.animation) && this.anim.frame !== null && this.anim.onion !== null;
+  }
+
+  private lit(layer: Layer, opts: ComposeOptions): boolean {
+    return Boolean(opts.light) && this.light?.folder === layer.id;
+  }
+
+  /** The part of the source that lands in `r` under the placement `m` (document space, in the canvas). */
+  private sourceOf(m: Affine, r: Rect): Rect | null {
+    const inv = invert(m);
+    const pts = [
+      [r.x, r.y],
+      [r.x + r.w, r.y],
+      [r.x, r.y + r.h],
+      [r.x + r.w, r.y + r.h],
+    ].map(([x, y]) => ({ x: inv[0] * x + inv[2] * y + inv[4], y: inv[1] * x + inv[3] * y + inv[5] }));
+    const x0 = Math.floor(Math.min(...pts.map((p) => p.x))) - 2;
+    const y0 = Math.floor(Math.min(...pts.map((p) => p.y))) - 2;
+    return intersect({ x: x0, y: y0, w: Math.ceil(Math.max(...pts.map((p) => p.x))) + 2 - x0, h: Math.ceil(Math.max(...pts.map((p) => p.y))) + 2 - y0 }, this.bounds);
+  }
+
+  /** Draws `source` placed by `m`. */
+  private drawPlaced(out: Ctx, source: CanvasImageSource, m: Affine, alpha: number): void {
+    out.save();
+    out.setTransform(m[0], m[1], m[2], m[3], m[4], m[5]);
+    out.globalAlpha = alpha;
+    out.imageSmoothingQuality = 'high';
+    out.drawImage(source, 0, 0);
+    out.restore();
+  }
+
+  /**
+   * Light table: each layer's source (another layer, or an image) placed by the Light table tool,
+   * recoloured like onion skins and faded, bottom one first.
+   */
+  private drawLightTable(target: Ctx, r: Rect, opts: ComposeOptions): void {
+    const light = this.light;
+    if (!light || this.inLight || !this.doc) return;
+    const { width, height } = this.doc;
+    this.inLight = true;
+    // The layers shown are drawn as they are, whatever the timeline shows.
+    this.inCel++;
+    try {
+      for (const l of [...light.layers].reverse()) {
+        const m = lightMatrix(l, width, height);
+        const tmp = this.pool.acquire(r);
+        if (l.source.kind === 'image') {
+          const img = getSurface(l.source.image);
+          if (img) this.drawPlaced(tmp, img, m, 1);
+        } else {
+          const layer = findLayer(this.doc.layers, l.source.layer);
+          const src = layer && layer.kind !== 'correction' ? this.sourceOf(m, r) : null;
+          if (layer && src) {
+            const c = this.pool.acquire(src);
+            this.drawContent(layer, c, src, opts);
+            this.drawPlaced(tmp, c.canvas, m, 1);
+            this.pool.release(c);
+          }
+        }
+        if (l.mode !== 'color') {
+          const img = tmp.getImageData(r.x, r.y, r.w, r.h);
+          tintOnion(img.data, l.mode, hexToRgb(l.color) ?? { r: 0, g: 0, b: 0 });
+          tmp.putImageData(img, r.x, r.y);
+        }
+        target.globalAlpha = l.opacity;
+        target.drawImage(tmp.canvas, 0, 0);
+        target.globalAlpha = 1;
+        this.pool.release(tmp);
+      }
+    } finally {
+      this.inCel--;
+      this.inLight = false;
+    }
   }
 
   /** Onion skin: the cels before and after the current one, tinted and faded, under it. */

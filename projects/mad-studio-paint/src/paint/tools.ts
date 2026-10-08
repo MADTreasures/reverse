@@ -29,7 +29,8 @@ export type ToolId =
   | 'text'
   | 'balloon'
   | 'frame'
-  | 'correct';
+  | 'correct'
+  | 'lightTable';
 
 export type BrushMode = 'paint' | 'erase' | 'blend';
 export type TipFlip = 'off' | 'on' | 'random';
@@ -399,6 +400,7 @@ export const TOOLS: ToolInfo[] = [
   { id: 'text', label: 'Text', key: 'T', hint: 'Click to type, drag to type in a frame (the text wraps at it) · click text to edit it · ⌘Enter or a click outside confirms' },
   { id: 'balloon', label: 'Balloon', key: 'T', hint: 'Drag to draw a speech balloon · balloon tail: drag from inside a balloon' },
   { id: 'correct', label: 'Correct line', key: 'Y', hint: 'Correct the lines of a vector layer: control points, pinch, simplify, connect, line width, redraw' },
+  { id: 'lightTable', label: 'Light table', key: '', hint: 'Moves the selected light table layer (Animation cels palette): drag inside to move, a corner to scale, the round handle to rotate' },
 ];
 
 export const toolInfo = (id: ToolId): ToolInfo => TOOLS.find((t) => t.id === id)!;
@@ -732,6 +734,7 @@ export const DEFAULT_SUB_TOOLS: SubTool[] = [
   { id: 'object', tool: 'object', name: 'Object', scaleLineWidth: true },
   { id: 'select-layer', tool: 'selectLayer', name: 'Select layer' },
   { id: 'move', tool: 'move', name: 'Move layer' },
+  { id: 'light-table', tool: 'lightTable', name: 'Light table' },
   { id: 'hand', tool: 'hand', name: 'Hand' },
   { id: 'rotate', tool: 'rotate', name: 'Rotate' },
   { id: 'zoom', tool: 'zoom', name: 'Zoom in' },
@@ -897,7 +900,7 @@ export interface PaletteEntry {
 export const PALETTE_ENTRIES: PaletteEntry[] = [
   { id: 'zoom', label: 'Zoom', icon: 'zoom', tools: ['zoom'] },
   { id: 'navigate', label: 'Move (Hand, Rotate)', icon: 'hand', tools: ['hand', 'rotate'] },
-  { id: 'operation', label: 'Operation (Object, Select layer, Move layer)', icon: 'operation', tools: ['object', 'selectLayer', 'move'] },
+  { id: 'operation', label: 'Operation (Object, Select layer, Move layer, Light table)', icon: 'operation', tools: ['object', 'selectLayer', 'move', 'lightTable'] },
   { id: 'select', label: 'Selection area', icon: 'select', tools: ['select'] },
   { id: 'autoSelect', label: 'Auto select', icon: 'autoSelect', tools: ['autoSelect'] },
   { id: 'eyedropper', label: 'Eyedropper', icon: 'eyedropper', tools: ['eyedropper'] },

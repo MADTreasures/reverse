@@ -3,6 +3,7 @@ import type { Correction } from '../paint/tonal';
 import type { CorrectionLayer, FolderLayer, GradientLayer, Id, Layer, LayerMask, PaintDocument, RasterLayer, TextLayer, VectorLayer } from './types';
 import type { GradientFill } from '../paint/gradient';
 import { remapTrack } from '../paint/animation';
+import { newLightId } from '../paint/lightTable';
 
 export function createRasterLayer(name: string, patch: Partial<RasterLayer> = {}): RasterLayer {
   return {
@@ -306,7 +307,9 @@ export function cloneLayer(layer: Layer, idMap: Map<Id, Id> = new Map()): { copy
     idMap.set(m.id, id);
     return { ...m, id };
   };
-  const copyOne = (l: Layer): Layer => {
+  const copyOne = (l0: Layer): Layer => {
+    // Light table layers of a copied cel are its own.
+    const l: Layer = l0.lightTable ? { ...l0, lightTable: l0.lightTable.map((e) => ({ ...e, id: newLightId() })) } : l0;
     const id = uid(l.kind === 'folder' ? 'f' : l.kind === 'correction' ? 'c' : l.kind === 'vector' ? 'v' : l.kind === 'text' ? 't' : l.kind === 'gradient' ? 'g' : 'l');
     idMap.set(l.id, id);
     const mask = copyMask(l.mask);

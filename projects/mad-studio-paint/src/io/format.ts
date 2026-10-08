@@ -23,11 +23,13 @@ import { sanitizeFrame } from '../paint/frames';
 import { pruneTrack, sanitizeTimeline, sanitizeTrack } from '../paint/animation';
 import { sanitizeClips } from '../paint/clips';
 import { sanitizeKeyTrack } from '../paint/keyframes';
+import { sanitizeLightLayers } from '../paint/lightTable';
 
 export const FORMAT = 'mad-studio-paint';
 /**
  * 2: layer masks, correction layers, effects, rulers. 3: vector and text layers, comic frames.
- * 4: animation (timeline, animation folders). 5: clips, keyframes, 2D camera folders. Older files open unchanged.
+ * 4: animation (timeline, animation folders). 5: clips, keyframes, 2D camera folders, light tables
+ * (their images are stored like layer pixels, as layers/<id>.png). Older files open unchanged.
  */
 export const FORMAT_VERSION = 5;
 export const EXTENSION = 'madpaint';
@@ -77,6 +79,7 @@ function sanitizeLayer(raw: unknown, seen: Set<string>, depth: number): Layer | 
   const rulers = sanitizeRulers(r.rulers);
   const clips = sanitizeClips(r.clips);
   const keys = sanitizeKeyTrack(r.keys);
+  const lightTable = sanitizeLightLayers(r.lightTable);
   const common = {
     id,
     name: str(r.name, 'Layer', 120),
@@ -91,6 +94,7 @@ function sanitizeLayer(raw: unknown, seen: Set<string>, depth: number): Layer | 
     ...(rulers ? { rulers } : {}),
     ...(clips ? { clips } : {}),
     ...(keys && r.kind !== 'correction' ? { keys } : {}),
+    ...(lightTable ? { lightTable } : {}),
   };
   if (r.kind === 'folder') {
     const children = Array.isArray(r.children) ? r.children.map((c) => sanitizeLayer(c, seen, depth + 1)).filter((c): c is Layer => c !== null) : [];
@@ -170,6 +174,7 @@ export function sanitizeDocument(raw: unknown): PaintDocument {
   const layers = Array.isArray(r.layers) ? r.layers.map((l) => sanitizeLayer(l, seen, 0)).filter((l): l is Layer => l !== null) : [];
   const paper = (r.paper && typeof r.paper === 'object' ? r.paper : {}) as Record<string, unknown>;
   const timeline = sanitizeTimeline(r.timeline);
+  const general = sanitizeLightLayers((r.lightTable as Record<string, unknown> | undefined)?.general);
   return {
     id: str(r.id, 'd-imported', 64),
     name: str(r.name, 'Untitled', 120),
@@ -179,6 +184,7 @@ export function sanitizeDocument(raw: unknown): PaintDocument {
     paper: { visible: bool(paper.visible, true), color: color(paper.color, '#ffffff') },
     layers: layers.length ? layers : [createRasterLayer('Layer 1')],
     ...(timeline ? { timeline } : {}),
+    ...(general ? { lightTable: { general } } : {}),
   };
 }
 

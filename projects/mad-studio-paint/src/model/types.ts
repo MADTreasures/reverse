@@ -2,6 +2,7 @@
 import type { AnimationTrack, Timeline } from '../paint/animation';
 import type { Clip } from '../paint/clips';
 import type { KeyTrack } from '../paint/keyframes';
+import type { LightLayer, LightTable } from '../paint/lightTable';
 import type { LayerEffects } from '../paint/effects';
 import type { Ruler } from '../paint/rulers';
 import type { Correction } from '../paint/tonal';
@@ -91,6 +92,8 @@ interface LayerBase {
    * opacity over time. For a 2D camera folder they place its camera frame (always on).
    */
   keys?: KeyTrack;
+  /** A cel's light table (Animation cels palette): reference layers and images shown under it. */
+  lightTable?: LightLayer[];
 }
 
 export interface RasterLayer extends LayerBase {
@@ -174,4 +177,6 @@ export interface PaintDocument {
   layers: Layer[];
   /** Animation: frame rate and length; animation folders hold the tracks. */
   timeline?: Timeline;
+  /** The general light table (shown for every cel). */
+  lightTable?: LightTable;
 }

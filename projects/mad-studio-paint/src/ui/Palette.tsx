@@ -6,10 +6,26 @@ export interface PaletteTab {
   content: ReactNode;
 }
 
-/** A docked palette with tabs, like the panels of desktop illustration apps. */
-export function Palette({ tabs, className = '', grow = false, testId }: { tabs: PaletteTab[]; className?: string; grow?: boolean; testId?: string }) {
-  const [active, setActive] = useState(tabs[0].id);
+/** A docked palette with tabs, like the panels of desktop illustration apps (`active` / `onSelect`: the tab is chosen elsewhere too). */
+export function Palette({
+  tabs,
+  className = '',
+  grow = false,
+  testId,
+  active: chosen,
+  onSelect,
+}: {
+  tabs: PaletteTab[];
+  className?: string;
+  grow?: boolean;
+  testId?: string;
+  active?: string;
+  onSelect?: (id: string) => void;
+}) {
+  const [own, setOwn] = useState(tabs[0].id);
   const [collapsed, setCollapsed] = useState(false);
+  const active = chosen ?? own;
+  const setActive = (id: string) => (onSelect ? onSelect(id) : setOwn(id));
   const tab = tabs.find((t) => t.id === active) ?? tabs[0];
   return (
     <section className={`palette ${grow ? 'grow' : ''} ${collapsed ? 'collapsed' : ''} ${className}`} data-testid={testId}>

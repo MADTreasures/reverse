@@ -2452,3 +2452,114 @@
 .layer-styles .kept-styles .palette-note {
   margin: 4px 0;
 }
+
+/* animation cels palette */
+
+.cels-palette {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  height: 100%;
+  min-height: 0;
+  padding: 4px 6px 8px;
+  overflow: auto;
+}
+
+.cels-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px;
+}
+
+.cels-bar .icon-btn {
+  width: 26px;
+  height: 26px;
+}
+
+.cels-mode {
+  height: 24px;
+  margin-left: 4px;
+  padding: 0 4px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--bg-3);
+  color: var(--text);
+  font-size: 12px;
+}
+
+.cels-color {
+  width: 26px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: none;
+}
+
+.cels-section {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 4px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--well);
+}
+
+.cels-section.off {
+  opacity: 0.5;
+}
+
+.cels-head {
+  color: var(--text-dim);
+  font-size: 11px;
+}
+
+.cels-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 2px 4px;
+  border-radius: var(--radius);
+  text-align: left;
+  color: var(--text);
+}
+
+.cels-row:hover {
+  background: var(--bg-4);
+}
+
+.cels-row.selected {
+  background: var(--select-row);
+}
+
+.cels-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cels-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--text-dim);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.cels-swatch {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+}
+
+.cels-empty {
+  padding: 4px;
+  color: var(--text-faint);
+  font-size: 11px;
+}

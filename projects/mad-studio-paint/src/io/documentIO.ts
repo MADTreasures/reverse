@@ -13,6 +13,7 @@ import { getState, setState, useStore } from '../store/store';
 import { confirmDialog, toast } from '../ui/overlays';
 import { EXTENSION, IMAGE_EXTENSIONS, isDocumentFileName, isImageFileName, isPsdFileName, mimeForName, packDocument, PSD_EXTENSIONS, unpackDocument } from './format';
 import { idbDelete, idbGet, idbSet } from './idb';
+import { docLightImages } from '../paint/lightTable';
 // Type only: the PSD code (and ag-psd) loads when a PSD is opened or saved.
 import type { Pixels } from './psd';
 
@@ -52,7 +53,7 @@ export function renderMerged(opts: { paper: boolean; skipDraft: boolean; scale?:
 export async function buildDocumentBytes(): Promise<Uint8Array> {
   const { doc, activeLayerId } = getState();
   const layers = new Map<Id, Uint8Array>();
-  for (const id of pixelIds(doc.layers)) {
+  for (const id of [...pixelIds(doc.layers), ...docLightImages(doc)]) {
     const s = getSurface(id);
     if (s) layers.set(id, await canvasToBytes(s));
   }
