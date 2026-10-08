@@ -5,8 +5,10 @@ import { patternTimeline, songTimeline, type Timeline } from '../model/timeline'
 import { snapRound, snapTicks } from '../model/timing';
 import type { Id, SynthChannel } from '../model/types';
 import { addNotes, endCoalesce, setTransport } from '../store/actions';
+import { toast } from '../ui/overlays';
 import { useStore, type AppState } from '../store/store';
 import { AutomationRuntime } from './automationRuntime';
+import { WebRecorder, armedTargets, deliverTakes, monitoredTargets, type RecordedTake } from './recorder';
 import { ProjectGraph } from './graph';
 import { SynthInstrument } from './instruments/synth';
 import type { Voice } from './instruments/voice';
@@ -38,6 +40,9 @@ export class AudioEngine {
   private initPromise: Promise<void> | null = null;
   /** Playlist automation clips (song mode). */
   readonly automation = new AutomationRuntime();
+  /** Audio input recording (FL: armed mixer tracks). */
+  private readonly recorder = new WebRecorder();
+  private recordStart: { tick: number; mode: 'song' | 'pattern' } | null = null;
 
   constructor() {
     this.scheduler = new Scheduler({
@@ -92,6 +97,7 @@ export class AudioEngine {
       this.timeline = null;
     }
     if (state.ui.selectedPatternId !== prev.ui.selectedPatternId) this.timeline = null;
+    if (state.project.mixer !== prev.project.mixer || state.transport.monitoring !== prev.transport.monitoring) void this.updateMonitoring();
     if (state.transport.mode !== prev.transport.mode && state.transport.playing) {
       this.stop();
       void this.play();
@@ -127,24 +133,86 @@ export class AudioEngine {
     await this.resume();
     const ctx = this.ctx;
     if (!ctx || this.scheduler.playing) return;
-    const s = useStore.getState();
+    let s = useStore.getState();
     this.timeline = null;
     this.take += 1;
     const from = s.transport.mode === 'song' ? s.transport.songStart : 0;
     if (s.transport.mode === 'song' && this.automation.update(s.project, from)) this.graph?.sync(this.automation.apply(s.project));
-    this.scheduler.start(from, ctx.currentTime + 0.05);
+
+    // Audio recording: armed tracks with an input (asks for microphone access the first time).
+    const targets = s.transport.recording && s.transport.recordFilter.audio ? armedTargets(s.project) : [];
+    let recording = false;
+    if (targets.length) {
+      recording = await this.recorder.open(ctx);
+      if (!recording) toast('Microphone access was denied – audio is not recorded.', 'error');
+      s = useStore.getState();
+      if (this.scheduler.playing) return;
+    }
+
+    // Recording precount (FL: Ctrl+P): one bar of metronome clicks before playback starts.
+    const now = ctx.currentTime + 0.05;
+    let startAt = now;
+    if (s.transport.recording && s.transport.precount && this.graph) {
+      const spb = 60 / s.project.bpm;
+      for (let b = 0; b < s.project.beatsPerBar; b++) this.graph.metronomeClick(now + b * spb, b === 0);
+      startAt = now + s.project.beatsPerBar * spb;
+    }
+    this.scheduler.start(from, startAt);
+    if (recording) {
+      await this.recorder.start(ctx, targets, startAt);
+      this.recordStart = { tick: from, mode: s.transport.mode };
+    }
     this.ticker.start();
     setTransport({ playing: true });
   }
 
+  /** Connects monitored inputs (FL: Monitor external input) to their mixer tracks. */
+  private async updateMonitoring(): Promise<void> {
+    const ctx = this.ctx;
+    const graph = this.graph;
+    if (!ctx || !graph) return;
+    const s = useStore.getState();
+    const targets = monitoredTargets(s.project, s.transport.monitoring);
+    if (targets.length && !(await this.recorder.open(ctx))) return;
+    this.recorder.setMonitoring(ctx, targets, (i) => graph.tracks[i]?.input ?? null);
+  }
+
+  /** Finishes a running recording and hands the takes to the project. */
+  private finishRecording(): void {
+    const start = this.recordStart;
+    if (!start || !this.recorder.active || !this.ctx) return;
+    this.recordStart = null;
+    const s = useStore.getState();
+    const ctx = this.ctx;
+    const trim = s.transport.latencyCompensation ? (ctx.outputLatency || 0) + (ctx.baseLatency || 0) + this.recorder.inputLatency() : 0;
+    void this.recorder.stop(ctx.sampleRate, trim).then((parts) => {
+      const project = useStore.getState().project;
+      const takes: RecordedTake[] = parts.map((p) => ({
+        trackIndex: p.trackIndex,
+        trackName: project.mixer[p.trackIndex]?.name ?? `Insert ${p.trackIndex}`,
+        channels: p.channels,
+        sampleRate: ctx.sampleRate,
+        startTick: start.tick,
+      }));
+      deliverTakes(takes, start.mode);
+    });
+  }
+
   stop(): void {
     const wasPlaying = this.scheduler.playing;
+    this.finishRecording();
     this.scheduler.stop();
     this.ticker.stop();
     if (this.ctx && this.graph) this.graph.stopAll(this.ctx.currentTime);
     for (const [handle, note] of this.held) if (note.recordStart !== null) this.noteOff(handle);
     endCoalesce();
     if (wasPlaying || useStore.getState().transport.playing) setTransport({ playing: false });
+  }
+
+  /** Silences everything immediately (FL: Ctrl+H, stop all sound). */
+  panic(): void {
+    if (this.ctx && this.graph) this.graph.stopAll(this.ctx.currentTime);
+    for (const handle of [...this.held.keys()]) this.noteOff(handle);
   }
 
   togglePlay(): void {
@@ -290,6 +358,7 @@ export class AudioEngine {
 
   // Plugins only exist in the native engine (desktop app); the browser engine ignores these.
   readonly isNative: boolean = false;
+  async capturePluginStates(): Promise<void> {}
   openPluginEditor(_key: string, _title: string): void {}
   setPluginParam(_key: string, _index: number, _value: number): void {}
   requestPluginParams(_key: string): void {}

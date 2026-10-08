@@ -35,6 +35,8 @@ export default defineConfig({
     target: 'es2022',
     outDir: 'dist',
     chunkSizeWarningLimit: 2000,
+    // AudioWorklet modules must be real files: the CSP does not allow scripts from data: URLs.
+    assetsInlineLimit: (file) => (file.endsWith('-worklet.js') ? false : undefined),
   },
   server: { port: 5173, strictPort: true },
 });

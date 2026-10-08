@@ -9,7 +9,12 @@ import { addSamplerChannelFor, assignSampleToChannel, importAudioFiles } from '.
 import {
   addSynthChannel,
   applySynthPreset,
+  cloneChannel,
+  deleteChannel,
   endCoalesce,
+  firstFreeInsert,
+  moveChannel,
+  rotateSteps,
   gestureKey,
   selectChannel,
   setChannelProps,
@@ -29,6 +34,7 @@ import { Knob } from '../controls/Knob';
 import { audioFilesFromDrop, getDragItem, hasDragItem, hasFiles, sampleInfoFor } from '../dnd';
 import { setHint } from '../hint';
 import { addChannelMenu, channelContextMenu } from '../menus/channelMenus';
+import { registerWindowKeys } from '../keyboard';
 import { showMenu, toast } from '../overlays';
 import { WindowFrame } from '../workspace/WindowFrame';
 import { openChannelEditor, openPianoRoll } from '../workspace/windows';
@@ -80,6 +86,47 @@ export function ChannelRack() {
   const bars = pattern ? patternLength(pattern, beatsPerBar) / (beatsPerBar * 96) : 1;
   const markerRef = useRef<HTMLDivElement>(null);
   const ledRowRef = useRef<HTMLDivElement>(null);
+
+  // FL Studio channel rack keys: Up/Down select, Alt+Up/Down move, Alt+C clone, Alt+Del delete,
+  // Ctrl+L route to a free mixer track, Shift+Ctrl+Left/Right rotate the steps.
+  useEffect(
+    () =>
+      registerWindowKeys('channelRack', (e) => {
+        const st = useStore.getState();
+        const list = st.project.channels.filter((c) => matchesFilter(c, st.ui.rackFilter));
+        const sel = st.ui.selectedChannelId;
+        const i = list.findIndex((c) => c.id === sel);
+        const mod = e.metaKey || e.ctrlKey;
+        if ((e.key === 'ArrowUp' || e.key === 'ArrowDown') && !mod) {
+          if (!sel) return false;
+          if (e.altKey) moveChannel(sel, e.key === 'ArrowUp' ? -1 : 1);
+          else {
+            const next = list[Math.min(list.length - 1, Math.max(0, i + (e.key === 'ArrowUp' ? -1 : 1)))];
+            if (next) selectChannel(next.id);
+          }
+          return true;
+        }
+        if (e.altKey && e.code === 'KeyC' && sel) {
+          cloneChannel(sel);
+          return true;
+        }
+        if (e.altKey && (e.key === 'Delete' || e.key === 'Backspace') && sel) {
+          deleteChannel(sel);
+          return true;
+        }
+        if (mod && e.code === 'KeyL' && sel) {
+          const free = firstFreeInsert(st.project);
+          if (free > 0) setChannelProps(sel, { mixerTrack: free });
+          return true;
+        }
+        if (mod && e.shiftKey && (e.key === 'ArrowLeft' || e.key === 'ArrowRight') && sel) {
+          rotateSteps(st.ui.selectedPatternId, sel, e.key === 'ArrowLeft' ? -1 : 1);
+          return true;
+        }
+        return false;
+      }),
+    [],
+  );
 
   useFrame(() => {
     const tick = engine.patternTick();

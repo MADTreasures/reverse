@@ -430,8 +430,17 @@ export function PianoRoll() {
           setSelected(new Set(ids));
           return true;
         }
-        if ((e.key === 'ArrowUp' || e.key === 'ArrowDown') && chosen.length && !mod) {
-          const dk = (e.key === 'ArrowUp' ? 1 : -1) * (e.shiftKey ? 12 : 1);
+        // FL Studio tool keys: P draw, B paint, D delete, E select.
+        if (!mod && !e.altKey && !e.shiftKey) {
+          const tool = ({ KeyP: 'draw', KeyB: 'paint', KeyD: 'delete', KeyE: 'select' } as const)[e.code as 'KeyP'];
+          if (tool) {
+            setUi((d) => void (d.pianoRoll.tool = tool));
+            return true;
+          }
+        }
+        if ((e.key === 'ArrowUp' || e.key === 'ArrowDown') && chosen.length) {
+          // Ctrl/Cmd+Up/Down transposes by an octave (FL), Shift as well.
+          const dk = (e.key === 'ArrowUp' ? 1 : -1) * (e.shiftKey || mod ? 12 : 1);
           updateNotes(pid, ch.id, (l) => {
             for (const n of l) if (sel.has(n.id)) n.key += dk;
           });
@@ -445,6 +454,7 @@ export function PianoRoll() {
           return true;
         }
         if (e.code === 'KeyQ' && !mod) {
+          // Q and FL Studio's Alt+Q both quantize.
           quantize(pid, ch.id, sel, g);
           return true;
         }

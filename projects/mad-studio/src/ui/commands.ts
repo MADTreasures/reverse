@@ -9,15 +9,18 @@ import {
   redo,
   renamePattern,
   renameProject,
+  setChannelProps,
   setTransport,
   setUi,
+  soloChannel,
   stepPattern,
   togglePlayMode,
   undo,
 } from '../store/actions';
+import { createAutomationClip } from '../store/automationActions';
 import { useStore } from '../store/store';
-import { confirmDialog, openDialog, promptDialog } from './overlays';
-import { toggleWindow } from './workspace/windows';
+import { confirmDialog, openDialog, promptDialog, toast } from './overlays';
+import { closeWindow, focusWindow, openWindow, toggleMaximize, toggleWindow } from './workspace/windows';
 
 export type CommandId =
   | 'new'
@@ -28,15 +31,27 @@ export type CommandId =
   | 'export'
   | 'importSamples'
   | 'projectInfo'
+  | 'saveNewVersion'
   | 'undo'
   | 'redo'
+  | 'undoToggle'
   | 'playPause'
+  | 'pause'
   | 'stop'
+  | 'panic'
+  | 'gotoStart'
   | 'toggleMode'
   | 'record'
   | 'metronome'
+  | 'precount'
   | 'typingKeyboard'
   | 'newPattern'
+  | 'newPatternNamed'
+  | 'lastTweakedAutomation'
+  | 'pluginPicker'
+  | 'audioSettings'
+  | 'closeAllWindows'
+  | 'togglePlaylistMax'
   | 'clonePattern'
   | 'renamePattern'
   | 'deletePattern'
@@ -52,30 +67,54 @@ export type CommandId =
 
 const mod = isMac ? '⌘' : 'Ctrl+';
 const shift = isMac ? '⇧' : 'Shift+';
+const alt = isMac ? '⌥' : 'Alt+';
 
+/** Shortcuts follow FL Studio's defaults (Ctrl is Cmd on the Mac). */
 export const SHORTCUTS: Partial<Record<CommandId, string>> = {
-  new: `${mod}N`,
   open: `${mod}O`,
   save: `${mod}S`,
   saveAs: `${shift}${mod}S`,
+  saveNewVersion: `${mod}N`,
   export: `${mod}R`,
-  undo: `${mod}Z`,
+  undoToggle: `${mod}Z`,
+  undo: `${alt}${mod}Z`,
   redo: `${shift}${mod}Z`,
   playPause: 'Space',
+  // macOS reserves ⌘Space (Spotlight) and ⌘H (Hide); the Control key works there.
+  pause: isMac ? '⌃Space' : 'Ctrl+Space',
+  panic: isMac ? '⌃H' : 'Ctrl+H',
+  gotoStart: 'Home',
   toggleMode: 'L',
   record: 'R',
-  metronome: 'M',
+  metronome: `${mod}M`,
+  precount: `${mod}P`,
   typingKeyboard: `${mod}T`,
   newPattern: `${mod}F4`,
-  nextPattern: ']',
-  prevPattern: '[',
+  newPatternNamed: 'F4',
+  renamePattern: 'F2',
+  nextPattern: '+',
+  prevPattern: '−',
   'window:playlist': 'F5',
   'window:channelRack': 'F6',
   'window:pianoRoll': 'F7',
-  toggleBrowser: 'F8',
+  pluginPicker: 'F8',
+  toggleBrowser: `${alt}F8`,
   'window:mixer': 'F9',
+  closeAllWindows: 'F12',
+  togglePlaylistMax: 'Enter',
   shortcuts: 'F1',
 };
+
+/** Ctrl/Cmd+Z in FL Studio undoes the last edit, pressed again it redoes it. */
+let toggledUndo = false;
+
+/** Mute (or with `solo` solo) the n-th channel of the rack (FL: keys 1–0, Ctrl+1–0). */
+export function muteChannelByIndex(index: number, solo: boolean): void {
+  const ch = useStore.getState().project.channels[index];
+  if (!ch) return;
+  if (solo) soloChannel(ch.id);
+  else setChannelProps(ch.id, { muted: !ch.muted });
+}
 
 export async function runCommand(id: CommandId): Promise<void> {
   const s = useStore.getState();
@@ -88,6 +127,9 @@ export async function runCommand(id: CommandId): Promise<void> {
       return openDemo();
     case 'save':
       await saveProject(false);
+      return;
+    case 'saveNewVersion':
+      await saveProject(false, true);
       return;
     case 'saveAs':
       await saveProject(true);
@@ -104,13 +146,37 @@ export async function runCommand(id: CommandId): Promise<void> {
       return;
     }
     case 'undo':
+      toggledUndo = false;
       return undo();
     case 'redo':
+      toggledUndo = false;
       return redo();
+    case 'undoToggle':
+      if (toggledUndo && s.future.length > 0) {
+        toggledUndo = false;
+        return redo();
+      }
+      toggledUndo = s.past.length > 0;
+      return undo();
     case 'playPause':
       return engine.togglePlay();
+    case 'pause': {
+      // Start/pause: stopping keeps the song position so playback continues from there.
+      if (!engine.playing) return void engine.play();
+      const tick = engine.playheadTick();
+      engine.stop();
+      if (tick !== null && s.transport.mode === 'song') engine.seek(tick);
+      return;
+    }
     case 'stop':
       engine.stop();
+      return;
+    case 'panic':
+      engine.stop();
+      engine.panic();
+      return;
+    case 'gotoStart':
+      engine.seek(0);
       return;
     case 'toggleMode':
       return togglePlayMode();
@@ -118,12 +184,43 @@ export async function runCommand(id: CommandId): Promise<void> {
       return setTransport({ recording: !s.transport.recording });
     case 'metronome':
       return setTransport({ metronome: !s.transport.metronome });
+    case 'precount':
+      setTransport({ precount: !s.transport.precount });
+      toast(`Recording precount ${!s.transport.precount ? 'on' : 'off'}`);
+      return;
     case 'typingKeyboard':
       return setUi((d) => {
         d.typingKeyboard = !d.typingKeyboard;
       });
     case 'newPattern':
       addPattern();
+      return;
+    case 'newPatternNamed': {
+      const id = addPattern();
+      const p = findPattern(useStore.getState().project, id);
+      const name = await promptDialog('Pattern name', p?.name ?? '');
+      if (name) renamePattern(id, name);
+      return;
+    }
+    case 'lastTweakedAutomation': {
+      const target = s.ui.lastTweaked;
+      if (!target) toast('Move a control first, then use “Last tweaked”.', 'error');
+      else if (createAutomationClip(target)) toast('Automation clip created for the last tweaked control.');
+      return;
+    }
+    case 'pluginPicker':
+      openDialog('plugins');
+      return;
+    case 'audioSettings':
+      openDialog('audio');
+      return;
+    case 'closeAllWindows':
+      for (const [id, w] of Object.entries(s.ui.windows)) if (w.open && id !== 'playlist') closeWindow(id);
+      return;
+    case 'togglePlaylistMax':
+      openWindow('playlist');
+      toggleMaximize('playlist');
+      focusWindow('playlist');
       return;
     case 'clonePattern':
       clonePattern(s.ui.selectedPatternId);

@@ -10,7 +10,9 @@ export default defineConfig({
   use: {
     baseURL: 'http://localhost:4173',
     viewport: { width: 1440, height: 900 },
-    launchOptions: { args: ['--autoplay-policy=no-user-gesture-required'] },
+    // Fake microphone (a test tone) so the recording workflow can be tested headless.
+    launchOptions: { args: ['--autoplay-policy=no-user-gesture-required', '--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream'] },
+    permissions: ['microphone'],
     trace: 'retain-on-failure',
   },
   projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'], viewport: { width: 1440, height: 900 } } }],

@@ -1,6 +1,8 @@
 import { useRef } from 'react';
 import { engine } from '../../audio/engine';
+import { describeTarget, mixerTarget } from '../../model/automationTargets';
 import { findPattern } from '../../model/patterns';
+import { usePlugins } from '../../plugins/pluginStore';
 import { MAX_BPM, MIN_BPM, formatClock, formatDb, formatPosition, ticksToSeconds, volumeToGain } from '../../model/timing';
 import { isElectron, isMac } from '../../platform/platform';
 import { selectPattern, setBpm, setMixerTrackProps, setTransport } from '../../store/actions';
@@ -18,12 +20,12 @@ import {
   IconPiano,
   IconPlay,
   IconPlaylist,
+  IconPlug,
+  IconPlus,
+  IconPrecount,
   IconRack,
   IconRecord,
-  IconRedo,
-  IconSave,
   IconStop,
-  IconUndo,
 } from '../controls/Icons';
 import { Knob } from '../controls/Knob';
 import { Meter } from '../controls/Meter';
@@ -45,6 +47,7 @@ function fileMenu(): MenuItem[] {
     { separator: true },
     cmd('Save', 'save'),
     cmd('Save as…', 'saveAs'),
+    cmd('Save new version', 'saveNewVersion'),
     { separator: true },
     cmd('Import audio files…', 'importSamples'),
     cmd('Export WAV…', 'export'),
@@ -55,13 +58,18 @@ function fileMenu(): MenuItem[] {
 
 function editMenu(): MenuItem[] {
   const s = useStore.getState();
-  return [cmd('Undo', 'undo', { disabled: s.past.length === 0 }), cmd('Redo', 'redo', { disabled: s.future.length === 0 })];
+  return [
+    cmd('Undo / redo last edit', 'undoToggle', { disabled: s.past.length === 0 && s.future.length === 0 }),
+    cmd('Undo step', 'undo', { disabled: s.past.length === 0 }),
+    cmd('Redo step', 'redo', { disabled: s.future.length === 0 }),
+  ];
 }
 
 function patternsMenu(): MenuItem[] {
   const s = useStore.getState();
   return [
     cmd('New pattern', 'newPattern'),
+    cmd('New pattern with name…', 'newPatternNamed'),
     cmd('Clone pattern', 'clonePattern'),
     cmd('Rename pattern…', 'renamePattern'),
     cmd('Delete pattern…', 'deletePattern', { danger: true }),
@@ -84,13 +92,20 @@ function viewMenu(): MenuItem[] {
     cmd('Piano roll', 'window:pianoRoll', { checked: open('pianoRoll') }),
     cmd('Mixer', 'window:mixer', { checked: open('mixer') }),
     cmd('Browser', 'toggleBrowser', { checked: s.ui.browserOpen }),
+    cmd('Plugin picker', 'pluginPicker'),
+    { separator: true },
+    cmd('Close all windows', 'closeAllWindows'),
   ];
 }
 
 function optionsMenu(): MenuItem[] {
   const s = useStore.getState();
   return [
+    cmd('Audio settings…', 'audioSettings'),
+    cmd('Manage plugins…', 'pluginPicker'),
+    { separator: true },
     cmd('Metronome', 'metronome', { checked: s.transport.metronome }),
+    cmd('Recording precount', 'precount', { checked: s.transport.precount }),
     cmd('Typing keyboard to piano', 'typingKeyboard', { checked: s.ui.typingKeyboard }),
     {
       label: 'Enable MIDI keyboard input',
@@ -109,8 +124,34 @@ function optionsMenu(): MenuItem[] {
   ];
 }
 
+function toolsMenu(): MenuItem[] {
+  const s = useStore.getState();
+  const last = s.ui.lastTweaked;
+  const info = last ? describeTarget(s.project, last) : null;
+  return [
+    { label: info ? `Last tweaked: ${info.label}` : 'Last tweaked: –', header: true },
+    cmd('Create automation clip', 'lastTweakedAutomation', { disabled: !info }),
+    { separator: true },
+    cmd('Plugin manager…', 'pluginPicker'),
+  ];
+}
+
 function helpMenu(): MenuItem[] {
   return [cmd('Keyboard shortcuts', 'shortcuts'), cmd('About MAD Studio', 'about')];
+}
+
+/** Right-click on the record button (FL Studio: recording filter). */
+function recordMenu(): MenuItem[] {
+  const t = useStore.getState().transport;
+  const f = t.recordFilter;
+  return [
+    { label: 'Recording filter', header: true },
+    { label: 'Notes', checked: f.notes, onClick: () => setTransport({ recordFilter: { ...f, notes: !f.notes } }) },
+    { label: 'Audio (armed mixer tracks)', checked: f.audio, onClick: () => setTransport({ recordFilter: { ...f, audio: !f.audio } }) },
+    { separator: true },
+    cmd('Recording precount', 'precount', { checked: t.precount }),
+    { label: 'Audio settings…', onClick: () => void runCommand('audioSettings') },
+  ];
 }
 
 const MENUS: [string, () => MenuItem[]][] = [
@@ -120,6 +161,7 @@ const MENUS: [string, () => MenuItem[]][] = [
   ['Patterns', patternsMenu],
   ['View', viewMenu],
   ['Options', optionsMenu],
+  ['Tools', toolsMenu],
   ['Help', helpMenu],
 ];
 
@@ -132,11 +174,13 @@ export function TopBar() {
   const windows = useStore((s) => s.ui.windows);
   const browserOpen = useStore((s) => s.ui.browserOpen);
   const typing = useStore((s) => s.ui.typingKeyboard);
+  const native = usePlugins((s) => s.nativeEngine);
+  const device = usePlugins((s) => s.device);
   const hint = useHint((s) => s.text);
 
   return (
     <header className={`topbar ${isElectron && isMac ? 'mac-inset' : ''}`}>
-      <div className="topbar-brand">
+      <div className="tb-row tb-row1">
         <div className="brand-row">
           <span className="brand">
             MAD<span>STUDIO</span>
@@ -156,6 +200,84 @@ export function TopBar() {
             ))}
           </nav>
         </div>
+
+        <div className="transport">
+          <div className="mode-switch" data-hint="Pattern or song mode (L)">
+            <button className={transport.mode === 'pattern' ? 'active' : ''} onClick={() => setTransport({ mode: 'pattern' })}>
+              <span className="mode-led" />
+              PAT
+            </button>
+            <button className={transport.mode === 'song' ? 'active' : ''} onClick={() => setTransport({ mode: 'song' })}>
+              <span className="mode-led" />
+              SONG
+            </button>
+          </div>
+          <button className={`transport-btn play ${transport.playing ? 'active' : ''}`} data-hint="Play (Space) · Ctrl/Cmd+Space: play / pause" onClick={() => engine.togglePlay()}>
+            {transport.playing ? <IconPause size={16} /> : <IconPlay size={16} />}
+          </button>
+          <button className="transport-btn" data-hint="Stop (Space)" onClick={() => engine.stop()}>
+            <IconStop size={15} />
+          </button>
+          <button
+            className={`transport-btn record ${transport.recording ? 'active' : ''}`}
+            data-hint="Record (notes, audio) (R) – right-click: recording filter"
+            onClick={() => setTransport({ recording: !transport.recording })}
+            onContextMenu={(e) => {
+              e.preventDefault();
+              showMenu(e, recordMenu());
+            }}
+          >
+            <IconRecord size={14} />
+          </button>
+          <div className="tempo" data-hint="Tempo (BPM) – drag, wheel, double-click to type, right-click: automation">
+            <DragNumber
+              className="tempo-value"
+              value={bpm}
+              min={MIN_BPM}
+              max={MAX_BPM}
+              step={0.5}
+              decimals={3}
+              hint="Tempo"
+              target="proj:bpm"
+              format={(v) => v.toFixed(3)}
+              onChange={(v, g) => setBpm(v, { coalesce: g })}
+            />
+          </div>
+          <TimeDisplay />
+        </div>
+
+        <div className="tb-toggles">
+          <WindowToggle label="Typing keyboard to piano (Ctrl/Cmd+T)" active={typing} onClick={() => void runCommand('typingKeyboard')}>
+            <IconKeyboard size={16} />
+          </WindowToggle>
+          <WindowToggle label="Recording precount (Ctrl/Cmd+P)" active={transport.precount} onClick={() => void runCommand('precount')}>
+            <IconPrecount size={16} />
+          </WindowToggle>
+          <WindowToggle label="Metronome (Ctrl/Cmd+M)" active={transport.metronome} onClick={() => void runCommand('metronome')}>
+            <IconMetronome size={15} />
+          </WindowToggle>
+        </div>
+
+        <div className="topbar-right">
+          <div className="master-section" data-hint="Master volume">
+            <Knob
+              size={26}
+              label="Master volume"
+              value={masterVolume}
+              min={0}
+              max={1}
+              defaultValue={0.8}
+              format={(v) => formatDb(volumeToGain(v))}
+              target={mixerTarget(0, 'volume')}
+              onChange={(v, g) => setMixerTrackProps(0, { volume: v }, { coalesce: g })}
+            />
+            <Scope />
+            <Meter trackIndex={0} width={9} height={30} />
+          </div>
+        </div>
+      </div>
+
+      <div className="tb-row tb-row2">
         <div className="hint-bar" title={hint}>
           {hint || (
             <>
@@ -164,86 +286,9 @@ export function TopBar() {
             </>
           )}
         </div>
-      </div>
-
-      <div className="transport">
-        <div className="mode-switch" data-hint="Pattern / song mode (L)">
-          <button className={transport.mode === 'pattern' ? 'active' : ''} onClick={() => setTransport({ mode: 'pattern' })}>
-            <span className="mode-led" />
-            PAT
-          </button>
-          <button className={transport.mode === 'song' ? 'active' : ''} onClick={() => setTransport({ mode: 'song' })}>
-            <span className="mode-led" />
-            SONG
-          </button>
-        </div>
-        <button className={`transport-btn play ${transport.playing ? 'active' : ''}`} data-hint="Play / pause (Space)" onClick={() => engine.togglePlay()}>
-          {transport.playing ? <IconPause size={16} /> : <IconPlay size={16} />}
-        </button>
-        <button className="transport-btn" data-hint="Stop" onClick={() => engine.stop()}>
-          <IconStop size={15} />
-        </button>
-        <button
-          className={`transport-btn record ${transport.recording ? 'active' : ''}`}
-          data-hint="Record notes from the keyboard into the selected pattern (R)"
-          onClick={() => setTransport({ recording: !transport.recording })}
-        >
-          <IconRecord size={14} />
-        </button>
-        <div className="tempo" data-hint="Tempo (BPM)">
-          <DragNumber
-            className="tempo-value"
-            value={bpm}
-            min={MIN_BPM}
-            max={MAX_BPM}
-            step={0.5}
-            decimals={3}
-            hint="Tempo"
-            format={(v) => v.toFixed(3)}
-            onChange={(v, g) => setBpm(v, { coalesce: g })}
-          />
-          <span className="label">BPM</span>
-        </div>
-        <button
-          className={`icon-btn metronome ${transport.metronome ? 'active' : ''}`}
-          data-hint="Metronome (M)"
-          onClick={() => setTransport({ metronome: !transport.metronome })}
-        >
-          <IconMetronome size={15} />
-        </button>
-        <TimeDisplay />
-        <PatternSelector />
-      </div>
-
-      <div className="topbar-right">
-        <div className="quick-tools">
-          <button className="icon-btn" data-hint="Undo" onClick={() => void runCommand('undo')}>
-            <IconUndo />
-          </button>
-          <button className="icon-btn" data-hint="Redo" onClick={() => void runCommand('redo')}>
-            <IconRedo />
-          </button>
-          <button className="icon-btn" data-hint="Save project" onClick={() => void runCommand('save')}>
-            <IconSave />
-          </button>
-        </div>
-        <div className="master-section" data-hint="Master volume">
-          <Knob
-            size={26}
-            label="Master volume"
-            value={masterVolume}
-            min={0}
-            max={1}
-            defaultValue={0.8}
-            format={(v) => formatDb(volumeToGain(v))}
-            onChange={(v, g) => setMixerTrackProps(0, { volume: v }, { coalesce: g })}
-          />
-          <Scope />
-          <Meter trackIndex={0} width={9} height={34} />
-        </div>
         <div className="window-toggles">
-          <WindowToggle label="Playlist (F5)" active={windows.playlist?.open} onClick={() => void runCommand('window:playlist')}>
-            <IconPlaylist size={16} />
+          <WindowToggle label="Browser (Alt+F8)" active={browserOpen} onClick={() => void runCommand('toggleBrowser')}>
+            <IconBrowser size={16} />
           </WindowToggle>
           <WindowToggle label="Channel rack (F6)" active={windows.channelRack?.open} onClick={() => void runCommand('window:channelRack')}>
             <IconRack size={16} />
@@ -251,16 +296,25 @@ export function TopBar() {
           <WindowToggle label="Piano roll (F7)" active={windows.pianoRoll?.open} onClick={() => void runCommand('window:pianoRoll')}>
             <IconPiano size={16} />
           </WindowToggle>
+          <WindowToggle label="Playlist (F5)" active={windows.playlist?.open} onClick={() => void runCommand('window:playlist')}>
+            <IconPlaylist size={16} />
+          </WindowToggle>
           <WindowToggle label="Mixer (F9)" active={windows.mixer?.open} onClick={() => void runCommand('window:mixer')}>
             <IconMixer size={16} />
           </WindowToggle>
-          <WindowToggle label="Browser (F8)" active={browserOpen} onClick={() => void runCommand('toggleBrowser')}>
-            <IconBrowser size={16} />
-          </WindowToggle>
-          <WindowToggle label="Typing keyboard to piano (Ctrl/Cmd+T)" active={typing} onClick={() => void runCommand('typingKeyboard')}>
-            <IconKeyboard size={16} />
+          <WindowToggle label="Plugin picker / manager (F8)" onClick={() => void runCommand('pluginPicker')}>
+            <IconPlug size={16} />
           </WindowToggle>
         </div>
+        <PatternSelector />
+        <button
+          className={`engine-status ${native ? 'native' : ''}`}
+          data-hint={native ? 'Native audio engine (VST3/AU, low latency) – click for audio settings' : 'Browser audio engine (Web Audio) – click for audio settings'}
+          onClick={() => void runCommand('audioSettings')}
+        >
+          <span className="engine-led" />
+          {native ? `Native${device ? ` · ${Math.round(device.sampleRate / 100) / 10} kHz · ${device.bufferSize}` : ''}` : 'Web Audio'}
+        </button>
       </div>
     </header>
   );
@@ -300,7 +354,7 @@ function PatternSelector() {
   const selected = useStore((s) => findPattern(s.project, s.ui.selectedPatternId));
   const index = patterns.findIndex((p) => p.id === selected?.id);
   return (
-    <div className="pattern-selector" data-hint="Current pattern ([ / ] to switch)">
+    <div className="pattern-selector" data-hint="Pattern selector (+ / − or numpad +/− to switch)">
       <button className="icon-btn" onClick={() => index > 0 && selectPattern(patterns[index - 1].id)}>
         <IconChevronLeft size={12} />
       </button>
@@ -316,6 +370,9 @@ function PatternSelector() {
       </button>
       <button className="icon-btn" onClick={() => index < patterns.length - 1 && selectPattern(patterns[index + 1].id)}>
         <IconChevronRight size={12} />
+      </button>
+      <button className="icon-btn" data-hint="New pattern (Ctrl/Cmd+F4)" onClick={() => void runCommand('newPattern')}>
+        <IconPlus size={12} />
       </button>
     </div>
   );

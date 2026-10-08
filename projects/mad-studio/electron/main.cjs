@@ -106,12 +106,13 @@ function buildMenu() {
     {
       label: 'File',
       submenu: [
-        item('New Project', 'new', 'CmdOrCtrl+N'),
+        item('New Project', 'new'),
         item('Open…', 'open', 'CmdOrCtrl+O'),
         item('Open Demo Song', 'demo'),
         sep,
         item('Save', 'save', 'CmdOrCtrl+S'),
         item('Save As…', 'saveAs', 'Shift+CmdOrCtrl+S'),
+        item('Save New Version', 'saveNewVersion', 'CmdOrCtrl+N'),
         sep,
         item('Import Audio Files…', 'importSamples'),
         item('Export WAV…', 'export', 'CmdOrCtrl+R'),
@@ -123,8 +124,9 @@ function buildMenu() {
     {
       label: 'Edit',
       submenu: [
-        item('Undo', 'undo', 'CmdOrCtrl+Z'),
-        item('Redo', 'redo', 'Shift+CmdOrCtrl+Z'),
+        item('Undo / Redo Last Edit', 'undoToggle', 'CmdOrCtrl+Z'),
+        item('Undo Step', 'undo', 'Alt+CmdOrCtrl+Z'),
+        item('Redo Step', 'redo', 'Shift+CmdOrCtrl+Z'),
         sep,
         { role: 'cut' },
         { role: 'copy' },
@@ -140,19 +142,25 @@ function buildMenu() {
         item('Rename Pattern…', 'renamePattern'),
         item('Delete Pattern…', 'deletePattern'),
         sep,
-        item('Previous Pattern', 'prevPattern', '['),
-        item('Next Pattern', 'nextPattern', ']'),
+        item('Previous Pattern', 'prevPattern', '-'),
+        item('Next Pattern', 'nextPattern', '='),
       ],
     },
     {
       label: 'Transport',
       submenu: [
-        item('Play / Pause', 'playPause', 'Space'),
+        item('Play / Stop', 'playPause', 'Space'),
+        // On macOS Cmd+Space (Spotlight) and Cmd+H (Hide) belong to the system: use the Control key there.
+        item('Play / Pause', 'pause', isMac ? 'Ctrl+Space' : 'CmdOrCtrl+Space'),
         item('Stop', 'stop'),
+        item('Stop All Sound', 'panic', isMac ? 'Ctrl+H' : 'CmdOrCtrl+H'),
         item('Pattern / Song Mode', 'toggleMode', 'L'),
         item('Record', 'record', 'R'),
-        item('Metronome', 'metronome', 'M'),
+        item('Recording Precount', 'precount', 'CmdOrCtrl+P'),
+        item('Metronome', 'metronome', 'CmdOrCtrl+M'),
         item('Typing Keyboard to Piano', 'typingKeyboard', 'CmdOrCtrl+T'),
+        sep,
+        item('Audio Settings…', 'audioSettings'),
       ],
     },
     {
@@ -161,14 +169,24 @@ function buildMenu() {
         item('Playlist', 'window:playlist', 'F5'),
         item('Channel Rack', 'window:channelRack', 'F6'),
         item('Piano Roll', 'window:pianoRoll', 'F7'),
-        item('Browser', 'toggleBrowser', 'F8'),
         item('Mixer', 'window:mixer', 'F9'),
+        item('Plugin Picker / Manager', 'pluginPicker', 'F8'),
+        item('Browser', 'toggleBrowser', 'Alt+F8'),
+        item('Close All Windows', 'closeAllWindows', 'F12'),
         sep,
         { role: 'togglefullscreen' },
         ...(DEV_URL ? [sep, { role: 'reload' }, { role: 'toggleDevTools' }] : []),
       ],
     },
-    { role: 'windowMenu' },
+    // Own window menu: the default one claims Cmd+M, which is FL Studio's metronome shortcut.
+    {
+      label: 'Window',
+      submenu: [
+        { role: 'minimize', accelerator: 'Alt+CmdOrCtrl+M' },
+        { role: 'zoom' },
+        ...(isMac ? [sep, { role: 'front' }] : [{ role: 'close' }]),
+      ],
+    },
     { role: 'help', submenu: [item('Keyboard Shortcuts', 'shortcuts', 'F1'), item('About MAD Studio', 'about')] },
   ];
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
@@ -323,10 +341,19 @@ app.whenReady().then(() => {
     return net.fetch(pathToFileURL(filePath).toString());
   });
 
-  // Web MIDI for hardware keyboards; everything else is denied.
+  // Web MIDI for hardware keyboards and audio-only capture (recording without the native engine);
+  // everything else (camera, screen, location, …) is denied.
   const allowed = new Set(['midi', 'midiSysex']);
-  session.defaultSession.setPermissionRequestHandler((_wc, permission, callback) => callback(allowed.has(permission)));
-  session.defaultSession.setPermissionCheckHandler((_wc, permission) => allowed.has(permission));
+  session.defaultSession.setPermissionRequestHandler((_wc, permission, callback, details) => {
+    if (permission === 'media') {
+      const types = Array.isArray(details?.mediaTypes) ? details.mediaTypes : [];
+      return callback(types.length > 0 && types.every((t) => t === 'audio'));
+    }
+    callback(allowed.has(permission));
+  });
+  session.defaultSession.setPermissionCheckHandler((_wc, permission, _origin, details) =>
+    permission === 'media' ? details?.mediaType === 'audio' : allowed.has(permission),
+  );
 
   registerIpc();
   buildMenu();

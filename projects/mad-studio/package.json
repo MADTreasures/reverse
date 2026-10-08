@@ -42,7 +42,7 @@
   "build": {
     "appId": "io.github.madtreasures.madstudio",
     "productName": "MAD Studio",
-    "copyright": "Copyright © 2026 MADTreasures",
+    "copyright": "Copyright \u00a9 2026 MADTreasures",
     "directories": {
       "output": "release",
       "buildResources": "build"
@@ -76,7 +76,7 @@
       "gatekeeperAssess": false,
       "darkModeSupport": true,
       "extendInfo": {
-        "NSHighResolutionCapable": true
+        "NSMicrophoneUsageDescription": "MAD Studio records audio from your microphone or audio interface onto armed mixer tracks."
       }
     },
     "dmg": {

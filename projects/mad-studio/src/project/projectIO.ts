@@ -1,5 +1,7 @@
 import { engine } from '../audio/engine';
+import { setTakeHandler, type RecordedTake } from '../audio/recorder';
 import { decodeAudioFile, samplePool } from '../audio/samplePool';
+import { encodeWav } from '../audio/wav';
 import { paletteColor } from '../model/colors';
 import { createEmptyProject, createSamplerChannel } from '../model/defaults';
 import { createDemoProject } from '../model/demo';
@@ -11,10 +13,13 @@ import { AUDIO_EXTENSIONS, native, openFiles, saveFile, type OpenedFile, type Sa
 import {
   addChannel,
   addClip,
+  addTracks,
+  disarmAllTracks,
   loadProject,
   markSaved,
   registerSample,
   setChannelSample,
+  setUi,
 } from '../store/actions';
 import { useStore } from '../store/store';
 import { confirmDialog, toast } from '../ui/overlays';
@@ -102,11 +107,21 @@ export function buildProjectBundle(project: Project = useStore.getState().projec
   return packProject(project, samples);
 }
 
-export async function saveProject(saveAs = false): Promise<boolean> {
+/** Next version name: "Song" → "Song_2", "Song_2" → "Song_3" (FL Studio: Save new version). */
+export function nextVersionName(name: string): string {
+  const m = /^(.*?)_(\d+)$/.exec(name);
+  return m ? `${m[1]}_${Number(m[2]) + 1}` : `${name}_2`;
+}
+
+export async function saveProject(saveAs = false, newVersion = false): Promise<boolean> {
+  // Plugin states live in the native engine; fetch them into the project first.
+  await engine.capturePluginStates();
   const { project } = useStore.getState();
-  const suggested = `${project.name.replace(/[\\/:*?"<>|]/g, '_') || 'Untitled'}.${PROJECT_EXTENSION}`;
+  const base = currentFile ? baseName(currentFile.name) : project.name;
+  const stem = newVersion ? nextVersionName(base) : project.name;
+  const suggested = `${stem.replace(/[\\/:*?"<>|]/g, '_') || 'Untitled'}.${PROJECT_EXTENSION}`;
   try {
-    const saved = await saveFile(buildProjectBundle(project), suggested, PROJECT_FILTERS, saveAs ? null : currentFile);
+    const saved = await saveFile(buildProjectBundle(project), suggested, PROJECT_FILTERS, saveAs || newVersion ? null : currentFile);
     if (!saved) return false;
     currentFile = saved;
     markSaved(saved.name);
@@ -172,7 +187,7 @@ export function assignSampleToChannel(channelId: Id, info: SampleInfo, rootKey?:
 }
 
 /** Places a sample on the playlist as an audio clip with its own channel. */
-export function createAudioClip(info: SampleInfo, trackId: Id, tick: number): Id | null {
+export function createAudioClip(info: SampleInfo, trackId: Id, tick: number, opts: { mixerTrack?: number } = {}): Id | null {
   const entry = samplePool.get(info.id);
   if (!entry) return null;
   const project = useStore.getState().project;
@@ -183,13 +198,61 @@ export function createAudioClip(info: SampleInfo, trackId: Id, tick: number): Id
       color: paletteColor(project.channels.length + 2),
       params: { oneShot: true },
       audioClip: true,
+      mixerTrack: opts.mixerTrack,
     }),
-    { samples: [info], select: false },
+    { samples: [info], select: false, autoMixer: opts.mixerTrack === undefined },
   );
   const ticks = secondsToTicks(entry.buffer.duration, project.bpm);
   const length = Math.max(TICKS_PER_STEP, Math.ceil(ticks / TICKS_PER_STEP) * TICKS_PER_STEP);
   return addClip({ kind: 'audio', channelId, trackId, start: Math.max(0, Math.round(tick)), length, offset: 0 });
 }
+
+// ---------------------------------------------------------------------------
+// Recording (FL Studio: takes become audio clips; Song mode places them in the playlist)
+
+/** First playlist track that is empty in [start, end); adds a track if all are busy. */
+export function freePlaylistTrack(start: number, end: number): Id {
+  const p = useStore.getState().project;
+  const busy = (id: Id) => p.clips.some((c) => c.trackId === id && c.start < end && c.start + c.length > start);
+  const free = p.tracks.find((t) => !busy(t.id));
+  if (free) return free.id;
+  addTracks(1);
+  const tracks = useStore.getState().project.tracks;
+  return tracks[tracks.length - 1].id;
+}
+
+/** Turns recorded audio into samples and audio clips, routed to the mixer track they were recorded on. */
+export function addRecordedTake(take: RecordedTake, mode: 'song' | 'pattern'): Id | null {
+  const frames = take.channels[0]?.length ?? 0;
+  if (frames === 0) return null;
+  const buffer = new AudioBuffer({ numberOfChannels: take.channels.length, length: frames, sampleRate: take.sampleRate });
+  take.channels.forEach((c, i) => buffer.copyToChannel(c as Float32Array<ArrayBuffer>, i));
+  const project = useStore.getState().project;
+  const count = Object.values(project.samples).filter((x) => x.recorded).length + 1;
+  const name = `${take.trackName} take ${count}`;
+  const fileName = `${name.replace(/[\\/:*?"<>|]/g, '_')}.wav`;
+  const id = makeId('rec');
+  const info: SampleInfo = { id, name, source: 'user', fileName, recorded: true };
+  samplePool.add({ id, name, buffer, source: 'user', bytes: encodeWav(take.channels, take.sampleRate, 24), fileName });
+  registerSample(info);
+  if (mode === 'song') {
+    const ticks = secondsToTicks(buffer.duration, project.bpm);
+    return createAudioClip(info, freePlaylistTrack(take.startTick, take.startTick + ticks), take.startTick, { mixerTrack: take.trackIndex });
+  }
+  // Pattern mode: FL Studio creates an audio clip channel that can be placed later.
+  const channelId = addChannel(
+    createSamplerChannel({ name, sampleId: id, color: paletteColor(project.channels.length + 2), params: { oneShot: true }, audioClip: true, mixerTrack: take.trackIndex }),
+    { samples: [info], select: true, autoMixer: false },
+  );
+  setUi((u) => void (u.playlistPick = { kind: 'audio', id: channelId }));
+  return channelId;
+}
+
+setTakeHandler((takes, mode) => {
+  for (const take of takes) addRecordedTake(take, mode);
+  toast(`Recorded ${takes.length} take${takes.length === 1 ? '' : 's'}${mode === 'song' ? ' into the playlist' : ' as audio clip channel'}.`);
+  if (useStore.getState().transport.autoUnarm) disarmAllTracks();
+});
 
 // ---------------------------------------------------------------------------
 // Export

@@ -254,3 +254,43 @@ test('automation clips drive the control during song playback', async ({ page })
   expect(value).toBeGreaterThanOrEqual(0);
   expect(value).toBeLessThan(0.8);
 });
+
+test('recording: an armed mixer track records its input into a playlist audio clip', async ({ page }) => {
+  const errors = await boot(page);
+  // Choose the input in the track inspector like in FL Studio: picking an input arms the track.
+  await page.keyboard.press('F9');
+  await page.locator('.strip').nth(11).click({ position: { x: 30, y: 10 } });
+  await page.locator('.io-select').first().click();
+  await page.getByRole('menuitem', { name: 'In 1 - In 2' }).click();
+  let s = await state(page);
+  expect(s.project.mixer[11].input).toBe('stereo:0');
+  expect(s.project.mixer[11].armed).toBe(true);
+  await expect(page.locator('.strip').nth(11).locator('.arm-dot')).toHaveClass(/on/);
+
+  const take = await page.evaluate(async () => {
+    const m = window.__madStudio;
+    const st = m.useStore.getState();
+    m.useStore.setState({ transport: { ...st.transport, mode: 'song', songStart: 0, recording: true } });
+    await m.engine.play();
+    await new Promise((r) => setTimeout(r, 1500));
+    m.engine.stop();
+    for (let i = 0; i < 40; i++) {
+      const p = m.useStore.getState().project;
+      if (Object.values(p.samples).some((x: any) => x.recorded)) break;
+      await new Promise((r) => setTimeout(r, 100));
+    }
+    const p = m.useStore.getState().project;
+    const info: any = Object.values(p.samples).find((x: any) => x.recorded);
+    const entry = info && m.samplePool.get(info.id);
+    const clip = p.clips.find((c: any) => c.kind === 'audio' && p.channels.find((ch: any) => ch.id === c.channelId)?.sampler?.sampleId === info?.id);
+    const ch = clip && p.channels.find((c: any) => c.id === clip.channelId);
+    return { name: info?.name, seconds: entry?.buffer.duration ?? 0, clipStart: clip?.start, mixerTrack: ch?.mixerTrack };
+  });
+  expect(take.name).toMatch(/take 1$/);
+  expect(take.seconds).toBeGreaterThan(0.8);
+  expect(take.clipStart).toBe(0);
+  expect(take.mixerTrack).toBe(11);
+  s = await state(page);
+  expect(s.transport.recording).toBe(true);
+  expect(errors).toEqual([]);
+});

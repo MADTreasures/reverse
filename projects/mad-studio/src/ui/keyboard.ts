@@ -1,7 +1,8 @@
 import { engine } from '../audio/engine';
 import { useStore } from '../store/store';
-import { runCommand, type CommandId } from './commands';
+import { muteChannelByIndex, runCommand, type CommandId } from './commands';
 import { closeDialog, closeMenu, useOverlays } from './overlays';
+import { closeWindow } from './workspace/windows';
 
 /** Physical key → semitone offset (layout independent, so QWERTZ works too). */
 const TYPING_KEYS: Record<string, number> = {
@@ -37,12 +38,13 @@ function releaseAll(): void {
   held.clear();
 }
 
+/** Global shortcuts, following FL Studio's defaults (Ctrl = Cmd on the Mac). */
 function shortcutFor(e: KeyboardEvent): CommandId | null {
   const mod = e.metaKey || e.ctrlKey;
   if (mod) {
     switch (e.code) {
       case 'KeyZ':
-        return e.shiftKey ? 'redo' : 'undo';
+        return e.altKey ? 'undo' : e.shiftKey ? 'redo' : 'undoToggle';
       case 'KeyY':
         return 'redo';
       case 'KeyS':
@@ -50,18 +52,26 @@ function shortcutFor(e: KeyboardEvent): CommandId | null {
       case 'KeyO':
         return 'open';
       case 'KeyN':
-        return 'new';
+        return 'saveNewVersion';
       case 'KeyR':
         return 'export';
       case 'KeyT':
         return 'typingKeyboard';
+      case 'KeyM':
+        return 'metronome';
+      case 'KeyP':
+        return 'precount';
+      case 'KeyH':
+        return 'panic';
+      case 'Space':
+        return 'pause';
       case 'F4':
         return 'newPattern';
       default:
         return null;
     }
   }
-  if (e.altKey) return null;
+  if (e.altKey) return e.code === 'F8' ? 'toggleBrowser' : null;
   switch (e.code) {
     case 'Space':
       return 'playPause';
@@ -69,10 +79,17 @@ function shortcutFor(e: KeyboardEvent): CommandId | null {
       return 'toggleMode';
     case 'KeyR':
       return 'record';
-    case 'KeyM':
-      return 'metronome';
+    case 'Home':
+      return 'gotoStart';
+    case 'Enter':
+    case 'NumpadEnter':
+      return 'togglePlaylistMax';
     case 'F1':
       return 'shortcuts';
+    case 'F2':
+      return 'renamePattern';
+    case 'F4':
+      return 'newPatternNamed';
     case 'F5':
       return 'window:playlist';
     case 'F6':
@@ -80,18 +97,30 @@ function shortcutFor(e: KeyboardEvent): CommandId | null {
     case 'F7':
       return 'window:pianoRoll';
     case 'F8':
-      return 'toggleBrowser';
+      return 'pluginPicker';
     case 'F9':
       return 'window:mixer';
+    case 'F12':
+      return 'closeAllWindows';
     case 'BracketLeft':
     case 'NumpadSubtract':
+    case 'Minus':
       return 'prevPattern';
     case 'BracketRight':
     case 'NumpadAdd':
+    case 'Equal':
       return 'nextPattern';
     default:
       return null;
   }
+}
+
+/** FL Studio: 1–0 mute the first ten channels, Ctrl+1–0 solo them (typing keyboard off). */
+function channelDigit(e: KeyboardEvent): number | null {
+  const m = /^Digit(\d)$/.exec(e.code);
+  if (!m || e.altKey || e.shiftKey) return null;
+  const d = Number(m[1]);
+  return d === 0 ? 9 : d - 1;
 }
 
 function onKeyDown(e: KeyboardEvent): void {
@@ -99,6 +128,13 @@ function onKeyDown(e: KeyboardEvent): void {
   if (e.key === 'Escape') {
     if (overlays.menu) closeMenu();
     else if (overlays.dialog) closeDialog();
+    else if (!isTextInput(e.target)) {
+      // FL Studio: Esc closes the focused window (after the editor had a chance to clear its selection).
+      const s = useStore.getState();
+      const focused = s.ui.focusedWindow;
+      if (focused && windowHandlers.get(focused)?.(e)) return;
+      if (focused && focused !== 'playlist') closeWindow(focused);
+    }
     return;
   }
   if (overlays.dialog || isTextInput(e.target)) return;
@@ -127,6 +163,13 @@ function onKeyDown(e: KeyboardEvent): void {
   if (command) {
     e.preventDefault();
     void runCommand(command);
+    return;
+  }
+
+  const digit = channelDigit(e);
+  if (digit !== null && !s.ui.typingKeyboard) {
+    e.preventDefault();
+    muteChannelByIndex(digit, mod);
   }
 }
 

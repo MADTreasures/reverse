@@ -561,6 +561,14 @@ export function Playlist() {
         const { project: p, selected: sel } = keyState.current;
         const mod = e.metaKey || e.ctrlKey;
         const chosen = p.clips.filter((c) => sel.has(c.id));
+        // FL Studio tool keys: P draw, B paint, D delete, E select.
+        if (!mod && !e.altKey && !e.shiftKey) {
+          const tool = ({ KeyP: 'draw', KeyB: 'paint', KeyD: 'delete', KeyE: 'select' } as const)[e.code as 'KeyP'];
+          if (tool) {
+            setUi((d) => void (d.playlist.tool = tool));
+            return true;
+          }
+        }
         if ((e.key === 'Delete' || e.key === 'Backspace') && chosen.length) {
           deleteClips(chosen.map((c) => c.id));
           setSelected(new Set());
