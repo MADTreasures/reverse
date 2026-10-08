@@ -174,7 +174,7 @@ Status: ✅ gleich · 🟡 ähnlich/vereinfacht · ❌ fehlt (noch)
 | Neue Leinwand | Standard 1600 × 1200 px, 72 dpi; Vorlagen u. a. „UXGA (1600 x 1200px)“, „A4 color (350dpi)“ [NEW] | gleich | ✅ | – |
 | Exportieren | PNG, JPEG, WebP, BMP, TIFF, TGA, PSD …; Skalierung; Entwurfsebenen aus; Transparenz; bei PSD „Output as Background“ [EXP] | PNG, JPEG, WebP und PSD (eine Ebene, auf Wunsch als Hintergrund) mit denselben Optionen; kein BMP/TIFF/TGA | 🟡 | `Photoshop documents: …` |
 | Dateiformat | `.clip` | eigenes `.madpaint` (kein `.clip`) | ❌ | Unit: `.madpaint format` |
-| Photoshop-Dokumente | *Open*: `.psd`/`.psb`, CMYK wird zu RGB [OPN]; *Save Duplicate* → `.psd`/`.psb`, um Ebenen für andere Programme zu behalten, mit Export-Dialog (Output image: u. a. Entwürfe – standardmässig aus; Expression color Graustufen/RGB/CMYK; ICC-Profil) [SAV, DRF] | *Open*: `.psd`/`.psb` (RGB, CMYK, Graustufen, 8/16/32 Bit) mit Ordnern, Masken, Schnittmasken, Modi, Deckkraft, Sperren; Einstellungsebenen → Korrekturebenen (alle neun Arten); Text/Form/Smartobjekt als Pixel; „Paper“ → Papier. *Save duplicate → .psd*: Ebenen, Papier als Ebene „Paper“, Entwürfe wählbar (aus), Vektor/Text/Verlauf gerastert, Korrekturebenen → Einstellungsebenen, Rahmenordner → Gruppe mit Rahmenmaske; nur RGB, kein ICC-Profil, kein `.psb` schreiben (Leinwand ≤ 8000 px passt in PSD) | 🟡 | `Photoshop documents: …`, Unit: `PSD documents` |
+| Photoshop-Dokumente | *Open*: `.psd`/`.psb`, CMYK wird zu RGB [OPN]; *Save Duplicate* → `.psd`/`.psb`, um Ebenen für andere Programme zu behalten, mit Export-Dialog (Output image: u. a. Entwürfe – standardmässig aus; Expression color Graustufen/RGB/CMYK; ICC-Profil) [SAV, DRF] | *Open*: `.psd`/`.psb` (RGB, CMYK, Graustufen, 8/16/32 Bit) mit Ordnern, Masken, Schnittmasken, Modi, Deckkraft, Sperren; Einstellungsebenen → Korrekturebenen (alle neun Arten); Textebenen → editierbare Textrahmen; Ebenenstile → Randeffekt, Ebenenfarbe, Schatten, Schein (Rest aufbewahrt); Form/Smartobjekt/verkrümmter Text als Pixel; „Paper“ → Papier. *Save duplicate → .psd*: Ebenen, Papier als Ebene „Paper“, Entwürfe wählbar (aus), Textrahmen als Photoshop-Text (vertikal als Pixel), Effekte als Ebenenstile, Vektor/Verlauf gerastert, Korrekturebenen → Einstellungsebenen, Rahmenordner → Gruppe mit Rahmenmaske; nur RGB, kein ICC-Profil, kein `.psb` schreiben (Leinwand ≤ 8000 px passt in PSD) | 🟡 | `Photoshop documents: …`, `Photoshop documents keep text editable …`, Unit: `PSD documents`, `text boxes as Photoshop text`, `Photoshop documents with text and layer styles`, `layer styles` |
 | Bild ablegen | auf der Leinwand → neue Leinwand, auf der Ebenen-Palette → Ebene [IMP, PC] | gleich | ✅ | – |
 
 ### Animation
@@ -294,14 +294,21 @@ vergleichen. Abweichungen bitte als Issue oder Nachricht melden – mit dem Punk
 - **Mehrfaches Drücken** einer geteilten Werkzeugtaste (Zyklus) belegt nur die Celsys-Tutorialseite
   „Art Rocket“, nicht das Handbuch.
 - **PSD:** Das Handbuch nennt Formate und Dialoge, aber nicht, wie Ebenenarten und -modi
-  übersetzt werden. Eigene Annahmen: Vektor-, Text- und Verlaufsebenen als Pixel; das Papier
+  übersetzt werden. Eigene Annahmen: Vektor- und Verlaufsebenen als Pixel; Textrahmen als
+  Photoshop-Text (ohne Umbruch als Punkttext, dessen Anker auf der ersten Grundlinie liegt –
+  geschätzt als halbe Zeilenhöhe + 0,33 × Schriftgrösse unter dem Rahmenrand –, mit Umbruch als
+  Absatztext mit dem Rahmen als Box; CSS-Schriftfamilie ↔ PostScript-Name über eine kleine Tabelle,
+  sonst ohne Leerzeichen; fett/kursiv als „Faux“-Stil; Textkante ↔ Kontur außen); das Papier
   als unterste Ebene „Paper“ (als normale Ebene, nicht als Photoshop-Hintergrund);
-  „Glow dodge“ → Farbig abwedeln, „Add“ und „Add (Glow)“ → Linear abwedeln; Randeffekt,
-  Ebenenfarbe und Rasterfolie werden in die Pixel gerechnet (samt Maske); Rahmenordner → Gruppe
-  mit Maske aus Rahmenflächen und Rahmenlinie. Beim Öffnen gilt eine leere Maske mit
-  Hintergrund Schwarz als „keine Maske“ (wie bei psd-tools; manche Programme schreiben sie für
-  jede Ebene), Ebenenstile entfallen, und ohne Ebene „Paper“ ist das Papier aus (wie
-  Photoshop: Transparenz). Die Mathematik der Korrekturebenen ist eigene; Photoshop rechnet
+  „Glow dodge“ → Farbig abwedeln, „Add“ und „Add (Glow)“ → Linear abwedeln; Randeffekt (Kante)
+  ↔ Kontur außen, Ebenenfarbe ↔ Farbüberlagerung (beim Öffnen mit Unterfarbe gleich Farbe, also
+  alle Pixel in der Farbe), Rasterfolie und Aquarellkante werden in die Pixel gerechnet (samt
+  Maske); Schatten und Schein werden mit normaler Füllmethode gerechnet (Photoshops
+  Standardmethoden Multiplizieren/Negativ multiplizieren nicht), „Spread/Choke“ als Prozent
+  der Grösse, Weichzeichnen als dreifacher Box-Filter; Rahmenordner → Gruppe mit Maske aus
+  Rahmenflächen und Rahmenlinie. Beim Öffnen gilt eine leere Maske mit Hintergrund Schwarz als
+  „keine Maske“ (wie bei psd-tools; manche Programme schreiben sie für jede Ebene), und ohne
+  Ebene „Paper“ ist das Papier aus (wie Photoshop: Transparenz). Die Mathematik der Korrekturebenen ist eigene; Photoshop rechnet
   Farbton/Sättigung u. a. etwas anders. Geprüft wurde mit einem unabhängigen Leser (psd-tools)
   und einem unabhängigen Schreiber (pytoshop, 16 Bit), nicht mit Photoshop selbst.
 

@@ -1,25 +1,31 @@
 /**
  * Photoshop documents (.psd, .psb) through ag-psd (MIT licence).
  *
- * Opening keeps the layer tree: folders, masks, clipping, blending modes, opacity, visibility, locks
- * and the adjustment layers that match a correction layer. Text, shape and smart object layers come
- * in as their pixels; a bottom layer called "Paper" becomes the paper again.
+ * Opening keeps the layer tree: folders, masks, clipping, blending modes, opacity, visibility, locks,
+ * the adjustment layers that match a correction layer, text layers (as editable text boxes) and
+ * layer styles (see psdStyles.ts). Shape and smart object layers come in as their pixels; a bottom
+ * layer called "Paper" becomes the paper again.
  *
- * Saving writes the same structure. Like the reference, vector, text and gradient layers are
- * rasterized, draft layers can be left out, and the paper is the bottom layer "Paper". Layers with
- * effects Photoshop lacks (border, layer colour, screentone) are written as they look, with their mask
- * applied. Frame border folders become groups masked by their panels, with the border as a layer.
+ * Saving writes the same structure. Text layers stay text (point or paragraph text; vertical text
+ * and balloons as pixels), border (edge), layer colour, shadows and glows become layer styles.
+ * Vector and gradient layers are rasterized, draft layers can be left out, and the paper is the
+ * bottom layer "Paper". Layers with effects Photoshop lacks (screentone, watercolor edge) are
+ * written as they look, with their mask applied. Frame border folders become groups masked by
+ * their panels, with the border as a layer.
  *
  * Pure (no DOM): pixels go in and out as straight RGBA at document size.
  */
 import { getCompositeImageData, getLayerImageData, getLayerMaskImageData, getLayerRealMaskImageData, initializeCanvas, readPsd, writePsdUint8Array } from 'ag-psd';
-import type { AdjustmentLayer, BlendMode as PsdBlendMode, Color, CurvesAdjustment, Layer as PsdLayer, LayerEffectsInfo, LayerMaskData, LevelsAdjustment, PixelData, Psd } from 'ag-psd';
+import type { AdjustmentLayer, BlendMode as PsdBlendMode, CurvesAdjustment, Layer as PsdLayer, LayerMaskData, LevelsAdjustment, PixelData, Psd } from 'ag-psd';
 import { rgbToHex, hexToRgb } from '../model/color';
 import { createDocument, MAX_CANVAS_SIDE } from '../model/document';
-import { clipGroups, createCorrectionLayer, createFolder, createLayerMask, createRasterLayer } from '../model/layers';
-import type { BlendMode, FolderBlendMode, FolderLayer, Id, Layer, LayerMask, PaintDocument } from '../model/types';
+import { clipGroups, createCorrectionLayer, createFolder, createLayerMask, createRasterLayer, createTextLayer } from '../model/layers';
+import type { BlendMode, FolderBlendMode, FolderLayer, Id, Layer, LayerMask, PaintDocument, TextLayer } from '../model/types';
 import { sanitizeCorrection, type Channel, type Correction, type Levels } from '../paint/tonal';
 import { celAt } from '../paint/animation';
+import type { TextBox } from '../paint/text';
+import { colorHex, fromPsdEffects, toPsdEffects } from './psdStyles';
+import { fromPsdText, textLayerName, toPsdText } from './psdText';
 
 /** Straight RGBA pixels. */
 export interface Pixels {
@@ -146,13 +152,6 @@ export function toAdjustment(c: Correction): AdjustmentLayer {
         opacityStops: c.stops.map((s) => ({ opacity: s.opacity, location: s.pos, midpoint: 0.5 })),
       };
   }
-}
-
-/** sRGB colour of a Photoshop colour record (other colour models: black). */
-function colorHex(c: Color | undefined): string {
-  if (c && 'r' in c) return rgbToHex({ r: Math.round(c.r), g: Math.round(c.g), b: Math.round(c.b) });
-  if (c && 'fr' in c) return rgbToHex({ r: Math.round(c.fr * 255), g: Math.round(c.fg * 255), b: Math.round(c.fb * 255) });
-  return '#000000';
 }
 
 /** The correction layer for an adjustment layer, or null for kinds we lack (exposure, vibrance, …). */
@@ -286,9 +285,12 @@ export interface PsdSource {
   maskPixels(mask: LayerMask): Pixels | null;
   /** Frame border folders: the panels with their border line as alpha, and the border line itself. */
   frameShapes(folder: FolderLayer): { area: Pixels; border: Pixels | null };
+  /** A text box of a text layer drawn on its own, or the layer's balloons. */
+  textPixels(layer: TextLayer, part: TextBox | 'balloons'): Pixels | null;
 }
 
-const hasEffects = (l: Layer) => Boolean(l.effects?.border?.enabled || l.effects?.layerColor?.enabled || l.effects?.tone?.enabled);
+/** Effects Photoshop has no layer style for: the layer is written as it looks. */
+const bakes = (l: Layer) => Boolean(l.effects?.tone?.enabled || (l.effects?.border?.enabled && l.effects.border.kind === 'watercolor'));
 
 function common(l: Layer): PsdLayer {
   const out: PsdLayer = { name: l.name, hidden: !l.visible, opacity: l.opacity, clipping: l.clip, blendMode: toPsdBlend(l.blend) };
@@ -308,9 +310,41 @@ function withMask(out: PsdLayer, l: Layer, src: PsdSource, frame?: Pixels): PsdL
   return out;
 }
 
+/** The layer's effects as Photoshop layer styles (when it has any). */
+function styled(out: PsdLayer, l: Layer, edge?: { width: number; color: string }): PsdLayer {
+  const effects = toPsdEffects(l.effects, edge);
+  if (effects) out.effects = effects;
+  return out;
+}
+
+/**
+ * A text layer: one text box becomes a Photoshop text layer; several (or with balloons) a group of
+ * them with the balloons as pixels below. Vertical text stays pixels (writing it as text can
+ * break Photoshop documents).
+ */
+function exportText(l: TextLayer, src: PsdSource): PsdLayer {
+  const part = (t: TextBox): PsdLayer => {
+    const out: PsdLayer = { name: textLayerName(t), opacity: 1, blendMode: 'normal', ...trimmed(src.textPixels(l, t)) };
+    if (t.vertical || !t.text.trim()) return out;
+    out.text = toPsdText(t);
+    if (t.edge > 0) out.effects = toPsdEffects(undefined, { width: t.edge, color: t.edgeColor });
+    return out;
+  };
+  if (l.texts.length === 1 && l.balloons.length === 0) {
+    const t = l.texts[0];
+    const one = part(t);
+    return withMask(styled({ ...common(l), ...one, name: l.name }, l, t.edge > 0 && one.text ? { width: t.edge, color: t.edgeColor } : undefined), l, src);
+  }
+  // Bottom first: the balloons, then the texts in their order.
+  const children: PsdLayer[] = [];
+  if (l.balloons.length) children.push({ name: 'Balloons', opacity: 1, blendMode: 'normal', ...trimmed(src.textPixels(l, 'balloons')) });
+  children.push(...l.texts.map(part));
+  return withMask(styled({ ...common(l), opened: true, children }, l), l, src);
+}
+
 function exportLayer(l: Layer, src: PsdSource): PsdLayer {
   if (l.kind === 'correction') return withMask({ ...common(l), adjustment: toAdjustment(l.correction) }, l, src);
-  if (hasEffects(l)) {
+  if (bakes(l)) {
     // Drawn as it looks: effects, mask and (for a screentone that shows the opacity in its dots) opacity.
     const tone = l.effects?.tone;
     const out: PsdLayer = { ...common(l), ...trimmed(src.bakedPixels(l)) };
@@ -319,14 +353,15 @@ function exportLayer(l: Layer, src: PsdSource): PsdLayer {
     if (l.blend === 'pass-through') out.blendMode = 'normal';
     return out;
   }
-  if (l.kind !== 'folder') return withMask({ ...common(l), ...trimmed(src.layerPixels(l)) }, l, src);
+  if (l.kind === 'text') return exportText(l, src);
+  if (l.kind !== 'folder') return withMask(styled({ ...common(l), ...trimmed(src.layerPixels(l)) }, l), l, src);
   const children = exportList(l.children, src, l);
-  if (!l.frame) return withMask({ ...common(l), opened: l.expanded, children }, l, src);
+  if (!l.frame) return withMask(styled({ ...common(l), opened: l.expanded, children }, l), l, src);
   // Frame border folder: content masked by the panels; the border on top, inside the group.
   const shapes = src.frameShapes(l);
   if (shapes.border) children.push({ name: 'Frame border', opacity: 1, blendMode: 'normal', ...trimmed(shapes.border) });
   const blendMode = l.blend === 'pass-through' ? 'normal' : toPsdBlend(l.blend);
-  return withMask({ ...common(l), blendMode, opened: l.expanded, children }, l, src, shapes.area);
+  return withMask(styled({ ...common(l), blendMode, opened: l.expanded, children }, l), l, src, shapes.area);
 }
 
 /**
@@ -379,7 +414,31 @@ export function encodeFlatPsd(image: Pixels, dpi: number, background: boolean): 
 
 export function encodePsd(src: PsdSource): Uint8Array {
   // Without noBackground an opaque bottom layer (the paper) would become Photoshop's locked Background.
-  return writePsdUint8Array(buildPsd(src), { noBackground: true });
+  try {
+    return writePsdUint8Array(buildPsd(src), { noBackground: true });
+  } catch (err) {
+    // Kept styles come from files: if one cannot be written, write the document without them.
+    const clean = withoutKept(src.doc);
+    if (clean === src.doc) throw err;
+    return writePsdUint8Array(buildPsd({ ...src, doc: clean }), { noBackground: true });
+  }
+}
+
+/** The document without kept Photoshop styles (the same document when it has none). */
+function withoutKept(doc: PaintDocument): PaintDocument {
+  let found = false;
+  const clean = (layers: Layer[]): Layer[] =>
+    layers.map((l) => {
+      let out = l;
+      if (l.effects?.kept) {
+        found = true;
+        const { kept: _kept, ...rest } = l.effects;
+        out = { ...l, effects: rest };
+      }
+      return out.kind === 'folder' ? { ...out, children: clean(out.children) } : out;
+    });
+  const layers = clean(doc.layers);
+  return found ? { ...doc, layers } : doc;
 }
 
 // ------------------------------------------------------------------ opening
@@ -456,17 +515,11 @@ function uniformColor(p: Pixels): string | null {
   return rgbToHex({ r: d[0], g: d[1], b: d[2] });
 }
 
-/** True if the layer has a layer style that is switched on. */
-function hasStyles(fx: LayerEffectsInfo | undefined): boolean {
-  if (!fx || fx.disabled) return false;
-  return Object.entries(fx).some(([k, v]) => k !== 'disabled' && k !== 'scale' && [v].flat().some((e) => e && typeof e === 'object' && (e as { enabled?: boolean }).enabled !== false));
-}
-
 /**
  * Reads a Photoshop document. `onPixels` receives the pixels of each raster layer and mask (by
  * layer or mask id) as soon as they are decoded, so only about one layer is held at a time.
  */
-export function decodePsd(bytes: Uint8Array, name: string, onPixels: (id: Id, pixels: Pixels) => void): PsdImport {
+export function decodePsd(bytes: Uint8Array, name: string, onPixels: (id: Id, pixels: Pixels) => void, fit?: (t: TextBox) => TextBox): PsdImport {
   // Structure first; bitmaps are decoded layer by layer once their sizes are checked.
   const psd = readPsd(bytes, { useRawData: true, skipThumbnail: true, skipLinkedFilesData: true });
   const { width, height } = psd;
@@ -506,7 +559,11 @@ export function decodePsd(bytes: Uint8Array, name: string, onPixels: (id: Id, pi
       clip: Boolean(l.clipping),
       locked: Boolean(l.protected?.composite && l.protected.position && l.protected.transparency),
     };
-    if (hasStyles(l.effects)) notes.add('Layer styles were left out');
+    const dpi = dpiOf(psd);
+    // Text layers stay text (warped text comes in as its pixels).
+    const asText = Boolean(l.text && !l.children && (!l.text.warp?.style || l.text.warp.style === 'none'));
+    const styles = fromPsdEffects(l.effects, dpi, asText);
+    for (const n of styles.notes) notes.add(n);
     let layer: Layer;
     if (l.children) {
       if (depth >= MAX_DEPTH) {
@@ -521,6 +578,16 @@ export function decodePsd(bytes: Uint8Array, name: string, onPixels: (id: Id, pi
         return null;
       }
       layer = createCorrectionLayer(base.name, correction, { ...base, blend: fromPsdBlend(l.blendMode, false) as BlendMode });
+    } else if (asText && l.text) {
+      let t = fromPsdText(l.text, fit);
+      if (styles.edge) t = { ...t, edge: styles.edge.width, edgeColor: styles.edge.color };
+      layer = createTextLayer(base.name, {
+        ...base,
+        // Photoshop's Fill opacity: without layer styles it is just more opacity.
+        opacity: base.opacity * (styles.effects ? 1 : Math.min(1, Math.max(0, l.fillOpacity ?? 1))),
+        blend: fromPsdBlend(l.blendMode, false) as BlendMode,
+        texts: [t],
+      });
     } else {
       layer = createRasterLayer(base.name, {
         ...base,
@@ -540,10 +607,11 @@ export function decodePsd(bytes: Uint8Array, name: string, onPixels: (id: Id, pi
       else if (l.vectorFill?.type === 'color') pixels = solid(width, height, colorHex(l.vectorFill.color));
       if (pixels && l === paperCandidate && depth === 0) held = { id: layer.id, pixels };
       else if (pixels) onPixels(layer.id, pixels);
-      if (l.text) notes.add('Text layers were opened as raster layers');
+      if (l.text) notes.add('Warped text was opened as pixels');
       else if (l.placedLayer) notes.add('Smart objects were opened as raster layers');
       else if (l.vectorMask || l.vectorFill) notes.add('Shape and fill layers were opened as raster layers');
     }
+    if (styles.effects) layer.effects = styles.effects;
     // With a vector mask as well, the pixel mask is the "real" one; a lone vector mask comes in as its pixels.
     const m = l.realMask ?? l.mask;
     if (m) {

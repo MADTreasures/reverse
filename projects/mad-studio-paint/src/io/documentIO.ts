@@ -6,6 +6,7 @@ import { bytesToCanvas, canvasToBytes, createCanvas, ctx2d } from '../engine/can
 import { framePath, strokeFrame } from '../engine/compositor';
 import { engine } from '../engine/engine';
 import { ensureSurface, getSurface } from '../engine/surfaces';
+import { drawBalloons, drawTextBox, fitTextBox } from '../engine/textRender';
 import { native, openFiles, saveFile, type OpenedFile, type SavedFile } from '../platform/platform';
 import * as actions from '../store/actions';
 import { getState, setState, useStore } from '../store/store';
@@ -118,7 +119,7 @@ export async function openFileBytes(file: OpenedFile): Promise<boolean> {
     } else if (isPsdFileName(file.name)) {
       const { decodePsd } = await import('./psd');
       const images = new Map<Id, HTMLCanvasElement>();
-      const { doc, notes } = decodePsd(file.data, baseName(file.name), (id, p) => images.set(id, pixelsToCanvas(p)));
+      const { doc, notes } = decodePsd(file.data, baseName(file.name), (id, p) => images.set(id, pixelsToCanvas(p)), fitTextBox);
       // Saving keeps everything in a .madpaint file; the PSD stays as it was.
       actions.loadDocument(doc, images, null);
       currentFile = null;
@@ -279,6 +280,12 @@ export async function exportPsd(opts: { skipDraft: boolean }): Promise<boolean> 
       bakedPixels: (l) => pixelsOf(engine.compositor.layerImage(doc, l, { skipDraft: opts.skipDraft })),
       maskPixels: (m) => surface(m.id),
       frameShapes,
+      textPixels: (_layer, part) => {
+        const c = createCanvas(doc.width, doc.height);
+        if (part === 'balloons') drawBalloons(ctx2d(c), _layer.balloons);
+        else drawTextBox(ctx2d(c), part);
+        return pixelsOf(c);
+      },
     });
     const saved = await saveFile(bytes, `${doc.name || 'Untitled'}.psd`, PSD_FILTERS, null, PSD_MIME);
     if (saved) toast(`Saved a copy as ${saved.name}`);

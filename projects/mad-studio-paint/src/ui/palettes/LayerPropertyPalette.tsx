@@ -1,7 +1,9 @@
-/** Layer Property palette: effects of the selected layer (border effect, tone, layer colour). */
+/** Layer Property palette: effects of the selected layer (border effect, tone, layer colour) and its layer styles. */
 import { findLayer } from '../../model/layers';
 import type { Layer } from '../../model/types';
 import { DEFAULT_BORDER, DEFAULT_LAYER_COLOR, type BorderEffect, type LayerColorEffect, type LayerEffects } from '../../paint/effects';
+import { DEFAULT_GLOW, DEFAULT_SHADOW, type GlowStyle, type ShadowStyle } from '../../paint/styles';
+import { showMenu } from '../overlays';
 import { defaultTone, DOT_SHAPES, type DotShape, type ToneEffect } from '../../paint/tone';
 import * as actions from '../../store/actions';
 import { getState, useStore } from '../../store/store';
@@ -129,6 +131,7 @@ export function LayerPropertyPalette() {
           <PropSlider label="Dot position Y" value={tone.y} min={-100} max={100} unit="px" onChange={(v) => setTone({ y: v })} />
         </section>
       )}
+      <LayerStyles fx={fx} set={set} />
       {color?.enabled && (
         <section className="effect-section">
           <h4>Layer color</h4>
@@ -142,5 +145,115 @@ export function LayerPropertyPalette() {
         </section>
       )}
     </div>
+  );
+}
+
+type ShadowKey = 'dropShadow' | 'innerShadow';
+type GlowKey = 'outerGlow' | 'innerGlow';
+const STYLE_NAMES: Record<ShadowKey | GlowKey, string> = { dropShadow: 'Drop shadow', innerShadow: 'Inner shadow', outerGlow: 'Outer glow', innerGlow: 'Inner glow' };
+const KEPT_NAMES: Record<string, string> = {
+  bevel: 'Bevel and emboss',
+  satin: 'Satin',
+  gradientOverlay: 'Gradient overlay',
+  extraStrokes: 'More strokes',
+  extraFills: 'More colour overlays',
+  extraDropShadows: 'More drop shadows',
+  extraInnerShadows: 'More inner shadows',
+};
+
+/** Layer styles (as in Photoshop documents): shadows and glows, and the styles kept for Photoshop. */
+function LayerStyles({ fx, set }: { fx: LayerEffects; set: (next: LayerEffects, label: string) => void }) {
+  const shadows: ShadowKey[] = ['dropShadow', 'innerShadow'];
+  const glows: GlowKey[] = ['outerGlow', 'innerGlow'];
+  const missing = ([...shadows, ...glows] as (ShadowKey | GlowKey)[]).filter((k) => !fx[k]);
+  const remove = (key: ShadowKey | GlowKey | 'kept', label: string) => {
+    const next = { ...fx };
+    delete next[key];
+    set(next, label);
+  };
+  const header = (key: ShadowKey | GlowKey, style: ShadowStyle | GlowStyle) => (
+    <div className="style-head">
+      <label className="effect-color">
+        <input type="checkbox" checked={style.enabled} onChange={(e) => set({ ...fx, [key]: { ...style, enabled: e.target.checked } }, STYLE_NAMES[key])} /> {STYLE_NAMES[key]}
+      </label>
+      <button className="icon-btn" title={`Remove ${STYLE_NAMES[key].toLowerCase()}`} aria-label={`Remove ${STYLE_NAMES[key].toLowerCase()}`} onClick={() => remove(key, `Remove ${STYLE_NAMES[key].toLowerCase()}`)}>
+        <Icon name="trash" size={14} />
+      </button>
+    </div>
+  );
+  const kept = Object.keys(fx.kept ?? {});
+  return (
+    <section className="effect-section layer-styles" data-testid="layer-styles">
+      <div className="style-head">
+        <h4>Layer style</h4>
+        {missing.length > 0 && (
+          <button
+            className="btn small"
+            onClick={(e) => {
+              const r = e.currentTarget.getBoundingClientRect();
+              showMenu(
+                { x: r.left, y: r.bottom + 2 },
+                missing.map((k) => ({
+                  label: STYLE_NAMES[k],
+                  onClick: () => set({ ...fx, [k]: k === 'dropShadow' || k === 'innerShadow' ? { ...DEFAULT_SHADOW } : { ...DEFAULT_GLOW } }, `Add ${STYLE_NAMES[k].toLowerCase()}`),
+                })),
+              );
+            }}
+          >
+            Add…
+          </button>
+        )}
+      </div>
+      {shadows.map((key) => {
+        const st = fx[key];
+        if (!st) return null;
+        const up = (patch: Partial<ShadowStyle>) => set({ ...fx, [key]: { ...st, ...patch } }, STYLE_NAMES[key]);
+        return (
+          <div key={key} className="style-block" data-testid={`style-${key}`}>
+            {header(key, st)}
+            {st.enabled && (
+              <>
+                <label className="effect-color">
+                  Color <input type="color" value={st.color} onChange={(e) => up({ color: e.target.value })} aria-label={`${STYLE_NAMES[key]} color`} />
+                </label>
+                <PropSlider label="Opacity" value={st.opacity} min={0} max={100} unit="%" onChange={(v) => up({ opacity: v })} />
+                <PropSlider label="Angle" value={st.angle} min={-180} max={180} unit="°" onChange={(v) => up({ angle: v })} />
+                <PropSlider label="Distance" value={st.distance} min={0} max={200} unit="px" onChange={(v) => up({ distance: v })} />
+                <PropSlider label="Size" value={st.size} min={0} max={100} unit="px" onChange={(v) => up({ size: v })} />
+                <PropSlider label={key === 'dropShadow' ? 'Spread' : 'Choke'} value={st.spread} min={0} max={100} unit="%" onChange={(v) => up({ spread: v })} />
+              </>
+            )}
+          </div>
+        );
+      })}
+      {glows.map((key) => {
+        const st = fx[key];
+        if (!st) return null;
+        const up = (patch: Partial<GlowStyle>) => set({ ...fx, [key]: { ...st, ...patch } }, STYLE_NAMES[key]);
+        return (
+          <div key={key} className="style-block" data-testid={`style-${key}`}>
+            {header(key, st)}
+            {st.enabled && (
+              <>
+                <label className="effect-color">
+                  Color <input type="color" value={st.color} onChange={(e) => up({ color: e.target.value })} aria-label={`${STYLE_NAMES[key]} color`} />
+                </label>
+                <PropSlider label="Opacity" value={st.opacity} min={0} max={100} unit="%" onChange={(v) => up({ opacity: v })} />
+                <PropSlider label="Size" value={st.size} min={0} max={100} unit="px" onChange={(v) => up({ size: v })} />
+                <PropSlider label={key === 'outerGlow' ? 'Spread' : 'Choke'} value={st.spread} min={0} max={100} unit="%" onChange={(v) => up({ spread: v })} />
+              </>
+            )}
+          </div>
+        );
+      })}
+      {kept.length > 0 && (
+        <div className="style-head kept-styles">
+          <span className="palette-note">Kept for Photoshop (not shown): {kept.map((k) => KEPT_NAMES[k] ?? k).join(', ')}</span>
+          <button className="icon-btn" title="Remove the kept styles" aria-label="Remove kept styles" onClick={() => remove('kept', 'Remove kept styles')}>
+            <Icon name="trash" size={14} />
+          </button>
+        </div>
+      )}
+    </section>
   );
 }

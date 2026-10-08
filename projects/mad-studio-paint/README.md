@@ -34,7 +34,7 @@ App-Symbol. Wie das Vorbild untersucht und verglichen wurde, steht in
 | **Ansicht** | Zoom 0,78 %–3200 % in den Stufen des Vorbilds (Mausrad, Pinch, ⌘+/⌘−), Drehen in 5°-Schritten um die Fenstermitte, Ansicht spiegeln, Navigator, Zoom/Drehung in der Statusleiste, Tab / ⇧Tab blendet Paletten / Menüleiste aus |
 | **Farbe** | Farbkreis (Farbtonring + Sättigung/Helligkeit, H/S/V-Werte), RGB-Regler, Farbset, Farbverlauf, Haupt-/Unter-/Transparentfarbe |
 | **Arbeitsbereich** | **Standard** (Layout der aktuellen Version: Tool Group/Tool Settings, Tool Sliders) und **Klassisch** (Sub Tool, Tool Property, Brush Size untereinander) – *Window → Workspace*; Einstellungen (⌘K): dunkles/helles Design, Drehschritt, Anzahl Undo, Haltezeit der Werkzeugtasten |
-| **Dateien** | Eigenes Format `.madpaint` (ZIP mit `document.json` und einer PNG-Datei pro Ebene), **Photoshop-Dokumente** (`.psd`/`.psb` öffnen mit Ordnern, Masken, Schnittmasken, Modi, Deckkraft, Sperren und Einstellungsebenen; *File → Save duplicate → .psd* mit Ebenen, Papier als unterste Ebene „Paper“, Entwurfsebenen wahlweise; *Export (single layer)* als PSD, auf Wunsch als Hintergrund), PNG/JPEG/WebP öffnen und exportieren (Skalierung, ohne Entwurfsebenen, transparent oder auf Papier), Bilder ablegen (auf der Leinwand: öffnen, auf der Ebenen-Palette: als Ebene), Autosave & Wiederherstellung |
+| **Dateien** | Eigenes Format `.madpaint` (ZIP mit `document.json` und einer PNG-Datei pro Ebene), **Photoshop-Dokumente** (`.psd`/`.psb` öffnen mit Ordnern, Masken, Schnittmasken, Modi, Deckkraft, Sperren, Einstellungsebenen, **editierbaren Textebenen** und **Ebenenstilen**; *File → Save duplicate → .psd* mit Ebenen, Textebenen als Photoshop-Text, Effekten als Ebenenstile, Papier als unterste Ebene „Paper“, Entwurfsebenen wahlweise; *Export (single layer)* als PSD, auf Wunsch als Hintergrund); **Ebenenstile** in der Palette *Layer Property*: Schlagschatten, Schatten nach innen, Schein nach aussen und innen (Farbe, Deckkraft, Winkel, Abstand, Grösse, Spread), PNG/JPEG/WebP öffnen und exportieren (Skalierung, ohne Entwurfsebenen, transparent oder auf Papier), Bilder ablegen (auf der Leinwand: öffnen, auf der Ebenen-Palette: als Ebene), Autosave & Wiederherstellung |
 
 ## Installation auf dem Mac
 
@@ -136,15 +136,25 @@ Wie im Handbuch des Vorbilds (macOS: Ctrl → ⌘, Alt → ⌥):
     Ebenenmodi, Deckkraft (auch „Fläche“), Sichtbarkeit und Sperren. Einstellungsebenen werden zu
     Korrekturebenen: Helligkeit/Kontrast, Tonwertkorrektur, Gradationskurve,
     Farbton/Sättigung, Farbbalance, Umkehren, Tontrennung, Schwellenwert, Verlaufsumsetzung.
-    Text-, Form- und Smartobjekt-Ebenen kommen als Pixel; Ebenenstile entfallen (ein Hinweis
-    nennt, was nicht übernommen wurde). Eine unterste Ebene „Paper“ wird wieder zum Papier.
-    Gespeichert wird danach als `.madpaint`; die PSD bleibt unverändert.
-  - *File → Save duplicate → .psd* schreibt die Ebenen wie das Vorbild: Vektor-, Text- und
-    Verlaufsebenen als Pixel, das Papier als unterste Ebene „Paper“, Entwurfsebenen nur wenn
-    angehakt. Korrekturebenen werden zu Einstellungsebenen. Rahmenordner werden Gruppen mit
-    einer Maske in Form der Rahmen und der Rahmenlinie als Ebene. Ebenen mit Randeffekt,
-    Ebenenfarbe oder Rasterfolie werden so geschrieben, wie sie aussehen (Photoshop kennt diese
-    Effekte nicht). Ein zusammengesetztes Bild liegt bei, damit Vorschau und Quick Look es zeigen.
+    **Textebenen bleiben editierbarer Text** (Schrift, Grösse, fett/kursiv, Unter-/Durchstreichen,
+    Farbe, Ausrichtung, Zeilen- und Zeichenabstand, Punkt- oder Absatztext, Drehung; eine Kontur
+    wird zur Textkante). **Ebenenstile**: Kontur → Randeffekt, Farbüberlagerung → Ebenenfarbe,
+    Schlagschatten, Schatten nach innen, Schein nach aussen/innen → eigene Ebenenstile (sichtbar und
+    einstellbar); Abgeflachte Kante, Glanz und Verlaufsüberlagerung werden aufbewahrt und beim
+    Speichern zurückgeschrieben (aber nicht angezeigt). Form- und Smartobjekt-Ebenen sowie
+    verkrümmter Text kommen als Pixel (ein Hinweis nennt, was nicht übernommen wurde). Eine
+    unterste Ebene „Paper“ wird wieder zum Papier. Gespeichert wird danach als `.madpaint`; die PSD
+    bleibt unverändert.
+  - *File → Save duplicate → .psd* schreibt die Ebenen: **Textrahmen als Photoshop-Textebenen**
+    (mehrere Rahmen und Sprechblasen einer Ebene als Gruppe; vertikaler Text bleibt Pixel, weil
+    vertikaler Text die Datei für Photoshop unbrauchbar machen kann), Vektor- und Verlaufsebenen
+    als Pixel, das Papier als unterste Ebene „Paper“, Entwurfsebenen nur wenn angehakt.
+    Korrekturebenen werden zu Einstellungsebenen, Randeffekt (Kante), Ebenenfarbe, Schatten und
+    Schein zu **Ebenenstilen**. Rahmenordner werden Gruppen mit einer Maske in Form der Rahmen und
+    der Rahmenlinie als Ebene. Ebenen mit Rasterfolie oder Aquarellkante werden so geschrieben,
+    wie sie aussehen (Photoshop kennt diese Effekte nicht). Photoshop fragt beim Öffnen, ob es die
+    Textebenen neu zeichnen soll. Ein zusammengesetztes Bild liegt bei, damit Vorschau und Quick
+    Look es zeigen.
   - *File → Export (single layer)* bietet PSD als Format, auf Wunsch „Output as background“.
 - Die Arbeit wird einige Sekunden nach jeder Änderung automatisch gesichert (IndexedDB)
   und beim nächsten Start wiederhergestellt. Das ersetzt kein Speichern in eine Datei.
@@ -206,9 +216,10 @@ Was im Vergleich zum Vorbild noch fehlt, steht Punkt für Punkt in
   Rahmen verbinden, Kontrollpunkte, Comic-Seiten mit Beschnitt und Innenrand.
 - Doppelpinsel, Band-Spitzen („Ribbon“), Tempo als Dynamik, Freiform-Verlauf; die Material-Palette
   des Vorbilds (Materialien kommen hier über die Pinseleinstellungen und den Bildimport).
-- Import/Export von `.clip`. Beim PSD-Austausch: Text bleibt nicht editierbar, Ebenenstile
-  und Vektormasken werden nicht als solche übernommen, „Glow dodge“ und „Add (Glow)“ werden zu
-  „Farbig abwedeln“ bzw. „Linear abwedeln“.
+- Import/Export von `.clip`. Beim PSD-Austausch: Formatierung einzelner Buchstaben, vertikaler
+  und verkrümmter Text, Vektormasken und Muster-Überlagerungen werden nicht als solche
+  übernommen; Abgeflachte Kante, Glanz und Verlaufsüberlagerung werden nur aufbewahrt, nicht
+  angezeigt; „Glow dodge“ und „Add (Glow)“ werden zu „Farbig abwedeln“ bzw. „Linear abwedeln“.
 
 ## Rechtliches
 

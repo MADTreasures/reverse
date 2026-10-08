@@ -5,6 +5,7 @@
 import { hexToRgb } from '../model/color';
 import { distanceToInside } from './distance';
 import { sanitizeTone, type ToneEffect } from './tone';
+import { sanitizeGlow, sanitizeKeptStyles, sanitizeShadow, styleReach, type GlowStyle, type ShadowStyle } from './styles';
 
 export interface BorderEffect {
   enabled: boolean;
@@ -31,7 +32,18 @@ export interface LayerEffects {
   layerColor?: LayerColorEffect;
   /** Screentone: the layer shown as halftone dots. */
   tone?: ToneEffect;
+  /** Layer styles (from Photoshop documents, or added in the Layer Property palette). */
+  dropShadow?: ShadowStyle;
+  innerShadow?: ShadowStyle;
+  outerGlow?: GlowStyle;
+  innerGlow?: GlowStyle;
+  /** Other Photoshop layer styles: kept as they came and written back to Photoshop documents (not shown). */
+  kept?: Record<string, unknown>;
 }
+
+/** Whether any effect or style changes how the layer looks. */
+export const anyEffect = (fx: LayerEffects | undefined) =>
+  Boolean(fx && (fx.border?.enabled || fx.layerColor?.enabled || fx.tone?.enabled || fx.dropShadow?.enabled || fx.innerShadow?.enabled || fx.outerGlow?.enabled || fx.innerGlow?.enabled));
 
 export const DEFAULT_BORDER: BorderEffect = { enabled: true, kind: 'edge', width: 4, color: '#000000', range: 6, opacity: 70, darkness: 40, blur: 2 };
 export const DEFAULT_LAYER_COLOR: LayerColorEffect = { enabled: true, color: '#3a6ff0', sub: null };
@@ -39,8 +51,9 @@ export const DEFAULT_LAYER_COLOR: LayerColorEffect = { enabled: true, color: '#3
 /** How far an effect reaches beyond the drawn pixels (the compositor redraws that much more). */
 export function effectReach(fx: LayerEffects | undefined): number {
   const b = fx?.border;
-  if (!b?.enabled) return 0;
-  return Math.ceil(b.kind === 'edge' ? b.width + 1 : b.range + b.blur + 1);
+  const border = b?.enabled ? Math.ceil(b.kind === 'edge' ? b.width + 1 : b.range + b.blur + 1) : 0;
+  // Shadows and glows are computed from the layer with its border.
+  return border + Math.max(styleReach(fx?.dropShadow), styleReach(fx?.outerGlow), styleReach(fx?.innerShadow), styleReach(fx?.innerGlow));
 }
 
 const rgbOf = (hex: string) => hexToRgb(hex) ?? { r: 0, g: 0, b: 0 };
@@ -131,5 +144,15 @@ export function sanitizeEffects(raw: unknown): LayerEffects | undefined {
   }
   const tone = sanitizeTone(r.tone);
   if (tone) out.tone = tone;
-  return out.border || out.layerColor || out.tone ? out : undefined;
+  const dropShadow = sanitizeShadow(r.dropShadow);
+  if (dropShadow) out.dropShadow = dropShadow;
+  const innerShadow = sanitizeShadow(r.innerShadow);
+  if (innerShadow) out.innerShadow = innerShadow;
+  const outerGlow = sanitizeGlow(r.outerGlow);
+  if (outerGlow) out.outerGlow = outerGlow;
+  const innerGlow = sanitizeGlow(r.innerGlow);
+  if (innerGlow) out.innerGlow = innerGlow;
+  const kept = sanitizeKeptStyles(r.kept);
+  if (kept) out.kept = kept;
+  return Object.keys(out).length ? out : undefined;
 }

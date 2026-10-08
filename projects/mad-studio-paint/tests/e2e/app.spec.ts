@@ -1722,6 +1722,55 @@ test('gradients: shapes and edge rules, the Edit gradient dialog, editable gradi
   expect(errors).toEqual([]);
 });
 
+test('Photoshop documents keep text editable and layer styles; the Layer Property palette edits styles', async ({ page }) => {
+  const errors = await boot(page);
+  await page.evaluate(() => delete (window as any).showSaveFilePicker);
+  // A text layer.
+  await page.keyboard.press('t');
+  const at = await docToScreen(page, 60, 100);
+  await page.mouse.click(at.x, at.y);
+  await page.keyboard.type('Hello PSD');
+  await page.keyboard.press('ControlOrMeta+Enter');
+  // A black square with a drop shadow from the Layer Property palette.
+  await page.evaluate(() => {
+    const a = window.__madPaint.actions;
+    a.setLayerProps(a.addRasterLayer(), { name: 'Square' });
+  });
+  await selectTool(page, 'select');
+  await drag(page, [250, 150], [330, 230]);
+  await fillBlack(page);
+  await page.keyboard.press('ControlOrMeta+d');
+  expect(await shown(page, 300, 234)).toBe(255);
+  await page.getByTestId('layer-styles').getByRole('button', { name: 'Add…' }).click();
+  await page.getByRole('menuitem', { name: 'Drop shadow' }).click();
+  await expect(page.getByTestId('style-dropShadow')).toBeVisible();
+  // Light from the upper left: the shadow falls down and to the right of the square.
+  const shadow = await shown(page, 300, 234);
+  expect(shadow).toBeLessThan(220);
+  expect(await shown(page, 300, 146)).toBe(255);
+  // Save as PSD and open it again.
+  await page.evaluate(() => window.__madPaint.runCommand('saveDuplicatePsd'));
+  const dlg = page.getByRole('dialog', { name: 'Export settings' });
+  const [download] = await Promise.all([page.waitForEvent('download'), dlg.getByRole('button', { name: 'OK' }).click()]);
+  const psd = readFileSync((await download.path())!);
+  const chooser = page.waitForEvent('filechooser');
+  await page.evaluate(() => void window.__madPaint.runCommand('open'));
+  await page.getByRole('dialog', { name: 'Unsaved changes' }).getByRole('button', { name: 'Discard' }).click();
+  await (await chooser).setFiles({ name: 'Text.psd', mimeType: 'image/vnd.adobe.photoshop', buffer: psd });
+  await expect.poll(async () => (await state(page)).layers.map((l: any) => l.name)).toEqual(['Square', 'Hello PSD', 'Layer 1']);
+  const { layers } = await state(page);
+  expect(layers[1]).toMatchObject({ kind: 'text', texts: [{ text: 'Hello PSD' }] });
+  expect(layers[0].effects.dropShadow).toMatchObject({ enabled: true, angle: 120, distance: 8 });
+  expect(Math.abs((await shown(page, 300, 234)) - shadow)).toBeLessThan(4);
+  // The text is still text: the Object tool edits it with a double-click.
+  await page.evaluate(() => window.__madPaint.actions.selectLayer(window.__madPaint.useStore.getState().doc.layers[1].id));
+  await page.keyboard.press('t');
+  await page.mouse.click(at.x + 10, at.y);
+  await expect(page.getByTestId('text-editor')).toHaveValue('Hello PSD');
+  await page.keyboard.press('Escape');
+  expect(errors).toEqual([]);
+});
+
 test('Photoshop documents: Save duplicate as .psd keeps the layers, File > Open reads them back', async ({ page }) => {
   const errors = await boot(page);
   // No save picker in tests: saving falls back to a download.

@@ -29,6 +29,7 @@ function source(doc: ReturnType<typeof createDocument>, pixels: Map<Id, Pixels>,
     bakedPixels: (l: Layer) => pixels.get(l.id) ?? null,
     maskPixels: (m) => pixels.get(m.id) ?? null,
     frameShapes: () => ({ area: image(() => [0, 0, 0, 255]), border: null }),
+    textPixels: () => image((x, y) => (x > 5 && x < 30 && y > 5 && y < 15 ? [0, 0, 0, 255] : [0, 0, 0, 0])),
     ...patch,
   };
 }

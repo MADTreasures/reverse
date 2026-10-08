@@ -8,7 +8,8 @@ import { hexToRgb } from '../model/color';
 import { celAt, onionCels, onionOpacity, tintOnion, type OnionSkin } from '../paint/animation';
 import { clipGroups, flatten } from '../model/layers';
 import type { BlendMode, CorrectionLayer, FolderBlendMode, FolderLayer, GradientLayer, Id, Layer, PaintDocument, RasterLayer, TextLayer, VectorLayer } from '../model/types';
-import { applyEdge, applyLayerColor, applyWatercolorEdge, effectReach } from '../paint/effects';
+import { anyEffect, applyEdge, applyLayerColor, applyWatercolorEdge, effectReach } from '../paint/effects';
+import { applyDropShadow, applyInnerGlow, applyInnerShadow, applyOuterGlow } from '../paint/styles';
 import { inflate, intersect, union, type Rect } from '../paint/rect';
 import { applyCorrection } from '../paint/tonal';
 import type { FrameBorder, FramePanel } from '../paint/frames';
@@ -300,6 +301,11 @@ export class Compositor {
         if (fx.border.kind === 'edge') data = applyEdge(data, rr.w, rr.h, fx.border);
         else applyWatercolorEdge(data, rr.w, rr.h, fx.border);
       }
+      // Layer styles: inside the shape first, then what falls around it.
+      if (fx.innerShadow?.enabled) applyInnerShadow(data, rr.w, rr.h, fx.innerShadow);
+      if (fx.innerGlow?.enabled) applyInnerGlow(data, rr.w, rr.h, fx.innerGlow);
+      if (fx.outerGlow?.enabled) applyOuterGlow(data, rr.w, rr.h, fx.outerGlow);
+      if (fx.dropShadow?.enabled) applyDropShadow(data, rr.w, rr.h, fx.dropShadow);
       ctx.putImageData(new ImageData(data, rr.w, rr.h), rr.x, rr.y);
     }
     return ctx;
@@ -396,7 +402,7 @@ export function strokeFrame(ctx: Ctx, path: Path2D, frame: FrameBorder): void {
   ctx.restore();
 }
 
-const hasEffects = (layer: Layer) => Boolean(layer.effects?.border?.enabled || layer.effects?.layerColor?.enabled || layer.effects?.tone?.enabled);
+const hasEffects = (layer: Layer) => anyEffect(layer.effects);
 
 /** A screentone that reflects the layer opacity shows it in the dot size, so the dots stay opaque. */
 const opacityOf = (layer: Layer) => (layer.effects?.tone?.enabled && layer.effects.tone.reflectOpacity ? 1 : layer.opacity);

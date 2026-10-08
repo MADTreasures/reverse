@@ -2272,3 +2272,22 @@
   font-size: 20px;
   line-height: 38px;
 }
+
+/* Layer styles in the Layer Property palette */
+.layer-styles .style-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+.layer-styles .style-head h4 {
+  margin: 0;
+}
+.layer-styles .style-block {
+  border-top: 1px solid var(--line);
+  padding-top: 4px;
+  margin-top: 4px;
+}
+.layer-styles .kept-styles .palette-note {
+  margin: 4px 0;
+}
