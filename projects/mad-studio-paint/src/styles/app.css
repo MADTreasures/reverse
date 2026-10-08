@@ -2297,6 +2297,61 @@
   color: var(--text-faint);
 }
 
+/* keyframes: yellow = hold, green = linear, blue = smooth */
+.tl-key {
+  position: absolute;
+  z-index: 3;
+  top: 14px;
+  width: 10px;
+  height: 10px;
+  margin-left: -5px;
+  border: 1px solid rgb(0 0 0 / 0.55);
+  border-radius: 1px;
+  transform: rotate(45deg);
+  cursor: pointer;
+}
+
+.tl-lane.cels .tl-key {
+  top: auto;
+  bottom: 2px;
+  width: 8px;
+  height: 8px;
+  margin-left: -4px;
+}
+
+.tl-key.hold {
+  background: #e8c547;
+}
+
+.tl-key.linear {
+  background: #4fbf6a;
+}
+
+.tl-key.smooth {
+  background: #4f8fe8;
+}
+
+.tl-key.selected {
+  outline: 2px solid #e5484d;
+  outline-offset: 1px;
+}
+
+.tl-keyed {
+  display: inline-flex;
+  color: var(--accent-strong);
+}
+
+.tl-interp {
+  height: 22px;
+  margin: 0 2px;
+  padding: 0 4px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--bg-3);
+  color: var(--text);
+  font-size: 12px;
+}
+
 .tl-cel-name {
   position: relative;
   padding: 0 3px;

@@ -34,12 +34,12 @@ export async function confirmDiscard(): Promise<boolean> {
 // ------------------------------------------------------------------ saving
 
 /** Merged image of the document (optionally on paper, without draft layers; a frame of the timeline). */
-export function renderMerged(opts: { paper: boolean; skipDraft: boolean; scale?: number; frame?: number } = { paper: true, skipDraft: true }): HTMLCanvasElement {
+export function renderMerged(opts: { paper: boolean; skipDraft: boolean; scale?: number; frame?: number; camera?: boolean } = { paper: true, skipDraft: true }): HTMLCanvasElement {
   const { doc } = getState();
   const full = createCanvas(doc.width, doc.height);
   // The paper is part of the stack (blend modes and correction layers see it), unless left out.
   const paper = opts.paper && doc.paper.visible ? doc.paper.color : null;
-  engine.compositor.compose(doc, ctx2d(full), { x: 0, y: 0, w: doc.width, h: doc.height }, { skipDraft: opts.skipDraft, paper, frame: opts.frame });
+  engine.compositor.compose(doc, ctx2d(full), { x: 0, y: 0, w: doc.width, h: doc.height }, { skipDraft: opts.skipDraft, paper, frame: opts.frame, camera: opts.camera });
   const scale = opts.scale ?? 1;
   if (scale === 1) return full;
   const out = createCanvas(Math.max(1, Math.round(doc.width * scale)), Math.max(1, Math.round(doc.height * scale)));
@@ -313,6 +313,8 @@ export interface AnimationExportOptions {
   dither: boolean;
   transparent: boolean;
   drafts: boolean;
+  /** Apply 2D camera effects. */
+  camera: boolean;
   /** Image sequence: file names and type. */
   sequence: { prefix: string; suffix: string; separator: string; startNumber: number; type: 'png' | 'jpeg' };
 }
@@ -345,7 +347,7 @@ export async function exportAnimation(o: AnimationExportOptions): Promise<boolea
     const draw = (f: number) => {
       let c = drawn.get(f);
       if (!c) {
-        c = renderMerged({ paper: !transparent, skipDraft: !o.drafts, scale, frame: f });
+        c = renderMerged({ paper: !transparent, skipDraft: !o.drafts, scale, frame: f, camera: o.camera });
         if (!transparent && !doc.paper.visible) c = onWhite(c);
         drawn.set(f, c);
       }

@@ -1,6 +1,7 @@
 /** Document model of MAD Studio Paint. Pixel data lives in surfaces (see engine/surfaces.ts), keyed by layer id. */
 import type { AnimationTrack, Timeline } from '../paint/animation';
 import type { Clip } from '../paint/clips';
+import type { KeyTrack } from '../paint/keyframes';
 import type { LayerEffects } from '../paint/effects';
 import type { Ruler } from '../paint/rulers';
 import type { Correction } from '../paint/tonal';
@@ -85,6 +86,11 @@ interface LayerBase {
    * of animation folders are not tracks: the folder's track shows them.
    */
   clips?: Clip[];
+  /**
+   * Keyframes of the layer's track ("Enable keyframes on this layer"): position, scale, rotation and
+   * opacity over time. For a 2D camera folder they place its camera frame (always on).
+   */
+  keys?: KeyTrack;
 }
 
 export interface RasterLayer extends LayerBase {
@@ -107,6 +113,8 @@ export interface FolderLayer extends LayerBase {
    * assigns them (while the timeline is enabled).
    */
   animation?: AnimationTrack;
+  /** 2D camera folder: its keyframes move the camera frame through which its layers are seen (exports, camera view). */
+  camera?: boolean;
 }
 
 /** Layer > New correction layer: corrects everything below it (in its folder) without changing pixels. */

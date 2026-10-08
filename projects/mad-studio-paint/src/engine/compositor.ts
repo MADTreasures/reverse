@@ -7,6 +7,8 @@ import { nativeOp } from '../model/blend';
 import { hexToRgb } from '../model/color';
 import { celAt, onionCels, onionOpacity, tintOnion, type OnionSkin } from '../paint/animation';
 import { inClips } from '../paint/clips';
+import { cameraMatrix, invert, isRest, placementAt, placementMatrix, type Placement } from '../paint/keyframes';
+import type { Affine } from '../paint/rulers';
 import { clipGroups, flatten } from '../model/layers';
 import type { BlendMode, CorrectionLayer, FolderBlendMode, FolderLayer, GradientLayer, Id, Layer, PaintDocument, RasterLayer, TextLayer, VectorLayer } from '../model/types';
 import { anyEffect, applyEdge, applyLayerColor, applyWatercolorEdge, effectReach } from '../paint/effects';
@@ -33,6 +35,14 @@ export interface ComposeOptions {
   frame?: number;
   /** Onion skins around the current cels (only the display shows them). */
   onion?: OnionSkin | null;
+  /** Apply 2D camera effects: 2D camera folders show what their camera frame sees. */
+  camera?: boolean;
+}
+
+/** A track placed by its keyframes (or a 2D camera folder seen through its camera). */
+interface Placed {
+  m: Affine;
+  opacity: number;
 }
 
 /**
@@ -101,6 +111,13 @@ export class Compositor {
   private anim: { frame: number | null; onion: OnionSkin | null } = { frame: null, onion: null };
   /** How many animation folders the layers being composed lie in (cels are not tracks: no clips). */
   private inCel = 0;
+  /** The display applies 2D camera effects (Show camera's field of view). */
+  camera = false;
+  /** Placements shown instead of the keyframes' while the Object tool changes them. */
+  readonly keyPreview = new Map<string, Placement>();
+  /** Edit layers with active keyframes: this track is drawn without its keyframes. */
+  unkeyed: string | null = null;
+  private applyCamera = false;
 
   constructor(width: number, height: number) {
     this.canvas = createCanvas(width, height);
@@ -136,10 +153,13 @@ export class Compositor {
     let r = this.dirty;
     if (!r) return null;
     this.dirty = null;
-    // Border effects reach beyond the changed pixels.
-    const reach = flatten(doc.layers).reduce((n, l) => n + (l.visible ? effectReach(l.effects) : 0), 0);
+    // Border effects reach beyond the changed pixels. Layers seen through a 2D camera can be drawn
+    // on, and their changes show elsewhere (layers placed by keyframes are locked while placed).
+    const layers = flatten(doc.layers);
+    const reach = layers.reduce((n, l) => n + (l.visible ? effectReach(l.effects) : 0), 0);
     if (reach) r = intersect(inflate(r, reach), this.bounds) ?? r;
-    this.compose(doc, this.ctx, r, { paper: doc.paper.visible ? doc.paper.color : null, onion: this.onion });
+    if (this.camera && doc.timeline?.enabled && layers.some((l) => l.kind === 'folder' && l.camera)) r = this.bounds;
+    this.compose(doc, this.ctx, r, { paper: doc.paper.visible ? doc.paper.color : null, onion: this.onion, camera: this.camera });
     return r;
   }
 
@@ -147,6 +167,7 @@ export class Compositor {
   compose(doc: PaintDocument, target: Ctx, r: Rect, opts: ComposeOptions): void {
     this.dpi = doc.dpi;
     this.inCel = 0;
+    this.applyCamera = Boolean(opts.camera);
     this.anim = doc.timeline?.enabled ? { frame: opts.frame ?? this.frame, onion: opts.onion ?? null } : { frame: null, onion: null };
     target.save();
     target.beginPath();
@@ -168,6 +189,7 @@ export class Compositor {
   layerImage(doc: PaintDocument, layer: Layer, opts: ComposeOptions = {}): HTMLCanvasElement {
     this.dpi = doc.dpi;
     this.inCel = 0;
+    this.applyCamera = Boolean(opts.camera);
     this.anim = { frame: doc.timeline?.enabled ? (opts.frame ?? this.frame) : null, onion: null };
     const out = createCanvas(this.canvas.width, this.canvas.height);
     this.drawContent(layer, ctx2d(out), this.bounds, opts);
@@ -180,6 +202,46 @@ export class Compositor {
     // A track shows only where it has a clip.
     if (this.anim.frame !== null && this.inCel === 0 && !inClips(layer.clips, this.anim.frame)) return false;
     return true;
+  }
+
+  /** How a track is placed at the frame by its keyframes, or seen through its 2D camera; null: as it is. */
+  private placed(layer: Layer): Placed | null {
+    if (this.anim.frame === null || this.inCel > 0 || layer.kind === 'correction') return null;
+    const camera = layer.kind === 'folder' && Boolean(layer.camera);
+    if (camera ? !this.applyCamera : !layer.keys?.enabled || layer.id === this.unkeyed) return null;
+    const p = this.keyPreview.get(layer.id) ?? placementAt(layer.keys?.frames ?? [], this.anim.frame);
+    if (!p || isRest(p)) return null;
+    return { m: camera ? cameraMatrix(p) : placementMatrix(p), opacity: p.opacity };
+  }
+
+  /** A placed layer's pixels (mask and effects applied, then moved; its keyframe opacity too), valid inside `r`. */
+  private placedContent(layer: RasterLayer | VectorLayer | TextLayer | GradientLayer | FolderLayer, xf: Placed, r: Rect, opts: ComposeOptions): Ctx {
+    const out = this.pool.acquire(r);
+    // Only the part of the layer that lands in `r` is needed.
+    const inv = invert(xf.m);
+    const pts = [
+      [r.x, r.y],
+      [r.x + r.w, r.y],
+      [r.x, r.y + r.h],
+      [r.x + r.w, r.y + r.h],
+    ].map(([x, y]) => ({ x: inv[0] * x + inv[2] * y + inv[4], y: inv[1] * x + inv[3] * y + inv[5] }));
+    const x0 = Math.floor(Math.min(...pts.map((p) => p.x))) - 2;
+    const y0 = Math.floor(Math.min(...pts.map((p) => p.y))) - 2;
+    const src = intersect({ x: x0, y: y0, w: Math.ceil(Math.max(...pts.map((p) => p.x))) + 2 - x0, h: Math.ceil(Math.max(...pts.map((p) => p.y))) + 2 - y0 }, this.bounds);
+    if (!src) return out;
+    const plain = layer.kind !== 'folder' && !maskOf(layer) && !hasEffects(layer);
+    const c = plain ? null : this.content(layer, src, opts);
+    const source = c ? c.canvas : getSurface(layer.id);
+    if (source) {
+      out.save();
+      out.setTransform(xf.m[0], xf.m[1], xf.m[2], xf.m[3], xf.m[4], xf.m[5]);
+      out.globalAlpha = xf.opacity;
+      out.imageSmoothingQuality = 'high';
+      out.drawImage(source, 0, 0);
+      out.restore();
+    }
+    if (c) this.pool.release(c);
+    return out;
   }
 
   /** Composes a folder's children (an animation folder's: the cel shown at the frame). */
@@ -255,6 +317,14 @@ export class Compositor {
   private drawLayer(layer: Layer, target: Ctx, r: Rect, opts: ComposeOptions): void {
     if (layer.kind === 'correction') {
       this.drawCorrection(layer, target, r);
+      return;
+    }
+    const xf = this.placed(layer);
+    if (xf) {
+      // Placed folders are composed on their own, like isolated ones.
+      const c = this.placedContent(layer, xf, r, opts);
+      paint(target, c.canvas, r, opacityOf(layer), layer.blend === 'pass-through' ? 'normal' : layer.blend);
+      this.pool.release(c);
       return;
     }
     if (layer.kind === 'raster' || layer.kind === 'vector' || layer.kind === 'text' || layer.kind === 'gradient') {
@@ -393,6 +463,13 @@ export class Compositor {
    */
   private drawContent(layer: Layer, target: Ctx, r: Rect, opts: ComposeOptions): void {
     if (layer.kind === 'correction') return;
+    const xf = this.placed(layer);
+    if (xf) {
+      const c = this.placedContent(layer, xf, r, opts);
+      target.drawImage(c.canvas, 0, 0);
+      this.pool.release(c);
+      return;
+    }
     if (layer.kind !== 'folder' && !maskOf(layer) && !hasEffects(layer)) {
       const s = getSurface(layer.id);
       if (s) target.drawImage(s, 0, 0);

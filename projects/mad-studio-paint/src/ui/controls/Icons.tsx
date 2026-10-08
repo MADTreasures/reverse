@@ -452,6 +452,16 @@ const paths: Record<string, ReactNode> = {
   ),
   newCel: <path d="M5.5 2.5h6l3 3v12h-9zM10 8.5v6M7 11.5h6" />,
   layer: <path d="M3 7.5l7-4 7 4-7 4zM3 12.5l7 4 7-4" />,
+  keyAdd: <path d="M8 4.5l4.5 4.5L8 13.5 3.5 9zM14.5 11v6M11.5 14h6" />,
+  keyDelete: <path d="M8 4.5l4.5 4.5L8 13.5 3.5 9zM12.5 12.5l4 4M16.5 12.5l-4 4" />,
+  keyEnable: <path d="M10 3l7 7-7 7-7-7zM10 7l3 3-3 3-3-3z" />,
+  keyEdit: <path d="M7 3.5l4 4-4 4-4-4zM10.5 16.5l1-3.5 5-5 2.5 2.5-5 5z" />,
+  camera: (
+    <>
+      <rect x="2.5" y="6" width="11" height="9" rx="1.2" />
+      <path d="M13.5 9l4-2.5v8L13.5 12" />
+    </>
+  ),
   removeCel: <path d="M5.5 2.5h6l3 3v12h-9zM7.8 9.3l4.4 4.4M12.2 9.3l-4.4 4.4" />,
 };
 

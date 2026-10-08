@@ -4,6 +4,7 @@ import { App } from './App';
 import { engine } from './engine/engine';
 import { buildDocumentBytes, listenForNativeOpen, openFileBytes, restoreAutosave, startAutosave } from './io/documentIO';
 import { native, isElectron, isMac } from './platform/platform';
+import { keyedTrackOf } from './model/animation';
 import { sanitizeOnion } from './paint/animation';
 import * as actions from './store/actions';
 import { getState, useStore } from './store/store';
@@ -69,6 +70,16 @@ function connectEngine(): void {
     if (s.selection !== prev.selection) engine.setSelection(s.selection);
     if (s.frame !== prev.frame) engine.setFrame(s.frame);
     if (s.onionSkin !== prev.onionSkin || s.onion !== prev.onion) engine.setOnion(s.onionSkin ? s.onion : null);
+    if (s.cameraView !== prev.cameraView) engine.setCameraView(s.cameraView);
+    // Edit layers with active keyframes: the current track is drawn as it is; another track turns it off.
+    if (s.editKeyed !== prev.editKeyed || s.activeLayerId !== prev.activeLayerId || s.doc !== prev.doc) {
+      const track = s.editKeyed ? (keyedTrackOf(s.doc.layers, s.activeLayerId)?.id ?? null) : null;
+      if (s.editKeyed && prev.editKeyed && track !== keyedTrackOf(prev.doc.layers, prev.activeLayerId)?.id) {
+        useStore.setState({ editKeyed: false });
+        return;
+      }
+      engine.setUnkeyed(track);
+    }
   });
 }
 

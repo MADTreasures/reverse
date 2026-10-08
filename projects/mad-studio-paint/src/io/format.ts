@@ -22,11 +22,12 @@ import { sanitizeBalloon, sanitizeTextBox, type Balloon, type TextBox } from '..
 import { sanitizeFrame } from '../paint/frames';
 import { pruneTrack, sanitizeTimeline, sanitizeTrack } from '../paint/animation';
 import { sanitizeClips } from '../paint/clips';
+import { sanitizeKeyTrack } from '../paint/keyframes';
 
 export const FORMAT = 'mad-studio-paint';
 /**
  * 2: layer masks, correction layers, effects, rulers. 3: vector and text layers, comic frames.
- * 4: animation (timeline, animation folders). 5: clips. Older files open unchanged.
+ * 4: animation (timeline, animation folders). 5: clips, keyframes, 2D camera folders. Older files open unchanged.
  */
 export const FORMAT_VERSION = 5;
 export const EXTENSION = 'madpaint';
@@ -75,6 +76,7 @@ function sanitizeLayer(raw: unknown, seen: Set<string>, depth: number): Layer | 
   const effects = sanitizeEffects(r.effects);
   const rulers = sanitizeRulers(r.rulers);
   const clips = sanitizeClips(r.clips);
+  const keys = sanitizeKeyTrack(r.keys);
   const common = {
     id,
     name: str(r.name, 'Layer', 120),
@@ -88,6 +90,7 @@ function sanitizeLayer(raw: unknown, seen: Set<string>, depth: number): Layer | 
     ...(effects ? { effects } : {}),
     ...(rulers ? { rulers } : {}),
     ...(clips ? { clips } : {}),
+    ...(keys && r.kind !== 'correction' ? { keys } : {}),
   };
   if (r.kind === 'folder') {
     const children = Array.isArray(r.children) ? r.children.map((c) => sanitizeLayer(c, seen, depth + 1)).filter((c): c is Layer => c !== null) : [];
@@ -107,6 +110,12 @@ function sanitizeLayer(raw: unknown, seen: Set<string>, depth: number): Layer | 
     const track = sanitizeTrack(r.animation);
     // Cels are the folder's own layers.
     if (track && !frame) folder.animation = pruneTrack(track, new Set(children.map((c) => c.id)));
+    // A 2D camera folder: its keyframes are always on.
+    if (r.camera === true && !frame && !folder.animation) {
+      folder.camera = true;
+      folder.keys = { enabled: true, frames: keys?.frames ?? [] };
+      if (folder.blend === 'pass-through') folder.blend = 'normal';
+    }
     return folder;
   }
   if (r.kind === 'correction') {

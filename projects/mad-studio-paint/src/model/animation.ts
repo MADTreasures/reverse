@@ -4,6 +4,7 @@
  */
 import { celAt, framesOf, pruneTrack, type AnimationTrack } from '../paint/animation';
 import { clipsOf, inClips, type TrackContent } from '../paint/clips';
+import type { Keyframe } from '../paint/keyframes';
 import { findLayer, flatten, locate } from './layers';
 import type { FolderLayer, Id, Layer, PaintDocument } from './types';
 
@@ -76,16 +77,29 @@ export function timelineTracks(layers: Layer[], depth = 0, out: TrackRow[] = [])
   return out;
 }
 
-/** What a track holds: its clips (made explicit) and, for an animation folder, its cel assignments. */
-export function trackContent(layer: Layer, frames: number): TrackContent {
-  return { clips: clipsOf(layer.clips, frames), ...(isAnimationFolder(layer) ? { cels: layer.animation.cels } : {}) };
+/** What a track holds: its clips (made explicit), an animation folder's cel assignments and its keyframes. */
+export function trackContent(layer: Layer, frames: number): TrackContent<Keyframe> {
+  return {
+    clips: clipsOf(layer.clips, frames),
+    ...(isAnimationFolder(layer) ? { cels: layer.animation.cels } : {}),
+    ...(layer.keys ? { keys: layer.keys.frames } : {}),
+  };
 }
 
 /** Stores a track's changed content in its layer (which is mutated). */
-export function setTrackContent(layer: Layer, t: TrackContent): void {
+export function setTrackContent(layer: Layer, t: TrackContent<Keyframe>): void {
   layer.clips = t.clips;
   if (layer.kind === 'folder' && layer.animation && t.cels) layer.animation = { cels: t.cels };
+  if (layer.keys && t.keys) layer.keys = { ...layer.keys, frames: t.keys };
 }
+
+export const isCameraFolder = (l: Layer | null | undefined): l is FolderLayer => l?.kind === 'folder' && Boolean(l.camera);
+
+/** Whether a track's keyframes are in effect: turned on, or a 2D camera folder's. */
+export const keysOn = (l: Layer): boolean => isCameraFolder(l) || Boolean(l.keys?.enabled);
+
+/** The track with keyframes turned on that a layer belongs to (2D camera folders do not count: their layers stay editable). */
+export const keyedTrackOf = (layers: Layer[], id: Id): Layer | null => tracksOf(layers, id).find((l) => !isCameraFolder(l) && l.keys?.enabled) ?? null;
 
 /**
  * Why a layer cannot be edited at `frame` because of the timeline, or null: a cel that is not shown

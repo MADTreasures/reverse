@@ -2,7 +2,7 @@
  * Animation (Timeline palette and Animation menu): the timeline, animation folders and cels,
  * assigning cels to frames, moving between frames, playback and onion skin.
  */
-import { animationFolders, celOf, isAnimationFolder, setTrackContent, trackContent, trackFolderOf, tracksOf, type AnimationFolder } from '../model/animation';
+import { animationFolders, celOf, isAnimationFolder, isCameraFolder, keysOn, setTrackContent, trackContent, trackFolderOf, tracksOf, type AnimationFolder } from '../model/animation';
 import { createFolder, createRasterLayer, findLayer, flatten, locate } from '../model/layers';
 import type { Id, Layer, PaintDocument } from '../model/types';
 import { assignAt, celAt, DEFAULT_TIMELINE, emptyTrack, entryAt, MAX_FRAMES, nextCelName, nextTrackName, removeAt, type OnionSkin, type Timeline } from '../paint/animation';
@@ -26,9 +26,13 @@ import {
   type ClipEdge,
   type TrackContent,
 } from '../paint/clips';
+import { moveKeys, placementAt, placementOf, restPlacement, setKey, type Interp, type Keyframe, type Placement } from '../paint/keyframes';
 import { ensureSurface } from '../engine/surfaces';
 import * as actions from './actions';
 import { getState, setState, type ClipRef, type PaintState } from './store';
+
+/** A track's content with its keyframes. */
+type Content = TrackContent<Keyframe>;
 
 export const timelineOf = (s: PaintState = getState()): Timeline | null => s.doc.timeline ?? null;
 
@@ -118,7 +122,7 @@ function allTracks(layers: Layer[], out: Layer[] = []): Layer[] {
 }
 
 /** Applies a track operation to every track: those with clips of their own, and animation folders. */
-function everyTrack(doc: PaintDocument, op: (t: TrackContent) => TrackContent): void {
+function everyTrack(doc: PaintDocument, op: (t: Content) => Content): void {
   const frames = doc.timeline?.frames ?? 1;
   for (const l of allTracks(doc.layers)) {
     if (!l.clips && !isAnimationFolder(l)) continue;
@@ -311,11 +315,11 @@ function commandClip(s: PaintState): { layer: Layer; index: number } | null {
  * Changes tracks in one undo step: `op` gets each track's content (clips made explicit) and returns
  * the new content, or null to leave it.
  */
-function editTracks(label: string, ids: Id[], op: (t: TrackContent, layer: Layer, timeline: Timeline) => TrackContent | null, key?: string): boolean {
+function editTracks(label: string, ids: Id[], op: (t: Content, layer: Layer, timeline: Timeline) => Content | null, key?: string): boolean {
   const s = getState();
   const t = s.doc.timeline;
   if (!t) return false;
-  const results = new Map<Id, TrackContent>();
+  const results = new Map<Id, Content>();
   for (const id of ids) {
     const layer = findLayer(s.doc.layers, id);
     if (!layer) continue;
@@ -398,7 +402,7 @@ export function deleteSelectedClips(): void {
 }
 
 /** What Copy (clip) put on the clipboard: the clip and the names of its cels (for other animation folders). */
-let clipboard: { track: Id; copy: ClipCopy; names: Map<Id, string> } | null = null;
+let clipboard: { track: Id; copy: ClipCopy<Keyframe>; names: Map<Id, string> } | null = null;
 
 export const hasCopiedClip = () => clipboard !== null;
 
@@ -483,7 +487,7 @@ export function moveSelectedClips(delta: number): void {
 }
 
 /** What a track looks like with a clip's edge dragged to `frame` (Alt: time stretch), for previews and commits. */
-export function draggedEdge(t: TrackContent, index: number, edge: ClipEdge, frame: number, stretch: boolean, fps: number): TrackContent {
+export function draggedEdge(t: Content, index: number, edge: ClipEdge, frame: number, stretch: boolean, fps: number): Content {
   return stretch ? stretchClip(t, index, edge, frame, fps) : trimClip(t, index, edge, frame, fps);
 }
 
@@ -508,6 +512,189 @@ function withClipAt(l: Layer, frame: number, frames: number): void {
 }
 
 export type { ClipRef };
+
+// ------------------------------------------------------------------ keyframes
+
+/** The track whose keyframes are edited: the current track, when its keyframes are on (2D camera folders: always). */
+export function keyTrack(s: PaintState = getState()): Layer | null {
+  const t = currentTrack(s);
+  return t && s.doc.timeline && keysOn(t) ? t : null;
+}
+
+/** A track's placement at a frame: from its keyframes, else as it is. */
+export function placementNow(track: Layer, frame = getState().frame, s: PaintState = getState()): Placement {
+  return placementAt(track.keys?.frames ?? [], frame) ?? restPlacement(s.doc.width, s.doc.height);
+}
+
+/** Animation > Edit track > Enable keyframes on this layer (the keyframes stay when turned off). */
+export function toggleKeyframes(): void {
+  const s = getState();
+  const track = currentTrack(s);
+  if (!track || !s.doc.timeline) {
+    setState({ hint: 'Select a layer or animation folder on the timeline' });
+    return;
+  }
+  if (isCameraFolder(track)) {
+    setState({ hint: 'Keyframes are always on for 2D camera folders' });
+    return;
+  }
+  if (track.kind === 'correction') {
+    setState({ hint: 'Correction layers have no keyframes' });
+    return;
+  }
+  const on = !track.keys?.enabled;
+  actions.changeDoc(on ? 'Enable keyframes' : 'Disable keyframes', (doc) => {
+    const l = findLayer(doc.layers, track.id);
+    if (l) l.keys = { enabled: on, frames: l.keys?.frames ?? [] };
+  });
+  if (!on) setState({ keySelection: [], editKeyed: false });
+}
+
+/** Records a placement as the keyframe at `frame` of a track (a clip is made there if needed; `enable` turns keyframes on). */
+export function setKeyframe(trackId: Id, frame: number, p: Placement, label = 'Keyframe', key?: string, enable = false): void {
+  const s = getState();
+  const old = findLayer(s.doc.layers, trackId)?.keys?.frames.find((k) => k.frame === frame);
+  const interp = old?.interp ?? s.keyInterp;
+  actions.changeDoc(
+    label,
+    (doc) => {
+      const l = findLayer(doc.layers, trackId);
+      if (!l || !doc.timeline) return;
+      if (!l.keys) l.keys = { enabled: true, frames: [] };
+      if (l.clips) setTrackContent(l, ensureClipAt(trackContent(l, doc.timeline.frames), frame, doc.timeline.frames, true));
+      l.keys = { enabled: l.keys.enabled || enable, frames: setKey(l.keys.frames, { ...placementOf(p), frame, interp }) };
+    },
+    key ? { key } : {},
+  );
+}
+
+/** Timeline palette / Animation > Edit track > Add keyframe: the current placement at the current frame. */
+export function addKeyframe(): void {
+  const s = getState();
+  const track = currentTrack(s);
+  if (!track || !s.doc.timeline || track.kind === 'correction') {
+    setState({ hint: 'Select a layer or animation folder on the timeline' });
+    return;
+  }
+  // Adding a keyframe turns keyframes on.
+  setKeyframe(track.id, s.frame, placementNow(track, s.frame, s), 'Add keyframe', undefined, true);
+  setState({ keySelection: [{ track: track.id, frame: s.frame }] });
+}
+
+/** The selected keyframes by track, or the current track's keyframe at the current frame. */
+function keyTargets(s: PaintState): Map<Id, number[]> {
+  const out = new Map<Id, number[]>();
+  for (const k of s.keySelection) out.set(k.track, [...(out.get(k.track) ?? []), k.frame]);
+  if (out.size === 0) {
+    const track = currentTrack(s);
+    if (track?.keys?.frames.some((k) => k.frame === s.frame)) out.set(track.id, [s.frame]);
+  }
+  return out;
+}
+
+/** Delete keyframe: the selected keyframes (or the one at the current frame). */
+export function deleteKeyframes(): void {
+  const s = getState();
+  const targets = keyTargets(s);
+  if (targets.size === 0) {
+    setState({ hint: 'Select a keyframe in the Timeline palette' });
+    return;
+  }
+  actions.changeDoc('Delete keyframe', (doc) => {
+    for (const [id, frames] of targets) {
+      const l = findLayer(doc.layers, id);
+      if (l?.keys) l.keys = { ...l.keys, frames: l.keys.frames.filter((k) => !frames.includes(k.frame)) };
+    }
+  });
+  setState({ keySelection: [] });
+}
+
+/** Animation > Edit track > Delete all keyframes of the current track. */
+export function deleteAllKeyframes(): void {
+  const track = currentTrack();
+  if (!track?.keys?.frames.length) {
+    setState({ hint: 'This track has no keyframes' });
+    return;
+  }
+  actions.changeDoc('Delete all keyframes', (doc) => {
+    const l = findLayer(doc.layers, track.id);
+    if (l?.keys) l.keys = { ...l.keys, frames: [] };
+  });
+  setState({ keySelection: [] });
+}
+
+/** Keyframe interpolation (Timeline palette) / Switch keyframe to … interpolation: for new keyframes and the selected ones. */
+export function setKeyInterp(interp: Interp): void {
+  const s = getState();
+  setState({ keyInterp: interp });
+  const targets = keyTargets(s);
+  if (targets.size === 0) return;
+  actions.changeDoc(`Switch keyframe to ${interp} interpolation`, (doc) => {
+    for (const [id, frames] of targets) {
+      const l = findLayer(doc.layers, id);
+      if (l?.keys) l.keys = { ...l.keys, frames: l.keys.frames.map((k) => (frames.includes(k.frame) ? { ...k, interp } : k)) };
+    }
+  });
+}
+
+/** Selects a keyframe (`add`: Ctrl/⌘-click adds it or takes it out) and goes to its frame. */
+export function selectKeyframe(track: Id, frame: number, add = false): void {
+  const s = getState();
+  const has = s.keySelection.some((k) => k.track === track && k.frame === frame);
+  const keySelection = !add ? [{ track, frame }] : has ? s.keySelection.filter((k) => !(k.track === track && k.frame === frame)) : [...s.keySelection, { track, frame }];
+  setState({ keySelection, clipSelection: [] });
+  selectTrackFrame(track, frame);
+}
+
+export const clearKeySelection = () => {
+  if (getState().keySelection.length) setState({ keySelection: [] });
+};
+
+/** Drags the selected keyframes by `delta` frames (Alt: copies them). */
+export function moveSelectedKeys(delta: number, copy = false): void {
+  const s = getState();
+  if (!delta || s.keySelection.length === 0) return;
+  const targets = keyTargets(s);
+  actions.changeDoc(copy ? 'Duplicate keyframe' : 'Move keyframe', (doc) => {
+    for (const [id, frames] of targets) {
+      const l = findLayer(doc.layers, id);
+      if (!l?.keys || !doc.timeline) continue;
+      l.keys = { ...l.keys, frames: moveKeys(l.keys.frames, frames, delta, copy) };
+      // Keyframes need a clip where they land.
+      if (l.clips) for (const f of frames) setTrackContent(l, ensureClipAt(trackContent(l, doc.timeline.frames), Math.max(1, f + delta), doc.timeline.frames, true));
+    }
+  });
+  setState({ keySelection: s.keySelection.map((k) => ({ ...k, frame: Math.max(1, k.frame + delta) })) });
+}
+
+/** Animation > Edit track > Edit layers with active keyframes: the current track is drawn as it is and can be drawn on. */
+export function toggleEditKeyed(): void {
+  const s = getState();
+  if (!s.editKeyed && !(currentTrack(s)?.keys?.enabled)) {
+    setState({ hint: 'Keyframes are not on for this track' });
+    return;
+  }
+  setState({ editKeyed: !s.editKeyed });
+}
+
+/** Object tool > 2D camera: Show camera's field of view (on) or field guides (off). */
+export const toggleCameraView = () => setState((s) => ({ cameraView: !s.cameraView }));
+
+/** Animation > New animation layer > 2D camera folder: its keyframes move a camera over the layers put in it. */
+export function newCameraFolder(name = '2D camera folder'): Id {
+  const folder = createFolder(name, [], { camera: true, blend: 'normal', keys: { enabled: true, frames: [] } });
+  actions.changeDoc('New 2D camera folder', (doc, st) => {
+    if (!doc.timeline) doc.timeline = { ...DEFAULT_TIMELINE };
+    // Above the current track, never inside an animation folder.
+    const anchor = tracksOf(doc.layers, st.activeLayerId)[0]?.id ?? st.activeLayerId;
+    const loc = locate(doc.layers, anchor);
+    if (loc) loc.siblings.splice(loc.index, 0, folder);
+    else doc.layers.unshift(folder);
+    return folder.id;
+  });
+  setState({ timelineShown: true });
+  return folder.id;
+}
 
 // ------------------------------------------------------------------ playback
 

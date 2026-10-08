@@ -34,6 +34,20 @@ describe('.madpaint format', () => {
     expect((odd.layers[0] as FolderLayer).animation).toEqual({ cels: [{ frame: 1, cel: 'c' }] });
   });
 
+  it('keeps keyframes and 2D camera folders', () => {
+    const doc = createDocument('Keys', 200, 100, 72);
+    const k = { frame: 3, interp: 'smooth' as const, x: 10, y: -4, scaleX: 1.5, scaleY: 1.5, rotation: 30, pivotX: 100, pivotY: 50, opacity: 0.5 };
+    doc.layers[0].keys = { enabled: true, frames: [k] };
+    doc.layers.unshift(createFolder('2D camera folder', [], { camera: true, blend: 'normal', keys: { enabled: true, frames: [{ ...k, frame: 1 }] } }));
+    doc.timeline = { enabled: true, fps: 12, frames: 12 };
+    const back = unpackDocument(packDocument({ doc, activeLayerId: null, layers: new Map() }));
+    expect(back.doc).toEqual(doc);
+    // A camera folder's keyframes cannot be turned off; correction layers have none.
+    const odd = sanitizeDocument({ layers: [{ id: 'c', kind: 'folder', camera: true, keys: { enabled: false }, children: [] }, { id: 'x', kind: 'correction', keys: { frames: [] } }] });
+    expect((odd.layers[0] as FolderLayer).keys).toEqual({ enabled: true, frames: [] });
+    expect(odd.layers[1].keys).toBeUndefined();
+  });
+
   it('keeps the clips of tracks', () => {
     const doc = createDocument('Clips', 200, 100, 72);
     doc.layers[0].clips = [

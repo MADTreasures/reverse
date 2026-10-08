@@ -127,6 +127,7 @@ export function AnimationExportDialog({ format }: { format: AnimationFormat }) {
   const [dither, setDither] = useState(false);
   const [transparent, setTransparent] = useState(false);
   const [drafts, setDrafts] = useState(false);
+  const [camera, setCamera] = useState(true);
   const [prefix, setPrefix] = useState(doc.name || 'frame');
   const [startNumber, setStartNumber] = useState(1);
   const [type, setType] = useState<'png' | 'jpeg'>('png');
@@ -149,6 +150,7 @@ export function AnimationExportDialog({ format }: { format: AnimationFormat }) {
       dither,
       transparent,
       drafts,
+      camera,
       sequence: { prefix, suffix: '', separator: '_', startNumber, type },
     });
     setBusy(false);
@@ -226,6 +228,10 @@ export function AnimationExportDialog({ format }: { format: AnimationFormat }) {
         <label />
         <label className="check">
           <input type="checkbox" checked={drafts} onChange={(e) => setDrafts(e.target.checked)} /> Export draft
+        </label>
+        <label />
+        <label className="check">
+          <input type="checkbox" checked={camera} onChange={(e) => setCamera(e.target.checked)} /> Apply 2D camera effects
         </label>
       </div>
       {format === 'sequence' && <p className="muted">The images are saved together in a ZIP file.</p>}

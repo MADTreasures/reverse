@@ -9,13 +9,14 @@
  */
 import { memo, useCallback, useMemo, useRef, useState } from 'react';
 import { useShallow } from 'zustand/react/shallow';
-import { isAnimationFolder, timelineTracks, trackContent, type AnimationFolder, type TrackRow as Row } from '../../model/animation';
+import { isAnimationFolder, isCameraFolder, keysOn, timelineTracks, trackContent, type AnimationFolder, type TrackRow as Row } from '../../model/animation';
 import type { Id, Layer } from '../../model/types';
 import { assignmentAt, entryAt } from '../../paint/animation';
 import { clipIndexAt, type ClipEdge, type TrackContent } from '../../paint/clips';
+import { moveKeys, type Interp, type Keyframe } from '../../paint/keyframes';
 import * as actions from '../../store/actions';
 import * as anim from '../../store/animationActions';
-import { getState, setState, useStore, type ClipRef } from '../../store/store';
+import { getState, setState, useStore, type ClipRef, type KeyRef } from '../../store/store';
 import { Icon } from '../controls/Icons';
 import { openDialog, showMenu, type MenuItem } from '../overlays';
 
@@ -44,6 +45,13 @@ function clipItems(): MenuItem[] {
     { label: 'Copy clip', onClick: anim.copySelectedClip },
     { label: 'Paste clip', disabled: !anim.hasCopiedClip(), onClick: anim.pasteCopiedClip },
     { label: selected ? 'Delete clips' : 'Delete clip', onClick: anim.deleteSelectedClips },
+    { separator: true },
+    { label: 'Add keyframe', onClick: anim.addKeyframe },
+    { label: 'Delete keyframe', disabled: s.keySelection.length === 0, onClick: anim.deleteKeyframes },
+    { label: 'Delete all keyframes', onClick: anim.deleteAllKeyframes },
+    { label: 'Switch keyframe to hold interpolation', onClick: () => anim.setKeyInterp('hold') },
+    { label: 'Switch keyframe to linear interpolation', onClick: () => anim.setKeyInterp('linear') },
+    { label: 'Switch keyframe to smooth interpolation', onClick: () => anim.setKeyInterp('smooth') },
   ];
 }
 
@@ -82,11 +90,15 @@ export function openAssignMenu(): void {
   showMenu({ x: box?.left ?? window.innerWidth / 2, y: box ? box.bottom + 2 : window.innerHeight / 2 }, trackMenu(track, s.frame));
 }
 
-/** A clip being dragged: moved (all selected clips), or one edge trimmed or stretched. */
-type Drag = { kind: 'move'; x0: number; delta: number } | { kind: 'edge'; track: Id; start: number; edge: ClipEdge; stretch: boolean; frame: number };
+/** A clip being dragged: moved (all selected clips), or one edge trimmed or stretched; or keyframes moved (Alt: copied). */
+type Drag =
+  | { kind: 'move'; x0: number; delta: number }
+  | { kind: 'edge'; track: Id; start: number; edge: ClipEdge; stretch: boolean; frame: number }
+  | { kind: 'keys'; x0: number; delta: number; copy: boolean };
 
 const ICONS: Record<Layer['kind'], string> = { raster: 'layer', vector: 'vector', text: 'text', gradient: 'gradient', correction: 'correction', folder: 'folder' };
-const trackIcon = (l: Layer) => (isAnimationFolder(l) ? 'animFolder' : l.kind === 'folder' && l.frame ? 'frame' : ICONS[l.kind]);
+const trackIcon = (l: Layer) => (isAnimationFolder(l) ? 'animFolder' : l.kind === 'folder' && l.camera ? 'camera' : l.kind === 'folder' && l.frame ? 'frame' : ICONS[l.kind]);
+const INTERP_LABELS: Record<Interp, string> = { hold: 'Hold', linear: 'Linear', smooth: 'Smooth' };
 
 interface RowProps {
   row: Row;
@@ -94,14 +106,19 @@ interface RowProps {
   active: boolean;
   /** First frames of this track's selected clips. */
   selected: string;
+  /** Frames of this track's selected keyframes. */
+  selectedKeys: string;
   /** What the track shows while a clip is dragged. */
-  preview: TrackContent | null;
+  preview: TrackContent<Keyframe> | null;
   onGrip: (e: React.PointerEvent<HTMLDivElement>, track: Layer, start: number, lane: HTMLElement) => void;
+  onKey: (e: React.PointerEvent<HTMLDivElement>, track: Layer, frame: number) => void;
 }
 
-const TrackRow = memo(function TrackRow({ row, frames, active, selected, preview, onGrip }: RowProps) {
+const TrackRow = memo(function TrackRow({ row, frames, active, selected, selectedKeys, preview, onGrip, onKey }: RowProps) {
   const track = row.layer;
   const content = preview ?? trackContent(track, frames);
+  const keys = keysOn(track) ? (content.keys ?? []) : [];
+  const keySel = new Set(selectedKeys ? selectedKeys.split(',').map(Number) : []);
   const animation = isAnimationFolder(track) ? (content.cels ? { cels: content.cels } : track.animation) : null;
   const starts = new Set(selected ? selected.split(',').map(Number) : []);
   const lane = useRef<HTMLDivElement>(null);
@@ -128,6 +145,7 @@ const TrackRow = memo(function TrackRow({ row, frames, active, selected, preview
           title={cel ? `Frame ${f}: ${cel.name}` : `Frame ${f}`}
           onClick={() => {
             anim.clearClipSelection();
+            anim.clearKeySelection();
             anim.selectTrackFrame(track.id, f);
           }}
           onDoubleClick={(e) => showMenu({ x: e.clientX, y: e.clientY }, trackMenu(track, f))}
@@ -159,6 +177,11 @@ const TrackRow = memo(function TrackRow({ row, frames, active, selected, preview
         <button className="tl-track-name" title={track.name} onClick={() => anim.selectTrackFrame(track.id, getState().frame)}>
           {track.name}
         </button>
+        {track.keys?.enabled && !isCameraFolder(track) && (
+          <span className="tl-keyed" title="Keyframes are on for this layer">
+            <Icon name="keyEnable" size={12} />
+          </span>
+        )}
       </div>
       <div
         ref={lane}
@@ -168,6 +191,7 @@ const TrackRow = memo(function TrackRow({ row, frames, active, selected, preview
             ? undefined
             : (e) => {
                 anim.clearClipSelection();
+                anim.clearKeySelection();
                 anim.selectTrackFrame(track.id, frameAt(e.clientX));
               }
         }
@@ -194,6 +218,21 @@ const TrackRow = memo(function TrackRow({ row, frames, active, selected, preview
             </div>
           ))}
         {animation && <div className="tl-cells">{cells}</div>}
+        {keys
+          .filter((k) => k.frame <= frames)
+          .map((k) => (
+            <div
+              key={`k${k.frame}`}
+              className={`tl-key ${k.interp} ${keySel.has(k.frame) ? 'selected' : ''}`}
+              data-testid="timeline-key"
+              data-frame={k.frame}
+              title={`Keyframe on frame ${k.frame} (${INTERP_LABELS[k.interp]}): drag to move, Alt+drag to duplicate`}
+              style={{ left: (k.frame - 0.5) * CELL }}
+              onPointerDown={(e) => onKey(e, track, k.frame)}
+              onClick={(e) => e.stopPropagation()}
+              onContextMenu={(e) => menu(e, k.frame)}
+            />
+          ))}
       </div>
     </div>
   );
@@ -210,6 +249,17 @@ export function TimelinePalette() {
   );
   const activeId = useStore((s) => anim.currentTrack(s)?.id ?? null);
   const hasCels = useStore((s) => anim.activeTrack(s) !== null);
+  const { keySelection, editKeyed } = useStore(useShallow((s) => ({ keySelection: s.keySelection, editKeyed: s.editKeyed })));
+  const keyOn = useStore((s) => {
+    const t = anim.currentTrack(s);
+    return Boolean(t && keysOn(t));
+  });
+  // The interpolation shown: the selected keyframe's, else the one for new keyframes.
+  const shownInterp = useStore((s) => {
+    const k = s.keySelection[0];
+    const l = k ? timelineTracks(s.doc.layers).find((r) => r.layer.id === k.track)?.layer : null;
+    return l?.keys?.frames.find((x) => x.frame === k!.frame)?.interp ?? s.keyInterp;
+  });
   const rows = useMemo(() => timelineTracks(layers), [layers]);
   const scrub = useRef(false);
   const [drag, setDrag] = useState<Drag | null>(null);
@@ -240,6 +290,7 @@ export function TimelinePalette() {
       setDragBoth(null);
       if (!d) return;
       if (d.kind === 'move') anim.moveSelectedClips(d.delta);
+      else if (d.kind === 'keys') anim.moveSelectedKeys(d.delta, d.copy);
       else anim.dragClipEdge(d.track, d.start, d.edge, d.frame, d.stretch);
     };
     window.addEventListener('pointermove', move);
@@ -280,14 +331,34 @@ export function TimelinePalette() {
       return delta === cur.delta ? cur : { ...cur, delta };
     });
   };
-  // Rows keep one handler (they are memoised); it always sees the current state.
+  const onKey = (e: React.PointerEvent<HTMLDivElement>, track: Layer, frame: number) => {
+    if (e.button !== 0) return;
+    e.stopPropagation();
+    e.preventDefault();
+    const add = e.ctrlKey || e.metaKey;
+    if (add || !getState().keySelection.some((k) => k.track === track.id && k.frame === frame)) anim.selectKeyframe(track.id, frame, add);
+    else anim.selectTrackFrame(track.id, frame);
+    if (add) return;
+    const x0 = e.clientX;
+    setDragBoth({ kind: 'keys', x0, delta: 0, copy: e.altKey });
+    follow((ev, cur) => {
+      if (cur.kind !== 'keys') return null;
+      const delta = Math.round((ev.clientX - x0) / CELL);
+      return delta === cur.delta && ev.altKey === cur.copy ? cur : { ...cur, delta, copy: ev.altKey };
+    });
+  };
+
+  // Rows keep one handler each (they are memoised); it always sees the current state.
   const gripRef = useRef(onGrip);
   gripRef.current = onGrip;
   const stableGrip = useCallback<RowProps['onGrip']>((...args) => gripRef.current(...args), []);
+  const keyRef = useRef(onKey);
+  keyRef.current = onKey;
+  const stableKey = useCallback<RowProps['onKey']>((...args) => keyRef.current(...args), []);
 
   // What dragged tracks look like before the drop.
   const previews = useMemo(() => {
-    const out = new Map<Id, TrackContent>();
+    const out = new Map<Id, TrackContent<Keyframe>>();
     if (!drag || !timeline) return out;
     const s = getState();
     if (drag.kind === 'edge') {
@@ -296,6 +367,16 @@ export function TimelinePalette() {
       const t = trackContent(track, frames);
       const i = t.clips.findIndex((c) => c.start === drag.start);
       if (i >= 0) out.set(track.id, anim.draggedEdge(t, i, drag.edge, drag.frame, drag.stretch, fps));
+      return out;
+    }
+    if (drag.kind === 'keys') {
+      if (!drag.delta) return out;
+      for (const r of rows) {
+        const frames0 = keySelection.filter((k) => k.track === r.layer.id).map((k) => k.frame);
+        if (!frames0.length || !r.layer.keys) continue;
+        const t = trackContent(r.layer, frames);
+        out.set(r.layer.id, { ...t, keys: moveKeys(r.layer.keys.frames, frames0, drag.delta, drag.copy) });
+      }
       return out;
     }
     const d = anim.clipMoveDelta(drag.delta, s);
@@ -307,7 +388,13 @@ export function TimelinePalette() {
       out.set(r.layer.id, { ...t, clips: t.clips.map((c) => (starts.includes(c.start) ? { ...c, start: c.start + d, end: c.end + d } : c)) });
     }
     return out;
-  }, [drag, rows, frames, fps, timeline, clipSelection]);
+  }, [drag, rows, frames, fps, timeline, clipSelection, keySelection]);
+
+  const keysOf = (id: Id) =>
+    keySelection
+      .filter((k: KeyRef) => k.track === id)
+      .map((k) => Math.max(1, k.frame + (drag?.kind === 'keys' ? drag.delta : 0)))
+      .join(',');
 
   const selectedOf = (id: Id) =>
     clipSelection
@@ -332,6 +419,18 @@ export function TimelinePalette() {
         <Button icon="removeCel" label="Delete assigned cel" disabled={!enabled || !hasCels} onClick={() => anim.removeAssignedCel()} />
         <span className="sep" />
         <Button icon="onion" label="Enable onion skin" on={onionSkin} disabled={!enabled} onClick={anim.toggleOnionSkin} />
+        <span className="sep" />
+        <Button icon="keyAdd" label="Add keyframe" disabled={!enabled || !activeId} onClick={anim.addKeyframe} />
+        <select className="tl-interp" aria-label="Keyframe interpolation" title="Keyframe interpolation" value={shownInterp} disabled={!enabled} onChange={(e) => anim.setKeyInterp(e.target.value as Interp)}>
+          {(Object.keys(INTERP_LABELS) as Interp[]).map((k) => (
+            <option key={k} value={k}>
+              {INTERP_LABELS[k]}
+            </option>
+          ))}
+        </select>
+        <Button icon="keyDelete" label="Delete keyframe" disabled={!enabled || !keyOn} onClick={anim.deleteKeyframes} />
+        <Button icon="keyEnable" label="Enable keyframes on this layer" on={keyOn} disabled={!enabled || !activeId} onClick={anim.toggleKeyframes} />
+        <Button icon="keyEdit" label="Edit layers with active keyframes" on={editKeyed} disabled={!enabled || !keyOn} onClick={anim.toggleEditKeyed} />
         <span className="spacer" />
         {timeline && (
           <button className="tl-info" title="Animation > Timeline > Change settings" onClick={() => openDialog('timelineSettings')}>
@@ -367,7 +466,17 @@ export function TimelinePalette() {
               </div>
             </div>
             {rows.map((r) => (
-              <TrackRow key={r.layer.id} row={r} frames={frames} active={r.layer.id === activeId} selected={selectedOf(r.layer.id)} preview={previews.get(r.layer.id) ?? null} onGrip={stableGrip} />
+              <TrackRow
+                key={r.layer.id}
+                row={r}
+                frames={frames}
+                active={r.layer.id === activeId}
+                selected={selectedOf(r.layer.id)}
+                selectedKeys={keysOf(r.layer.id)}
+                preview={previews.get(r.layer.id) ?? null}
+                onGrip={stableGrip}
+                onKey={stableKey}
+              />
             ))}
             <div className="tl-now" style={{ left: `calc(var(--name-w) + ${(frame - 1) * CELL}px)` }} aria-hidden="true" />
           </div>

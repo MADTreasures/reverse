@@ -1,5 +1,5 @@
 /** Document operations. Every change that should be undoable goes through `commit`. */
-import { celBlocker, celOf, isAnimationFolder, nearestFrameOf, pruneTracks } from '../model/animation';
+import { celBlocker, celOf, isAnimationFolder, keyedTrackOf, nearestFrameOf, pruneTracks } from '../model/animation';
 import { celAt } from '../paint/animation';
 import { pushHistory } from '../model/color';
 import { createDocument } from '../model/document';
@@ -249,6 +249,8 @@ export function editBlocker(s: PaintState = getState()): string | null {
   }
   if (isEffectivelyLocked(s.doc.layers, l.id)) return 'The layer is locked';
   if (!l.visible) return 'The layer is hidden';
+  if (s.doc.timeline?.enabled && !s.editKeyed && keyedTrackOf(s.doc.layers, l.id))
+    return 'Keyframes are on for this track: turn on Edit layers with active keyframes to draw on it (Timeline palette)';
   return celBlocker(s.doc, l.id, s.frame);
 }
 

@@ -2054,6 +2054,110 @@ test('animation clips: trim, first and last displayed frame, merge, split, move,
   expect(errors).toEqual([]);
 });
 
+test('keyframes move a track over time; a 2D camera folder frames the output', async ({ page }) => {
+  const errors = await boot(page);
+  await page.evaluate(() => void window.__madPaint.runCommand('new'));
+  const dlg = page.getByRole('dialog', { name: 'New canvas' });
+  await dlg.getByLabel('Width').fill('400');
+  await dlg.getByLabel('Height').fill('300');
+  await dlg.getByText('Create animated illustration').click();
+  await dlg.getByLabel('Number of cels').fill('8');
+  await dlg.getByLabel('Frame rate').fill('8');
+  await dlg.getByRole('button', { name: 'OK' }).click();
+  const ruler = (f: number) => page.getByTestId('timeline-ruler').locator('.tl-cell').nth(f - 1).click();
+  const keysOf = (i = 0) =>
+    page.evaluate((n) => {
+      const s = window.__madPaint.useStore.getState();
+      const find = (ls: any[]): any[] => ls.flatMap((l) => [l, ...(l.children && !l.animation ? find(l.children) : [])]);
+      const track = find(s.doc.layers).filter((l) => l.keys)[n];
+      return track ? { enabled: track.keys.enabled, frames: track.keys.frames.map((k: any) => [k.frame, Math.round(k.x), k.interp]) } : null;
+    }, i);
+  // A short thick line at x 30 … 90 on cel 1.
+  await thinPen(page);
+  await page.evaluate(() => {
+    const m = window.__madPaint;
+    const s = m.useStore.getState();
+    const sub = s.subTools.find((t: any) => t.id === s.activeSub.pen);
+    m.actions.updateSubTool(sub.id, { brush: { ...sub.brush, size: 20 } });
+  });
+  await drag(page, [40, 150], [80, 150]);
+  // Add keyframe: keyframes turn on for the animation folder, which can no longer be drawn on.
+  await page.getByRole('button', { name: 'Add keyframe' }).click();
+  expect(await keysOf()).toEqual({ enabled: true, frames: [[1, 0, 'linear']] });
+  await expect(page.locator('[data-testid=timeline-track][data-track="A"] [data-testid=timeline-key]')).toHaveCount(1);
+  await drag(page, [40, 250], [80, 250]);
+  expect(await page.evaluate(() => window.__madPaint.useStore.getState().hint)).toMatch(/Keyframes are on/);
+  // Frame 8: the Object tool drags the box 200 px to the right, which records a keyframe.
+  await ruler(8);
+  await selectTool(page, 'object');
+  await drag(page, [200, 100], [400, 100], 8);
+  expect(await keysOf()).toEqual({ enabled: true, frames: [[1, 0, 'linear'], [8, 200, 'linear']] });
+  expect(await shown(page, 260, 150)).toBeLessThan(60);
+  expect(await shown(page, 60, 150)).toBe(255);
+  // Frame 4 lies 3/7 of the way (linear): about 86 px to the right.
+  await ruler(4);
+  expect(await shown(page, 145, 150)).toBeLessThan(60);
+  expect(await shown(page, 60, 150)).toBe(255);
+  // Hold: the first keyframe's place stays until frame 8.
+  await page.locator('[data-testid=timeline-track][data-track="A"] [data-testid=timeline-key][data-frame="1"]').click();
+  await page.getByLabel('Keyframe interpolation').first().selectOption('hold');
+  expect((await keysOf())!.frames[0]).toEqual([1, 0, 'hold']);
+  await ruler(4);
+  expect(await shown(page, 60, 150)).toBeLessThan(60);
+  // Edit layers with active keyframes: drawn as it is, and it can be drawn on.
+  await ruler(8);
+  await page.getByRole('button', { name: 'Edit layers with active keyframes' }).click();
+  expect(await shown(page, 60, 150)).toBeLessThan(60);
+  await thinPen(page);
+  await drag(page, [200, 250], [260, 250]);
+  expect(await layerAlpha(page, 230, 250)).toBeGreaterThan(100);
+  await page.getByRole('button', { name: 'Edit layers with active keyframes' }).click();
+  expect(await shown(page, 60, 150)).toBe(255);
+  // 2D camera folder around A: at frame 1 the camera frame is half the size, centred on (100, 150).
+  await page.evaluate(() => {
+    const m = window.__madPaint;
+    m.runCommand('newCameraFolder');
+    const s = m.useStore.getState();
+    const cam = s.doc.layers.find((l: any) => l.camera);
+    const a = s.doc.layers.find((l: any) => l.animation);
+    m.actions.moveLayer(a.id, cam.id, 'inside');
+    m.actions.selectLayer(cam.id);
+  });
+  await expect(page.getByTestId('camera-icon')).toHaveCount(1);
+  await ruler(1);
+  await page.evaluate(() => {
+    const m = window.__madPaint;
+    m.actions.selectLayer(m.useStore.getState().doc.layers.find((l: any) => l.camera).id);
+  });
+  await selectTool(page, 'object');
+  await page.getByRole('button', { name: 'Tool Settings', exact: true }).click();
+  await expect(page.getByTestId('keyframe-info')).toContainText('2D camera folder');
+  await page.getByRole('spinbutton', { name: 'Scale ratio W' }).fill('50');
+  await page.getByRole('spinbutton', { name: 'Position X' }).fill('-100');
+  // New keyframes take the interpolation chosen last (Hold).
+  expect(await keysOf(0)).toEqual({ enabled: true, frames: [[1, -100, 'hold']] });
+  // Field guides: the canvas shows the layers as they are; the camera's field of view shows them through it.
+  expect(await shown(page, 120, 150)).toBe(255);
+  await page.getByRole('radio', { name: "Show camera's field of view" }).click();
+  expect(await shown(page, 120, 150)).toBeLessThan(60);
+  expect(await shown(page, 40, 150)).toBe(255);
+  await page.evaluate(() => window.__madPaint.runCommand('cameraView'));
+  // GIF export applies the camera.
+  await page.evaluate(() => window.__madPaint.runCommand('exportGif'));
+  const ex = page.getByRole('dialog', { name: 'Animated GIF export settings' });
+  await expect(ex.getByLabel('Apply 2D camera effects')).toBeChecked();
+  await ex.getByRole('button', { name: 'Cancel' }).click();
+  // Saved and opened again: keyframes and the camera folder are kept.
+  const back = await page.evaluate(async () => {
+    const m = window.__madPaint;
+    await m.openFileBytes({ name: 'keys.madpaint', data: await m.buildDocumentBytes() });
+    const cam = m.useStore.getState().doc.layers.find((l: any) => l.camera);
+    return { camera: cam.keys.frames.map((k: any) => [k.frame, k.x, k.scaleX]), a: cam.children[0].keys.frames.map((k: any) => [k.frame, Math.round(k.x), k.interp]) };
+  });
+  expect(back).toEqual({ camera: [[1, -100, 0.5]], a: [[1, 0, 'hold'], [8, 200, 'linear']] });
+  expect(errors).toEqual([]);
+});
+
 test('frame borders snap strokes that start near them, not along their extension', async ({ page }) => {
   await boot(page);
   await page.evaluate(() => window.__madPaint.runCommand('newFrameFolder'));

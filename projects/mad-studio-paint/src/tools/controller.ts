@@ -30,6 +30,8 @@ import { drawRulers, rulerSession } from './rulerTool';
 import { CurveInput } from './curveInput';
 import { correctSession, drawCorrectHover, drawSelectedControlPoints } from './correctTool';
 import { drawGradientHandles, drawLineSelection, lineHandleCursor, objectSession } from './objectTool';
+import { drawCameraGuides, drawKeyBox, keyframeTarget, keyHandleCursor } from './keyframeTool';
+import { isCameraFolder, tracksOf } from '../model/animation';
 import { balloonSession, textSession } from './textTool';
 import { frameSession } from './frameTool';
 import { confirmTransform, drawTransformOverlay, hitHandle, isTransforming, transformCursor, TransformSession } from './transform';
@@ -67,6 +69,8 @@ class Controller {
     if (this.session?.cursor) return this.session.cursor;
     if (isTransforming() && !this.mods.space && this.hover) return transformCursor(hitHandle(this.hover, this.view));
     const t = this.current();
+    const keyed = t === 'object' ? keyframeTarget() : null;
+    if (keyed) return (this.hover && keyHandleCursor(this.hover, this.view, keyed)) ?? 'default';
     const line = t === 'object' && this.hover ? lineHandleCursor(this.hover, this.view) : null;
     if (line) return line;
     if (t === 'select' && currentSubTool().brush) return 'none';
@@ -209,8 +213,15 @@ class Controller {
   /** Draws tool feedback (brush outline, selection preview, transform box) in viewport space. */
   overlay(ctx: CanvasRenderingContext2D): void {
     drawRulers(ctx, this.view);
-    // The Object tool (also ⌘ with drawing tools) shows the selected vector lines and their control points.
-    if (!this.session?.overlay && this.current() === 'object') {
+    // 2D camera folders around the current layer: their camera frames (field guides).
+    const s = getState();
+    if (s.doc.timeline?.enabled && !s.cameraView) drawCameraGuides(ctx, this.view, tracksOf(s.doc.layers, s.activeLayerId).filter(isCameraFolder));
+    // The Object tool on a track with keyframes: its placed box; else the selected vector lines and their control points.
+    const keyed = this.current() === 'object' ? keyframeTarget() : null;
+    // Seen through the camera, its frame is the output itself.
+    if (!this.session?.overlay && keyed) {
+      if (!(isCameraFolder(keyed) && s.cameraView)) drawKeyBox(ctx, this.view, keyed);
+    } else if (!this.session?.overlay && this.current() === 'object') {
       drawLineSelection(ctx, this.view);
       drawSelectedControlPoints(ctx, this.view);
     }

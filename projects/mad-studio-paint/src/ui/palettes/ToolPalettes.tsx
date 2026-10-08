@@ -2,6 +2,10 @@ import { useState } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import { BRUSH_SIZE_PRESETS } from '../../store/actions';
 import * as actions from '../../store/actions';
+import * as anim from '../../store/animationActions';
+import { isCameraFolder } from '../../model/animation';
+import type { Layer } from '../../model/types';
+import type { Interp, Placement } from '../../paint/keyframes';
 import { currentSubTool, drawingColor, getState, setState, useStore } from '../../store/store';
 import { pxToPt, setTextStyle, setTextWrap, textToolStyle } from '../../store/textActions';
 import { setFrameProps } from '../../store/frameActions';
@@ -280,7 +284,7 @@ export function ToolProperty() {
         </>
       )}
       {sub.tool === 'eraser' && b && <VectorEraserRow sub={sub} update={update} />}
-      {sub.tool === 'object' && <ObjectLineSettings sub={sub} update={update} />}
+      {sub.tool === 'object' && <ObjectSettings sub={sub} update={update} />}
       {sub.tool === 'text' && <TextSettings />}
       {sub.tool === 'balloon' && sub.balloon && <BalloonToolSettings sub={sub} update={update} />}
       {sub.tool === 'balloon' && sub.tail && <TailSettings sub={sub} update={update} />}
@@ -392,6 +396,101 @@ function VectorEraserRow({ sub, update }: { sub: SubTool; update: (patch: Partia
         </label>
       )}
     </div>
+  );
+}
+
+/** Object tool: a track's keyframe placement (keyframes on, or a 2D camera folder), else the selected objects. */
+function ObjectSettings({ sub, update }: { sub: SubTool; update: (patch: Partial<SubTool>) => void }) {
+  const keyed = useStore((s) => (s.doc.timeline?.enabled && !s.editKeyed ? anim.keyTrack(s) : null));
+  return keyed ? <KeyframeSettings track={keyed} /> : <ObjectLineSettings sub={sub} update={update} />;
+}
+
+const round2 = (v: number) => Math.round(v * 100) / 100;
+
+/** The placement of a track at the current frame; a change records a keyframe there. */
+function KeyframeSettings({ track }: { track: Layer }) {
+  const frame = useStore((s) => s.frame);
+  const { width, height } = useStore(useShallow((s) => ({ width: s.doc.width, height: s.doc.height })));
+  const cameraView = useStore((s) => s.cameraView);
+  const interp = useStore((s) => track.keys?.frames.find((k) => k.frame === s.frame)?.interp ?? s.keyInterp);
+  const [keepAspect, setKeepAspect] = useState(true);
+  const p = anim.placementNow(track, frame);
+  const camera = isCameraFolder(track);
+  const atKey = Boolean(track.keys?.frames.some((k) => k.frame === frame));
+  const set = (patch: Partial<Placement>, what: string) => anim.setKeyframe(track.id, frame, { ...p, ...patch }, `Keyframe: ${what}`, `key:${track.id}:${frame}:${what}`);
+  const span = Math.max(width, height) * 2;
+  return (
+    <>
+      <div className="prop-note" data-testid="keyframe-info">
+        {camera ? '2D camera folder' : 'Keyframes'} · frame {frame}
+        {atKey ? ' (keyframe)' : ''}
+      </div>
+      {camera && (
+        <Segmented
+          label="2D camera"
+          value={cameraView ? 'view' : 'guides'}
+          options={[
+            ['guides', 'Show field guides'],
+            ['view', "Show camera's field of view"],
+          ]}
+          onChange={(v) => {
+            if ((v === 'view') !== cameraView) anim.toggleCameraView();
+          }}
+        />
+      )}
+      <PropSlider label="Position X" unit="px" value={round2(p.x)} min={-span} max={span} step={1} decimals={1} onChange={(v) => set({ x: v }, 'position')} />
+      <PropSlider label="Position Y" unit="px" value={round2(p.y)} min={-span} max={span} step={1} decimals={1} onChange={(v) => set({ y: v }, 'position')} />
+      <PropSlider
+        label="Scale ratio W"
+        unit="%"
+        value={round2(p.scaleX * 100)}
+        min={1}
+        max={1000}
+        log
+        step={0.1}
+        decimals={1}
+        onChange={(v) => set(keepAspect ? { scaleX: v / 100, scaleY: (p.scaleY / p.scaleX) * (v / 100) } : { scaleX: v / 100 }, 'scale')}
+      />
+      <PropSlider
+        label="Scale ratio H"
+        unit="%"
+        value={round2(p.scaleY * 100)}
+        min={1}
+        max={1000}
+        log
+        step={0.1}
+        decimals={1}
+        onChange={(v) => set(keepAspect ? { scaleY: v / 100, scaleX: (p.scaleX / p.scaleY) * (v / 100) } : { scaleY: v / 100 }, 'scale')}
+      />
+      <label className="check prop-check">
+        <input type="checkbox" checked={keepAspect} onChange={(e) => setKeepAspect(e.target.checked)} />
+        Keep aspect ratio
+      </label>
+      <PropSlider label="Rotate" unit="°" value={round2(p.rotation)} min={-360} max={360} step={1} decimals={1} onChange={(v) => set({ rotation: v }, 'rotate')} />
+      <PropSlider label="Center of rotation X" unit="px" value={round2(p.pivotX)} min={-width} max={width * 2} step={1} onChange={(v) => set({ pivotX: v }, 'center')} />
+      <PropSlider label="Center of rotation Y" unit="px" value={round2(p.pivotY)} min={-height} max={height * 2} step={1} onChange={(v) => set({ pivotY: v }, 'center')} />
+      <PropSlider label="Opacity" unit="%" value={Math.round(p.opacity * 100)} min={0} max={100} onChange={(v) => set({ opacity: v / 100 }, 'opacity')} />
+      <Segmented
+        label="Keyframe interpolation"
+        value={interp}
+        options={[
+          ['hold', 'Hold'],
+          ['linear', 'Linear'],
+          ['smooth', 'Smooth'],
+        ]}
+        onChange={(v) => anim.setKeyInterp(v as Interp)}
+      />
+      <div className="prop-row">
+        <button className="btn small" onClick={() => set({ x: 0, y: 0, scaleX: 1, scaleY: 1, rotation: 0, opacity: 1 }, 'reset')}>
+          Reset
+        </button>
+      </div>
+      <div className="prop-note">
+        {camera
+          ? 'Drag the camera frame on the canvas: inside to move, a corner to zoom, the round handle to turn. Each change makes a keyframe at the current frame.'
+          : 'Drag the box on the canvas: inside to move, a corner to scale, the round handle to rotate, the centre point to move the centre of rotation. Each change makes a keyframe at the current frame.'}
+      </div>
+    </>
   );
 }
 

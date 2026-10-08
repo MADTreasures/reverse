@@ -14,6 +14,7 @@ import { renderVectorStroke } from './brushEngine';
 import { renderTextLayer } from './textRender';
 import { createCanvas, ctx2d, maskToCanvas } from './canvas';
 import type { OnionSkin } from '../paint/animation';
+import type { Placement } from '../paint/keyframes';
 import { Compositor } from './compositor';
 import { patchBytes, type PixelPatch } from './edit';
 import { deleteSurface, ensureSurface, getSurface, resizeSurfaces, setSurface, surfaceIds, touch } from './surfaces';
@@ -249,6 +250,28 @@ class PaintEngine {
   setOnion(onion: OnionSkin | null): void {
     if (!this.compositor) return;
     this.compositor.onion = onion;
+    this.invalidate();
+  }
+
+  /** Show camera's field of view: the display applies 2D camera effects. */
+  setCameraView(on: boolean): void {
+    if (!this.compositor || this.compositor.camera === on) return;
+    this.compositor.camera = on;
+    this.invalidate();
+  }
+
+  /** A track's placement while the Object tool changes it (null: its keyframes again). */
+  setKeyPreview(id: string, p: Placement | null): void {
+    if (!this.compositor) return;
+    if (p) this.compositor.keyPreview.set(id, p);
+    else this.compositor.keyPreview.delete(id);
+    this.invalidate();
+  }
+
+  /** Edit layers with active keyframes: the track drawn as it is (null: none). */
+  setUnkeyed(id: string | null): void {
+    if (!this.compositor || this.compositor.unkeyed === id) return;
+    this.compositor.unkeyed = id;
     this.invalidate();
   }
 

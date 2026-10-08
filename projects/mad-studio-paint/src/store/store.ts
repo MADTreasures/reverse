@@ -6,6 +6,7 @@ import { LINEAR, type CurvePoint } from '../paint/curve';
 import { DEFAULT_SUB_TOOLS, type SubTool, type ToolId, type WorkspaceId } from '../paint/tools';
 import type { TextBox } from '../paint/text';
 import { DEFAULT_ONION, type OnionSkin } from '../paint/animation';
+import type { Interp } from '../paint/keyframes';
 
 export interface ViewState {
   /** Screen pixels per document pixel. */
@@ -112,6 +113,20 @@ export interface PaintState {
   timelineShown: boolean;
   /** Clips selected in the Timeline palette: their track and first frame. */
   clipSelection: ClipRef[];
+  /** Keyframes selected in the Timeline palette: their track and frame. */
+  keySelection: KeyRef[];
+  /** Keyframe interpolation for new keyframes (Timeline palette). */
+  keyInterp: Interp;
+  /** Edit layers with active keyframes: the current track is drawn as it is and can be drawn on. */
+  editKeyed: boolean;
+  /** Show camera's field of view: the display applies 2D camera effects. */
+  cameraView: boolean;
+}
+
+/** A keyframe in the Timeline palette: the track (layer) and its frame. */
+export interface KeyRef {
+  track: Id;
+  frame: number;
 }
 
 /** A clip in the Timeline palette: the track (layer) and the clip's first frame. */
@@ -165,6 +180,10 @@ function initialState(): PaintState {
     onion: { ...DEFAULT_ONION },
     timelineShown: false,
     clipSelection: [],
+    keySelection: [],
+    keyInterp: 'linear',
+    editKeyed: false,
+    cameraView: false,
   };
 }
 

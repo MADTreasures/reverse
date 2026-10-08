@@ -20,6 +20,7 @@ import { currentSubTool, getState, setState } from '../store/store';
 import { editTextBox } from '../store/textActions';
 import { hitHandle as hitRulerHandle, rulerObjectSession } from './rulerTool';
 import { selectedPointSession } from './correctTool';
+import { keyframeSession, keyframeTarget } from './keyframeTool';
 import type { Modifiers, OverlayView, PointerInfo, ToolSession } from './types';
 
 const PICK_PX = 6;
@@ -263,6 +264,9 @@ let lastClick: { time: number; id: string } | null = null;
 
 /** Object tool: rulers, vector lines, text and balloons. */
 export function objectSession(p: PointerInfo, view: OverlayView): ToolSession | null {
+  // A track with keyframes (or a 2D camera folder): the Object tool places it at the current frame.
+  const keyed = keyframeTarget();
+  if (keyed) return keyframeSession(p, view, keyed);
   const handle0 = gradientHandleAt(p, view);
   if (handle0) return editable() ? new GradientHandleSession(handle0.layer, handle0.end) : null;
   if (hitRulerHandle(p, view)) return rulerObjectSession(p, view);
