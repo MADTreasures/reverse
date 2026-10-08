@@ -5,7 +5,7 @@ import type { GradientLayer, Id, VectorLayer } from '../model/types';
 import { CLOSE_GAP_STEPS, floodFillMask } from '../paint/fill';
 import { combine, ellipseMask, expandMask, isSelected, maskBounds, polygonMask, rectMask, translateMask, type Mask, type SelectionOp } from '../paint/mask';
 import { fromPoints, union, type Rect } from '../paint/rect';
-import { isSpecial, perspectiveConstraint, rulerConstraint, symmetryTransforms, type Affine, type Constraint, type Pt, type Ruler } from '../paint/rulers';
+import { distanceToRuler, isSpecial, perspectiveConstraint, rulerConstraint, symmetryTransforms, type Affine, type Constraint, type Pt, type Ruler } from '../paint/rulers';
 import { ellipsePoints, rectPoints, snapAngle, type StrokePoint } from '../paint/stroke';
 import { evalPressureCurve } from '../paint/curve';
 import { type FillReference, type SubTool } from '../paint/tools';
@@ -131,11 +131,14 @@ export function rulerSnap(start: Pt): Snap {
       const c = rulerConstraint(r, start, reach);
       if (c) return { ...none, constrain: c };
     }
-    // Comic frame borders work as rulers too.
+    // Comic frame borders work as rulers too, for strokes that start near the border itself (not
+    // along its extension, which crosses the other frames of the page).
     for (const l of flatten(s.doc.layers)) {
       if (!actions.isFrameFolder(l) || !isEffectivelyVisible(s.doc.layers, l.id)) continue;
       for (const [a, b] of panelEdges(l.frame.panels)) {
-        const c = rulerConstraint({ kind: 'linear', id: 'frame', a, b }, start, reach);
+        const edge: Ruler = { kind: 'linear', id: 'frame', a, b };
+        if (distanceToRuler(edge, start) > reach) continue;
+        const c = rulerConstraint(edge, start, reach);
         if (c) return { ...none, constrain: c };
       }
     }

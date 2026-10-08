@@ -1565,6 +1565,10 @@
   width: 90px;
 }
 
+.with-unit input[type='checkbox'] {
+  width: auto;
+}
+
 .prompt-input {
   width: 100%;
 }

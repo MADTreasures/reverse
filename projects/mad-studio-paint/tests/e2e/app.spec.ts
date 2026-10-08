@@ -1525,3 +1525,28 @@ test('animation: animated illustration, a cel per frame, onion skin, playback, G
   expect(back).toEqual({ timeline: { enabled: true, fps: 4, frames: 4 }, cels: [[1, '1'], [2, '2'], [4, '1']] });
   expect(errors).toEqual([]);
 });
+
+test('frame borders snap strokes that start near them, not along their extension', async ({ page }) => {
+  await boot(page);
+  await page.evaluate(() => window.__madPaint.runCommand('newFrameFolder'));
+  await page.getByRole('dialog', { name: 'New frame border folder' }).getByRole('button', { name: 'OK' }).click();
+  // Top and bottom frame, then the top one split into two columns: their vertical edges end above the bottom frame.
+  await useSubTool(page, 'frame', 'frame-divide');
+  await drag(page, [5, 150], [395, 150], 8);
+  await drag(page, [200, 5], [200, 140], 8);
+  const bottom = await page.evaluate(() => window.__madPaint.useStore.getState().doc.layers.find((l: any) => l.frame && Math.min(...l.frame.panels[0].points.map((p: any) => p.y)) > 100).id);
+  await page.evaluate((id) => {
+    const a = window.__madPaint.actions;
+    a.selectLayer(id);
+    a.addRasterLayer();
+  }, bottom);
+  await thinPen(page);
+  // Right below the top frames' gutter, but far from their edges: the stroke stays diagonal.
+  await drag(page, [205, 200], [300, 270], 10);
+  expect(await layerAlpha(page, 300, 270)).toBeGreaterThan(100);
+  expect(await layerAlpha(page, 203, 270)).toBe(0);
+  // Next to the page frame's left edge: the stroke follows it.
+  await drag(page, [18, 190], [60, 260], 10);
+  expect(await layerAlpha(page, 60, 260)).toBe(0);
+  expect(await layerAlpha(page, 15, 250)).toBeGreaterThan(100);
+});
