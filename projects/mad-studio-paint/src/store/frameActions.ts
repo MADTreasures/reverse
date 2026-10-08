@@ -32,6 +32,29 @@ export function addFrameFolder(points: Pt[], lineWidth: number, draw = true, col
   });
 }
 
+/**
+ * Frame templates: one frame border folder per frame (in reading order, the first on top), or one
+ * folder holding all frames.
+ */
+export function addFrameTemplate(panels: Pt[][], lineWidth: number, draw: boolean, separate: boolean): void {
+  if (panels.length === 0) return;
+  actions.changeDoc('Frame template', (doc, st) => {
+    const border = (list: Pt[][]): FrameBorder => ({ panels: list.map((points) => ({ id: newPanelId(), points })), lineWidth, color: '#000000', draw });
+    // Unique names, counting up from the free ones.
+    const used = new Set(flatten(doc.layers).map((l) => l.name));
+    let n = 1;
+    const name = () => {
+      while (used.has(`Frame ${n}`)) n++;
+      used.add(`Frame ${n}`);
+      return `Frame ${n}`;
+    };
+    const folders = separate ? panels.map((p) => frameFolder(name(), border([p]))) : [frameFolder(name(), border(panels))];
+    // Each goes right above the current layer's place, below the ones before: the first ends on top.
+    for (const f of folders) insertFrameFolder(doc, f, st.activeLayerId);
+    return folders[0].id;
+  });
+}
+
 /** The page frame: the canvas inside a margin of 5 % of its shorter side (there is no inner border setting). */
 export function pageFrame(doc: PaintDocument): Pt[] {
   const m = Math.round(Math.min(doc.width, doc.height) * 0.05);

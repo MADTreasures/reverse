@@ -2195,3 +2195,48 @@
   position: relative;
   padding: 0 3px;
 }
+
+/* frame templates */
+
+.template-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(86px, 1fr));
+  gap: 6px;
+  max-height: 290px;
+  margin-bottom: 12px;
+  padding: 6px;
+  overflow: auto;
+  background: var(--well);
+  border-radius: var(--radius);
+}
+
+.template-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 4px;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  color: var(--text-dim);
+  font-size: 11px;
+  text-align: center;
+}
+
+.template-item:hover {
+  background: var(--bg-3);
+}
+
+.template-item.on {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--text);
+}
+
+.template-name {
+  width: 150px;
+}
+
+.frame-template-dialog {
+  width: 560px;
+}

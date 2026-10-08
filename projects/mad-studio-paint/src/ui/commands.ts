@@ -138,6 +138,7 @@ export const COMMANDS: Command[] = [
     run: () => openDialog('divideFrame'),
     enabled: () => activeFrameFolder() !== null,
   },
+  { id: 'frameTemplates', label: 'Frame templates…', run: () => openDialog('frameTemplates') },
   {
     id: 'rasterize',
     label: 'Rasterize',

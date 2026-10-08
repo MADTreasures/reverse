@@ -90,7 +90,7 @@ export const MENUS: MenuSpec[] = [
       'rasterize',
       '-',
       { label: 'Layer mask', items: ['maskOutside', 'maskSelection', '-', 'applyMask', 'deleteMask', '-', 'enableMask', 'linkMask', 'showMaskArea'] },
-      { label: 'Ruler/Frame', items: ['perspective1', 'perspective2', 'perspective3', '-', 'showRuler', 'deleteRulers', '-', 'divideFrame'] },
+      { label: 'Ruler/Frame', items: ['perspective1', 'perspective2', 'perspective3', '-', 'showRuler', 'deleteRulers', '-', 'divideFrame', 'frameTemplates'] },
       '-',
       'clip',
       'reference',

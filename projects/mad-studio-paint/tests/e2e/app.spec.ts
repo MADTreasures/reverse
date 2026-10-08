@@ -1550,3 +1550,37 @@ test('frame borders snap strokes that start near them, not along their extension
   expect(await layerAlpha(page, 60, 260)).toBe(0);
   expect(await layerAlpha(page, 15, 250)).toBeGreaterThan(100);
 });
+
+test('frame templates: a page layout makes its frames; frames on the canvas become an own template', async ({ page }) => {
+  const errors = await boot(page);
+  await page.evaluate(() => window.__madPaint.runCommand('frameTemplates'));
+  const dlg = page.getByRole('dialog', { name: 'Frame templates' });
+  await dlg.getByRole('option', { name: '2 × 2' }).click();
+  await dlg.getByRole('button', { name: 'OK' }).click();
+  let frames = (await state(page)).layers.filter((l: any) => l.frame);
+  expect(frames.map((f: any) => f.name)).toEqual(['Frame 1', 'Frame 2', 'Frame 3', 'Frame 4']);
+  // Reading order: Frame 1 top left, Frame 2 top right.
+  const left = (f: any) => Math.min(...f.frame.panels[0].points.map((p: any) => p.x));
+  const top = (f: any) => Math.min(...f.frame.panels[0].points.map((p: any) => p.y));
+  expect(left(frames[1])).toBeGreaterThan(left(frames[0]));
+  expect(top(frames[2])).toBeGreaterThan(top(frames[0]));
+  // The border is drawn inside the page margin (5 % of 300 = 15 px).
+  expect(await shown(page, 15, 100)).toBeLessThan(60);
+  // Register the frames as a template and make it again, all in one folder.
+  await page.evaluate(() => window.__madPaint.runCommand('frameTemplates'));
+  await dlg.getByLabel('Template name').fill('Meine Seite');
+  await dlg.getByRole('button', { name: 'Register frames on the canvas' }).click();
+  await expect(dlg.getByRole('option', { name: 'Meine Seite' })).toHaveAttribute('aria-selected', 'true');
+  await dlg.getByText('A frame border folder per frame').click();
+  await dlg.getByRole('button', { name: 'OK' }).click();
+  frames = (await state(page)).layers.filter((l: any) => l.frame);
+  expect(frames).toHaveLength(5);
+  expect(frames[0].name).toBe('Frame 5');
+  expect(frames[0].frame.panels).toHaveLength(4);
+  // Own templates are kept and can be deleted.
+  await page.evaluate(() => window.__madPaint.runCommand('frameTemplates'));
+  await dlg.getByRole('option', { name: 'Meine Seite' }).click();
+  await dlg.getByRole('button', { name: 'Delete template' }).click();
+  await expect(dlg.getByRole('option', { name: 'Meine Seite' })).toHaveCount(0);
+  expect(errors).toEqual([]);
+});
