@@ -489,6 +489,11 @@ async function testPlugins(engine) {
   if (!synth || !gain) return;
   const cached = await engine.request({ type: 'plugins.getList' }, (m) => m.type === 'plugins.list', 5000, 'plugins.getList');
   check(cached.plugins.some((p) => p.uid === synth.uid), 'plugins.getList returns the cached list');
+  // Paths keyed by format (the renderer's plugin manager sends them like plugins.paths).
+  const since2 = engine.messages.length;
+  engine.send({ type: 'plugins.scan', formats: ['VST3'], paths: { VST3: [pluginDir] }, rescanAll: true });
+  const byFormat = await engine.waitFor((m) => m.type === 'plugins.list', 120000, 'plugins.list after a scan with paths by format', since2);
+  check(['MAD Test Synth', 'MAD Test Gain'].every((n) => byFormat.plugins.some((p) => p.name === n)), 'scan accepts paths keyed by format');
 
   const pluginRef = (p, state = null) => ({ uid: p.uid, name: p.name, vendor: p.vendor, format: p.format, fileOrIdentifier: p.fileOrIdentifier, isInstrument: p.isInstrument, state });
   const project = {

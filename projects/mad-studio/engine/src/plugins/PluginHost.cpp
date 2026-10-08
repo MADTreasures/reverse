@@ -335,7 +335,7 @@ std::string PluginHost::pathsJson() const
     return w.take();
 }
 
-void PluginHost::scan (const juce::StringArray& wanted, const juce::StringArray& paths, bool rescanAll)
+void PluginHost::scan (const juce::StringArray& wanted, const ScanPaths& paths, bool rescanAll)
 {
     if (scanning.load())
         return;
@@ -348,11 +348,17 @@ void PluginHost::scan (const juce::StringArray& wanted, const juce::StringArray&
         if (! f->canScanForPlugins())
             continue;
 
+        const juce::StringArray* custom = nullptr;
+        if (const auto own = paths.find (f->getName()); own != paths.end())
+            custom = &own->second;
+        else if (const auto all = paths.find (juce::String()); all != paths.end())
+            custom = &all->second;
+
         juce::FileSearchPath searchPath;
-        if (paths.isEmpty())
+        if (custom == nullptr || custom->isEmpty())
             searchPath = f->getDefaultLocationsToSearch();
         else
-            for (const auto& p : paths)
+            for (const auto& p : *custom)
                 searchPath.add (juce::File (p));
 
         ScanThread::Job job;

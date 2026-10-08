@@ -177,7 +177,7 @@ Project JSON carries plugin instances (see below). The engine creates them on `p
 | Command | Reply / effect |
 | ------- | -------------- |
 | `plugins.getPaths` | `{"type":"plugins.paths","paths":{"VST3":["…"],"AudioUnit":[]}}` default search paths |
-| `plugins.scan` `{formats?, paths?, rescanAll?}` | scans **out of process** (one `mad-engine --scan-plugin` child per file, 30 s timeout, crashes/timeouts are recorded as failed); events `plugins.scanProgress {format,name,index,total}`; finally `plugins.list` |
+| `plugins.scan` `{formats?, paths?, rescanAll?}` | `paths`: an array of folders (for every format) or an object keyed by format like `plugins.paths` (`{"VST3":["…"]}`); formats without folders use their defaults. Scans **out of process** (one `mad-engine --scan-plugin` child per file, 30 s timeout, crashes/timeouts are recorded as failed); events `plugins.scanProgress {format,name,index,total}`; finally `plugins.list` |
 | `plugins.getList` | `{"type":"plugins.list","plugins":[PluginDescription…],"failed":[{"format","fileOrIdentifier","reason"}]}` (cached in `<data-dir>/plugins.json`) |
 | `plugin.getParams {key}` | `{"type":"plugin.params","key","params":[{"index","name","label","value","text","steps","automatable"}]}` |
 | `plugin.setParam {key,index,value}` | sets a normalized parameter |

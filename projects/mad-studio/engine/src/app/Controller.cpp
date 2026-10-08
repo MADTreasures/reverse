@@ -35,6 +35,18 @@ juce::StringArray stringArray (const juce::var& v)
                 out.add (s.toString());
     return out;
 }
+
+/** `plugins.scan` paths: an array (all formats) or an object keyed by format, like `plugins.paths`. */
+PluginHost::ScanPaths scanPaths (const juce::var& v)
+{
+    PluginHost::ScanPaths out;
+    if (v.isArray())
+        out[juce::String()] = stringArray (v);
+    else if (const auto* obj = v.getDynamicObject())
+        for (const auto& prop : obj->getProperties())
+            out[prop.name.toString()] = stringArray (prop.value);
+    return out;
+}
 } // namespace
 
 //==============================================================================
@@ -479,7 +491,7 @@ void Controller::handle (const juce::String& type, const juce::var& msg, const j
     {
         if (plugins->isScanning())
             return fail ("a plugin scan is already running");
-        plugins->scan (stringArray (json::get (msg, "formats")), stringArray (json::get (msg, "paths")),
+        plugins->scan (stringArray (json::get (msg, "formats")), scanPaths (json::get (msg, "paths")),
                        json::boolean (msg, "rescanAll", false));
         return;
     }

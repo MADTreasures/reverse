@@ -42,7 +42,10 @@ public:
     juce::StringArray formatNames() const;
     std::string pathsJson() const;
     std::string listJson() const;
-    void scan (const juce::StringArray& formats, const juce::StringArray& paths, bool rescanAll);
+    /** Search paths by format name; the key "" applies to every format. Formats without an entry (or
+        with an empty list) use their default locations. */
+    using ScanPaths = std::map<juce::String, juce::StringArray>;
+    void scan (const juce::StringArray& formats, const ScanPaths& paths, bool rescanAll);
     bool isScanning() const noexcept { return scanning.load(); }
 
     std::shared_ptr<PluginSlot> find (const juce::String& key) const;
