@@ -1,3 +1,5 @@
+import { readdirSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { defineConfig, type Plugin } from 'vite';
 import react from '@vitejs/plugin-react';
 
@@ -27,10 +29,40 @@ function contentSecurityPolicy(): Plugin {
   };
 }
 
+/**
+ * Writes THIRD_PARTY_LICENSES.txt next to the build: name, version and licence text of every
+ * package that ends up in the bundle (their licences ask for the notice to travel with the code).
+ */
+function thirdPartyLicenses(): Plugin {
+  return {
+    name: 'mad-studio-paint-licenses',
+    apply: 'build',
+    generateBundle() {
+      // Package name → its directory (the innermost node_modules, for nested packages).
+      const packages = new Map<string, string>();
+      for (const id of this.getModuleIds()) {
+        const m = /^(.*node_modules[\\/]((?:@[^\\/]+[\\/])?[^\\/]+))/.exec(id);
+        if (m) packages.set(m[2].replace(/\\/g, '/'), m[1]);
+      }
+      const parts = [...packages].sort(([a], [b]) => a.localeCompare(b)).map(([name, dir]) => {
+        const pkg = JSON.parse(readFileSync(join(dir, 'package.json'), 'utf8')) as { version?: string; license?: string };
+        const file = readdirSync(dir).find((f) => /^(licen[cs]e|copying)(\.|$)/i.test(f));
+        const text = file ? readFileSync(join(dir, file), 'utf8').trim() : `License: ${pkg.license ?? 'see package'}`;
+        return `${name} ${pkg.version ?? ''}\n${'-'.repeat(60)}\n${text}\n`;
+      });
+      this.emitFile({
+        type: 'asset',
+        fileName: 'THIRD_PARTY_LICENSES.txt',
+        source: `MAD Studio Paint includes the following open source packages.\n\n${parts.join('\n')}`,
+      });
+    },
+  };
+}
+
 export default defineConfig({
   // Relative asset URLs so the build also loads inside the Electron app.
   base: './',
-  plugins: [react(), contentSecurityPolicy()],
+  plugins: [react(), contentSecurityPolicy(), thirdPartyLicenses()],
   build: {
     target: 'es2022',
     outDir: 'dist',

@@ -1,19 +1,24 @@
 /** Open, save, import, export and autosave – the browser/Electron side of the document format. */
 import { createRasterLayer, flatten, insertAbove, nextLayerName, pixelIds } from '../model/layers';
 import { createDocument } from '../model/document';
-import type { Id, PaintDocument } from '../model/types';
+import type { FolderLayer, Id, PaintDocument } from '../model/types';
 import { bytesToCanvas, canvasToBytes, createCanvas, ctx2d } from '../engine/canvas';
+import { framePath, strokeFrame } from '../engine/compositor';
 import { engine } from '../engine/engine';
 import { ensureSurface, getSurface } from '../engine/surfaces';
 import { native, openFiles, saveFile, type OpenedFile, type SavedFile } from '../platform/platform';
 import * as actions from '../store/actions';
 import { getState, setState, useStore } from '../store/store';
 import { confirmDialog, toast } from '../ui/overlays';
-import { EXTENSION, IMAGE_EXTENSIONS, isDocumentFileName, isImageFileName, mimeForName, packDocument, unpackDocument } from './format';
+import { EXTENSION, IMAGE_EXTENSIONS, isDocumentFileName, isImageFileName, isPsdFileName, mimeForName, packDocument, PSD_EXTENSIONS, unpackDocument } from './format';
 import { idbDelete, idbGet, idbSet } from './idb';
+// Type only: the PSD code (and ag-psd) loads when a PSD is opened or saved.
+import type { Pixels } from './psd';
 
 const DOC_FILTERS = [{ name: 'MAD Studio Paint Document', extensions: [EXTENSION] }];
-const OPEN_FILTERS = [{ name: 'Documents and images', extensions: [EXTENSION, ...IMAGE_EXTENSIONS] }];
+const OPEN_FILTERS = [{ name: 'Documents and images', extensions: [EXTENSION, ...PSD_EXTENSIONS, ...IMAGE_EXTENSIONS] }];
+const PSD_FILTERS = [{ name: 'Photoshop document', extensions: ['psd'] }];
+const PSD_MIME = 'image/vnd.adobe.photoshop';
 const AUTOSAVE_KEY = 'autosave';
 
 let currentFile: SavedFile | null = null;
@@ -72,6 +77,19 @@ export async function saveDocument(saveAs = false): Promise<boolean> {
   }
 }
 
+/** File > Save duplicate > .madpaint: a copy elsewhere; the open document keeps its file. */
+export async function saveDuplicate(): Promise<boolean> {
+  try {
+    const bytes = await buildDocumentBytes();
+    const saved = await saveFile(bytes, `${getState().doc.name || 'Untitled'} copy.${EXTENSION}`, DOC_FILTERS, null);
+    if (saved) toast(`Saved a copy as ${saved.name}`);
+    return Boolean(saved);
+  } catch (err) {
+    toast(`Could not save: ${(err as Error).message}`, 'error');
+    return false;
+  }
+}
+
 // ------------------------------------------------------------------ opening
 
 async function loadFromBytes(data: Uint8Array): Promise<{ doc: PaintDocument; images: Map<Id, HTMLCanvasElement>; activeLayerId: Id | null }> {
@@ -89,7 +107,7 @@ async function loadFromBytes(data: Uint8Array): Promise<{ doc: PaintDocument; im
   return { doc: file.doc, images, activeLayerId: file.activeLayerId };
 }
 
-/** Opens a .madpaint document or an image (as a new canvas). */
+/** Opens a .madpaint document, a Photoshop document or an image (as a new canvas). */
 export async function openFileBytes(file: OpenedFile): Promise<boolean> {
   try {
     if (isDocumentFileName(file.name)) {
@@ -97,6 +115,14 @@ export async function openFileBytes(file: OpenedFile): Promise<boolean> {
       actions.loadDocument(doc, images, file.name);
       if (activeLayerId && flatten(doc.layers).some((l) => l.id === activeLayerId)) setState({ activeLayerId });
       currentFile = file.path ? { name: file.name, path: file.path } : null;
+    } else if (isPsdFileName(file.name)) {
+      const { decodePsd } = await import('./psd');
+      const images = new Map<Id, HTMLCanvasElement>();
+      const { doc, notes } = decodePsd(file.data, baseName(file.name), (id, p) => images.set(id, pixelsToCanvas(p)));
+      // Saving keeps everything in a .madpaint file; the PSD stays as it was.
+      actions.loadDocument(doc, images, null);
+      currentFile = null;
+      if (notes.length) toast(`${notes.join('. ')}.`);
     } else if (isImageFileName(file.name)) {
       const img = await bytesToCanvas(file.data, mimeForName(file.name));
       const doc = createDocument(baseName(file.name), img.width, img.height, 72);
@@ -149,7 +175,7 @@ export async function importImages(files?: OpenedFile[] | null): Promise<void> {
  */
 export async function handleDroppedFiles(files: File[], onLayerPalette = false): Promise<void> {
   const opened: OpenedFile[] = await Promise.all(files.map(async (f) => ({ name: f.name, data: new Uint8Array(await f.arrayBuffer()) })));
-  const doc = opened.find((f) => isDocumentFileName(f.name));
+  const doc = opened.find((f) => isDocumentFileName(f.name) || isPsdFileName(f.name));
   const images = opened.filter((f) => isImageFileName(f.name));
   if (onLayerPalette && images.length) {
     await importImages(images);
@@ -169,13 +195,31 @@ export function listenForNativeOpen(): void {
 
 // ------------------------------------------------------------------ export
 
-export type ExportFormat = 'png' | 'jpeg' | 'webp';
+export type ExportFormat = 'png' | 'jpeg' | 'webp' | 'psd';
 
-export async function exportImage(format: ExportFormat, opts: { scale: number; transparent: boolean; quality: number; skipDraft: boolean }): Promise<boolean> {
-  const mime = format === 'png' ? 'image/png' : format === 'jpeg' ? 'image/jpeg' : 'image/webp';
-  // JPEG has no alpha: always on paper (white if the paper is hidden).
-  let canvas = renderMerged({ paper: !opts.transparent || format === 'jpeg', skipDraft: opts.skipDraft, scale: opts.scale });
-  if (format === 'jpeg' && !getState().doc.paper.visible) {
+const MIME: Record<ExportFormat, string> = { png: 'image/png', jpeg: 'image/jpeg', webp: 'image/webp', psd: PSD_MIME };
+
+function pixelsOf(canvas: HTMLCanvasElement): Pixels {
+  const img = ctx2d(canvas).getImageData(0, 0, canvas.width, canvas.height);
+  return { width: img.width, height: img.height, data: img.data };
+}
+
+function pixelsToCanvas(p: Pixels): HTMLCanvasElement {
+  const c = createCanvas(p.width, p.height);
+  ctx2d(c).putImageData(new ImageData(p.data as Uint8ClampedArray<ArrayBuffer>, p.width, p.height), 0, 0);
+  return c;
+}
+
+/**
+ * File > Export (single layer). PSD: the merged image as one layer, or as Photoshop's background
+ * ("Output as background", always on paper).
+ */
+export async function exportImage(format: ExportFormat, opts: { scale: number; transparent: boolean; quality: number; skipDraft: boolean; background?: boolean }): Promise<boolean> {
+  const mime = MIME[format];
+  // JPEG and a background layer have no alpha: always on paper (white if the paper is hidden).
+  const opaque = format === 'jpeg' || (format === 'psd' && Boolean(opts.background));
+  let canvas = renderMerged({ paper: !opts.transparent || opaque, skipDraft: opts.skipDraft, scale: opts.scale });
+  if (opaque && !getState().doc.paper.visible) {
     const flat = createCanvas(canvas.width, canvas.height);
     const f = ctx2d(flat);
     f.fillStyle = '#ffffff';
@@ -184,13 +228,62 @@ export async function exportImage(format: ExportFormat, opts: { scale: number; t
     canvas = flat;
   }
   try {
-    const bytes = await canvasToBytes(canvas, mime, format === 'png' ? undefined : opts.quality);
+    const bytes =
+      format === 'psd'
+        ? (await import('./psd')).encodeFlatPsd(pixelsOf(canvas), getState().doc.dpi, Boolean(opts.background))
+        : await canvasToBytes(canvas, mime, format === 'png' ? undefined : opts.quality);
     const ext = format === 'jpeg' ? 'jpg' : format;
     const saved = await saveFile(bytes, `${getState().doc.name || 'Untitled'}.${ext}`, [{ name: format.toUpperCase(), extensions: [ext] }], null, mime);
     if (saved) toast(`Exported ${saved.name}`);
     return Boolean(saved);
   } catch (err) {
     toast(`Export failed: ${(err as Error).message}`, 'error');
+    return false;
+  }
+}
+
+/** A frame border folder's panels (with their border line) as alpha, and the border line itself. */
+function frameShapes(folder: FolderLayer): { area: Pixels; border: Pixels | null } {
+  const { doc } = getState();
+  const frame = folder.frame!;
+  const path = framePath(frame.panels);
+  const area = createCanvas(doc.width, doc.height);
+  const a = ctx2d(area);
+  a.fillStyle = '#000';
+  a.fill(path, 'nonzero');
+  strokeFrame(a, path, frame);
+  if (!frame.draw || frame.lineWidth <= 0) return { area: pixelsOf(area), border: null };
+  const border = createCanvas(doc.width, doc.height);
+  strokeFrame(ctx2d(border), path, frame);
+  return { area: pixelsOf(area), border: pixelsOf(border) };
+}
+
+/**
+ * File > Save duplicate > .psd: a Photoshop document with the layers (see io/psd.ts). Like the
+ * reference, draft layers are left out unless "Draft layers" is ticked.
+ */
+export async function exportPsd(opts: { skipDraft: boolean }): Promise<boolean> {
+  try {
+    const { encodePsd } = await import('./psd');
+    const { doc } = getState();
+    const surface = (id: Id) => {
+      const s = getSurface(id);
+      return s ? pixelsOf(s) : null;
+    };
+    const bytes = encodePsd({
+      doc,
+      composite: pixelsOf(renderMerged({ paper: true, skipDraft: opts.skipDraft })),
+      skipDraft: opts.skipDraft,
+      layerPixels: (l) => surface(l.id),
+      bakedPixels: (l) => pixelsOf(engine.compositor.layerImage(doc, l, { skipDraft: opts.skipDraft })),
+      maskPixels: (m) => surface(m.id),
+      frameShapes,
+    });
+    const saved = await saveFile(bytes, `${doc.name || 'Untitled'}.psd`, PSD_FILTERS, null, PSD_MIME);
+    if (saved) toast(`Saved a copy as ${saved.name}`);
+    return Boolean(saved);
+  } catch (err) {
+    toast(`Could not save: ${(err as Error).message}`, 'error');
     return false;
   }
 }

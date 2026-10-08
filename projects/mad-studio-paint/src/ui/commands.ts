@@ -1,7 +1,7 @@
 /** Every menu command, its shortcut and handler. Menus (browser and native) and the keyboard use this table. */
 import { flatten } from '../model/layers';
 import { isMac } from '../platform/platform';
-import { importImages, openDocument, saveDocument } from '../io/documentIO';
+import { importImages, openDocument, saveDocument, saveDuplicate } from '../io/documentIO';
 import * as actions from '../store/actions';
 import { activeFrameFolder } from '../store/frameActions';
 import { copy, cut, hasClip, pasteImage } from '../store/clipboard';
@@ -78,6 +78,8 @@ export const COMMANDS: Command[] = [
   { id: 'open', label: 'Open…', keys: ['Mod+o'], run: () => openDocument() },
   { id: 'save', label: 'Save', keys: ['Mod+s'], run: () => void saveDocument(false) },
   { id: 'saveAs', label: 'Save as…', keys: ['Mod+Shift+s', 'Mod+Alt+s'], run: () => void saveDocument(true) },
+  { id: 'saveDuplicate', label: '.madpaint (MAD Studio Paint)…', run: () => void saveDuplicate() },
+  { id: 'saveDuplicatePsd', label: '.psd (Photoshop document)…', run: () => openDialog('exportPsd') },
   { id: 'importImage', label: 'Import image as layer…', run: () => importImages() },
   { id: 'export', label: 'Export (single layer)…', run: () => openDialog('export') },
   { id: 'preferences', label: 'Preferences…', keys: ['Mod+k'], run: () => openDialog('preferences') },

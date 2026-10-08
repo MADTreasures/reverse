@@ -170,8 +170,9 @@ Status: ✅ gleich · 🟡 ähnlich/vereinfacht · ❌ fehlt (noch)
 | Mausrad | zoomt [NAV] | Mausrad zoomt; Trackpad: zwei Finger verschieben, Pinch zoomt | 🟡 | – |
 | Undo | Anzahl in den Einstellungen (Desktop-Screenshot: 200), History-Palette [UND, PRF] | 200, einstellbar; History-Palette | ✅ | `pen stroke … undo` |
 | Neue Leinwand | Standard 1600 × 1200 px, 72 dpi; Vorlagen u. a. „UXGA (1600 x 1200px)“, „A4 color (350dpi)“ [NEW] | gleich | ✅ | – |
-| Exportieren | PNG, JPEG, WebP, BMP, TIFF, TGA, PSD …; Skalierung; Entwurfsebenen aus; Transparenz [EXP] | PNG, JPEG, WebP mit denselben Optionen | 🟡 | – |
-| Dateiformat | `.clip` | eigenes `.madpaint` (kein `.clip`, kein PSD) | ❌ | Unit: `.madpaint format` |
+| Exportieren | PNG, JPEG, WebP, BMP, TIFF, TGA, PSD …; Skalierung; Entwurfsebenen aus; Transparenz; bei PSD „Output as Background“ [EXP] | PNG, JPEG, WebP und PSD (eine Ebene, auf Wunsch als Hintergrund) mit denselben Optionen; kein BMP/TIFF/TGA | 🟡 | `Photoshop documents: …` |
+| Dateiformat | `.clip` | eigenes `.madpaint` (kein `.clip`) | ❌ | Unit: `.madpaint format` |
+| Photoshop-Dokumente | *Open*: `.psd`/`.psb`, CMYK wird zu RGB [OPN]; *Save Duplicate* → `.psd`/`.psb`, um Ebenen für andere Programme zu behalten, mit Export-Dialog (Output image: u. a. Entwürfe – standardmässig aus; Expression color Graustufen/RGB/CMYK; ICC-Profil) [SAV, DRF] | *Open*: `.psd`/`.psb` (RGB, CMYK, Graustufen, 8/16/32 Bit) mit Ordnern, Masken, Schnittmasken, Modi, Deckkraft, Sperren; Einstellungsebenen → Korrekturebenen (alle neun Arten); Text/Form/Smartobjekt als Pixel; „Paper“ → Papier. *Save duplicate → .psd*: Ebenen, Papier als Ebene „Paper“, Entwürfe wählbar (aus), Vektor/Text/Verlauf gerastert, Korrekturebenen → Einstellungsebenen, Rahmenordner → Gruppe mit Rahmenmaske; nur RGB, kein ICC-Profil, kein `.psb` schreiben (Leinwand ≤ 8000 px passt in PSD) | 🟡 | `Photoshop documents: …`, Unit: `PSD documents` |
 | Bild ablegen | auf der Leinwand → neue Leinwand, auf der Ebenen-Palette → Ebene [IMP, PC] | gleich | ✅ | – |
 
 ## REA im Projekt
@@ -245,6 +246,17 @@ vergleichen. Abweichungen bitte als Issue oder Nachricht melden – mit dem Punk
 - **Lineal-Bereich:** Welchen Geltungsbereich ein neues Lineal standardmässig hat, sagt das Handbuch nicht; angenommen: „alle Ebenen“.
 - **Mehrfaches Drücken** einer geteilten Werkzeugtaste (Zyklus) belegt nur die Celsys-Tutorialseite
   „Art Rocket“, nicht das Handbuch.
+- **PSD:** Das Handbuch nennt Formate und Dialoge, aber nicht, wie Ebenenarten und -modi
+  übersetzt werden. Eigene Annahmen: Vektor-, Text- und Verlaufsebenen als Pixel; das Papier
+  als unterste Ebene „Paper“ (als normale Ebene, nicht als Photoshop-Hintergrund);
+  „Glow dodge“ → Farbig abwedeln, „Add“ und „Add (Glow)“ → Linear abwedeln; Randeffekt,
+  Ebenenfarbe und Rasterfolie werden in die Pixel gerechnet (samt Maske); Rahmenordner → Gruppe
+  mit Maske aus Rahmenflächen und Rahmenlinie. Beim Öffnen gilt eine leere Maske mit
+  Hintergrund Schwarz als „keine Maske“ (wie bei psd-tools; manche Programme schreiben sie für
+  jede Ebene), Ebenenstile entfallen, und ohne Ebene „Paper“ ist das Papier aus (wie
+  Photoshop: Transparenz). Die Mathematik der Korrekturebenen ist eigene; Photoshop rechnet
+  Farbton/Sättigung u. a. etwas anders. Geprüft wurde mit einem unabhängigen Leser (psd-tools)
+  und einem unabhängigen Schreiber (pytoshop, 16 Bit), nicht mit Photoshop selbst.
 
 ## Quellen
 
@@ -276,6 +288,7 @@ Präfix `M/` = `https://help.clip-studio.com/en-us/manual_en/` (Handbuch Ver. 5.
 | TR, FIG | `M/360_transform/Types_of_transformations.htm`, `M/450_figure/` |
 | MOD, OPT, TS, MENU | `M/780_shortcuts/Shortcuts_usable_during_operation.htm`, `…/Optional_Shortcuts.htm`, `…/Tool_Shortcuts.htm`, `…/Menu_Shortcuts.htm` |
 | PRF, UND, EXP, IMP, PC | `M/720_preferences/Preferences.htm`, `M/270_canvas/Undo__47_Redo.htm`, `M/210_file/Exporting_files.htm`, `…/Import_image_file_to_canvas.htm`, `M/060_pc/Saving__44__exporting__44__and_importing_files.htm` |
+| OPN, SAV, DRF | `M/210_file/Open_file.htm`, `M/210_file/Save_file.htm`, `M/180_layers/Draft_layers.htm` |
 | GL-x | `M/810_subtools/x.htm` (Glossar der Einstellungen) |
 | T563, T582, T656, T684, T868, T1250, T4846 | `https://tips.clip-studio.com/en-us/articles/<Nr>` (ClipStudioOfficial) |
 | TIPS | `https://tips.clip-studio.com/en-us/articles/1248` |

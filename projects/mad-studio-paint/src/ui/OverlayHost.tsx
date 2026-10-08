@@ -6,7 +6,7 @@ import { NewToneDialog } from './dialogs/ToneDialog';
 import { GradientDialog } from './dialogs/GradientDialog';
 import { TonalDialog } from './dialogs/TonalDialog';
 import { PreferencesDialog } from './dialogs/PreferencesDialog';
-import { ExportDialog } from './dialogs/ExportDialog';
+import { ExportDialog, PsdExportDialog } from './dialogs/ExportDialog';
 import { AboutDialog, ShortcutsDialog } from './dialogs/InfoDialogs';
 import { NewCanvasDialog } from './dialogs/NewCanvasDialog';
 import { closeDialog, closeMenu, useOverlays, type MenuItem } from './overlays';
@@ -51,6 +51,7 @@ export function OverlayHost() {
           )}
           {dialog.kind === 'custom' && dialog.id === 'newCanvas' && <NewCanvasDialog />}
           {dialog.kind === 'custom' && dialog.id === 'export' && <ExportDialog />}
+          {dialog.kind === 'custom' && dialog.id === 'exportPsd' && <PsdExportDialog />}
           {dialog.kind === 'custom' && dialog.id === 'about' && <AboutDialog />}
           {dialog.kind === 'custom' && dialog.id === 'shortcuts' && <ShortcutsDialog />}
           {dialog.kind === 'tonal' && <TonalDialog target={dialog.target} />}

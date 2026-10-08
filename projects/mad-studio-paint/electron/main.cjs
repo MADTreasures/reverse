@@ -347,7 +347,7 @@ app.whenReady().then(() => {
 
   // Files passed on the command line (Windows/Linux, or `open -a`).
   for (const arg of process.argv.slice(1)) {
-    if (arg.endsWith('.madpaint') && fsSync.existsSync(arg)) void deliverOpenedFile(arg);
+    if (/\.(madpaint|psd|psb)$/i.test(arg) && fsSync.existsSync(arg)) void deliverOpenedFile(arg);
   }
 
   if (SMOKE) {

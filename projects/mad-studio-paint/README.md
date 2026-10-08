@@ -33,7 +33,7 @@ App-Symbol. Wie das Vorbild untersucht und verglichen wurde, steht in
 | **Ansicht** | Zoom 0,78 %–3200 % in den Stufen des Vorbilds (Mausrad, Pinch, ⌘+/⌘−), Drehen in 5°-Schritten um die Fenstermitte, Ansicht spiegeln, Navigator, Zoom/Drehung in der Statusleiste, Tab / ⇧Tab blendet Paletten / Menüleiste aus |
 | **Farbe** | Farbkreis (Farbtonring + Sättigung/Helligkeit, H/S/V-Werte), RGB-Regler, Farbset, Farbverlauf, Haupt-/Unter-/Transparentfarbe |
 | **Arbeitsbereich** | **Standard** (Layout der aktuellen Version: Tool Group/Tool Settings, Tool Sliders) und **Klassisch** (Sub Tool, Tool Property, Brush Size untereinander) – *Window → Workspace*; Einstellungen (⌘K): dunkles/helles Design, Drehschritt, Anzahl Undo, Haltezeit der Werkzeugtasten |
-| **Dateien** | Eigenes Format `.madpaint` (ZIP mit `document.json` und einer PNG-Datei pro Ebene), PNG/JPEG/WebP öffnen und exportieren (Skalierung, ohne Entwurfsebenen, transparent oder auf Papier), Bilder ablegen (auf der Leinwand: öffnen, auf der Ebenen-Palette: als Ebene), Autosave & Wiederherstellung |
+| **Dateien** | Eigenes Format `.madpaint` (ZIP mit `document.json` und einer PNG-Datei pro Ebene), **Photoshop-Dokumente** (`.psd`/`.psb` öffnen mit Ordnern, Masken, Schnittmasken, Modi, Deckkraft, Sperren und Einstellungsebenen; *File → Save duplicate → .psd* mit Ebenen, Papier als unterste Ebene „Paper“, Entwurfsebenen wahlweise; *Export (single layer)* als PSD, auf Wunsch als Hintergrund), PNG/JPEG/WebP öffnen und exportieren (Skalierung, ohne Entwurfsebenen, transparent oder auf Papier), Bilder ablegen (auf der Leinwand: öffnen, auf der Ebenen-Palette: als Ebene), Autosave & Wiederherstellung |
 
 ## Installation auf dem Mac
 
@@ -126,7 +126,24 @@ Wie im Handbuch des Vorbilds (macOS: Ctrl → ⌘, Alt → ⌥):
   Breite und Dichte, eine Pinseltabelle je Ebene), Textebenen ihre Textrahmen und Sprechblasen;
   beide werden beim Öffnen neu gezeichnet.
 - Das Clip-Studio-Format `.clip` wird **nicht** gelesen oder geschrieben (siehe
-  [RESEARCH.md](RESEARCH.md)). Austausch mit anderen Programmen: PNG/JPEG/WebP.
+  [RESEARCH.md](RESEARCH.md)). Austausch mit anderen Programmen: **PSD** sowie PNG/JPEG/WebP.
+- **PSD** (über die MIT-lizenzierte Bibliothek [ag-psd](https://github.com/Agamnentzar/ag-psd);
+  der Code dafür lädt erst, wenn eine PSD geöffnet oder gespeichert wird):
+  - *File → Open* liest `.psd` und `.psb` (RGB, CMYK, Graustufen; 8, 16 und 32 Bit) mit
+    Ordnern („Hindurchwirken“ bleibt erhalten), Ebenenmasken, Schnittmasken, allen passenden
+    Ebenenmodi, Deckkraft (auch „Fläche“), Sichtbarkeit und Sperren. Einstellungsebenen werden zu
+    Korrekturebenen: Helligkeit/Kontrast, Tonwertkorrektur, Gradationskurve,
+    Farbton/Sättigung, Farbbalance, Umkehren, Tontrennung, Schwellenwert, Verlaufsumsetzung.
+    Text-, Form- und Smartobjekt-Ebenen kommen als Pixel; Ebenenstile entfallen (ein Hinweis
+    nennt, was nicht übernommen wurde). Eine unterste Ebene „Paper“ wird wieder zum Papier.
+    Gespeichert wird danach als `.madpaint`; die PSD bleibt unverändert.
+  - *File → Save duplicate → .psd* schreibt die Ebenen wie das Vorbild: Vektor-, Text- und
+    Verlaufsebenen als Pixel, das Papier als unterste Ebene „Paper“, Entwurfsebenen nur wenn
+    angehakt. Korrekturebenen werden zu Einstellungsebenen. Rahmenordner werden Gruppen mit
+    einer Maske in Form der Rahmen und der Rahmenlinie als Ebene. Ebenen mit Randeffekt,
+    Ebenenfarbe oder Rasterfolie werden so geschrieben, wie sie aussehen (Photoshop kennt diese
+    Effekte nicht). Ein zusammengesetztes Bild liegt bei, damit Vorschau und Quick Look es zeigen.
+  - *File → Export (single layer)* bietet PSD als Format, auf Wunsch „Output as background“.
 - Die Arbeit wird einige Sekunden nach jeder Änderung automatisch gesichert (IndexedDB)
   und beim nächsten Start wiederhergestellt. Das ersetzt kein Speichern in eine Datei.
 
@@ -141,7 +158,7 @@ src/
 │                 Schnittmasken, nur geänderte Bereiche), Pinsel-Engine, Bearbeitungen mit Undo-Patches
 ├── tools/        Zeiger-Eingabe → Werkzeug: Zusatztasten, Sitzungen je Werkzeug, Freies Transformieren
 ├── store/        Zustand (zustand), Aktionen (Ebenen, Auswahl, Undo/Redo, Ansicht), Zwischenablage
-├── io/           .madpaint-Format, Öffnen/Speichern/Export, Autosave
+├── io/           .madpaint-Format, PSD (ag-psd, nachgeladen), Öffnen/Speichern/Export, Autosave
 ├── ui/           React-Oberfläche: Paletten, Zeichenfläche, Menüs (eine Befehlstabelle für die
 │                 Menüleiste im Browser und das native Mac-Menü), Dialoge, Tastatur
 └── platform/     Brücke zu Electron (Dateidialoge, Menü) bzw. Browser-Fallbacks
@@ -186,7 +203,9 @@ Was im Vergleich zum Vorbild noch fehlt, steht Punkt für Punkt in
   Text: Formatierung einzelner Buchstaben, Rubi (Lesehilfe), Kreistext; bei Rahmen: Vorlagen,
   Rahmen verbinden, Kontrollpunkte, Comic-Seiten mit Beschnitt und Innenrand.
 - Pinsel-Materialien (Bildspitzen, Texturen, Doppelpinsel), Tempo als Dynamik, Freiform-Verlauf.
-- Import/Export von `.clip` oder PSD.
+- Import/Export von `.clip`. Beim PSD-Austausch: Text bleibt nicht editierbar, Ebenenstile
+  und Vektormasken werden nicht als solche übernommen, „Glow dodge“ und „Add (Glow)“ werden zu
+  „Farbig abwedeln“ bzw. „Linear abwedeln“.
 
 ## Rechtliches
 
@@ -196,3 +215,7 @@ Vorbild genannt. Es wurde kein Code, keine Grafik, kein Pinsel und keine Datei v
 Paint verwendet. Das Programm wurde weder heruntergeladen noch installiert, dekompiliert oder
 mit REA analysiert – das verbietet die Lizenzvereinbarung (§5.2/§5.3). Grundlage war die
 öffentliche Dokumentation; Details in [RESEARCH.md](RESEARCH.md).
+
+Mitgelieferte Open-Source-Bibliotheken (React, zustand, fflate, ag-psd mit pako und base64-js)
+stehen unter MIT- bzw. Zlib-Lizenz. Ihre Lizenztexte schreibt der Build nach
+`dist/THIRD_PARTY_LICENSES.txt`, das mit der App ausgeliefert wird.

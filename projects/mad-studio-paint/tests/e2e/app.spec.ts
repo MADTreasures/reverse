@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { expect, test, type Page } from '@playwright/test';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -1362,5 +1363,73 @@ test('gradients: shapes and edge rules, the Edit gradient dialog, editable gradi
     return m.useStore.getState().doc.layers[0].kind;
   });
   expect(back).toBe('gradient');
+  expect(errors).toEqual([]);
+});
+
+test('Photoshop documents: Save duplicate as .psd keeps the layers, File > Open reads them back', async ({ page }) => {
+  const errors = await boot(page);
+  // No save picker in tests: saving falls back to a download.
+  await page.evaluate(() => delete (window as any).showSaveFilePicker);
+  // Bottom layer: black, masked outside a square.
+  await fillBlack(page);
+  await selectTool(page, 'select');
+  await drag(page, [100, 100], [200, 200]);
+  await page.getByRole('button', { name: 'Mask outside selection' }).click();
+  await page.keyboard.press('ControlOrMeta+d');
+  // A vector line on a 50 % Multiply layer (rasterized in the PSD) and a draft layer (left out).
+  await page.getByRole('button', { name: 'New vector layer' }).click();
+  await thinPen(page);
+  await drag(page, [50, 250], [350, 250], 10);
+  await page.evaluate(() => {
+    const a = window.__madPaint.actions;
+    const s = window.__madPaint.useStore.getState();
+    a.setLayerProps(s.activeLayerId, { blend: 'multiply', opacity: 0.5, name: 'Lines' });
+    a.setLayerProps(a.addRasterLayer(), { draft: true, name: 'Sketch' });
+  });
+
+  // File > Save duplicate > .psd: drafts are not output by default.
+  await page.evaluate(() => window.__madPaint.runCommand('saveDuplicatePsd'));
+  const dlg = page.getByRole('dialog', { name: 'Export settings' });
+  await expect(dlg.getByLabel('Draft layers')).not.toBeChecked();
+  const [download] = await Promise.all([page.waitForEvent('download'), dlg.getByRole('button', { name: 'OK' }).click()]);
+  expect(download.suggestedFilename()).toBe('Test.psd');
+  const psd = readFileSync((await download.path())!);
+  expect(psd.subarray(0, 4).toString('latin1')).toBe('8BPS');
+
+  // File > Open: the unsaved canvas is discarded, the PSD opens with its layers.
+  const chooser = page.waitForEvent('filechooser');
+  // Not awaited: the command waits for the confirmation and the file chooser.
+  await page.evaluate(() => void window.__madPaint.runCommand('open'));
+  await page.getByRole('dialog', { name: 'Unsaved changes' }).getByRole('button', { name: 'Discard' }).click();
+  await (await chooser).setFiles({ name: 'Test.psd', mimeType: 'image/vnd.adobe.photoshop', buffer: psd });
+  await expect.poll(async () => (await state(page)).layers.map((l: any) => l.name)).toEqual(['Lines', 'Layer 1']);
+  const { layers } = await state(page);
+  expect(layers.map((l: any) => [l.kind, l.blend, Math.round(l.opacity * 100), Boolean(l.mask)])).toEqual([
+    ['raster', 'multiply', 50, false],
+    ['raster', 'normal', 100, true],
+  ]);
+  expect(await page.evaluate(() => window.__madPaint.useStore.getState().doc.paper)).toEqual({ visible: true, color: '#ffffff' });
+  // The mask still hides the black outside the square; the line shows at half strength.
+  expect(await shown(page, 150, 150)).toBe(0);
+  expect(await shown(page, 50, 50)).toBe(255);
+  const line = await shown(page, 200, 250);
+  expect(line).toBeGreaterThan(90);
+  expect(line).toBeLessThan(170);
+
+  // File > Export (single layer) as .psd, output as background: one opaque layer.
+  await page.evaluate(() => window.__madPaint.runCommand('export'));
+  const ex = page.getByRole('dialog', { name: 'Export' });
+  await ex.getByLabel('Format').selectOption('psd');
+  await ex.getByLabel('Output as background').check();
+  await expect(ex.getByText('Transparent background')).toHaveCount(0);
+  const [flat] = await Promise.all([page.waitForEvent('download'), ex.getByRole('button', { name: 'Export' }).click()]);
+  const flatBytes = [...readFileSync((await flat.path())!)];
+  const opened = await page.evaluate(async (data) => {
+    const m = window.__madPaint;
+    await m.openFileBytes({ name: 'flat.psd', data: new Uint8Array(data) });
+    const s = m.useStore.getState();
+    return { names: s.doc.layers.map((l: any) => l.name), centre: m.engine.sampleDisplayed(150, 150, '#ffffff')[0] };
+  }, flatBytes);
+  expect(opened).toEqual({ names: ['Background'], centre: 0 });
   expect(errors).toEqual([]);
 });

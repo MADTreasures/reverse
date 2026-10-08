@@ -9,7 +9,7 @@ import type { BlendMode, CorrectionLayer, FolderBlendMode, FolderLayer, Gradient
 import { applyEdge, applyLayerColor, applyWatercolorEdge, effectReach } from '../paint/effects';
 import { inflate, intersect, union, type Rect } from '../paint/rect';
 import { applyCorrection } from '../paint/tonal';
-import type { FramePanel } from '../paint/frames';
+import type { FrameBorder, FramePanel } from '../paint/frames';
 import { applyTone } from '../paint/tone';
 import { blendInto } from './blendPixels';
 import { clearRect, createCanvas, ctx2d, type Ctx } from './canvas';
@@ -142,6 +142,17 @@ export class Compositor {
     }
     this.composeList(doc.layers, target, r, opts);
     target.restore();
+  }
+
+  /**
+   * One layer drawn on its own at document size with its mask and effects (a folder composed in
+   * isolation), for exports that keep layers.
+   */
+  layerImage(doc: PaintDocument, layer: Layer, opts: ComposeOptions = {}): HTMLCanvasElement {
+    this.dpi = doc.dpi;
+    const out = createCanvas(this.canvas.width, this.canvas.height);
+    this.drawContent(layer, ctx2d(out), this.bounds, opts);
+    return out;
   }
 
   private shown(layer: Layer, opts: ComposeOptions): boolean {
@@ -278,26 +289,16 @@ export class Compositor {
   }
 
   /** Frame border folder: keeps the content inside the panels and draws their border on top. */
-  private drawFrame(ctx: Ctx, id: string, frame: NonNullable<FolderLayer['frame']>): void {
+  private drawFrame(ctx: Ctx, id: string, frame: FrameBorder): void {
     const panels = this.framePreview.get(id) ?? frame.panels;
     if (panels.length === 0) return;
-    const path = new Path2D();
-    for (const panel of panels) {
-      panel.points.forEach((p, i) => (i === 0 ? path.moveTo(p.x, p.y) : path.lineTo(p.x, p.y)));
-      path.closePath();
-    }
+    const path = framePath(panels);
     ctx.save();
     ctx.globalCompositeOperation = 'destination-in';
     ctx.fillStyle = '#000';
     ctx.fill(path, 'nonzero');
     ctx.restore();
-    if (!frame.draw || frame.lineWidth <= 0) return;
-    ctx.save();
-    ctx.lineWidth = frame.lineWidth;
-    ctx.lineJoin = 'miter';
-    ctx.strokeStyle = frame.color;
-    ctx.stroke(path);
-    ctx.restore();
+    strokeFrame(ctx, path, frame);
   }
 
   /**
@@ -315,6 +316,27 @@ export class Compositor {
     target.drawImage(c.canvas, 0, 0);
     this.pool.release(c);
   }
+}
+
+/** The outline of a frame border folder's panels. */
+export function framePath(panels: FramePanel[]): Path2D {
+  const path = new Path2D();
+  for (const panel of panels) {
+    panel.points.forEach((p, i) => (i === 0 ? path.moveTo(p.x, p.y) : path.lineTo(p.x, p.y)));
+    path.closePath();
+  }
+  return path;
+}
+
+/** Draws a frame border folder's border line (if it has one) along `path`. */
+export function strokeFrame(ctx: Ctx, path: Path2D, frame: FrameBorder): void {
+  if (!frame.draw || frame.lineWidth <= 0) return;
+  ctx.save();
+  ctx.lineWidth = frame.lineWidth;
+  ctx.lineJoin = 'miter';
+  ctx.strokeStyle = frame.color;
+  ctx.stroke(path);
+  ctx.restore();
 }
 
 const hasEffects = (layer: Layer) => Boolean(layer.effects?.border?.enabled || layer.effects?.layerColor?.enabled || layer.effects?.tone?.enabled);

@@ -228,6 +228,11 @@ export function isDocumentFileName(name: string): boolean {
   return name.toLowerCase().endsWith(`.${EXTENSION}`);
 }
 
+/** Photoshop documents (opened through io/psd.ts, which loads only when needed). */
+export const PSD_EXTENSIONS = ['psd', 'psb'];
+
+export const isPsdFileName = (name: string) => PSD_EXTENSIONS.includes(name.split('.').pop()?.toLowerCase() ?? '');
+
 export const IMAGE_EXTENSIONS = ['png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp'];
 
 export function isImageFileName(name: string): boolean {
