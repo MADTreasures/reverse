@@ -1,7 +1,8 @@
 import { useRef, type PointerEvent as ReactPointerEvent } from 'react';
 import { formatDb, volumeToGain } from '../../model/timing';
 import { endCoalesce, gestureKey } from '../../store/actions';
-import { noteTweaked } from '../../store/automationActions';
+import { engine } from '../../audio/engine';
+import { noteTweaked, recordAutomationValue } from '../../store/automationActions';
 import { setHint } from '../hint';
 import { controlMenu } from '../menus/controlMenu';
 import { showMenu } from '../overlays';
@@ -28,7 +29,10 @@ export function Fader({ value, onChange, label = 'Volume', height = 120, default
   const set = (v: number, key: string) => {
     const c = Math.min(1, Math.max(0, v));
     onChange(c, key);
-    if (target) noteTweaked(target);
+    if (target) {
+      noteTweaked(target);
+      recordAutomationValue(target, c, engine.playheadTick());
+    }
     setHint(describe(c));
   };
 

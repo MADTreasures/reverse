@@ -1,7 +1,8 @@
 import { useRef, type PointerEvent as ReactPointerEvent, type WheelEvent as ReactWheelEvent } from 'react';
 import { useAutomationOverlay } from '../../audio/automationRuntime';
 import { endCoalesce, gestureKey } from '../../store/actions';
-import { noteTweaked } from '../../store/automationActions';
+import { engine } from '../../audio/engine';
+import { noteTweaked, recordAutomationValue } from '../../store/automationActions';
 import { setHint } from '../hint';
 import { controlMenu } from '../menus/controlMenu';
 import { showMenu } from '../overlays';
@@ -89,7 +90,10 @@ export function Knob({
     let v = fromNormalized(norm, min, max, curve);
     if (integer) v = Math.round(v);
     if (v !== value) onChange(v, key);
-    if (target) noteTweaked(target);
+    if (target) {
+      noteTweaked(target);
+      recordAutomationValue(target, v, engine.playheadTick());
+    }
     setHint(describe(v));
   };
 

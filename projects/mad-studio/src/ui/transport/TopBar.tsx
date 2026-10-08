@@ -147,6 +147,7 @@ function recordMenu(): MenuItem[] {
   return [
     { label: 'Recording filter', header: true },
     { label: 'Notes', checked: f.notes, onClick: () => setTransport({ recordFilter: { ...f, notes: !f.notes } }) },
+    { label: 'Automation (control movements, song mode)', checked: f.automation, onClick: () => setTransport({ recordFilter: { ...f, automation: !f.automation } }) },
     { label: 'Audio (armed mixer tracks)', checked: f.audio, onClick: () => setTransport({ recordFilter: { ...f, audio: !f.audio } }) },
     { separator: true },
     cmd('Recording precount', 'precount', { checked: t.precount }),

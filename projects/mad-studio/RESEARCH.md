@@ -105,6 +105,7 @@ Quellen: FL Studio Online Manual (Seiten *Plugin Wrapper*, *System settings › 
 | 16 | „**Last tweaked**“: zuletzt bewegter Parameter (auch in Fremd-Plugins) → *Create automation clip* | Engine meldet Parameteränderungen aus dem Plugin-Fenster | `plugin.paramChanged` → `ui.lastTweaked`, Menü *Tools › Last tweaked* |
 | 17 | Aufnahme: **Eingang am Mixer-Track** wählen (stereo/mono), Track wird **scharf geschaltet**, Record + Play; im Song-Modus entstehen **Audio-Clips in der Playlist**, im Pattern-Modus Audio-Clip-Kanäle; Dateien landen im Ordner **„Recorded“**; Optionen Latenzkompensation, Monitoring (Off / When armed / On), Auto-unarm, Vorzähler | Aufnahme hängt am Mixer, nicht an Playlist-Spuren | Modellfelder `MixerTrack.input`/`armed`; Web-Engine: `getUserMedia` + AudioWorklet (`recorder.ts`); native Engine: Gerät/Interface, WAV-Dateien im Ordner `~/Music/MAD Studio/Recorded`; Takes werden auf die aufnehmende Mixer-Spur geroutet |
 | 18 | **Automation-Clips** sind spezielle Kanäle, ihre Clips laufen in der Playlist; zwischen Clips bleibt der letzte Wert stehen; ein Ziel kann mehrere Clips haben | Automation als Kanal + Playlist-Clip, Auswertung pro Ziel | `automation.ts` (Kurven, Auswertung, Linearisierung zu Stützstellen), `automationRuntime.ts` (Web Audio), Protokoll `automation.set` (native Engine) |
+| 19 | Aufnahmefilter „Automation“: Reglerbewegungen während der Song-Aufnahme werden als Automation aufgezeichnet | Bewegungen in den Clip des Reglers schreiben, alte Punkte im überstrichenen Bereich ersetzen | `recordAutomationValue()` (Clip wird bei der ersten Bewegung angelegt, Punkte ausgedünnt) |
 
 ## REA-Prüfung des eigenen App-Pakets
 
@@ -136,8 +137,6 @@ zudem nach 60 s in ein Timeout; für grosse Ziele die CLI verwenden:
 
 - Die genauen Formeln von FLs Kurvenmodi (Single/Double curve 2/3, Stairs …) sind nicht dokumentiert;
   MAD Studio verwendet eigene Formeln mit ähnlichem Verhalten.
-- FLs Aufnahmefilter kennt zusätzlich „Automation“ (Reglerbewegungen während der Aufnahme als Clips
-  aufzeichnen) – in MAD Studio noch nicht umgesetzt.
 
 - `.flp`-Import: Das Format ist von Open-Source-Projekten dokumentiert (Event-basiertes
   Binärformat). Ein Import der Noten, Patterns und Playlist wäre machbar; Plugin-Zustände

@@ -266,7 +266,7 @@ export class WebAudioEngine implements EngineApi {
     const voice = this.graph?.noteOn(channelId, key, velocity) ?? null;
     const s = useStore.getState();
     let recordStart: number | null = null;
-    if (s.transport.recording && this.scheduler.playing) {
+    if (s.transport.recording && s.transport.recordFilter.notes && this.scheduler.playing) {
       const tick = this.patternTick();
       if (tick !== null) recordStart = tick;
     }

@@ -211,3 +211,57 @@ export function noteTweaked(target: string): void {
     });
   }
 }
+
+// ---------------------------------------------------------------------------
+// Automation recording (FL Studio: recording filter "Automation")
+
+let recTake: { target: string; channelId: Id; lastLocal: number; lastValue: number; key: string } | null = null;
+let recCounter = 0;
+
+useStore.subscribe((s, prev) => {
+  if (prev.transport.playing && !s.transport.playing) recTake = null;
+});
+
+/**
+ * While recording in song mode, control changes are written as points into the automation clip of
+ * that control (created on the first movement), replacing what was there for the time the control
+ * is moved – like recording automation in FL Studio.
+ */
+export function recordAutomationValue(target: string, value: number, tick: number | null): void {
+  const s = useStore.getState();
+  const t = s.transport;
+  if (tick === null || !t.recording || !t.playing || t.mode !== 'song' || !t.recordFilter.automation) return;
+  const info = describeTarget(s.project, target);
+  if (!info) return;
+  const norm = toNorm(info, value);
+  let channelId = automationChannelFor(s.project, target);
+  if (!channelId) {
+    channelId = createAutomationClip(target);
+    if (!channelId) return;
+  }
+  const project = useStore.getState().project;
+  const clip = project.clips.find((c) => c.kind === 'automation' && c.channelId === channelId && tick >= c.start && tick < c.start + c.length);
+  if (!clip) return;
+  const local = Math.max(0, Math.round(tick - clip.start + clip.offset));
+  if (!recTake || recTake.target !== target || recTake.channelId !== channelId) {
+    recCounter += 1;
+    recTake = { target, channelId, lastLocal: local, lastValue: norm, key: `autorec#${recCounter}` };
+  }
+  const take = recTake;
+  // Thin out: at most one point per 1/8 step unless the value jumps.
+  if (local - take.lastLocal < 12 && Math.abs(norm - take.lastValue) < 0.08 && local !== take.lastLocal) return;
+  const from = take.lastLocal;
+  updateAutomation(
+    channelId,
+    (a) => {
+      a.points = a.points.filter((p) => p.tick === 0 || p.tick <= from || p.tick > local);
+      const existing = a.points.find((p) => p.tick === local);
+      if (existing) existing.value = norm;
+      else a.points.push({ tick: local, value: norm, tension: 0, mode: 'single' });
+      if (local === 0) a.points[0].value = norm;
+    },
+    { coalesce: take.key },
+  );
+  take.lastLocal = local;
+  take.lastValue = norm;
+}
