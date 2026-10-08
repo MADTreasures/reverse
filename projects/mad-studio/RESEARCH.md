@@ -37,6 +37,8 @@ Interoperabilität verstehen, wo das zulässig ist.
 - [x] Wie wird zwischen Pattern- und Song-Wiedergabe umgeschaltet?
 - [x] Wie läuft das Signal vom Kanal bis zum Master?
 - [x] Welche Bedienkonventionen erwarten FL-Nutzer (Maus, Tastenkürzel)?
+- [x] Wie bedient sich FL Studio im Detail (Menüs, Maus, Kontextmenüs)? → Vergleich mit der installierten Testversion, siehe unten
+- [x] Wie hostet FL Studio VST/AU-Plugins, wie nimmt es Audio auf, wie funktionieren Automation-Clips?
 - [ ] Wie ist das `.flp`-Projektformat aufgebaut? (offen – nur für einen späteren Import relevant)
 
 ## Befunde → Umsetzung
@@ -59,6 +61,50 @@ Interoperabilität verstehen, wo das zulässig ist.
 Bewusst **eigene** Lösungen (keine Übernahme aus dem Vorbild): Name, Farbschema, Icons,
 App-Icon, Synth-Architektur und -Presets, prozedural synthetisierte Drums, Dateiformat
 (`.madstudio` = ZIP + JSON).
+
+## Vergleich mit der installierten FL-Studio-Testversion
+
+Auftrag: „Installiere FL Studio und vergleiche, es soll sich möglichst gleich anfühlen und bedienen lassen.“
+
+**Vorgehen.** Die kostenlose Testversion von FL Studio (Windows-Installer von image-line.com) wurde in
+der Linux-Arbeitsumgebung unter Wine 9.0 auf einem virtuellen Bildschirm (Xvfb) installiert und per
+Maus/Tastatur-Automation (xdotool) bedient; Screenshots dienten nur dem Vergleich und liegen **nicht**
+im Repo. Version 26.1.7 startet unter Wine nicht (Signaturprüfung, bekanntes Wine-Problem ab 26.1.4,
+Wine-Merge-Request 11824), daher wurde **26.1.3** verwendet. Die Lizenzbedingungen (EULA) verbieten
+Reverse Engineering, Dekompilieren und Disassemblieren sowie das Übernehmen von Logos/Artwork – nichts
+davon ist passiert: FL Studio wurde nur wie von einem Nutzer bedient und beobachtet (Black Box).
+
+| Bereich | Beobachtung in FL Studio 26.1.3 | Umsetzung in MAD Studio |
+| ------- | ------------------------------- | ----------------------- |
+| Werkzeugleiste | Zwei Zeilen: oben Menüs (FILE … TOOLS HELP), PAT/SONG, Play/Stop/Record, Tempo, Songposition, Schalter für Tipp-Tastatur, Vorzähler, Loop-Aufnahme, Metronom; unten Hint-Leiste, Fenster-Buttons in der Reihenfolge Browser · Channel Rack · Piano Roll · Playlist · Mixer, Snap und Pattern-Auswahl mit „+“ | gleiche Anordnung (`TopBar.tsx`), eigene Icons; Menü „Tools“ mit „Last tweaked“ ergänzt |
+| Standardprojekt | 130 BPM, vier/fünf Drum-Kanäle, je auf eigene Mixer-Spur geroutet | war bereits so (eigene Sounds) |
+| Step-Sequencer | Linksklick schaltet, Linksziehen „malt“, Rechtsklick/-ziehen löscht; Klick wählt den Kanal | identisch (bestand schon) |
+| Kanal-Kontextmenü | Piano roll · Rename/Color · Clone/Delete · Fill each 2/4/8 steps · Rotate left/right … | an FL angelehnt, „Rotate left/right“ (Shift+Ctrl+←/→) ergänzt |
+| Regler-Rechtsklick | Kopf mit Name, **Reset**, Abschnitt *Automation* (Edit events, Init song …, **Create automation clip**), *Remote control*, *Value* (**Copy/Paste value, Type in value…**) | `controlMenu.ts` für alle Knobs, Fader, Tempo: Reset · Create/Edit automation clip · Copy/Paste/Type value |
+| Automation-Clip anlegen | erscheint als eigener Kanal im Channel Rack, der Rack-Filter springt auf „Automation“; ein Clip über den ganzen Song (bei leerem Song 1 Takt) landet auf der ersten freien Playlist-Spur; der Playlist-Picker zeigt ihn an | identisch (`createAutomationClip`) |
+| Automation bearbeiten | in der Playlist: **Rechtsklick in den Clip = Punkt setzen**, Rechtsklick auf Punkt = Menü (*Point n/m*, Delete, 13 Kurvenmodi, Copy/Paste/Type value), Ziehen = verschieben, kleiner Kreis in der Segmentmitte = Spannung; Rechtsklick auf die Titelleiste löscht den Clip; Hint zeigt Position und Wert | identisch (`Playlist.tsx`, `automation/curve.ts`, `pointMenu.ts`); Kurvenformeln sind eigene, da FL sie nicht dokumentiert |
+| Automation-Fenster | „Automation editor“ mit Kurve, darunter „Target links“ | `AutomationEditor.tsx` (Kurve, Ziel, „Link to last tweaked“, Flip, Reset) |
+| Mixer | Spuren mit Mute-LED, Pan, Fader, Pegel; rechts der **Track-Inspector**: oben Eingang („(none)“ / *FL Studio ASIO – stereo* „In 1 - In 2“ / *mono* „In 1“, „In 2“), zehn Slots, Equalizer, unten Ausgang „Out 1 - Out 2“; Eingang wählen **armt die Spur** (roter Punkt unter der Spur) | Track-Inspector mit Eingang, zehn Slots und Ausgang, Arm-Punkt unter jeder Spur, Mute-LED (Ctrl+Klick = Solo) |
+| Mixer-Menü | *Disk recording* (Latenzkompensation, Monitor input, Auto-unarm), Arm/Disarm selected tracks … | Mixer-Menü „Disk recording“ mit denselben Optionen |
+| Record-Button | Hint: „Record (automation, score, audio, clips)“, Rechtsklick = Aufnahmefilter | Rechtsklick öffnet den Aufnahmefilter (Noten, Audio) und Vorzähler |
+| Add-Menü | „More plugins…“, „Plugin database“, Kategorien (Drum, Synth, Sampler, Misc mit *Automation Clip* …) | „More plugins…“, Plugins (VST3/AU), Automation clip, eigene Synth-/Drum-Kategorien |
+
+Bewusst **nicht** übernommen: FLs Grafik (Skin, Icons, Logo, Farbschema im Detail), Sounds und
+Plugin-Namen. Das Bedienkonzept ist übernommen, das Aussehen bleibt eigenständig.
+
+## VST/AU, Aufnahme und Automation: wie FL Studio es macht
+
+Quellen: FL Studio Online Manual (Seiten *Plugin Wrapper*, *System settings › Manage plugins*,
+*Recording audio*, *Playlist › Automation Clips*, *Keyboard shortcuts*) und die Beobachtungen oben.
+
+| # | Beobachtung (Manual / Testversion) | Schlussfolgerung | Umsetzung |
+| - | ---------------------------------- | ---------------- | --------- |
+| 13 | Plugins laufen in einem **Wrapper** mit Preset-Menü, Parameterliste („Browse parameters“), Editor-Fenster und Optionen; „Make bridged“ startet ein Plugin in **separatem Prozess**, damit Abstürze FL nicht mitreissen | Plugin-Hosting gehört in einen nativen Prozess, getrennt von der Oberfläche | eigener Engine-Prozess `engine/` (C++/JUCE) mit stdio-Protokoll (`engine/PROTOCOL.md`); Wrapper-Fenster `PluginWrapper.tsx` mit allen Parametern als automatisierbare Knöpfe |
+| 14 | **Plugin-Manager**: Suchpfade, „Scan & verify“ ordnet Plugins als Instrument oder Effekt ein; fehlerhafte Plugins werden markiert | Scannen muss abstürzende Plugins überleben | Scan **pro Plugin in einem eigenen Prozess** (`mad-engine --scan-plugin`), Liste mit Instrumenten/Effekten/Fehlern (`PluginManager.tsx`) |
+| 15 | Instrument-Plugins sind **Kanäle** im Channel Rack, Effekt-Plugins sitzen in **Mixer-Slots** | gleiche Datenmodell-Trennung | Kanaltyp `plugin`, Slot-Typ `plugin`; Zustand der Plugins (Chunk, base64) wird beim Speichern aus der Engine geholt |
+| 16 | „**Last tweaked**“: zuletzt bewegter Parameter (auch in Fremd-Plugins) → *Create automation clip* | Engine meldet Parameteränderungen aus dem Plugin-Fenster | `plugin.paramChanged` → `ui.lastTweaked`, Menü *Tools › Last tweaked* |
+| 17 | Aufnahme: **Eingang am Mixer-Track** wählen (stereo/mono), Track wird **scharf geschaltet**, Record + Play; im Song-Modus entstehen **Audio-Clips in der Playlist**, im Pattern-Modus Audio-Clip-Kanäle; Dateien landen im Ordner **„Recorded“**; Optionen Latenzkompensation, Monitoring (Off / When armed / On), Auto-unarm, Vorzähler | Aufnahme hängt am Mixer, nicht an Playlist-Spuren | Modellfelder `MixerTrack.input`/`armed`; Web-Engine: `getUserMedia` + AudioWorklet (`recorder.ts`); native Engine: Gerät/Interface, WAV-Dateien im Ordner `~/Music/MAD Studio/Recorded`; Takes werden auf die aufnehmende Mixer-Spur geroutet |
+| 18 | **Automation-Clips** sind spezielle Kanäle, ihre Clips laufen in der Playlist; zwischen Clips bleibt der letzte Wert stehen; ein Ziel kann mehrere Clips haben | Automation als Kanal + Playlist-Clip, Auswertung pro Ziel | `automation.ts` (Kurven, Auswertung, Linearisierung zu Stützstellen), `automationRuntime.ts` (Web Audio), Protokoll `automation.set` (native Engine) |
 
 ## REA-Prüfung des eigenen App-Pakets
 
@@ -87,6 +133,11 @@ zudem nach 60 s in ein Timeout; für grosse Ziele die CLI verwenden:
 `npx -y rea-agents@5.0.0 analyze-javascript-application <pfad> --json`.
 
 ## Unbekanntes / offene Fragen
+
+- Die genauen Formeln von FLs Kurvenmodi (Single/Double curve 2/3, Stairs …) sind nicht dokumentiert;
+  MAD Studio verwendet eigene Formeln mit ähnlichem Verhalten.
+- FLs Aufnahmefilter kennt zusätzlich „Automation“ (Reglerbewegungen während der Aufnahme als Clips
+  aufzeichnen) – in MAD Studio noch nicht umgesetzt.
 
 - `.flp`-Import: Das Format ist von Open-Source-Projekten dokumentiert (Event-basiertes
   Binärformat). Ein Import der Noten, Patterns und Playlist wäre machbar; Plugin-Zustände

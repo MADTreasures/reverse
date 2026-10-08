@@ -38,9 +38,9 @@
   gap: 2px;
   height: 72px;
   padding: 0 8px;
-  background: linear-gradient(#2a323a, #20272d);
+  background: linear-gradient(#56616a, #48525a);
   border-bottom: 1px solid var(--line);
-  box-shadow: inset 0 1px 0 #3a444e;
+  box-shadow: inset 0 1px 0 #6b7780;
   flex-shrink: 0;
 }
 
@@ -74,7 +74,7 @@
   padding: 0 8px;
   border: 1px solid var(--line);
   border-radius: 3px;
-  background: #151a1e;
+  background: #343e44;
   color: var(--text-dim);
   font-size: 10.5px;
 }
@@ -163,7 +163,7 @@ body.electron.mac .topbar input {
   height: 24px;
   padding: 2px 6px;
   border-radius: 3px;
-  background: #151a1e;
+  background: #343e44;
   border: 1px solid var(--line);
   color: var(--text-dim);
   font-size: 11px;
@@ -238,12 +238,12 @@ body.electron.mac .topbar input {
   height: 32px;
   border: 1px solid var(--line);
   border-radius: 5px;
-  background: linear-gradient(#3a454f, #2a333b);
+  background: linear-gradient(#606b73, #4c565d);
   color: var(--text);
 }
 
 .transport-btn:hover {
-  background: linear-gradient(#45515c, #313b44);
+  background: linear-gradient(#6c7881, #57626a);
 }
 
 .transport-btn.play.active {
@@ -267,7 +267,7 @@ body.electron.mac .topbar input {
   padding: 2px 8px;
   border: 1px solid var(--line);
   border-radius: 4px;
-  background: #0f1316;
+  background: #263036;
   min-width: 78px;
 }
 
@@ -296,7 +296,7 @@ body.electron.mac .topbar input {
   padding: 4px 10px;
   border: 1px solid var(--line);
   border-radius: 4px;
-  background: #0f1316;
+  background: #263036;
   color: #ffd29c;
   font-family: var(--mono);
   font-size: 19px;
@@ -364,7 +364,7 @@ body.electron.mac .topbar input {
   height: 26px;
   border: 1px solid var(--line);
   border-radius: 4px;
-  background: linear-gradient(#323c45, #283038);
+  background: linear-gradient(#5a656c, #4b555c);
   color: var(--text-dim);
 }
 
@@ -374,7 +374,7 @@ body.electron.mac .topbar input {
 
 .toggle-btn.active {
   color: var(--accent);
-  background: linear-gradient(#232a31, #2b333b);
+  background: linear-gradient(#3b444a, #444e55);
   box-shadow: inset 0 0 0 1px #ff9b3d40;
 }
 
@@ -837,7 +837,7 @@ body.electron.mac .topbar input {
   line-height: 18px;
   border: 1px solid var(--line);
   border-radius: 3px;
-  background: #11161a;
+  background: #2a3338;
   color: #ffd29c;
   font-family: var(--mono);
   font-size: 11px;
@@ -856,13 +856,13 @@ body.electron.mac .topbar input {
   border: 1px solid var(--line);
   border-left: 4px solid var(--ch);
   border-radius: 3px;
-  background: linear-gradient(#3a454f, #2e3740);
+  background: linear-gradient(#5b666d, #4d575e);
   text-align: left;
   flex-shrink: 0;
 }
 
 .channel-name:hover {
-  background: linear-gradient(#45515c, #36404a);
+  background: linear-gradient(#68747c, #58636a);
 }
 
 .channel-name-text {
@@ -1027,7 +1027,7 @@ body.electron.mac .topbar input {
   padding: 4px 3px 6px;
   border: 1px solid var(--line);
   border-radius: 4px;
-  background: linear-gradient(#2d363f, #252c33);
+  background: linear-gradient(#4b565d, #404a51);
   flex-shrink: 0;
   cursor: default;
 }
@@ -1040,7 +1040,7 @@ body.electron.mac .topbar input {
 
 .strip.selected {
   box-shadow: 0 0 0 1px var(--select) inset;
-  background: linear-gradient(#323d48, #28313a);
+  background: linear-gradient(#576570, #4a5760);
 }
 
 .strip-num {
@@ -1327,7 +1327,7 @@ body.electron.mac .topbar input {
   height: 110px;
   border: 1px solid var(--line);
   border-radius: 4px;
-  background: #11161a;
+  background: #2a3338;
   overflow: hidden;
 }
 
@@ -1348,7 +1348,7 @@ body.electron.mac .topbar input {
   display: block;
   border: 1px solid var(--line);
   border-radius: 3px;
-  background: #11161a;
+  background: #2a3338;
 }
 
 /* ------------------------------------------------- menus, dialogs, toasts */
@@ -1771,7 +1771,7 @@ kbd {
   padding: 0 6px;
   border: 1px solid var(--line);
   border-radius: 3px;
-  background: #11161a;
+  background: #2a3338;
   color: var(--text-dim);
   text-align: left;
   font-size: 11px;
@@ -1931,7 +1931,7 @@ kbd {
   height: 20px;
   border: 1px solid var(--line);
   border-radius: 3px;
-  background: #11161a;
+  background: #2a3338;
   overflow: hidden;
   font-size: 11px;
 }

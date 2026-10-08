@@ -49,7 +49,7 @@ export function AutomationEditor({ channel }: { channel: AutomationChannel }) {
     const ctx = prepareCanvas(canvas, sc.size.width, sc.size.height);
     if (!ctx) return;
     const v = view();
-    ctx.fillStyle = '#1b2127';
+    ctx.fillStyle = '#27353e';
     ctx.fillRect(0, 0, sc.size.width, sc.size.height);
     // Grid: bars and beats.
     ctx.font = '10px -apple-system, sans-serif';

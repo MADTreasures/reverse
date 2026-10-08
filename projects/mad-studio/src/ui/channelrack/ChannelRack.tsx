@@ -378,7 +378,7 @@ function AutomationPreview({ channel, stepCount }: { channel: AutomationChannel;
     const ctx = prepareCanvas(canvas, width, height);
     if (!ctx) return;
     ctx.clearRect(0, 0, width, height);
-    ctx.fillStyle = '#161b20';
+    ctx.fillStyle = '#2a3740';
     ctx.fillRect(0, 0, width, height);
     const data = channel.automation;
     const len = Math.max(1, data.length);
@@ -503,7 +503,7 @@ function MiniRoll({ channel, notes, stepCount }: { channel: Channel; notes: Note
     const ctx = prepareCanvas(canvas, width, height);
     if (!ctx) return;
     ctx.clearRect(0, 0, width, height);
-    ctx.fillStyle = '#161b20';
+    ctx.fillStyle = '#2a3740';
     ctx.fillRect(0, 0, width, height);
     if (notes.length === 0) return;
     let lo = 127;

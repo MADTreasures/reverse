@@ -170,14 +170,14 @@ export function drawPlaylist(ctx: CanvasRenderingContext2D, v: PlaylistViewport,
   ctx.clip();
   for (let i = firstTrack; i <= lastTrack; i++) {
     const y = yOfTrack(v, i);
-    ctx.fillStyle = i % 2 === 0 ? '#20272d' : '#1d2329';
+    ctx.fillStyle = i % 2 === 0 ? '#293842' : '#26343e';
     ctx.fillRect(TRACK_W, y, width - TRACK_W, trackHeight);
-    ctx.fillStyle = '#0b0e10';
+    ctx.fillStyle = '#1c262d';
     ctx.fillRect(TRACK_W, y + trackHeight - 1, width - TRACK_W, 1);
   }
   const below = yOfTrack(v, project.tracks.length);
   if (below < height) {
-    ctx.fillStyle = '#15191d';
+    ctx.fillStyle = '#212c33';
     ctx.fillRect(TRACK_W, below, width - TRACK_W, height - below);
   }
 
@@ -189,7 +189,7 @@ export function drawPlaylist(ctx: CanvasRenderingContext2D, v: PlaylistViewport,
     const isBar = t % bar === 0;
     if (!isBar && beatPx < 8) continue;
     const x = Math.round(xOfTick(v, t)) + 0.5;
-    ctx.strokeStyle = isBar ? '#ffffff26' : '#ffffff0c';
+    ctx.strokeStyle = isBar ? '#ffffff30' : '#ffffff10';
     ctx.beginPath();
     ctx.moveTo(x, RULER_H);
     ctx.lineTo(x, Math.min(height, below));
@@ -272,9 +272,9 @@ export function drawPlaylist(ctx: CanvasRenderingContext2D, v: PlaylistViewport,
   ctx.restore();
 
   // --- ruler
-  ctx.fillStyle = '#1a2025';
+  ctx.fillStyle = '#3b464d';
   ctx.fillRect(TRACK_W, 0, width - TRACK_W, RULER_H);
-  ctx.fillStyle = '#0b0e10';
+  ctx.fillStyle = '#1f282e';
   ctx.fillRect(TRACK_W, RULER_H - 1, width - TRACK_W, 1);
   ctx.font = '10px -apple-system, sans-serif';
   ctx.textBaseline = 'middle';
@@ -285,7 +285,7 @@ export function drawPlaylist(ctx: CanvasRenderingContext2D, v: PlaylistViewport,
     if (x < TRACK_W) continue;
     const index = t / bar;
     if (index % every !== 0) continue;
-    ctx.fillStyle = '#c3ccd4';
+    ctx.fillStyle = '#e6ebee';
     ctx.fillText(String(index + 1), x + 4, 9);
     ctx.fillStyle = '#ffffff40';
     ctx.fillRect(x, RULER_H - 8, 1, 7);
@@ -310,9 +310,9 @@ export function drawPlaylist(ctx: CanvasRenderingContext2D, v: PlaylistViewport,
   for (let i = firstTrack; i <= lastTrack; i++) {
     const t = project.tracks[i];
     const y = yOfTrack(v, i);
-    ctx.fillStyle = i % 2 === 0 ? '#29313a' : '#262e36';
+    ctx.fillStyle = i % 2 === 0 ? '#4c575e' : '#48535a';
     ctx.fillRect(0, y, TRACK_W - 1, trackHeight);
-    ctx.fillStyle = '#0b0e10';
+    ctx.fillStyle = '#2b343a';
     ctx.fillRect(0, y + trackHeight - 1, TRACK_W, 1);
     // mute LED
     ctx.beginPath();
@@ -321,15 +321,15 @@ export function drawPlaylist(ctx: CanvasRenderingContext2D, v: PlaylistViewport,
     ctx.fill();
     ctx.strokeStyle = '#0a0d0f';
     ctx.stroke();
-    ctx.fillStyle = t.muted ? '#6f7b86' : '#d8dfe5';
+    ctx.fillStyle = t.muted ? '#8e9aa2' : '#eaeef1';
     ctx.font = '11px -apple-system, sans-serif';
     ctx.textBaseline = 'middle';
     ctx.fillText(t.name, 28, y + trackHeight / 2, TRACK_W - 36);
   }
   ctx.restore();
-  ctx.fillStyle = '#0b0e10';
+  ctx.fillStyle = '#1f282e';
   ctx.fillRect(TRACK_W - 1, 0, 1, height);
-  ctx.fillStyle = '#1a2025';
+  ctx.fillStyle = '#3b464d';
   ctx.fillRect(0, 0, TRACK_W - 1, RULER_H);
 
   // --- playhead

@@ -75,7 +75,7 @@ export function drawRoll(ctx: CanvasRenderingContext2D, v: RollView, s: RollScen
   const bottomKey = keyAtY(v, bottom - 1);
   for (let key = bottomKey; key <= topKey; key++) {
     const y = yOfKey(v, key);
-    ctx.fillStyle = isBlackKey(key) ? '#1c2227' : '#232a30';
+    ctx.fillStyle = isBlackKey(key) ? '#25333c' : '#2b3a44';
     ctx.fillRect(KEYS_W, y, width - KEYS_W, rowHeight);
     if (key % 12 === 0) {
       ctx.fillStyle = '#ffffff10';
@@ -156,9 +156,9 @@ export function drawRoll(ctx: CanvasRenderingContext2D, v: RollView, s: RollScen
   ctx.restore();
 
   // --- ruler
-  ctx.fillStyle = '#1a2025';
+  ctx.fillStyle = '#3b464d';
   ctx.fillRect(KEYS_W, 0, width - KEYS_W, RULER_H);
-  ctx.fillStyle = '#0b0e10';
+  ctx.fillStyle = '#1d272d';
   ctx.fillRect(KEYS_W, RULER_H - 1, width - KEYS_W, 1);
   ctx.font = '10px -apple-system, sans-serif';
   ctx.textBaseline = 'middle';
@@ -169,7 +169,7 @@ export function drawRoll(ctx: CanvasRenderingContext2D, v: RollView, s: RollScen
     if (x < KEYS_W) continue;
     const barIndex = t / bar;
     if (barIndex % barEvery === 0) {
-      ctx.fillStyle = '#c3ccd4';
+      ctx.fillStyle = '#e6ebee';
       ctx.fillText(String(barIndex + 1), x + 4, RULER_H / 2);
       ctx.fillStyle = '#ffffff40';
       ctx.fillRect(x, RULER_H - 9, 1, 8);
@@ -204,17 +204,17 @@ export function drawRoll(ctx: CanvasRenderingContext2D, v: RollView, s: RollScen
     }
   }
   ctx.restore();
-  ctx.fillStyle = '#0b0e10';
+  ctx.fillStyle = '#1d272d';
   ctx.fillRect(KEYS_W - 1, RULER_H, 1, bottom - RULER_H);
-  ctx.fillStyle = '#1a2025';
+  ctx.fillStyle = '#3b464d';
   ctx.fillRect(0, 0, KEYS_W, RULER_H);
 
   // --- velocity lane
-  ctx.fillStyle = '#161b1f';
+  ctx.fillStyle = '#26323a';
   ctx.fillRect(0, bottom, width, VEL_H);
-  ctx.fillStyle = '#0b0e10';
+  ctx.fillStyle = '#1d272d';
   ctx.fillRect(0, bottom, width, 1);
-  ctx.fillStyle = '#5f6b76';
+  ctx.fillStyle = '#aab6be';
   ctx.font = '9px -apple-system, sans-serif';
   ctx.textBaseline = 'top';
   ctx.fillText('VELOCITY', 8, bottom + 6);

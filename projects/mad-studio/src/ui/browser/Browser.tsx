@@ -138,7 +138,9 @@ export function Browser() {
                   </button>
                   {isOpen &&
                     (entries.length === 0 ? (
-                      <div className="browser-empty">Drop audio files here or use + to import.</div>
+                      <div className="browser-empty">
+                        {folder.id === 'recorded' ? 'Audio you record on armed mixer tracks appears here.' : 'Drop audio files here or use + to import.'}
+                      </div>
                     ) : (
                       entries.map((en) => (
                         <div
