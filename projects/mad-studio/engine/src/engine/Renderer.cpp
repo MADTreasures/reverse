@@ -48,7 +48,7 @@ RenderResult runRender (const RenderRequest& request, SampleStore& samples, Chan
         const double bpm = std::clamp (request.project.bpm, 10.0, 522.0);
         const double estimate = std::max (1.0, (endTick - startTick) * 60.0 / (bpm * ppq) * rate + request.tailSeconds * rate);
         const auto tailFrames = (int64_t) std::ceil (std::max (0.0, request.tailSeconds) * rate);
-        int64_t remainingTail = -1;
+        int64_t targetFrames = -1; // known once the end tick has been reached
 
         std::vector<float> left ((size_t) block), right ((size_t) block);
         float* outs[] = { left.data(), right.data() };
@@ -63,14 +63,11 @@ RenderResult runRender (const RenderRequest& request, SampleStore& samples, Chan
             }
 
             engine.process (nullptr, 0, outs, 2, block);
+            if (targetFrames < 0 && engine.endReached())
+                targetFrames = result.frames + engine.endOffset() + tailFrames;
             int frames = block;
-            if (remainingTail < 0 && engine.endReached())
-                remainingTail = tailFrames;
-            if (remainingTail >= 0)
-            {
-                frames = (int) std::min<int64_t> (frames, remainingTail);
-                remainingTail -= frames;
-            }
+            if (targetFrames >= 0)
+                frames = (int) std::clamp<int64_t> (targetFrames - result.frames, 0, block);
 
             for (int i = 0; i < frames; ++i)
                 result.peak = std::max (result.peak, (double) std::max (std::abs (left[(size_t) i]), std::abs (right[(size_t) i])));
@@ -88,7 +85,7 @@ RenderResult runRender (const RenderRequest& request, SampleStore& samples, Chan
                 lastProgress = fraction;
                 progress (fraction);
             }
-            if (remainingTail == 0)
+            if (targetFrames >= 0 && result.frames >= targetFrames)
                 break;
             if (result.frames > (int64_t) (rate * 3600.0 * 4.0))
             {

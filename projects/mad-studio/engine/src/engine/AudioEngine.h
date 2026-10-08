@@ -118,6 +118,8 @@ public:
     /** Offline renders: play straight through [startTick, endTick). */
     void setBounded (double endTick) noexcept { sequencer.setBounded (true, endTick); }
     bool endReached() const noexcept { return reachedEnd.load(); }
+    /** Offset inside the block in which the end was reached. */
+    int endOffset() const noexcept { return reachedEndOffset.load(); }
     double transportTick() const noexcept { return sequencer.position(); }
 
 private:
@@ -137,6 +139,7 @@ private:
     std::atomic<int64_t> clock { 0 };
     std::atomic<float> cpu { 0.0f };
     std::atomic<bool> reachedEnd { false };
+    std::atomic<int> reachedEndOffset { 0 };
 
     SpscFifo<EngineCommand, 1024> commands;
     SpscFifo<EngineNotification, 64> notifications;

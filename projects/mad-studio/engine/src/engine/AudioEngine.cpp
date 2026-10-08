@@ -86,8 +86,9 @@ public:
         }
     }
 
-    void endReached (int) override
+    void endReached (int offset) override
     {
+        engine.reachedEndOffset.store (offset);
         engine.reachedEnd.store (true);
         engine.notifications.push ({ EngineNotification::Type::endReached, nullptr, 0.0 });
     }
