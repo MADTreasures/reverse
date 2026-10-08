@@ -633,7 +633,9 @@ PluginEffect::~PluginEffect() = default;
 
 void PluginEffect::prepare (double, int maxBlock, bool)
 {
-    buffer.setSize (32, maxBlock);
+    // A juce::AudioBuffer referring to existing channels only avoids a heap allocation
+    // for fewer than 32 channels (its preallocated pointer space), so stay below that.
+    buffer.setSize (30, maxBlock);
     midi.ensureSize (256);
 }
 

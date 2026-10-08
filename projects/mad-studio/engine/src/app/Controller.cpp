@@ -51,6 +51,9 @@ public:
     {
         cancel.store (true);
         stopThread (30000);
+        // Normally finishRender() hands the plugins back; this covers shutdown mid-render.
+        for (auto& [key, slot] : borrowed)
+            slot->unlockExclusive();
     }
 
     std::shared_ptr<PluginSlot> slotFor (const juce::String& key, const PluginRef&, bool) override

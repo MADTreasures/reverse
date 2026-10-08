@@ -128,19 +128,10 @@ void AudioEngine::prepare (double rate, int blockSize)
         c.active = false;
 }
 
-PositionInfo AudioEngine::readPosition() const noexcept
+PositionInfo AudioEngine::readPosition() noexcept
 {
-    for (int attempt = 0; attempt < 100; ++attempt)
-    {
-        const auto s1 = positionSeq.load (std::memory_order_acquire);
-        if ((s1 & 1u) != 0)
-            continue;
-        const PositionInfo copy = position;
-        std::atomic_thread_fence (std::memory_order_acquire);
-        if (positionSeq.load (std::memory_order_relaxed) == s1)
-            return copy;
-    }
-    return position;
+    positions.read (lastPosition); // keeps the previous frame when nothing new was published
+    return lastPosition;
 }
 
 void AudioEngine::addEvent (const NoteEvent& e) noexcept
@@ -600,8 +591,8 @@ void AudioEngine::processBlock (const float* const* inputs, int numInputs, float
 
     clock.store (ctx.blockStart + n, std::memory_order_relaxed);
 
-    // Transport position for status messages.
-    positionSeq.fetch_add (1, std::memory_order_acq_rel);
+    // Transport position for status messages (every field is rewritten for each frame).
+    auto& position = positions.writeBuffer();
     position.sample = ctx.blockStart + n;
     position.state = sequencer.state() == Sequencer::State::playing ? 2 : (sequencer.state() == Sequencer::State::countIn ? 1 : 0);
     position.tick = position.state == 0 ? sequencer.nextStartTick() : sequencer.position();
@@ -610,7 +601,7 @@ void AudioEngine::processBlock (const float* const* inputs, int numInputs, float
     position.loopStart = tl != nullptr ? tl->loopStart : 0.0;
     position.loopEnd = tl != nullptr ? tl->loopEnd : 0.0;
     position.nextStart = sequencer.nextStartTick();
-    positionSeq.fetch_add (1, std::memory_order_release);
+    positions.publish();
 
     snapshots.release();
 }

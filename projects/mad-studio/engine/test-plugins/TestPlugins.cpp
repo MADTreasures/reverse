@@ -55,6 +55,7 @@ public:
 
     void prepareToPlay (double, int) override {}
 
+    using TestPluginBase::processBlock; // keep the double-precision overload visible
     void processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer&) override
     {
         const float g = gain->get();
@@ -106,6 +107,7 @@ public:
             v = {};
     }
 
+    using TestPluginBase::processBlock; // keep the double-precision overload visible
     void processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midi) override
     {
         buffer.clear();

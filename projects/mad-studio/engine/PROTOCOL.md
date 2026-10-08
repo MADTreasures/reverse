@@ -226,3 +226,64 @@ Only these fields matter to the engine (others such as `patterns`, `tracks`, `cl
 `limiter`, `plugin`. Mixer routing: channel → `mixer[channel.mixerTrack]` (clamped) → master (index 0) →
 device output. A track is silent when `muted`, or when any insert track (index > 0) has `solo` and this
 insert does not (master is never soloed out). Only `enabled` effects are in the chain.
+
+---
+
+## Appendix: implementation notes and extensions (engine 0.2.0)
+
+Everything above is implemented as specified. The engine adds the following; renderers that
+ignore unknown fields keep working.
+
+### Additions
+
+* **`requestId` echo**: every direct reply carries the request's `requestId` when it had one
+  (`samples.loaded`, `audio.devices`, `plugins.paths`, `plugins.list` for `plugins.getList`,
+  `plugin.params`, `pong`, `plugins.states`, `render.*`). `error` messages carry it too.
+* **`status`**: extra field `"state":"stopped"|"countIn"|"playing"`. During a count-in `tick`
+  runs from `-countInTicks` up to 0 (then continues at `fromTick`). While stopped, `tick` is the
+  next start position (the last `fromTick`/`transport.seek` target).
+* **`meters`**: ~30/s while the transport runs or any meter shows signal. While stopped and
+  completely silent the engine sends one all-zero frame and then pauses until signal returns.
+* **`render.start`**: optional `project`, `timeline` (timeline.set fields) and `automation`
+  (`{"lanes":[…]}`) override the live state for this render. Defaults: `sampleRate` = device
+  rate, `bitDepth` 24, `startTick` 0, `endTick` = timeline `loopEnd`, `tailSeconds` 2. The range
+  is rendered once, without looping, in song mode (automation applies).
+  `render.done` adds `frames`, `sampleRate` and `renderTime` (wall-clock seconds); `seconds` is the
+  duration of the rendered audio. Live playback is stopped while rendering and `transport.play` /
+  `audio.setDevice` are refused (`error`) until the render has finished.
+* **`record.done`** takes may contain `droppedFrames` when the disk writer could not keep up
+  (30 s of buffering per take). Takes without any audio are deleted and not listed.
+* **`plugin.loaded`** adds `numInputs` / `numOutputs` (channel counts after bus setup).
+* **`PluginDescription`** adds `descriptiveName`, `uniqueId`, `deprecatedUid`, `lastFileModTime`,
+  `lastInfoUpdateTime`, `hasSharedContainer` (needed to recreate the description). `numInputs` /
+  `numOutputs` may be 0 when unknown (VST3 scans read `moduleinfo.json` without instantiating).
+* **`plugin.editorClosed`** is also sent after `plugin.closeEditor` and when a plugin is removed
+  while its editor is open. Without a display (headless Linux) `plugin.openEditor` replies with
+  an `error`.
+* **`plugin.paramChanged`**: at most one event per instance per ~33 ms (the most recent change).
+* **Audio devices**: `audio.devices.types` contains a pseudo type `"Null"`;
+  `audio.setDevice {"type":"Null"}` selects the null device, `"input": null` (or `"none"`) opens
+  no input. `current.inputChannels` / `outputChannels` list the active channels (up to 8 inputs,
+  2 outputs).
+* **New commands**: `ping` → `{"type":"pong"}`; `quit` → graceful shutdown (same as closing
+  stdin: recordings are finalised, the process exits with code 0).
+* **Command line**: `--null-audio` (always use the null device), `--null-input-tone <Hz>` (test
+  aid: a 0.25 amplitude sine on the null device's two inputs), `--sample-rate N` /
+  `--buffer-size N` (initial device settings), `--help`. `--version` prints
+  `{"name":"mad-engine","version":"0.2.0","protocol":1,"juce":"8.0.15"}`; `--render` prints a
+  `render.done` line (or an `error` line and exit code 1). `--scan-plugin` exits 2 with an
+  `"error"` field for an unknown format.
+
+### Behaviour details
+
+* Errors: `transport.play` with `record:true` but no armed mixer track with an `input` replies
+  with an `error` and plays without recording; `live.noteOn` needs a non-zero `handle`;
+  `plugins.scan` while a scan is running is refused.
+* `transport.play` while playing restarts at `fromTick` (voices are killed).
+* Consecutive queued `project.sync` / `timeline.set` / `automation.set` messages are coalesced
+  (only the newest of a run is applied).
+* A plugin effect that is still loading (or borrowed by an offline render) passes audio
+  through; a plugin instrument is silent.
+* Sequenced notes on muted channels are not triggered (as in the Web Audio engine); live notes are.
+* A gated sampler (`oneShot:false`, or `loop`) releases a live note on `live.noteOff` (the Web
+  Audio engine only releases looping ones).

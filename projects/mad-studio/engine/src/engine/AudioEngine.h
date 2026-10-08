@@ -102,7 +102,9 @@ public:
     bool post (const EngineCommand& command) noexcept { return commands.push (command); }
     bool popNotification (EngineNotification& n) noexcept { return notifications.pop (n); }
     bool readMeters (MeterFrame& out) noexcept { return meters.read (out); }
-    PositionInfo readPosition() const noexcept;
+    /** The transport position at the end of the newest processed block (one reader only:
+        the message thread). */
+    PositionInfo readPosition() noexcept;
 
     float cpuLoad() const noexcept { return cpu.load (std::memory_order_relaxed); }
     int64_t sampleClock() const noexcept { return clock.load (std::memory_order_relaxed); }
@@ -145,9 +147,8 @@ private:
     SpscFifo<EngineNotification, 64> notifications;
     TripleBuffer<MeterFrame> meters;
 
-    // Position seqlock.
-    mutable std::atomic<uint32_t> positionSeq { 0 };
-    PositionInfo position;
+    TripleBuffer<PositionInfo> positions;
+    PositionInfo lastPosition; // reader side: the newest frame read so far
 
     Sequencer sequencer;
 
