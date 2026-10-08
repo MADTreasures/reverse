@@ -117,6 +117,7 @@ export const COMMANDS: Command[] = [
   { id: 'newVectorLayer', label: 'New vector layer', run: () => void actions.addVectorLayer() },
   { id: 'newFolder', label: 'New layer folder', run: () => void actions.addFolder() },
   { id: 'newFrameFolder', label: 'New frame border folder…', run: () => openDialog('newFrameFolder') },
+  { id: 'newTone', label: 'New tone layer…', run: () => openDialog('newTone') },
   {
     id: 'divideFrame',
     label: 'Divide frame border equally…',

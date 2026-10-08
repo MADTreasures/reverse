@@ -4,6 +4,7 @@
  */
 import { hexToRgb } from '../model/color';
 import { distanceToInside } from './distance';
+import { sanitizeTone, type ToneEffect } from './tone';
 
 export interface BorderEffect {
   enabled: boolean;
@@ -28,6 +29,8 @@ export interface LayerColorEffect {
 export interface LayerEffects {
   border?: BorderEffect;
   layerColor?: LayerColorEffect;
+  /** Screentone: the layer shown as halftone dots. */
+  tone?: ToneEffect;
 }
 
 export const DEFAULT_BORDER: BorderEffect = { enabled: true, kind: 'edge', width: 4, color: '#000000', range: 6, opacity: 70, darkness: 40, blur: 2 };
@@ -126,5 +129,7 @@ export function sanitizeEffects(raw: unknown): LayerEffects | undefined {
     const c = r.layerColor as Record<string, unknown>;
     out.layerColor = { enabled: c.enabled !== false, color: color(c.color, DEFAULT_LAYER_COLOR.color), sub: c.sub === null || c.sub === undefined ? null : color(c.sub, '#ffffff') };
   }
-  return out.border || out.layerColor ? out : undefined;
+  const tone = sanitizeTone(r.tone);
+  if (tone) out.tone = tone;
+  return out.border || out.layerColor || out.tone ? out : undefined;
 }

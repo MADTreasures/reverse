@@ -43,6 +43,7 @@ export const MENUS: MenuSpec[] = [
       'newVectorLayer',
       'newFolder',
       'newFrameFolder',
+      'newTone',
       { label: 'New correction layer', items: TONAL.map((t) => `correction-${t}`) },
       'correctionSettings',
       'groupLayer',

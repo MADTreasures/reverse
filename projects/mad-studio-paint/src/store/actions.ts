@@ -36,6 +36,7 @@ import type { FrameBorder } from '../paint/frames';
 import { fitTextBox } from '../engine/textRender';
 import { sanitizeCurve01 } from '../paint/curve';
 import type { LayerEffects } from '../paint/effects';
+import { defaultTone, DOT_SHAPES, type ToneEffect } from '../paint/tone';
 import { applyCorrection, correctionLabel, type Correction } from '../paint/tonal';
 import { combine, createMask, expandMask, invertMask, isMaskEmpty, isSelected, maskBounds, rectMask, type Mask, type SelectionOp } from '../paint/mask';
 import { mergeSubTools, type SubTool, type ToolId } from '../paint/tools';
@@ -966,6 +967,30 @@ export function addCorrectionLayer(correction: Correction, preview = false): Id 
   };
   if (preview) previewDoc(insert);
   else changeDoc('New correction layer', insert);
+  setState({ maskEditing: false });
+  return layer.id;
+}
+
+/**
+ * Layer > New layer > Tone: a layer filled with black and shown as a tone of the set density, with a
+ * mask limited to the selection (everywhere without one), named after the tone like the reference.
+ */
+export function addToneLayer(tone: Pick<ToneEffect, 'frequency' | 'value' | 'shape' | 'angle'>): Id {
+  const s = getState();
+  const shape = DOT_SHAPES.find(([id]) => id === tone.shape)?.[1] ?? 'Circle';
+  const layer = createRasterLayer(`${shape} ${tone.frequency.toFixed(1)} line ${Math.round(tone.value)}%`, {
+    mask: maskFromSelection(),
+    effects: { tone: defaultTone(s.doc.dpi, { ...tone, density: 'fixed', enabled: true }) },
+  });
+  const surface = ensureSurface(layer.id, s.doc.width, s.doc.height);
+  const ctx = ctx2d(surface);
+  ctx.fillStyle = '#000000';
+  ctx.fillRect(0, 0, surface.width, surface.height);
+  touch(layer.id);
+  changeDoc('New tone layer', (doc) => {
+    insertNew(doc, layer, s.activeLayerId);
+    return layer.id;
+  });
   setState({ maskEditing: false });
   return layer.id;
 }

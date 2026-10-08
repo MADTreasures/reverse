@@ -7,7 +7,7 @@ import { useStore } from '../../store/store';
 import { controller } from '../../tools/controller';
 import { startTransform } from '../../tools/transform';
 import { Icon } from '../controls/Icons';
-import { promptDialog } from '../overlays';
+import { openDialog, promptDialog } from '../overlays';
 
 async function grow(sign: 1 | -1): Promise<void> {
   const v = await promptDialog(sign > 0 ? 'Expand selected area by (px)' : 'Shrink selected area by (px)', '4');
@@ -48,6 +48,7 @@ export function SelectionLauncher() {
     ['copyPaste', 'Copy and paste', () => void copyAndPaste()],
     ['transform', 'Scale up/Scale down/Rotate', () => void startTransform()],
     ['fillCommand', 'Fill', () => actions.fillWithColor()],
+    ['tone', 'New tone', () => openDialog('newTone')],
   ];
   return (
     <div className="selection-launcher" style={{ left, top }} data-testid="selection-launcher" onPointerDown={(e) => e.stopPropagation()}>

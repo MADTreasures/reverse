@@ -263,6 +263,18 @@ const paths: Record<string, ReactNode> = {
   ),
   check: <path d="m5 10.5 3.2 3.2L15 7" />,
   close: <path d="M5.5 5.5l9 9M14.5 5.5l-9 9" />,
+  tone: (
+    <>
+      <circle cx="5" cy="5" r="1.6" fill="currentColor" />
+      <circle cx="10" cy="5" r="1.6" fill="currentColor" />
+      <circle cx="15" cy="5" r="1.6" fill="currentColor" />
+      <circle cx="7.5" cy="10" r="1.6" fill="currentColor" />
+      <circle cx="12.5" cy="10" r="1.6" fill="currentColor" />
+      <circle cx="5" cy="15" r="1.6" fill="currentColor" />
+      <circle cx="10" cy="15" r="1.6" fill="currentColor" />
+      <circle cx="15" cy="15" r="1.6" fill="currentColor" />
+    </>
+  ),
   frame: (
     <>
       <rect x="2.5" y="2.5" width="15" height="15" />

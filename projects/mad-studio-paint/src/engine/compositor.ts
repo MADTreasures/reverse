@@ -10,6 +10,7 @@ import { applyEdge, applyLayerColor, applyWatercolorEdge, effectReach } from '..
 import { inflate, intersect, union, type Rect } from '../paint/rect';
 import { applyCorrection } from '../paint/tonal';
 import type { FramePanel } from '../paint/frames';
+import { applyTone } from '../paint/tone';
 import { blendInto } from './blendPixels';
 import { clearRect, createCanvas, ctx2d, type Ctx } from './canvas';
 import { getSurface } from './surfaces';
@@ -83,6 +84,8 @@ export class Compositor {
   private dirty: Rect | null = null;
   /** Frame panels shown instead of the document's while a tool changes them. */
   readonly framePreview = new Map<string, FramePanel[]>();
+  /** Resolution of the document being composed (screentone frequencies are per inch). */
+  private dpi = 72;
 
   constructor(width: number, height: number) {
     this.canvas = createCanvas(width, height);
@@ -127,6 +130,7 @@ export class Compositor {
 
   /** Composes the document into `target` within `r`. Used for exports and colour sampling too. */
   compose(doc: PaintDocument, target: Ctx, r: Rect, opts: ComposeOptions): void {
+    this.dpi = doc.dpi;
     target.save();
     target.beginPath();
     target.rect(r.x, r.y, r.w, r.h);
@@ -173,11 +177,11 @@ export class Compositor {
         tmp.globalCompositeOperation = 'destination-in';
         tmp.drawImage(baseAlpha.canvas, 0, 0);
         tmp.globalCompositeOperation = 'source-over';
-        paint(group$, tmp.canvas, r, layer.opacity, layer.blend === 'pass-through' ? 'normal' : layer.blend);
+        paint(group$, tmp.canvas, r, opacityOf(layer), layer.blend === 'pass-through' ? 'normal' : layer.blend);
         this.pool.release(tmp);
       }
       this.pool.release(baseAlpha);
-      paint(target, group$.canvas, r, base.opacity, base.blend === 'pass-through' ? 'normal' : base.blend);
+      paint(target, group$.canvas, r, opacityOf(base), base.blend === 'pass-through' ? 'normal' : base.blend);
       this.pool.release(group$);
     }
   }
@@ -218,7 +222,7 @@ export class Compositor {
         return;
       }
       const c = this.content(layer, r, opts);
-      paint(target, c.canvas, r, layer.opacity, layer.blend);
+      paint(target, c.canvas, r, opacityOf(layer), layer.blend);
       this.pool.release(c);
       return;
     }
@@ -239,7 +243,7 @@ export class Compositor {
       return;
     }
     const c = this.content(layer, r, opts);
-    paint(target, c.canvas, r, layer.opacity, layer.blend);
+    paint(target, c.canvas, r, opacityOf(layer), layer.blend);
     this.pool.release(c);
   }
 
@@ -262,6 +266,7 @@ export class Compositor {
     if (fx && hasEffects(layer)) {
       const img = ctx.getImageData(rr.x, rr.y, rr.w, rr.h);
       let data: Uint8ClampedArray<ArrayBuffer> = img.data;
+      if (fx.tone?.enabled) applyTone(data, rr.w, rr.h, rr.x, rr.y, fx.tone, this.dpi, layer.opacity);
       if (fx.layerColor?.enabled) applyLayerColor(data, fx.layerColor);
       if (fx.border?.enabled) {
         if (fx.border.kind === 'edge') data = applyEdge(data, rr.w, rr.h, fx.border);
@@ -312,7 +317,10 @@ export class Compositor {
   }
 }
 
-const hasEffects = (layer: Layer) => Boolean(layer.effects?.border?.enabled || layer.effects?.layerColor?.enabled);
+const hasEffects = (layer: Layer) => Boolean(layer.effects?.border?.enabled || layer.effects?.layerColor?.enabled || layer.effects?.tone?.enabled);
+
+/** A screentone that reflects the layer opacity shows it in the dot size, so the dots stay opaque. */
+const opacityOf = (layer: Layer) => (layer.effects?.tone?.enabled && layer.effects.tone.reflectOpacity ? 1 : layer.opacity);
 
 /** The surface of a layer's enabled mask, or null. */
 function maskOf(layer: Layer): HTMLCanvasElement | null {

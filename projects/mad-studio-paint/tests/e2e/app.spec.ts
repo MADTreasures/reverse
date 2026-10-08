@@ -1253,3 +1253,62 @@ test('comic frames: frame border folder, divide with gutters, content shows only
   expect(back).toBe(3);
   expect(errors).toEqual([]);
 });
+
+/** Share of dark displayed pixels in a region. */
+const darkShare = (page: Page, x: number, y: number, w: number, h: number) =>
+  page.evaluate(
+    ([rx, ry, rw, rh]) => {
+      const m = window.__madPaint;
+      let dark = 0;
+      let n = 0;
+      for (let yy = ry; yy < ry + rh; yy++)
+        for (let xx = rx; xx < rx + rw; xx++) {
+          n++;
+          if (m.engine.sampleDisplayed(xx, yy, '#ffffff')[0] < 128) dark++;
+        }
+      return dark / n;
+    },
+    [x, y, w, h],
+  );
+
+test('screentones: the Tone effect turns grey into dots; New tone makes a masked tone layer', async ({ page }) => {
+  const errors = await boot(page);
+  await page.evaluate(() => {
+    const a = window.__madPaint.actions;
+    a.setDrawingColor('#808080');
+    a.fillWithColor();
+  });
+  // Grey before; then dots of about half black.
+  expect(await darkShare(page, 100, 100, 40, 40)).toBe(0);
+  await page.getByRole('button', { name: 'Tone', exact: true }).click();
+  await expect(page.getByTestId('tone-settings')).toBeVisible();
+  const half = await darkShare(page, 100, 100, 40, 40);
+  expect(half).toBeGreaterThan(0.35);
+  expect(half).toBeLessThan(0.65);
+  // Hide that layer; a 20 % tone layer in a selection.
+  await page.evaluate(() => {
+    const m = window.__madPaint;
+    const s = m.useStore.getState();
+    m.actions.setLayerProps(s.activeLayerId, { visible: false }, 'Hide');
+    m.actions.setSelection({ width: 400, height: 300, data: new Uint8Array(400 * 300).map((_: number, i: number) => (i % 400 < 200 ? 255 : 0)) });
+    m.runCommand('newTone');
+  });
+  const dlg = page.getByRole('dialog', { name: 'Simple tone settings' });
+  await dlg.getByLabel('Density (%)').fill('20');
+  await dlg.getByRole('button', { name: 'OK' }).click();
+  const l = (await state(page)).layers[0];
+  expect(l.name).toMatch(/line 20%/);
+  expect(l.mask).toBeTruthy();
+  const inside = await darkShare(page, 60, 100, 40, 40);
+  expect(inside).toBeGreaterThan(0.1);
+  expect(inside).toBeLessThan(0.3);
+  expect(await darkShare(page, 300, 100, 40, 40)).toBe(0);
+  // Saved with the document.
+  const back = await page.evaluate(async () => {
+    const m = window.__madPaint;
+    await m.openFileBytes({ name: 'tone.madpaint', data: await m.buildDocumentBytes() });
+    return m.useStore.getState().doc.layers[0].effects.tone;
+  });
+  expect(back).toMatchObject({ enabled: true, density: 'fixed', value: 20 });
+  expect(errors).toEqual([]);
+});
