@@ -2,6 +2,7 @@
 import type { LayerEffects } from '../paint/effects';
 import type { Ruler } from '../paint/rulers';
 import type { Correction } from '../paint/tonal';
+import type { VectorStroke } from '../paint/vector';
 
 export type Id = string;
 
@@ -98,7 +99,16 @@ export interface CorrectionLayer extends LayerBase {
   correction: Correction;
 }
 
-export type Layer = RasterLayer | FolderLayer | CorrectionLayer;
+/** Vector layer: lines stored as paths; the pixels are rendered from them (see engine). */
+export interface VectorLayer extends LayerBase {
+  kind: 'vector';
+  blend: BlendMode;
+  strokes: VectorStroke[];
+  /** Changes with every edit of `strokes` (never reused), so rendered pixels can be cached. */
+  rev: number;
+}
+
+export type Layer = RasterLayer | FolderLayer | CorrectionLayer | VectorLayer;
 
 export interface PaperSettings {
   visible: boolean;

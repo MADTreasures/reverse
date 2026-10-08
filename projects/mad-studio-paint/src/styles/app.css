@@ -1882,3 +1882,29 @@
 .ruler-icon.off {
   opacity: 0.4;
 }
+
+.vector-icon {
+  display: flex;
+  align-items: center;
+  color: var(--text);
+}
+
+.line-color-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.line-color-row .btn {
+  white-space: nowrap;
+}
+
+.line-color {
+  width: 26px;
+  height: 22px;
+  padding: 0 1px;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  background: none;
+  cursor: pointer;
+}

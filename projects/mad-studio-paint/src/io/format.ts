@@ -1,22 +1,25 @@
 /**
  * The .madpaint document format: a ZIP archive with
  *   document.json      – format tag, version, document structure (layer tree, flags)
- *   layers/<id>.png    – pixels of each raster layer and layer mask (document size, straight alpha)
+ *   layers/<id>.png    – pixels of each raster layer and layer mask (document size, straight alpha);
+ *                        vector layers store their lines in document.json and are rendered on load
  *   preview.png        – merged image for previews (optional)
  * Pure (no DOM): PNG encoding/decoding happens in the browser layer.
  */
 import { strFromU8, strToU8, unzipSync, zipSync } from 'fflate';
 import { isBlendMode } from '../model/blend';
 import { clampCanvasSide } from '../model/document';
-import { createRasterLayer } from '../model/layers';
-import type { CorrectionLayer, FolderLayer, Id, Layer, LayerMask, LayerRulers, PaintDocument, RasterLayer } from '../model/types';
+import { createRasterLayer, flatten, nextRev } from '../model/layers';
+import type { CorrectionLayer, FolderLayer, Id, Layer, LayerMask, LayerRulers, PaintDocument, RasterLayer, VectorLayer } from '../model/types';
 import { sanitizeEffects } from '../paint/effects';
 import { sanitizeRuler, type Ruler } from '../paint/rulers';
 import { sanitizeCorrection } from '../paint/tonal';
+import { sanitizeBrush, type BrushSettings } from '../paint/tools';
+import { packStroke, unpackStroke, type VectorStroke } from '../paint/vector';
 
 export const FORMAT = 'mad-studio-paint';
-/** 2: layer masks, correction layers, effects, rulers. Version 1 files open unchanged. */
-export const FORMAT_VERSION = 2;
+/** 2: layer masks, correction layers, effects, rulers. 3: vector layers. Older files open unchanged. */
+export const FORMAT_VERSION = 3;
 export const EXTENSION = 'madpaint';
 
 export interface DocumentFile {
@@ -95,6 +98,19 @@ function sanitizeLayer(raw: unknown, seen: Set<string>, depth: number): Layer | 
     };
     return correction;
   }
+  if (r.kind === 'vector') {
+    // Lines refer to the layer's brush table by index (`b`).
+    const brushes = Array.isArray(r.brushes) ? r.brushes.slice(0, 10000).map(sanitizeBrush) : [];
+    const brushOf = (b: unknown): BrushSettings => (typeof b === 'number' ? brushes[b] ?? sanitizeBrush(null) : sanitizeBrush(b));
+    const strokes = Array.isArray(r.strokes)
+      ? r.strokes
+          .slice(0, 200000)
+          .map((x) => unpackStroke(x && typeof x === 'object' && 'b' in x ? { ...x, brush: (x as { b: unknown }).b } : x, brushOf))
+          .filter((x): x is VectorStroke => x !== null)
+      : [];
+    const vector: VectorLayer = { ...common, kind: 'vector', blend: isBlendMode(r.blend) ? r.blend : 'normal', strokes, rev: nextRev() };
+    return vector;
+  }
   const raster: RasterLayer = {
     ...common,
     kind: 'raster',
@@ -122,9 +138,34 @@ export function sanitizeDocument(raw: unknown): PaintDocument {
   };
 }
 
+/** A vector layer for the file: compact lines that share a table of the brushes they use. */
+function packVectorLayer(l: VectorLayer): Record<string, unknown> {
+  const brushes: BrushSettings[] = [];
+  const index = new Map<string, number>();
+  const strokes = l.strokes.map((x) => {
+    const { brush, ...rest } = packStroke(x);
+    const key = JSON.stringify(brush);
+    let b = index.get(key);
+    if (b === undefined) {
+      b = brushes.push(brush) - 1;
+      index.set(key, b);
+    }
+    return { ...rest, b };
+  });
+  const { rev: _rev, strokes: _strokes, ...rest } = l;
+  return { ...rest, brushes, strokes };
+}
+
+/** The document structure as stored in document.json. */
+function documentJson(doc: PaintDocument): unknown {
+  const pack = (layers: Layer[]): unknown[] =>
+    layers.map((l) => (l.kind === 'vector' ? packVectorLayer(l) : l.kind === 'folder' ? { ...l, children: pack(l.children) } : l));
+  return flatten(doc.layers).some((l) => l.kind === 'vector') ? { ...doc, layers: pack(doc.layers) } : doc;
+}
+
 export function packDocument(file: DocumentFile): Uint8Array {
   const entries: Record<string, Uint8Array | [Uint8Array, { level: 0 }]> = {
-    'document.json': strToU8(JSON.stringify({ format: FORMAT, version: FORMAT_VERSION, activeLayerId: file.activeLayerId, document: file.doc }, null, 1)),
+    'document.json': strToU8(JSON.stringify({ format: FORMAT, version: FORMAT_VERSION, activeLayerId: file.activeLayerId, document: documentJson(file.doc) })),
   };
   // PNGs are already compressed: store them.
   for (const [id, png] of file.layers) entries[`layers/${id}.png`] = [png, { level: 0 }];

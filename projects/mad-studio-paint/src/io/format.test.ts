@@ -1,6 +1,8 @@
+import { strFromU8, unzipSync } from 'fflate';
 import { describe, expect, it } from 'vitest';
 import { createDocument } from '../model/document';
-import { createFolder, createLayerMask, createRasterLayer, flatten } from '../model/layers';
+import { cloneDocument, createFolder, createLayerMask, createRasterLayer, createVectorLayer, flatten } from '../model/layers';
+import { DEFAULT_BRUSH } from '../paint/tools';
 import { isDocumentFileName, isImageFileName, mimeForName, packDocument, sanitizeDocument, unpackDocument } from './format';
 
 describe('.madpaint format', () => {
@@ -29,6 +31,28 @@ describe('.madpaint format', () => {
       ],
     });
     expect(clash.layers.map((l) => l.mask)).toEqual([{ id: 'm1', enabled: true, linked: false }, undefined, undefined]);
+  });
+
+  it('stores vector lines with a shared brush table', () => {
+    const doc = createDocument('Lines', 200, 100, 72);
+    const brush = { ...DEFAULT_BRUSH, size: 6 };
+    const line = (id: string, y: number) => ({ id, color: '#123456', brush, points: [0, 1, 2].map((i) => ({ x: 10 + i * 40, y, s: 1 - i * 0.2, d: 1 })) });
+    const ink = createVectorLayer('Ink', { strokes: [line('a', 10), line('b', 20), { ...line('c', 30), erase: true }] });
+    doc.layers.unshift(ink);
+    const bytes = packDocument({ doc, activeLayerId: ink.id, layers: new Map() });
+    const back = unpackDocument(bytes).doc.layers[0];
+    expect(back.kind).toBe('vector');
+    if (back.kind !== 'vector') return;
+    expect(back.strokes.map((x) => x.id)).toEqual(['a', 'b', 'c']);
+    expect(back.strokes[1].points).toEqual(ink.strokes[1].points);
+    expect(back.strokes[0].brush.size).toBe(6);
+    expect(back.strokes[2].erase).toBe(true);
+    // One brush entry for all three lines.
+    const stored = JSON.parse(strFromU8(unzipSync(bytes)['document.json'])) as { document: { layers: { brushes?: unknown[] }[] } };
+    expect(stored.document.layers[0].brushes).toHaveLength(1);
+    // Copies of the document share lines (they are never changed in place).
+    const copy = cloneDocument(doc);
+    expect(copy.layers[0] !== doc.layers[0] && (copy.layers[0] as typeof ink).strokes[0]).toBe(ink.strokes[0]);
   });
 
   it('rejects foreign or damaged files', () => {

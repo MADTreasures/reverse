@@ -5,7 +5,7 @@
  */
 import { nativeOp } from '../model/blend';
 import { clipGroups, flatten } from '../model/layers';
-import type { BlendMode, CorrectionLayer, FolderBlendMode, FolderLayer, Layer, PaintDocument, RasterLayer } from '../model/types';
+import type { BlendMode, CorrectionLayer, FolderBlendMode, FolderLayer, Layer, PaintDocument, RasterLayer, VectorLayer } from '../model/types';
 import { applyEdge, applyLayerColor, applyWatercolorEdge, effectReach } from '../paint/effects';
 import { inflate, intersect, union, type Rect } from '../paint/rect';
 import { applyCorrection } from '../paint/tonal';
@@ -207,7 +207,7 @@ export class Compositor {
       this.drawCorrection(layer, target, r);
       return;
     }
-    if (layer.kind === 'raster') {
+    if (layer.kind === 'raster' || layer.kind === 'vector') {
       const s = getSurface(layer.id);
       if (!s) return;
       if (!maskOf(layer) && !hasEffects(layer)) {
@@ -244,10 +244,10 @@ export class Compositor {
    * valid inside `r`. Border effects need the pixels around `r`, so they are drawn wider. The
    * caller releases the canvas.
    */
-  private content(layer: RasterLayer | FolderLayer, r: Rect, opts: ComposeOptions): Ctx {
+  private content(layer: RasterLayer | VectorLayer | FolderLayer, r: Rect, opts: ComposeOptions): Ctx {
     const rr = intersect(inflate(r, effectReach(layer.effects)), this.bounds) ?? r;
     const ctx = this.pool.acquire(rr);
-    if (layer.kind === 'raster') {
+    if (layer.kind !== 'folder') {
       const s = getSurface(layer.id);
       if (s) ctx.drawImage(s, 0, 0);
     } else this.composeList(layer.children, ctx, rr, opts);
@@ -273,7 +273,7 @@ export class Compositor {
    */
   private drawContent(layer: Layer, target: Ctx, r: Rect, opts: ComposeOptions): void {
     if (layer.kind === 'correction') return;
-    if (layer.kind === 'raster' && !maskOf(layer) && !hasEffects(layer)) {
+    if (layer.kind !== 'folder' && !maskOf(layer) && !hasEffects(layer)) {
       const s = getSurface(layer.id);
       if (s) target.drawImage(s, 0, 0);
       return;

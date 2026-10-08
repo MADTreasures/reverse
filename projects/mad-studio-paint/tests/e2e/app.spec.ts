@@ -927,3 +927,169 @@ test('perspective ruler: strokes run towards the closest vanishing point; rulers
   await page.keyboard.press('ControlOrMeta+Shift+n');
   expect(await page.evaluate(() => window.__madPaint.actions.activeRulers().length)).toBe(0);
 });
+
+/** Lines of the active (vector) layer. */
+const lines = (page: Page) =>
+  page.evaluate(() => {
+    const s = window.__madPaint.useStore.getState();
+    const find = (ls: any[]): any => ls.map((l) => (l.id === s.activeLayerId ? l : l.children ? find(l.children) : null)).find(Boolean);
+    return (find(s.doc.layers)?.strokes ?? []).map((x: any) => ({ id: x.id, color: x.color, size: x.brush.size, erase: Boolean(x.erase), n: x.points.length }));
+  });
+
+test('vector layer: strokes become lines; the vector eraser erases up to intersections or whole lines', async ({ page }) => {
+  const errors = await boot(page);
+  await page.getByRole('button', { name: 'New vector layer' }).click();
+  expect((await state(page)).layers[0].kind).toBe('vector');
+  await expect(page.getByTestId('vector-icon')).toHaveCount(1);
+  await thinPen(page);
+  await drag(page, [40, 150], [360, 150], 12);
+  await drag(page, [150, 50], [150, 250], 12);
+  await drag(page, [250, 50], [250, 250], 12);
+  expect(await lines(page)).toHaveLength(3);
+  expect(await layerAlpha(page, 200, 150)).toBeGreaterThan(200);
+  // "Up to intersection": the horizontal line goes between the two vertical ones.
+  await useSubTool(page, 'eraser', 'eraser-vector');
+  await drag(page, [200, 148], [201, 151], 2);
+  expect(await layerAlpha(page, 200, 150)).toBe(0);
+  expect(await layerAlpha(page, 100, 150)).toBeGreaterThan(200);
+  expect(await layerAlpha(page, 300, 150)).toBeGreaterThan(200);
+  expect(await layerAlpha(page, 150, 100)).toBeGreaterThan(200);
+  expect(await lines(page)).toHaveLength(4);
+  await page.keyboard.press('ControlOrMeta+z');
+  expect(await lines(page)).toHaveLength(3);
+  expect(await layerAlpha(page, 200, 150)).toBeGreaterThan(200);
+  // "Whole line".
+  await page.evaluate(() => window.__madPaint.actions.updateSubTool('eraser-vector', { vectorErase: 'whole' }));
+  await drag(page, [150, 60], [151, 62], 2);
+  expect(await layerAlpha(page, 150, 200)).toBe(0);
+  expect(await lines(page)).toHaveLength(2);
+  // A normal eraser erases the touched part only.
+  await useSubTool(page, 'eraser', 'eraser-hard');
+  await drag(page, [250, 100], [252, 100], 2);
+  expect(await layerAlpha(page, 250, 100)).toBe(0);
+  expect(await layerAlpha(page, 250, 200)).toBeGreaterThan(200);
+  expect(await lines(page)).toHaveLength(3);
+  // The transparent colour draws erasing lines.
+  await thinPen(page);
+  await page.keyboard.press('c');
+  await drag(page, [80, 120], [80, 180], 8);
+  expect(await layerAlpha(page, 80, 150)).toBe(0);
+  expect((await lines(page)).filter((l: any) => l.erase)).toHaveLength(1);
+  expect(errors).toEqual([]);
+});
+
+test('Object tool: select, move, recolour and delete vector lines; transforms stay lossless', async ({ page }) => {
+  const errors = await boot(page);
+  await page.evaluate(() => window.__madPaint.actions.addVectorLayer());
+  await thinPen(page);
+  await drag(page, [100, 100], [200, 100], 10);
+  await selectTool(page, 'object');
+  const on = await docToScreen(page, 150, 101);
+  await page.mouse.click(on.x, on.y);
+  expect(await page.evaluate(() => window.__madPaint.useStore.getState().selectedLines)).toHaveLength(1);
+  // Dragging the line moves it.
+  await drag(page, [150, 100], [150, 180], 10);
+  expect(await layerAlpha(page, 150, 180)).toBeGreaterThan(200);
+  expect(await layerAlpha(page, 150, 100)).toBe(0);
+  await page.keyboard.press('ControlOrMeta+z');
+  expect(await layerAlpha(page, 150, 100)).toBeGreaterThan(200);
+  await page.keyboard.press('ControlOrMeta+Shift+z');
+  expect(await layerAlpha(page, 150, 180)).toBeGreaterThan(200);
+  // ⌘-drag with the pen works like the Object tool.
+  await selectTool(page, 'pen');
+  await page.keyboard.down('ControlOrMeta');
+  await drag(page, [150, 180], [150, 200], 6);
+  await page.keyboard.up('ControlOrMeta');
+  expect(await layerAlpha(page, 150, 200)).toBeGreaterThan(200);
+  expect(await lines(page)).toHaveLength(1);
+  await page.keyboard.press('ControlOrMeta+z');
+  expect(await layerAlpha(page, 150, 180)).toBeGreaterThan(200);
+  await selectTool(page, 'object');
+  // Tool Settings: give it the drawing colour, then a new width.
+  await page.evaluate(() => window.__madPaint.actions.setDrawingColor('#ff0000'));
+  await page.getByRole('button', { name: 'Tool Settings', exact: true }).click();
+  await page.getByRole('button', { name: 'Use drawing color' }).click();
+  expect((await lines(page))[0].color).toBe('#ff0000');
+  const red = await page.evaluate(() => window.__madPaint.engine.sampleLayer(window.__madPaint.useStore.getState().activeLayerId, 150, 180));
+  expect(red[0]).toBeGreaterThan(240);
+  expect(red[1] + red[2]).toBeLessThan(10);
+  expect(red[3]).toBe(255);
+  // Delete removes the selected line; undo brings it back.
+  await page.keyboard.press('Delete');
+  expect(await lines(page)).toHaveLength(0);
+  await page.keyboard.press('ControlOrMeta+z');
+  expect(await lines(page)).toHaveLength(1);
+  // Doubling the resolution doubles the line exactly (width too).
+  await page.evaluate(() => window.__madPaint.actions.changeImageResolution(800, 600, 144));
+  expect((await lines(page))[0].size).toBe(12);
+  expect(await thickness(page, 300, 360, 40)).toBeGreaterThanOrEqual(11);
+  // Lines are saved and come back as lines.
+  const back = await page.evaluate(async () => {
+    const m = window.__madPaint;
+    await m.openFileBytes({ name: 'lines.madpaint', data: await m.buildDocumentBytes() });
+    const l = m.useStore.getState().doc.layers[0];
+    return { kind: l.kind, n: l.strokes.length, alpha: m.engine.sampleLayer(l.id, 300, 360)[3] };
+  });
+  expect(back).toEqual({ kind: 'vector', n: 1, alpha: 255 });
+  expect(errors).toEqual([]);
+});
+
+test('fill, gradient and blend refuse vector layers; Rasterize turns one into a raster layer', async ({ page }) => {
+  await boot(page);
+  await page.evaluate(() => window.__madPaint.actions.addVectorLayer());
+  await thinPen(page);
+  await drag(page, [100, 150], [300, 150], 10);
+  await selectTool(page, 'fill');
+  const at = await docToScreen(page, 50, 50);
+  await page.mouse.click(at.x, at.y);
+  expect((await state(page)).hint).toMatch(/vector layers/);
+  expect(await layerAlpha(page, 50, 50)).toBe(0);
+  await page.evaluate(() => window.__madPaint.runCommand('rasterize'));
+  const l = (await state(page)).layers[0];
+  expect(l.kind).toBe('raster');
+  expect(await layerAlpha(page, 200, 150)).toBeGreaterThan(200);
+  await page.mouse.click(at.x, at.y);
+  expect(await layerAlpha(page, 50, 50)).toBe(255);
+});
+
+test('Move layer, ⌘T and Flip move vector lines, not pixels; Select overlapping vectors', async ({ page }) => {
+  const errors = await boot(page);
+  await page.evaluate(() => window.__madPaint.actions.addVectorLayer());
+  await thinPen(page);
+  await drag(page, [100, 100], [160, 100], 8);
+  await drag(page, [100, 200], [160, 200], 8);
+  const first = async () =>
+    page.evaluate(() => {
+      const s = window.__madPaint.useStore.getState();
+      const p = s.doc.layers[0].strokes[0].points;
+      return { x: Math.round(p[0].x), y: Math.round(p[0].y), size: s.doc.layers[0].strokes[0].brush.size };
+    });
+  // Move layer: both lines move by the drag.
+  await selectTool(page, 'move');
+  await drag(page, [200, 150], [230, 170], 6);
+  expect(await first()).toEqual({ x: 130, y: 120, size: 6 });
+  expect(await layerAlpha(page, 150, 120)).toBeGreaterThan(200);
+  // ⌘T, drag inside the box, Enter.
+  await page.keyboard.press('ControlOrMeta+t');
+  await drag(page, [160, 170], [160, 190], 6);
+  await page.keyboard.press('Enter');
+  expect(await first()).toEqual({ x: 130, y: 140, size: 6 });
+  await page.keyboard.press('ControlOrMeta+z');
+  expect(await first()).toEqual({ x: 130, y: 120, size: 6 });
+  // Flip horizontal mirrors the lines around the canvas centre (x → 400 − x).
+  await page.evaluate(() => window.__madPaint.runCommand('flipLayerH'));
+  expect((await first()).x).toBe(270);
+  // A selection over the lower line selects only that line.
+  await page.evaluate(() => {
+    const a = window.__madPaint.actions;
+    a.setSelection({ width: 400, height: 300, data: new Uint8Array(400 * 300).map((_: number, i: number) => (Math.floor(i / 400) > 180 ? 255 : 0)) });
+    window.__madPaint.runCommand('selectOverlappingVectors');
+  });
+  const picked = await page.evaluate(() => {
+    const s = window.__madPaint.useStore.getState();
+    return { tool: s.tool, ids: s.selectedLines, lower: s.doc.layers[0].strokes[1].id };
+  });
+  expect(picked.tool).toBe('object');
+  expect(picked.ids).toEqual([picked.lower]);
+  expect(errors).toEqual([]);
+});

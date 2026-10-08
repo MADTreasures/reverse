@@ -23,8 +23,9 @@ App-Symbol. Wie das Vorbild untersucht und verglichen wurde, steht in
 | ------- | -------- |
 | **Zeichnen** | Pen (G-pen, Real G-pen, Mapping pen, Turnip pen, Calligraphy · Milli pen, Felt pen, Dot pen), Pencil (Pencil, Mechanical pencil, Charcoal, Crayon), Brush (Round watercolor brush, Transparent watercolor, Opaque watercolor, Brush pen, Dry ink · Oil paint, Flat brush, Gouache, Soft brush), Airbrush (Soft, Spray, Droplet), Eraser (Hard, Soft, Kneaded eraser, Rough), Blend (Blend, Blur, Finger tip) |
 | **Pinsel-Engine** | Stiftdruck auf Grösse und Dichte mit **Druckkurve** je Einstellung und **globaler Druckeinstellung** (*File → Pen pressure settings*: Kurve, Stärker/Leichter, Testfeld, automatisch aus dem Gezeichneten), **Stiftneigung** (breiter/heller wie die Bleistiftseite), Zufall, Stabilisierung 0–100, Kantenglättung in 4 Stufen, Deckkraft pro Strich und „Brush density“ pro Tupfer, **Pinselspitze** (Härte, Dicke, Winkel – fest, Linienrichtung oder Stiftrichtung), **Ein- und Auslaufen** (auch mit der Maus), **Farbmischung** (Blend, Running color: Farbmenge, Farbdichte, Farbdehnung), **Aquarellkante**, Abstand, Körnung, Streuung – alles im Fenster *Advanced Tool Settings* (Schraubenschlüssel) |
-| **Werkzeuge** | Auswahlbereich (Rechteck, Ellipse, Lasso, Polylinie, Auswahlstift, Auswahl radieren), Auto select (Bearbeitungsebene / alle Ebenen / Referenzebenen), Füllen (Toleranz, **Lücke schliessen** in 5 Stufen, Bereichsvergrösserung, Mehrfachreferenz, nur verbundene Pixel), Verlauf (Vordergrund → transparent / → Hintergrund, Kreis), Figur (Gerade, Rechteck, Ellipse), **Lineale** (Lineal, Hilfslinie, Spezial-Lineale: parallel, radial, konzentrisch, **Symmetrie-Lineal** mit 2–32 Linien und Spiegelung, **Perspektiv-Lineal** mit 1–3 Fluchtpunkten; Striche und Figur-Linien rasten ein, *Snap to ruler* ⌘1 / *Snap to special ruler* ⌘2, Geltungsbereich je Ebene), Operation (Objekt: Lineale wählen/verschieben/bearbeiten/löschen, Ebene wählen, Ebene verschieben), Pipette (angezeigte Farbe / Ebenenfarbe), Hand, Drehen, Zoom |
-| **Ebenen** | Rasterebenen und Ordner (Normal oder „Through“), **alle 28 Ebenenmodi** des Vorbilds (11 davon pixelweise berechnet), Deckkraft, **Ebeneneigenschaften** (Randeffekt: Kante oder Aquarellkante, Ebenenfarbe mit Unterfarbe), **Korrekturebenen** (die neun Tonwertkorrekturen als Ebene, mit eigener Maske, beschneidbar, Einstellungen per Klick aufs Symbol), **Ebenenmasken** (Ausserhalb der Auswahl / Auswahl maskieren, auf der Maske zeichnen: Farbe zeigt, Radierer verbirgt, Löschen = nichts maskiert, aktivieren, Maskenbereich anzeigen, mit der Ebene verknüpfen, auf die Ebene anwenden, ⌘-Klick = Auswahl), Auf untere Ebene beschneiden, Referenz-, Entwurfsebene, Sperren, Transparente Pixel schützen, Auf untere Ebene übertragen, Mit unterer / sichtbare Ebenen vereinen, Auf eine Ebene reduzieren, Ordner erstellen/auflösen, Duplizieren (auch ⌥-Ziehen), ⌥-Klick aufs Auge = nur diese Ebene, ⌘-Klick aufs Miniaturbild = Auswahl, Papier-Ebene (wie im Vorbild Teil des Stapels: Ebenenmodi und Korrekturebenen wirken auf sie) |
+| **Werkzeuge** | Auswahlbereich (Rechteck, Ellipse, Lasso, Polylinie, Auswahlstift, Auswahl radieren), Auto select (Bearbeitungsebene / alle Ebenen / Referenzebenen), Füllen (Toleranz, **Lücke schliessen** in 5 Stufen, Bereichsvergrösserung, Mehrfachreferenz, nur verbundene Pixel), Verlauf (Vordergrund → transparent / → Hintergrund, Kreis), Figur (Gerade, Rechteck, Ellipse), **Lineale** (Lineal, Hilfslinie, Spezial-Lineale: parallel, radial, konzentrisch, **Symmetrie-Lineal** mit 2–32 Linien und Spiegelung, **Perspektiv-Lineal** mit 1–3 Fluchtpunkten; Striche und Figur-Linien rasten ein, *Snap to ruler* ⌘1 / *Snap to special ruler* ⌘2, Geltungsbereich je Ebene), Operation (Objekt: **Vektorlinien** wählen (⇧ ergänzt), verschieben, skalieren, drehen, Farbe/Breite/Deckkraft ändern, löschen; Lineale wählen/verschieben/bearbeiten/löschen; Ebene wählen, Ebene verschieben), Pipette (angezeigte Farbe / Ebenenfarbe), Hand, Drehen, Zoom |
+| **Ebenen** | Rasterebenen, **Vektorebenen** und Ordner (Normal oder „Through“), **alle 28 Ebenenmodi** des Vorbilds (11 davon pixelweise berechnet), Deckkraft, **Ebeneneigenschaften** (Randeffekt: Kante oder Aquarellkante, Ebenenfarbe mit Unterfarbe), **Korrekturebenen** (die neun Tonwertkorrekturen als Ebene, mit eigener Maske, beschneidbar, Einstellungen per Klick aufs Symbol), **Ebenenmasken** (Ausserhalb der Auswahl / Auswahl maskieren, auf der Maske zeichnen: Farbe zeigt, Radierer verbirgt, Löschen = nichts maskiert, aktivieren, Maskenbereich anzeigen, mit der Ebene verknüpfen, auf die Ebene anwenden, ⌘-Klick = Auswahl), Auf untere Ebene beschneiden, Referenz-, Entwurfsebene, Sperren, Transparente Pixel schützen, Auf untere Ebene übertragen, Mit unterer / sichtbare Ebenen vereinen, Auf eine Ebene reduzieren, Ordner erstellen/auflösen, Duplizieren (auch ⌥-Ziehen), ⌥-Klick aufs Auge = nur diese Ebene, ⌘-Klick aufs Miniaturbild = Auswahl, Papier-Ebene (wie im Vorbild Teil des Stapels: Ebenenmodi und Korrekturebenen wirken auf sie) |
+| **Vektorebenen** | Jeder Strich (Pinsel, Figur, auch mit Symmetrie) wird als Linie mit Breite und Dichte je Punkt gespeichert und daraus gezeichnet: Verschieben, ⌘T, Spiegeln, Bildauflösung und Leinwandgrösse verlieren nichts. **Vektorradierer** (berührten Bereich, **bis zum Schnittpunkt** – auf Wunsch mit allen Ebenen –, ganze Linie), normale Radierer radieren den berührten Teil, Transparentfarbe zeichnet radierende Linien; *Select → Select overlapping vectors / Select vectors within area*; Füllen, Verlauf und Mischen sind wie im Vorbild gesperrt; *Layer → Rasterize*; Vektorebenen lassen sich in Vektorebenen vereinen |
 | **Auswahl** | Hinzufügen (⇧) / Abziehen (⌥) / Schnittmenge (⇧⌥), Quadrat/Kreis (⇧ beim Aufziehen), Alles, Aufheben, Erneut, Umkehren, Vergrössern/Verkleinern, laufende Ameisen und **Auswahl-Starter** (Aufheben, Zuschneiden, Umkehren, Vergrössern, Verkleinern, Löschen, Ausserhalb löschen, Ausschneiden/Kopieren & Einfügen, Transformieren, Füllen) |
 | **Bearbeiten** | Undo/Redo (200 Schritte, History-Palette), Ausschneiden/Kopieren/Einfügen (auch Bilder aus der Zwischenablage), Löschen, Füllen, Skalieren/Drehen (⌘T) und Freies Transformieren (⇧⌘T), Spiegeln, **Tonwertkorrektur** mit Vorschau – alle neun des Vorbilds: Helligkeit/Kontrast, Tonwertkorrektur mit Histogramm, Gradationskurve, Farbton/Sättigung/Helligkeit (⌘U), Farbbalance, Umkehren (⌘I), Posterisieren, Binarisieren, Verlaufsumsetzung, Gaussian blur, Bildauflösung, Leinwandgrösse |
 | **Ansicht** | Zoom 0,78 %–3200 % in den Stufen des Vorbilds (Mausrad, Pinch, ⌘+/⌘−), Drehen in 5°-Schritten um die Fenstermitte, Ansicht spiegeln, Navigator, Zoom/Drehung in der Statusleiste, Tab / ⇧Tab blendet Paletten / Menüleiste aus |
@@ -84,7 +85,8 @@ Die Bedienung folgt dem öffentlichen Handbuch des Vorbilds (Ver. 5). Die wichti
 | ⌘⇧-Klick = Ebene unter dem Mauszeiger wählen | gleich |
 | Tab = Paletten ausblenden, ⇧Tab = Menüleiste ausblenden | gleich |
 | Ebenen-Palette: Modus + Deckkraft oben, Schalter für Schnittmaske/Referenz/Entwurf/Sperren, Stift-Symbol markiert die Bearbeitungsebene | gleich |
-| Vektorebenen, 3D, Animation, Comic-Rahmen, Text, Lineale | noch nicht (siehe unten) |
+| Vektorebenen: Vektorradierer, Objekt-Werkzeug | gleich (Linienkorrektur-Werkzeuge noch nicht) |
+| 3D, Animation, Comic-Rahmen, Text | noch nicht (siehe unten) |
 
 ### Tastenkürzel
 
@@ -113,9 +115,10 @@ Wie im Handbuch des Vorbilds (macOS: Ctrl → ⌘, Alt → ⌥):
 ## Dokumente
 
 - `.madpaint` ist ein ZIP-Archiv mit `document.json` (Ebenenbaum, Modi, Deckkraft, Flags,
-  Papierfarbe – lesbares JSON) und `layers/<id>.png` (eine verlustfreie PNG-Datei pro Ebene
-  und pro Ebenenmaske, die Maske im Alphakanal) sowie `preview.png`. Fremde Programme können
-  die Ebenen so direkt öffnen.
+  Papierfarbe, Vektorlinien – lesbares JSON) und `layers/<id>.png` (eine verlustfreie PNG-Datei
+  pro Rasterebene und pro Ebenenmaske, die Maske im Alphakanal) sowie `preview.png`. Fremde
+  Programme können die Ebenen so direkt öffnen. Vektorebenen speichern ihre Linien (Punkte mit
+  Breite und Dichte, eine Pinseltabelle je Ebene) und werden beim Öffnen neu gezeichnet.
 - Das Clip-Studio-Format `.clip` wird **nicht** gelesen oder geschrieben (siehe
   [RESEARCH.md](RESEARCH.md)). Austausch mit anderen Programmen: PNG/JPEG/WebP.
 - Die Arbeit wird einige Sekunden nach jeder Änderung automatisch gesichert (IndexedDB)
@@ -170,8 +173,9 @@ Bei einem Tag `mad-studio-paint-v*` wird daraus ein GitHub-Release.
 Was im Vergleich zum Vorbild noch fehlt, steht Punkt für Punkt in
 [RESEARCH.md](RESEARCH.md#vergleich-clip-studio-paint-laut-handbuch--mad-studio-paint). Die grössten Lücken:
 
-- Vektorebenen (Vektorradierer, Linienkorrektur), Kurven- und Figur-Lineale, Raster, Text- und
-  Sprechblasen-Werkzeug, Comic-Rahmen, Rasterfolien (Töne), Animation/Zeitleiste und 3D.
+- Linienkorrektur auf Vektorebenen (Kontrollpunkte, Linien ziehen/vereinfachen/verbinden),
+  Kurven- und Figur-Lineale, Raster, Text- und Sprechblasen-Werkzeug, Comic-Rahmen,
+  Rasterfolien (Töne), Animation/Zeitleiste und 3D.
 - Pinsel-Materialien (Bildspitzen, Texturen, Doppelpinsel), Tempo als Dynamik, Verlaufseditor.
 - Import/Export von `.clip` oder PSD.
 

@@ -85,6 +85,8 @@ export interface PaintState {
   snapSpecial: boolean;
   /** Ruler selected with the Object tool. */
   selectedRuler: { layerId: Id; rulerId: string } | null;
+  /** Vector lines of the active layer selected with the Object tool (line ids). */
+  selectedLines: string[];
   prefs: Preferences;
 }
 
@@ -123,6 +125,7 @@ function initialState(): PaintState {
     snapRuler: true,
     snapSpecial: true,
     selectedRuler: null,
+    selectedLines: [],
     prefs: { ...DEFAULT_PREFS },
   };
 }

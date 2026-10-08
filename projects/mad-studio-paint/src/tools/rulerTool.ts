@@ -107,8 +107,8 @@ class MoveRulerSession implements ToolSession {
   cancel(): void {}
 }
 
-/** Object tool: select a ruler, drag its handles or the ruler itself. */
-export function objectSession(p: PointerInfo, view: OverlayView): ToolSession | null {
+/** Object tool on rulers: select a ruler, drag its handles or the ruler itself. */
+export function rulerObjectSession(p: PointerInfo, view: OverlayView): ToolSession | null {
   const hit = hitHandle(p, view);
   if (hit) return new HandleSession(hit);
   const item = pickRuler(p);

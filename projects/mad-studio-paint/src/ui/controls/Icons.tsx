@@ -194,6 +194,22 @@ const paths: Record<string, ReactNode> = {
       <path d="M15.5 1.5v6M12.5 4.5h6" />
     </>
   ),
+  newVector: (
+    <>
+      <rect x="3" y="5" width="12" height="12" rx="1" />
+      <path d="M5.5 14.5C7 9 10 12.5 12.5 7.5" />
+      <rect x="4.6" y="13.6" width="1.8" height="1.8" fill="currentColor" />
+      <rect x="11.6" y="6.6" width="1.8" height="1.8" fill="currentColor" />
+      <path d="M15.5 1.5v6M12.5 4.5h6" />
+    </>
+  ),
+  vector: (
+    <>
+      <path d="M4 15.5C6.5 6 12 14 16 4.5" />
+      <rect x="2.8" y="14.3" width="2.4" height="2.4" fill="currentColor" />
+      <rect x="14.8" y="3.3" width="2.4" height="2.4" fill="currentColor" />
+    </>
+  ),
   newFolder: (
     <>
       <path d="M2.5 16V5.5a1 1 0 0 1 1-1h4l1.5 1.8h7.5a1 1 0 0 1 1 1V16z" />

@@ -91,7 +91,7 @@ export function TonalDialog({ target }: { target: TonalTarget }) {
     }
     const s = startSession(target, initial);
     if (!s) {
-      toast(actions.editBlocker() ?? 'Select a raster layer first', 'error');
+      toast(actions.rasterOnlyBlocker() ?? 'Select a raster layer first', 'error');
       closeDialog();
       return;
     }

@@ -1,7 +1,8 @@
 import { useState } from 'react';
+import { useShallow } from 'zustand/react/shallow';
 import { BRUSH_SIZE_PRESETS } from '../../store/actions';
 import * as actions from '../../store/actions';
-import { currentSubTool, setState, useStore } from '../../store/store';
+import { currentSubTool, drawingColor, getState, setState, useStore } from '../../store/store';
 import { entryForTool, PALETTE_ENTRIES, PALETTE_LAYOUT, subToolsOf, toolInfo, type FillReference, type SubTool, type ToolId } from '../../paint/tools';
 import { Icon } from '../controls/Icons';
 import { PropSlider } from '../controls/PropSlider';
@@ -225,6 +226,8 @@ export function ToolProperty() {
           )}
         </>
       )}
+      {sub.tool === 'eraser' && b && <VectorEraserRow sub={sub} update={update} />}
+      {sub.tool === 'object' && <ObjectLineSettings sub={sub} update={update} />}
       {sub.tool === 'select' && <SelectionModeRow />}
       {sub.tool === 'ruler' && sub.rulerKind === 'symmetry' && (
         <>
@@ -266,7 +269,7 @@ export function ToolProperty() {
           </div>
         </div>
       )}
-      {!b && !f && sub.tool !== 'select' && sub.tool !== 'gradient' && <div className="prop-note">{toolInfo(sub.tool).hint}</div>}
+      {!b && !f && sub.tool !== 'select' && sub.tool !== 'gradient' && sub.tool !== 'object' && <div className="prop-note">{toolInfo(sub.tool).hint}</div>}
       <div className="prop-footer">
         <button className="icon-btn" title="Reset to the default settings" aria-label="Reset sub tool" onClick={() => actions.resetSubTool(sub.id)}>
           <Icon name="resetRotation" size={15} />
@@ -290,6 +293,103 @@ export function ToolProperty() {
       </div>
       {dyn && b && <DynamicsPopover kind={dyn.kind} at={dyn.at} onClose={() => setDyn(null)} />}
     </div>
+  );
+}
+
+/** Erasers on vector layers: what a touch erases. */
+function VectorEraserRow({ sub, update }: { sub: SubTool; update: (patch: Partial<SubTool>) => void }) {
+  const mode = sub.vectorErase ?? 'touched';
+  const modes = [
+    ['touched', 'Touched area'],
+    ['intersection', 'Up to intersection'],
+    ['whole', 'Whole line'],
+  ] as const;
+  return (
+    <div className="prop-row column">
+      <span className="prop-label">Vector eraser</span>
+      <div className="segmented wrap" role="radiogroup" aria-label="Vector eraser">
+        {modes.map(([id, label]) => (
+          <button key={id} role="radio" aria-checked={mode === id} className={mode === id ? 'on' : ''} onClick={() => update({ vectorErase: id })}>
+            {label}
+          </button>
+        ))}
+      </div>
+      {mode === 'intersection' && (
+        <label className="check prop-check">
+          <input type="checkbox" checked={sub.vectorReferAll ?? false} onChange={(e) => update({ vectorReferAll: e.target.checked })} />
+          Refer all layers
+        </label>
+      )}
+    </div>
+  );
+}
+
+/** Object tool: colour, width and opacity of the selected vector lines. */
+function ObjectLineSettings({ sub, update }: { sub: SubTool; update: (patch: Partial<SubTool>) => void }) {
+  // Line objects never change in place, so a shallow comparison keeps this stable.
+  const lines = useStore(useShallow((s) => actions.selectedVectorLines(s)?.lines ?? []));
+  const first = lines[0];
+  const change = (fn: Parameters<typeof actions.updateSelectedLines>[0], label: string, key?: string) => actions.updateSelectedLines(fn, label, key);
+  return (
+    <>
+      {first ? (
+        <>
+          <div className="prop-row">
+            <span className="prop-label">Line color</span>
+            <span className="line-color-row">
+              <input
+                type="color"
+                className="line-color"
+                aria-label="Line color"
+                value={first.color}
+                onChange={(e) => {
+                  const color = e.target.value;
+                  change((l) => ({ ...l, color }), 'Line color', 'lines:color');
+                }}
+              />
+              <button
+                className="btn small"
+                title="Give the selected lines the drawing color"
+                aria-label="Use drawing color"
+                onClick={() => {
+                  const color = drawingColor(getState().colors);
+                  change((l) => ({ ...l, color }), 'Line color');
+                }}
+              >
+                Drawing color
+              </button>
+            </span>
+          </div>
+          <PropSlider
+            testId="line-size"
+            label="Brush Size"
+            value={first.brush.size}
+            min={0.5}
+            max={2000}
+            log
+            step={0.1}
+            decimals={1}
+            onChange={(v) => change((l) => ({ ...l, brush: { ...l.brush, size: v } }), 'Line width', 'lines:size')}
+          />
+          <PropSlider
+            label="Opacity"
+            value={Math.round(first.brush.opacity * 100)}
+            min={0}
+            max={100}
+            onChange={(v) => change((l) => ({ ...l, brush: { ...l.brush, opacity: v / 100 } }), 'Line opacity', 'lines:opacity')}
+          />
+          <div className="prop-note">
+            {lines.length} line{lines.length === 1 ? '' : 's'} selected · Delete removes {lines.length === 1 ? 'it' : 'them'}
+          </div>
+        </>
+      ) : (
+        <div className="prop-note">{toolInfo('object').hint}</div>
+      )}
+      <label className="check prop-check">
+        <input type="checkbox" checked={sub.scaleLineWidth !== false} onChange={(e) => update({ scaleLineWidth: e.target.checked })} />
+        Adjust line thickness when scaling
+      </label>
+    </>
   );
 }
 

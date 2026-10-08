@@ -248,6 +248,7 @@ export function CanvasView() {
           s.showMaskArea !== prev.showMaskArea ||
           s.activeLayerId !== prev.activeLayerId ||
           s.selectedRuler !== prev.selectedRuler ||
+          s.selectedLines !== prev.selectedLines ||
           s.snapRuler !== prev.snapRuler ||
           s.snapSpecial !== prev.snapSpecial
         )

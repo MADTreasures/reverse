@@ -19,6 +19,8 @@ export function effectiveTool(tool: ToolId, m: Modifiers, button = 0): Effective
   if (DRAWING_TOOLS.includes(tool)) {
     if (m.mod && m.alt) return BRUSH_TOOLS.includes(tool) ? 'brushSize' : tool;
     if (m.alt) return 'eyedropper';
+    // ⌘-drag selects and moves vector lines (and rulers) without leaving the tool.
+    if (m.mod) return 'object';
   }
   if (tool === 'zoom' && m.alt) return 'zoomOut';
   return tool;

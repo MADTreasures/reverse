@@ -2,15 +2,17 @@
  * The pixel side of the app: surfaces, compositing, selection canvas, undo history.
  * The document structure (layer tree, flags) lives in the store; this module owns the pixels.
  */
-import { maskIds, pixelIds } from '../model/layers';
-import type { Id, PaintDocument } from '../model/types';
+import { flatten, maskIds, pixelIds, vectorIds } from '../model/layers';
+import type { Id, PaintDocument, VectorLayer } from '../model/types';
 import { HistoryStack } from '../paint/history';
 import type { Mask } from '../paint/mask';
-import type { Rect } from '../paint/rect';
+import { intersect, type Rect } from '../paint/rect';
+import { linesBounds, strokeBounds, type VectorStroke } from '../paint/vector';
+import { renderVectorStroke } from './brushEngine';
 import { createCanvas, ctx2d, maskToCanvas } from './canvas';
 import { Compositor } from './compositor';
 import { patchBytes, type PixelPatch } from './edit';
-import { deleteSurface, ensureSurface, getSurface, resizeSurfaces, surfaceIds, touch } from './surfaces';
+import { deleteSurface, ensureSurface, getSurface, resizeSurfaces, setSurface, surfaceIds, touch } from './surfaces';
 
 export interface DocState {
   doc: PaintDocument;
@@ -33,6 +35,8 @@ export interface HistoryEntry {
 
 const maskBytes = (m: Mask | null | undefined) => (m ? m.data.byteLength : 0);
 
+const lineIds = (strokes: VectorStroke[]) => strokes.map((s) => s.id).join(',');
+
 export const DEFAULT_UNDO_STEPS = 200;
 
 class PaintEngine {
@@ -41,6 +45,10 @@ class PaintEngine {
   private selectionCanvasCache: HTMLCanvasElement | null = null;
   private renderListeners = new Set<() => void>();
   private currentDoc: PaintDocument | null = null;
+  /** Revision of the strokes each vector layer's pixels were rendered from. */
+  private vectorRevs = new Map<Id, number>();
+  /** Lines a tool already drew into a vector layer's pixels (ids in order), see expectVectorLines. */
+  private drawnLines = new Map<Id, string>();
 
   readonly history = new HistoryStack<HistoryEntry>({
     maxEntries: DEFAULT_UNDO_STEPS,
@@ -71,6 +79,8 @@ class PaintEngine {
     }
     if (this.compositor) this.compositor.resize(doc.width, doc.height);
     else this.compositor = new Compositor(doc.width, doc.height);
+    this.vectorRevs.clear();
+    this.syncVectors(doc);
     this.history.clear();
     this.selectionMask = null;
     this.selectionCanvasCache = null;
@@ -84,7 +94,72 @@ class PaintEngine {
     this.currentDoc = doc;
     for (const id of pixelIds(doc.layers)) ensureSurface(id, doc.width, doc.height);
     if (resized) this.compositor.resize(doc.width, doc.height);
+    this.syncVectors(doc);
     this.invalidate();
+  }
+
+  /** Renders vector layers whose strokes changed (new lines, erasing, undo …). */
+  private syncVectors(doc: PaintDocument): void {
+    for (const l of flatten(doc.layers)) {
+      if (l.kind !== 'vector') continue;
+      const known = getSurface(l.id);
+      const sized = known && known.width === doc.width && known.height === doc.height;
+      if (sized && this.vectorRevs.get(l.id) === l.rev) continue;
+      if (sized && this.drawnLines.get(l.id) === lineIds(l.strokes)) {
+        // A tool already drew exactly these lines.
+        this.vectorRevs.set(l.id, l.rev);
+        continue;
+      }
+      const surface = sized ? known : createCanvas(doc.width, doc.height);
+      if (surface !== known) setSurface(l.id, surface);
+      const ctx = ctx2d(surface);
+      ctx.clearRect(0, 0, surface.width, surface.height);
+      for (const stroke of l.strokes) renderVectorStroke(ctx, stroke);
+      this.vectorRevs.set(l.id, l.rev);
+      touch(l.id);
+      this.compositor?.invalidate();
+    }
+    this.drawnLines.clear();
+  }
+
+  /**
+   * A tool drew the lines into vector layer `id` itself (live, while drawing or erasing); the next
+   * document that gives the layer exactly these lines does not render it again.
+   */
+  expectVectorLines(id: Id, strokes: VectorStroke[]): void {
+    this.drawnLines.set(id, lineIds(strokes));
+  }
+
+  /** Draws lines added to a vector layer on top of its pixels, so the next document need not render it again. */
+  drawNewLines(layer: VectorLayer, added: VectorStroke[]): void {
+    const surface = getSurface(layer.id);
+    if (!surface || this.vectorRevs.get(layer.id) !== layer.rev) return;
+    const ctx = ctx2d(surface);
+    for (const line of added) renderVectorStroke(ctx, line);
+    touch(layer.id);
+    this.invalidate(linesBounds(added));
+    this.expectVectorLines(layer.id, [...layer.strokes, ...added]);
+  }
+
+  /** Draws lines into a vector layer's pixels: only inside `r` (cleared first), or the whole layer. */
+  renderVectorLines(id: Id, strokes: VectorStroke[], r: Rect | null = null): void {
+    const surface = getSurface(id);
+    if (!surface) return;
+    const area = r ? intersect(r, { x: 0, y: 0, w: surface.width, h: surface.height }) : { x: 0, y: 0, w: surface.width, h: surface.height };
+    if (!area) return;
+    const ctx = ctx2d(surface);
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(area.x, area.y, area.w, area.h);
+    ctx.clip();
+    ctx.clearRect(area.x, area.y, area.w, area.h);
+    for (const stroke of strokes) {
+      const b = strokeBounds(stroke);
+      if (b && intersect(b, area)) renderVectorStroke(ctx, stroke);
+    }
+    ctx.restore();
+    touch(id);
+    this.invalidate(area);
   }
 
   get doc(): PaintDocument {
@@ -156,7 +231,7 @@ class PaintEngine {
   gc(): void {
     const keep = new Set<Id>();
     const add = (doc: PaintDocument | undefined) => {
-      if (doc) for (const id of pixelIds(doc.layers)) keep.add(id);
+      if (doc) for (const id of [...pixelIds(doc.layers), ...vectorIds(doc.layers)]) keep.add(id);
     };
     add(this.currentDoc ?? undefined);
     for (const e of this.history.entries()) {

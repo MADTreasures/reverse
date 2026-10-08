@@ -90,10 +90,11 @@ export const COMMANDS: Command[] = [
     id: 'clear',
     label: 'Delete',
     keys: ['backspace', 'delete', 'Mod+backspace'],
-    // With the Object tool, Delete removes the selected ruler.
+    // With the Object tool, Delete removes the selected vector lines or ruler.
     run: () => {
       const { tool, selectedRuler } = getState();
-      if (tool === 'object' && selectedRuler) actions.deleteRuler(selectedRuler.layerId, selectedRuler.rulerId);
+      if (tool === 'object' && actions.selectedVectorLines()) actions.deleteSelectedLines();
+      else if (tool === 'object' && selectedRuler) actions.deleteRuler(selectedRuler.layerId, selectedRuler.rulerId);
       else actions.clearLayer();
     },
     enabled: () => canEdit() || (getState().tool === 'object' && getState().selectedRuler !== null),
@@ -110,7 +111,14 @@ export const COMMANDS: Command[] = [
   { id: 'flipLayerV', label: 'Flip layer vertical', run: () => actions.flipLayer(false), enabled: canEdit },
   // Layer
   { id: 'newRasterLayer', label: 'New raster layer', keys: ['Mod+Shift+n'], run: () => void actions.addRasterLayer() },
+  { id: 'newVectorLayer', label: 'New vector layer', run: () => void actions.addVectorLayer() },
   { id: 'newFolder', label: 'New layer folder', run: () => void actions.addFolder() },
+  {
+    id: 'rasterize',
+    label: 'Rasterize',
+    run: () => actions.rasterizeLayer(),
+    enabled: () => actions.activeLayer()?.kind === 'vector' && !actions.activeLayer()?.locked,
+  },
   { id: 'groupLayer', label: 'Create folder and insert layer', keys: ['Mod+g'], run: () => actions.groupLayer() },
   {
     id: 'ungroupLayer',
@@ -182,6 +190,18 @@ export const COMMANDS: Command[] = [
   { id: 'deselect', label: 'Deselect', keys: ['Mod+d'], run: () => actions.deselect(), enabled: hasSelection },
   { id: 'reselect', label: 'Reselect', keys: ['Mod+Shift+d'], run: () => actions.reselect() },
   { id: 'invertSelection', label: 'Invert selected area', keys: ['Mod+Shift+i'], run: () => actions.invertSelection() },
+  {
+    id: 'selectOverlappingVectors',
+    label: 'Select overlapping vectors',
+    run: () => actions.selectVectorsInSelection(false),
+    enabled: () => hasSelection() && actions.activeLayer()?.kind === 'vector',
+  },
+  {
+    id: 'selectVectorsWithin',
+    label: 'Select vectors within area',
+    run: () => actions.selectVectorsInSelection(true),
+    enabled: () => hasSelection() && actions.activeLayer()?.kind === 'vector',
+  },
   { id: 'expandSelection', label: 'Expand selected area…', run: () => askGrow(1), enabled: hasSelection },
   { id: 'shrinkSelection', label: 'Shrink selected area…', run: () => askGrow(-1), enabled: hasSelection },
   // View

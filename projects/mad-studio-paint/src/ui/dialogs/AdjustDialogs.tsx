@@ -19,7 +19,7 @@ function FilterDialog({ title, params, build, label }: { title: string; params: 
   useEffect(() => {
     const p = new actions.FilterPreview();
     if (!p.ok) {
-      toast(actions.editBlocker() ?? 'Select a raster layer first', 'error');
+      toast(actions.rasterOnlyBlocker() ?? 'Select a raster layer first', 'error');
       closeDialog();
       return;
     }

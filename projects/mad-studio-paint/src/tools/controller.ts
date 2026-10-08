@@ -26,7 +26,8 @@ import {
   SelectSession,
   ZoomSession,
 } from './sessions';
-import { drawRulers, objectSession, rulerSession } from './rulerTool';
+import { drawRulers, rulerSession } from './rulerTool';
+import { drawLineSelection, lineHandleCursor, objectSession } from './vectorTool';
 import { confirmTransform, drawTransformOverlay, hitHandle, isTransforming, transformCursor, TransformSession } from './transform';
 import type { Modifiers, OverlayView, PointerInfo, ToolSession } from './types';
 
@@ -62,6 +63,8 @@ class Controller {
     if (this.session?.cursor) return this.session.cursor;
     if (isTransforming() && !this.mods.space && this.hover) return transformCursor(hitHandle(this.hover, this.view));
     const t = this.current();
+    const line = t === 'object' && this.hover ? lineHandleCursor(this.hover, this.view) : null;
+    if (line) return line;
     if (t === 'select' && currentSubTool().brush) return 'none';
     return cursorFor(t);
   }
@@ -190,6 +193,8 @@ class Controller {
   /** Draws tool feedback (brush outline, selection preview, transform box) in viewport space. */
   overlay(ctx: CanvasRenderingContext2D): void {
     drawRulers(ctx, this.view);
+    // The Object tool (also ⌘ with drawing tools) shows the selected vector lines.
+    if (!this.session?.overlay && this.current() === 'object') drawLineSelection(ctx, this.view);
     drawTransformOverlay(ctx, this.view);
     PolylineSelect.overlay(ctx, this.view);
     if (this.session?.overlay) {

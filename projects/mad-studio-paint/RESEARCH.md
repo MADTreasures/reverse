@@ -97,6 +97,8 @@ Status: ✅ gleich · 🟡 ähnlich/vereinfacht · ❌ fehlt (noch)
 | Verlauf | „Foreground to transparent“, „Foreground to background“ …; Form Linie/Kreis/Ellipse [GRAD] | Linie und Kreis, beide Farbvarianten; kein Verlaufseditor | 🟡 | – |
 | Figur | Gerade (⇧ = 45°), Rechteck/Ellipse (⇧ = Quadrat/Kreis), Kurven, Polylinie … [FIG] | Gerade, Rechteck, Ellipse | 🟡 | – |
 | Lineale | Lineal, Kurven-, Figur-Lineal, Lineal-Stift, Spezial-Lineale (Parallel, Parallelkurve, Mehrfachkurve, Radial, Radialkurve, Konzentrisch), Hilfslinien, Perspektiv-Lineal (1/2/3 Punkte, Fischauge, Raster), Symmetrie-Lineal (Linienzahl, Liniensymmetrie); Lineal gehört zu einer Ebene, Bereich „alle Ebenen / gleicher Ordner / nur Bearbeitungsziel“, ⇧-Klick aufs Symbol blendet aus; Einrasten über View > Snap (⌘1 Lineal, ⌘2 Spezial-Lineal), lila = Einrasten an, grün = aus; Bearbeiten mit dem Objekt-Werkzeug [RUL, SNAP, PERSP, EDITR, MENU] | Lineal, Hilfslinie, Parallel, Radial, Konzentrisch, Symmetrie (2–32, mit/ohne Spiegelung), Perspektive 1/2/3 Punkte (Menü und Werkzeug), Bereich und Ein-/Ausblenden über das Symbol, ⌘1/⌘2, Farben, Objekt-Werkzeug (Griffe, Verschieben, Entf); Standardbereich „alle Ebenen“ angenommen. Kurven-, Figur-Lineal, Lineal-Stift, Kurven-Spezial-Lineale, Fischauge, Raster und ⌘4 fehlen | 🟡 | `symmetrical ruler …`, `special and linear rulers …`, `perspective ruler …`, Unit: `rulers` |
+| Vektorradierer | Eraser-Gruppe „Vector“; Modi: berührten Bereich, bis zum Schnittpunkt (Option „Refer all layers“), ganze Linie; andere Radierer erzeugen auf Vektorebenen keine Linien; mit Transparentfarbe gezeichnete Striche werden Linien; auf Rasterebenen radiert er normal [VEC, ERASE] | gleich; Einstellung „Vector eraser“ bei jedem Radierer in Tool Settings (statt Advanced Tool Settings) | ✅ | `vector layer: strokes become lines …`, Unit: `vector lines` |
+| Objekt-Werkzeug auf Vektorebenen | Linie antippen = auswählen (Linie und Kontrollpunkte hervorgehoben), verschieben, Griffe skalieren, Drehgriff oben; „Adjust line thickness when scaling“; Farbe, Grösse, Pinselform der gewählten Linien in Tool Settings; „Operation of transparent part: Switch to a different layer“; Auswahlmodus [VEC, OBJ, V] | Auswählen (⇧ ergänzt/entfernt), verschieben, skalieren (Ecken; ⇧ frei), drehen (⇧ 15°), Linienfarbe (Farbwähler oder Zeichenfarbe), Breite, Deckkraft, Linienstärke beim Skalieren ein/aus, Klick auf eine Linie einer anderen Vektorebene wechselt die Ebene, Entf löscht; Kontrollpunkte und Pinselform-Wechsel fehlen | 🟡 | `Object tool: select, move, recolour …` |
 | Ebene verschieben | in der Gruppe „Operation“ (K); ⌥-Ziehen kopiert, ⇧ fixiert die Richtung [LAY, MOD] | gleich; auch Gruppe „Operation“ mit „Select layer“ (D) | ✅ | `free transform …` |
 | Transformieren | ⌘T Skalieren/Drehen (Seitenverhältnis bleibt), ⇧⌘T frei; ausserhalb ziehen = drehen; ⇧ = 45°-Schritte; Enter/Doppelklick bestätigt, Esc bricht ab [TR] | gleich; Verzerren, Perspektive, Netz fehlen | 🟡 | `free transform …` |
 | Pipette | „Pick displayed color“ / „Pick color from layer“; ⌥-Klick in Zeichenwerkzeugen; Rechtsklick überall [EYE, MOD] | gleich | ✅ | `⌥-click with a brush picks …` |
@@ -116,7 +118,7 @@ Status: ✅ gleich · 🟡 ähnlich/vereinfacht · ❌ fehlt (noch)
 | ⇧⌘-Klick | Ebene unter dem Zeiger wählen | gleich | ✅ | Unit |
 | Rechtsklick | Pipette | gleich | ✅ | Unit |
 | Werkzeugtaste halten | Werkzeug nur solange gedrückt (500 ms) | gleich, Zeit in *Preferences* | ✅ | `holding a tool key …` |
-| ⌘-Ziehen mit Zeichenwerkzeugen | temporär „Object“-Werkzeug | fehlt (keine Vektorobjekte) | ❌ | – |
+| ⌘-Ziehen mit Zeichenwerkzeugen | temporär „Object“-Werkzeug | gleich (Vektorlinien und Lineale) | ✅ | Unit: `⌘ with drawing tools …` |
 
 ### Tastenkürzel (macOS)
 
@@ -151,7 +153,8 @@ Status: ✅ gleich · 🟡 ähnlich/vereinfacht · ❌ fehlt (noch)
 | Papier | unterste Ebene des Stapels: Ebenenmodi und Korrekturebenen darüber wirken auf sie [LP] | gleich (Export mit transparentem Hintergrund ohne Papier) | ✅ | `correction layers see the paper …` |
 | Ebeneneigenschaften | Layer Property palette: Border effect (Edge: Dicke, Farbe; Watercolor edge: Bereich, Deckkraft, Dunkelheit, Weichzeichnung), Layer color (ersetzt Schwarz, Unterfarbe ersetzt Weiss), Tone, Expression color [LPROP] | Randeffekt und Ebenenfarbe gleich (Formeln eigene Modelle); Tone und Expression color fehlen | 🟡 | `Layer Property palette: …`, Unit: `layer effects` |
 | Masken-Darstellung „Mask Expression“ (Verläufe ja/nein, Schwelle) | in den Ebeneneigenschaften [LPROP] | Masken wirken immer stufenlos | ❌ | – |
-| Vektor-, Text-, Füll-, Tonebenen | vorhanden [WAL] | fehlen | ❌ | – |
+| Vektorebenen | Linien als Pfad mit Kontrollpunkten: verlustfrei skalieren/transformieren; alle Zeichen- und Figurwerkzeuge; Füllen, Verlauf, Mischen und Farbmischung gesperrt; „Select overlapping vectors“ / „Select vectors within area“; Neue Vektorebene über Menü oder Symbol [VEC] | gleich; Linien speichern Punkte mit Breite und Dichte (aus Druck, Neigung, Ein-/Auslaufen) und werden daraus gezeichnet; Verschieben, ⌘T, Spiegeln, Bildauflösung, Leinwandgrösse, Zuschneiden wirken auf die Linien; Auswahl begrenzt neue Linien; *Layer → Rasterize*; plain Vektorebenen lassen sich in Vektorebenen vereinen. Linienkorrektur-Werkzeuge (Kontrollpunkte, Ziehen, Vereinfachen, Verbinden, Linienbreite) und „Convert layer“ nach Vektor fehlen; Aquarellkante und Farbmischung werden auf Linien nicht angewendet | 🟡 | `vector layer: …`, `Object tool: …`, `fill, gradient and blend refuse …`, `Move layer, ⌘T and Flip …`, Unit: `vector lines`, `.madpaint format` |
+| Text-, Füll-, Tonebenen | vorhanden [WAL] | fehlen | ❌ | – |
 
 ### Ansicht, Undo, Dateien
 
@@ -217,7 +220,13 @@ vergleichen. Abweichungen bitte als Issue oder Nachricht melden – mit dem Punk
 - **Glow dodge / Add (Glow):** offiziell nur „stärker bei halbtransparenten Pixeln“; Formel nach
   einem Community-Modell (niedrige Konfidenz).
 - **Pinsel:** Materialspitzen, Texturen, Doppelpinsel, Tempo-Dynamik und „Smear“ fehlen.
-- **Vektorebenen, Text, Comic-Rahmen, Animation und 3D** sind nicht umgesetzt; bei den Linealen fehlen die Kurven-Arten.
+- **Text, Comic-Rahmen, Animation und 3D** sind nicht umgesetzt; bei den Linealen fehlen die Kurven-Arten.
+- **Vektorlinien:** Das Handbuch beschreibt Pfade mit Kontrollpunkten (Spline/Bezier), aber kein
+  Dateiformat und keine Formeln. MAD Studio Paint speichert die geglätteten Punkte des Strichs mit
+  Breite und Dichte je Punkt (eigenes Modell) und zeichnet die Linie mit derselben Pinselspitze;
+  „bis zum Schnittpunkt“ schneidet an den Kreuzungen der Pfade (Mittellinien).
+- **Auswahl beim Verschieben/Transformieren einer Vektorebene:** nicht beschrieben; umgesetzt:
+  Linien, die die Auswahl berühren, werden als Ganzes mitgenommen.
 - **Lineal-Bereich:** Welchen Geltungsbereich ein neues Lineal standardmässig hat, sagt das Handbuch nicht; angenommen: „alle Ebenen“.
 - **Mehrfaches Drücken** einer geteilten Werkzeugtaste (Zyklus) belegt nur die Celsys-Tutorialseite
   „Art Rocket“, nicht das Handbuch.
@@ -240,6 +249,8 @@ Präfix `M/` = `https://help.clip-studio.com/en-us/manual_en/` (Handbuch Ver. 5.
 | NAV, CANVAS | `M/270_canvas/Navigating_the_canvas.htm`, `…/Canvas_window.htm` |
 | LP, BO, OLS, REF, DR, FOL, BL | `M/180_layers/Using_layers.htm`, `…/Basic_operations.htm`, `…/Other_layer_settings.htm`, `…/Reference_layers.htm`, `…/Draft_layers.htm`, `…/Layer_folders.htm`, `…/Blending_modes.htm` |
 | MASK, LPROP | `M/180_layers/Layer_masks.htm`, `…/Layer_properties.htm` |
+| VEC, ERASE | `M/180_layers/Vector_layers.htm`, `M/240_brushes/Eraser_tools.htm` |
+| OBJ, V | `M/810_subtools/O.htm` (Operation), `M/810_subtools/V.htm` (Vector) |
 | TC, TCE, GD | `M/390_filters/Tonal_Correction.htm`, `…/Tonal_Correction_Effects.htm`, `M/810_subtools/G.htm` (Gradient dialog) |
 | JB, JS | `https://help.clip-studio.com/ja-jp/manual_jp/180_layers/` (Grundoperationen, nützliche Einstellungen) |
 | FILL, GRAD | `M/420_fill/Fill_Tool.htm`, `…/Gradient_Tool.htm` |

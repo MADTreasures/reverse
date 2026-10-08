@@ -2,9 +2,12 @@
  * Free transform (⌘T): lifts the selection (or the whole layer) and lets the user move, scale
  * and rotate it with handles. Enter confirms, Esc cancels.
  */
-import { maskIds } from '../model/layers';
+import { findLayer, maskIds } from '../model/layers';
+import type { Id } from '../model/types';
 import { maskBounds, type Mask } from '../paint/mask';
 import { union, type Rect } from '../paint/rect';
+import type { Affine } from '../paint/rulers';
+import { linesBounds, type VectorStroke } from '../paint/vector';
 import { apply as applyMatrix, invert, type Matrix } from '../paint/viewMath';
 import { createCanvas, ctx2d } from '../engine/canvas';
 import { DirectEdit, type PixelPatch } from '../engine/edit';
@@ -36,10 +39,22 @@ interface Part {
   hole: HTMLCanvasElement;
 }
 
+/** A vector layer being transformed: its lines are transformed, not its pixels (lossless). */
+interface LinePart {
+  id: Id;
+  original: VectorStroke[];
+  which: Set<string>;
+  /** Bounds of the lines before the transform and where they were last drawn. */
+  box: Rect | null;
+  shown: Rect | null;
+}
+
 class FreeTransform {
   private parts: Part[];
+  private lines: LinePart[] = [];
   readonly bounds: Rect;
   params: Params;
+  private readonly initial: Params;
   private selection: Mask | null;
 
   constructor(
@@ -48,9 +63,17 @@ class FreeTransform {
     readonly mode: TransformMode,
   ) {
     this.bounds = bounds;
-    this.selection = getState().selection;
+    const state = getState();
+    this.selection = state.selection;
     const sel = engine.selectionCanvas();
     this.parts = ids.flatMap((id, i) => {
+      const layer = findLayer(state.doc.layers, id);
+      if (layer?.kind === 'vector') {
+        const which = actions.linesToMove(layer, state.selection);
+        const box = linesBounds(layer.strokes.filter((x) => which.has(x.id)));
+        this.lines.push({ id, original: layer.strokes, which, box, shown: box });
+        return [];
+      }
       const surface = getSurface(id);
       if (!surface) return [];
       const edit = new DirectEdit(id, surface, (r) => engine.invalidate(r), `transform:${i}`);
@@ -71,7 +94,25 @@ class FreeTransform {
       return [{ edit, source, hole }];
     });
     this.params = { cx: bounds.x + bounds.w / 2, cy: bounds.y + bounds.h / 2, sx: 1, sy: 1, angle: 0 };
+    this.initial = { ...this.params };
     this.render();
+  }
+
+  /** Document → document matrix of the current transform (for vector lines). */
+  private docMatrix(): Affine {
+    const [a, b, c, d, e, f] = this.matrix();
+    const { x, y } = this.bounds;
+    return [a, b, c, d, e - a * x - c * y, f - b * x - d * y];
+  }
+
+  private transformedLines(v: LinePart): VectorStroke[] {
+    return actions.transformSome(v.original, v.which, this.docMatrix());
+  }
+
+  private get changed(): boolean {
+    const p = this.params;
+    const q = this.initial;
+    return p.cx !== q.cx || p.cy !== q.cy || p.sx !== q.sx || p.sy !== q.sy || p.angle !== q.angle;
   }
 
   /** Local (source pixel) → document matrix. */
@@ -115,37 +156,45 @@ class FreeTransform {
       ctx.restore();
       edit.changed({ x: 0, y: 0, w: width, h: height });
     }
+    for (const v of this.lines) {
+      const lines = this.transformedLines(v);
+      const now = linesBounds(lines.filter((x) => v.which.has(x.id)));
+      engine.renderVectorLines(v.id, lines, union(v.shown, now));
+      v.shown = now;
+    }
   }
 
   commit(): void {
     const patches = this.parts.map(({ edit }) => edit.commit()).filter((p): p is PixelPatch => p !== null);
-    if (patches.length === 0) return;
-    const { width, height } = this.parts[0].hole;
-    if (this.selection) {
-      // The selection follows the transformed pixels (rasterised from the new outline).
-      const sel = createCanvas(width, height);
-      const s = ctx2d(sel, true);
-      s.setTransform(...this.matrix());
-      s.fillStyle = '#000';
-      s.fillRect(0, 0, this.bounds.w, this.bounds.h);
-      const src = engine.selectionCanvas();
-      if (src) {
-        s.globalCompositeOperation = 'destination-in';
-        s.drawImage(src, -this.bounds.x, -this.bounds.y);
-      }
-      s.setTransform(1, 0, 0, 1, 0, 0);
-      const data = s.getImageData(0, 0, sel.width, sel.height).data;
-      const mask = { width: sel.width, height: sel.height, data: new Uint8Array(sel.width * sel.height) };
-      for (let i = 0, p = 3; i < mask.data.length; i++, p += 4) mask.data[i] = data[p];
-      setState({ selection: mask });
-      actions.commit({ label: 'Transform', patches, selection: { before: this.selection, after: mask } });
-    } else {
-      actions.commit({ label: 'Transform', patches });
+    const lines = new Map<Id, VectorStroke[]>();
+    if (this.changed) for (const v of this.lines) if (v.which.size) lines.set(v.id, this.transformedLines(v));
+    if (patches.length === 0 && lines.size === 0) return;
+    if (!this.selection) {
+      actions.commitTransform('Transform', patches, lines);
+      return;
     }
+    // The selection follows the transformed pixels (rasterised from the new outline).
+    const { width, height } = getState().doc;
+    const sel = createCanvas(width, height);
+    const s = ctx2d(sel, true);
+    s.setTransform(...this.matrix());
+    s.fillStyle = '#000';
+    s.fillRect(0, 0, this.bounds.w, this.bounds.h);
+    const src = engine.selectionCanvas();
+    if (src) {
+      s.globalCompositeOperation = 'destination-in';
+      s.drawImage(src, -this.bounds.x, -this.bounds.y);
+    }
+    s.setTransform(1, 0, 0, 1, 0, 0);
+    const data = s.getImageData(0, 0, sel.width, sel.height).data;
+    const mask = { width: sel.width, height: sel.height, data: new Uint8Array(sel.width * sel.height) };
+    for (let i = 0, p = 3; i < mask.data.length; i++, p += 4) mask.data[i] = data[p];
+    actions.commitTransform('Transform', patches, lines, { before: this.selection, after: mask });
   }
 
   cancel(): void {
     for (const { edit } of this.parts) edit.cancel();
+    for (const v of this.lines) engine.renderVectorLines(v.id, v.original, union(v.shown, v.box));
   }
 }
 

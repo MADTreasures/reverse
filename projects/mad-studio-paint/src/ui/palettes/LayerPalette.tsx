@@ -115,6 +115,9 @@ export function LayerActionBar() {
       <button className="icon-btn" title={`New raster layer (${isMac ? '⇧⌘N' : 'Shift+Ctrl+N'})`} aria-label="New raster layer" onClick={() => actions.addRasterLayer()}>
         <Icon name="newLayer" />
       </button>
+      <button className="icon-btn" title="New vector layer" aria-label="New vector layer" onClick={() => actions.addVectorLayer()}>
+        <Icon name="newVector" />
+      </button>
       <button className="icon-btn" title="New layer folder" aria-label="New layer folder" onClick={() => actions.addFolder()}>
         <Icon name="newFolder" />
       </button>
@@ -191,6 +194,7 @@ function LayerRow({ layer, depth, drag, setDrag, drop, setDrop }: RowsProps & { 
     actions.selectLayer(layer.id);
     showMenu({ x: e.clientX, y: e.clientY }, [
       { label: 'New raster layer', onClick: () => actions.addRasterLayer() },
+      { label: 'New vector layer', onClick: () => actions.addVectorLayer() },
       { label: 'New layer folder', onClick: () => actions.addFolder() },
       { label: 'Create folder and insert layer', onClick: () => actions.groupLayer(layer.id) },
       { separator: true },
@@ -202,7 +206,8 @@ function LayerRow({ layer, depth, drag, setDrag, drop, setDrop }: RowsProps & { 
       ...(layer.kind === 'correction' && layer.correction.type !== 'reverse'
         ? [{ label: 'Correction layer settings…', onClick: () => openTonalDialog({ kind: 'layer', layerId: layer.id }) }]
         : []),
-      ...(layer.kind === 'raster' ? [{ label: 'Select layer opacity area', onClick: () => actions.selectLayerOpacity(layer.id) }] : []),
+      ...(layer.kind === 'raster' || layer.kind === 'vector' ? [{ label: 'Select layer opacity area', onClick: () => actions.selectLayerOpacity(layer.id) }] : []),
+      ...(layer.kind === 'vector' ? [{ label: 'Rasterize', disabled: layer.locked, onClick: () => actions.rasterizeLayer(layer.id) }] : []),
       { separator: true },
       { label: 'Clip to layer below', checked: layer.clip, onClick: () => actions.setLayerProps(layer.id, { clip: !layer.clip }, 'Clip to layer below') },
       { label: 'Set as reference layer', checked: layer.reference, onClick: () => actions.setLayerProps(layer.id, { reference: !layer.reference }, 'Reference layer') },
@@ -376,6 +381,11 @@ function LayerRow({ layer, depth, drag, setDrag, drop, setDrop }: RowsProps & { 
         )}
       </span>
       <span className="row-icons">
+        {layer.kind === 'vector' && (
+          <span className="vector-icon" title="Vector layer" data-testid="vector-icon">
+            <Icon name="vector" size={16} />
+          </span>
+        )}
         {layer.rulers && (
           <button
             className={`ruler-icon ${layer.rulers.visible ? '' : 'off'}`}

@@ -40,6 +40,7 @@ export const MENUS: MenuSpec[] = [
     label: 'Layer',
     items: [
       'newRasterLayer',
+      'newVectorLayer',
       'newFolder',
       { label: 'New correction layer', items: TONAL.map((t) => `correction-${t}`) },
       'correctionSettings',
@@ -48,6 +49,7 @@ export const MENUS: MenuSpec[] = [
       '-',
       'duplicateLayer',
       'deleteLayer',
+      'rasterize',
       '-',
       { label: 'Layer mask', items: ['maskOutside', 'maskSelection', '-', 'applyMask', 'deleteMask', '-', 'enableMask', 'linkMask', 'showMaskArea'] },
       { label: 'Ruler/Frame', items: ['perspective1', 'perspective2', 'perspective3', '-', 'showRuler', 'deleteRulers'] },
@@ -68,7 +70,10 @@ export const MENUS: MenuSpec[] = [
       'layerDown',
     ],
   },
-  { label: 'Select', items: ['selectAll', 'deselect', 'reselect', 'invertSelection', '-', 'expandSelection', 'shrinkSelection'] },
+  {
+    label: 'Select',
+    items: ['selectAll', 'deselect', 'reselect', 'invertSelection', '-', 'expandSelection', 'shrinkSelection', '-', 'selectOverlappingVectors', 'selectVectorsWithin'],
+  },
   {
     label: 'View',
     items: [

@@ -18,6 +18,13 @@ describe('modifier keys', () => {
     expect(effectiveTool('fill', { ...none, alt: true, mod: true })).toBe('fill');
   });
 
+  it('⌘ with drawing tools is the Object tool', () => {
+    expect(effectiveTool('pen', { ...none, mod: true })).toBe('object');
+    expect(effectiveTool('eraser', { ...none, mod: true })).toBe('object');
+    expect(effectiveTool('fill', { ...none, mod: true })).toBe('object');
+    expect(effectiveTool('select', { ...none, mod: true })).toBe('select');
+  });
+
   it('keeps Option for selection subtraction and copying with the move tool', () => {
     expect(effectiveTool('select', { ...none, alt: true })).toBe('select');
     expect(effectiveTool('move', { ...none, alt: true })).toBe('move');

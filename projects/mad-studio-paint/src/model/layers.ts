@@ -1,6 +1,6 @@
 import { uid } from './ids';
 import type { Correction } from '../paint/tonal';
-import type { CorrectionLayer, FolderLayer, Id, Layer, LayerMask, PaintDocument, RasterLayer } from './types';
+import type { CorrectionLayer, FolderLayer, Id, Layer, LayerMask, PaintDocument, RasterLayer, VectorLayer } from './types';
 
 export function createRasterLayer(name: string, patch: Partial<RasterLayer> = {}): RasterLayer {
   return {
@@ -33,6 +33,28 @@ export function createFolder(name: string, children: Layer[] = [], patch: Partia
     draft: false,
     expanded: true,
     children,
+    ...patch,
+  };
+}
+
+let revCounter = Date.now();
+/** A fresh revision number for a vector layer's strokes. */
+export const nextRev = () => ++revCounter;
+
+export function createVectorLayer(name: string, patch: Partial<VectorLayer> = {}): VectorLayer {
+  return {
+    id: uid('v'),
+    kind: 'vector',
+    name,
+    visible: true,
+    opacity: 1,
+    blend: 'normal',
+    clip: false,
+    locked: false,
+    reference: false,
+    draft: false,
+    strokes: [],
+    rev: nextRev(),
     ...patch,
   };
 }
@@ -89,6 +111,25 @@ export function flatten(layers: Layer[], out: Layer[] = []): Layer[] {
 
 export const rasterLayers = (layers: Layer[]) => flatten(layers).filter((l): l is RasterLayer => l.kind === 'raster');
 
+/**
+ * A deep copy of the document for the next undo step. Vector lines are never changed in place
+ * (edits replace them), so the copy shares them instead of cloning every point.
+ */
+export function cloneDocument(doc: PaintDocument): PaintDocument {
+  const lines = new Map<Id, VectorLayer['strokes']>();
+  const strip = (layers: Layer[]): Layer[] =>
+    layers.map((l) => {
+      if (l.kind === 'vector') {
+        lines.set(l.id, l.strokes);
+        return { ...l, strokes: [] };
+      }
+      return l.kind === 'folder' ? { ...l, children: strip(l.children) } : l;
+    });
+  const copy = structuredClone({ ...doc, layers: strip(doc.layers) });
+  for (const l of flatten(copy.layers)) if (l.kind === 'vector') l.strokes = [...(lines.get(l.id) ?? [])];
+  return copy;
+}
+
 /** A new layer mask; the caller creates its surface. */
 export const createLayerMask = (): LayerMask => ({ id: uid('m'), enabled: true, linked: true });
 
@@ -101,6 +142,9 @@ export function pixelIds(layers: Layer[]): Id[] {
   }
   return ids;
 }
+
+/** Ids of vector layers (their pixels are rendered from the strokes). */
+export const vectorIds = (layers: Layer[]): Id[] => flatten(layers).flatMap((l) => (l.kind === 'vector' ? [l.id] : []));
 
 /** Ids of all layer masks. */
 export const maskIds = (layers: Layer[]): Id[] => flatten(layers).flatMap((l) => (l.mask ? [l.mask.id] : []));
@@ -224,10 +268,12 @@ export function cloneLayer(layer: Layer, idMap: Map<Id, Id> = new Map()): { copy
     return { ...m, id };
   };
   const copyOne = (l: Layer): Layer => {
-    const id = uid(l.kind === 'folder' ? 'f' : l.kind === 'correction' ? 'c' : 'l');
+    const id = uid(l.kind === 'folder' ? 'f' : l.kind === 'correction' ? 'c' : l.kind === 'vector' ? 'v' : 'l');
     idMap.set(l.id, id);
     const mask = copyMask(l.mask);
     if (l.kind === 'folder') return { ...l, id, mask, children: l.children.map(copyOne) };
+    // Lines are never changed in place, so the copy can share them.
+    if (l.kind === 'vector') return { ...l, id, mask, strokes: [...l.strokes], rev: nextRev() };
     return { ...l, id, mask };
   };
   return { copy: copyOne(layer), idMap };

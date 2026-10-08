@@ -1,13 +1,15 @@
 /** Press-drag-release interactions for every tool. */
 import { hexToRgb } from '../model/color';
-import { flatten, isEffectivelyVisible } from '../model/layers';
-import type { Id } from '../model/types';
+import { findLayer, flatten, isEffectivelyVisible } from '../model/layers';
+import type { Id, VectorLayer } from '../model/types';
 import { CLOSE_GAP_STEPS, floodFillMask } from '../paint/fill';
-import { combine, ellipseMask, expandMask, maskBounds, polygonMask, rectMask, translateMask, type Mask, type SelectionOp } from '../paint/mask';
-import { fromPoints, type Rect } from '../paint/rect';
+import { combine, ellipseMask, expandMask, isSelected, maskBounds, polygonMask, rectMask, translateMask, type Mask, type SelectionOp } from '../paint/mask';
+import { fromPoints, union, type Rect } from '../paint/rect';
 import { isSpecial, perspectiveConstraint, rulerConstraint, symmetryTransforms, type Affine, type Constraint, type Pt, type Ruler } from '../paint/rulers';
 import { ellipsePoints, rectPoints, snapAngle, type StrokePoint } from '../paint/stroke';
+import { evalPressureCurve } from '../paint/curve';
 import { type FillReference, type SubTool } from '../paint/tools';
+import { eraseAt, linesBounds, newStrokeId, transformStrokes, type VectorEraseMode, type VectorStroke } from '../paint/vector';
 import { apply as applyMatrix, normalizeAngle } from '../paint/viewMath';
 import { BlendStroke, BrushStroke, type Stroke, type StrokeTarget } from '../engine/brushEngine';
 import { createCanvas, ctx2d, maskToCanvas } from '../engine/canvas';
@@ -42,7 +44,36 @@ export function strokeTarget(): StrokeTarget | null {
   };
 }
 
+/** Like strokeTarget, for tools that only work on pixels (fill, gradient, blend). */
+function rasterTarget(): StrokeTarget | null {
+  return blocked(actions.rasterOnlyBlocker()) ? null : strokeTarget();
+}
+
 const toStroke = (p: PointerInfo): StrokePoint => ({ x: p.x, y: p.y, pressure: p.pressure, tilt: p.tilt, azimuth: p.azimuth });
+
+/** The active vector layer when the drawing tools draw lines (not on its mask). */
+function vectorTarget(): VectorLayer | null {
+  const t = actions.editTarget();
+  return t?.vector && t.layer.kind === 'vector' ? t.layer : null;
+}
+
+/**
+ * The finished stroke as vector lines (one per symmetry copy). Colour mixing and the watercolor edge
+ * are pixel effects, so lines are stored without them; transparent strokes become erasing lines.
+ */
+function strokeLines(sub: SubTool, stroke: BrushStroke, erase: boolean): VectorStroke[] {
+  const points = stroke.endAsLine();
+  if (points.length === 0) return [];
+  const s = getState();
+  const line: VectorStroke = {
+    id: newStrokeId(),
+    color: drawingColor(s.colors),
+    brush: { ...sub.brush!, mixing: 'none', watercolorEdge: false, stabilization: 0 },
+    points,
+    ...(erase ? { erase: true } : {}),
+  };
+  return (stroke.copies ?? [null]).map((m) => (m ? { ...transformStrokes([line], m)[0], id: newStrokeId() } : line));
+}
 
 /** Selection combine mode from modifier keys (Shift adds, Option subtracts, both intersect). */
 export function selectionOpFor(m: Modifiers): SelectionOp {
@@ -114,11 +145,22 @@ export class BrushSession implements ToolSession {
   private snap: Snap;
   /** Points held back until a perspective direction is chosen. */
   private held: StrokePoint[] | null = null;
+  /** Drawing on a vector layer: the stroke becomes a line. */
+  private vector: boolean;
   readonly cursor = 'none';
 
-  static create(sub: SubTool, p: PointerInfo): BrushSession | null {
+  static create(sub: SubTool, p: PointerInfo): ToolSession | null {
+    if (!sub.brush) return null;
+    if (vectorTarget() && !actions.editBlocker()) {
+      // On vector layers erasers erase lines; the blend tool only works on pixels.
+      if (sub.brush.mode === 'blend') {
+        blocked(actions.rasterOnlyBlocker());
+        return null;
+      }
+      if (sub.brush.mode === 'erase') return VectorEraseSession.create(sub, p);
+    }
     const target = strokeTarget();
-    if (!target || !sub.brush) return null;
+    if (!target) return null;
     return new BrushSession(sub, p, target);
   }
 
@@ -130,10 +172,11 @@ export class BrushSession implements ToolSession {
     const s = getState();
     const brush = sub.brush!;
     this.layerId = target.layerId;
+    this.vector = vectorTarget() !== null;
     this.stroke =
       brush.mode === 'blend'
         ? new BlendStroke(brush, target)
-        : new BrushStroke(brush, drawingColor(s.colors), s.colors.transparent, target);
+        : new BrushStroke(this.vector ? { ...brush, mixing: 'none', watercolorEdge: false } : brush, drawingColor(s.colors), s.colors.transparent, target);
     this.start = p;
     this.last = p;
     this.lineMode = p.shift && brush.mode !== 'blend';
@@ -192,11 +235,19 @@ export class BrushSession implements ToolSession {
       for (const q of this.held) this.stroke.add(q);
       this.held = null;
     }
-    const patch = this.stroke.end();
-    actions.commitPixels(this.sub.name, [patch]);
+    let drawn: boolean;
+    if (this.vector && this.stroke instanceof BrushStroke) {
+      const lines = strokeLines(this.sub, this.stroke, getState().colors.transparent);
+      actions.addVectorLines(this.layerId, lines, this.sub.name);
+      drawn = lines.length > 0;
+    } else {
+      const patch = this.stroke.end();
+      actions.commitPixels(this.sub.name, [patch]);
+      drawn = patch !== null;
+    }
     lastStrokeEnd = { layerId: this.layerId, x: this.last.x, y: this.last.y, pressure: this.lineMode ? (this.connectFrom ?? toStroke(this.start)).pressure : this.last.pressure };
     const s = getState();
-    if (patch && this.sub.brush?.mode === 'paint' && !s.colors.transparent && !actions.editingMask(s)) actions.addColorToHistory(drawingColor(s.colors));
+    if (drawn && this.sub.brush?.mode === 'paint' && !s.colors.transparent && !actions.editingMask(s)) actions.addColorToHistory(drawingColor(s.colors));
   }
 
   cancel(): void {
@@ -275,11 +326,99 @@ export class FigureSession implements ToolSession {
       return;
     }
     this.stroke.path(this.points(p, p));
-    actions.commitPixels(this.sub.name, [this.stroke.end()]);
+    const layer = vectorTarget();
+    if (layer) actions.addVectorLines(layer.id, strokeLines(this.sub, this.stroke, getState().colors.transparent), this.sub.name);
+    else actions.commitPixels(this.sub.name, [this.stroke.end()]);
   }
 
   cancel(): void {
     this.stroke.cancel();
+  }
+}
+
+// ------------------------------------------------------------------ vector eraser
+
+/**
+ * Erasers on vector layers erase lines instead of pixels: the touched parts, the touched part up to
+ * the nearest crossings with other lines, or whole lines (sub tool setting "Vector eraser").
+ */
+export class VectorEraseSession implements ToolSession {
+  private lines: VectorStroke[];
+  private readonly original: VectorStroke[];
+  private readonly mode: VectorEraseMode;
+  /** Lines on the other vector layers ("Refer all layers" for erasing up to intersections). */
+  private readonly others: VectorStroke[];
+  private last: PointerInfo;
+  /** Area redrawn so far (restored on cancel). */
+  private dirty: Rect | null = null;
+  readonly cursor = 'none';
+
+  static create(sub: SubTool, p: PointerInfo): VectorEraseSession | null {
+    const layer = vectorTarget();
+    return layer && !blocked(actions.editBlocker()) ? new VectorEraseSession(sub, layer, p) : null;
+  }
+
+  private constructor(
+    private sub: SubTool,
+    private layer: VectorLayer,
+    p: PointerInfo,
+  ) {
+    this.original = layer.strokes;
+    this.lines = layer.strokes;
+    this.mode = sub.vectorErase ?? 'touched';
+    const { doc } = getState();
+    this.others =
+      this.mode === 'intersection' && sub.vectorReferAll
+        ? flatten(doc.layers).flatMap((l) => (l.kind === 'vector' && l.id !== layer.id && isEffectivelyVisible(doc.layers, l.id) ? l.strokes : []))
+        : [];
+    this.last = p;
+    this.erase(p, p);
+  }
+
+  private radius(p: PointerInfo): number {
+    const b = this.sub.brush!;
+    const f = b.sizePressure ? b.minSize + (1 - b.minSize) * evalPressureCurve(b.sizeCurve, p.pressure) : 1;
+    return Math.max(0.5, (b.size / 2) * f);
+  }
+
+  /** Erases along the way from `a` to `b` (dabs half a radius apart), then redraws what changed. */
+  private erase(a: PointerInfo, b: PointerInfo): void {
+    const r = this.radius(b);
+    const sel = getState().selection;
+    const n = Math.max(1, Math.ceil(Math.hypot(b.x - a.x, b.y - a.y) / Math.max(0.5, r / 2)));
+    const before = this.lines;
+    let lines = before;
+    for (let i = a === b ? n : 1; i <= n; i++) {
+      const c = { x: a.x + ((b.x - a.x) * i) / n, y: a.y + ((b.y - a.y) * i) / n };
+      // With a selection, only lines inside it are erased.
+      if (sel && !isSelected(sel, c)) continue;
+      lines = eraseAt(lines, c, r, this.mode, this.others.length ? [...lines, ...this.others] : lines);
+    }
+    const kept = new Set(lines);
+    const removed = before.filter((x) => !kept.has(x));
+    if (removed.length === 0) return;
+    this.lines = lines;
+    const area = linesBounds(removed);
+    this.dirty = union(this.dirty, area);
+    engine.renderVectorLines(this.layer.id, lines, area);
+  }
+
+  move(p: PointerInfo, coalesced: PointerInfo[]): void {
+    for (const q of coalesced.length ? coalesced : [p]) {
+      this.erase(this.last, q);
+      this.last = q;
+    }
+  }
+
+  up(p: PointerInfo): void {
+    this.erase(this.last, p);
+    if (this.lines === this.original) return;
+    engine.expectVectorLines(this.layer.id, this.lines);
+    actions.setVectorStrokes(this.layer.id, this.lines, this.sub.name);
+  }
+
+  cancel(): void {
+    if (this.dirty) engine.renderVectorLines(this.layer.id, this.original, this.dirty);
   }
 }
 
@@ -304,7 +443,7 @@ function regionMask(sub: SubTool, p: PointerInfo, toggleReference: boolean): Mas
 }
 
 export function fillAt(sub: SubTool, p: PointerInfo): void {
-  const target = strokeTarget();
+  const target = rasterTarget();
   if (!target || !sub.fill) return;
   const s = getState();
   let mask = regionMask(sub, p, p.shift);
@@ -352,7 +491,7 @@ export class GradientSession implements ToolSession {
   readonly cursor = 'crosshair';
 
   static create(sub: SubTool, p: PointerInfo): GradientSession | null {
-    const target = strokeTarget();
+    const target = rasterTarget();
     return target ? new GradientSession(sub, p, target) : null;
   }
 
@@ -700,7 +839,7 @@ export class BrushSizeSession implements ToolSession {
 export function pickLayerAt(p: PointerInfo): void {
   const { doc } = getState();
   for (const layer of flatten(doc.layers)) {
-    if (layer.kind !== 'raster' || !isEffectivelyVisible(doc.layers, layer.id)) continue;
+    if ((layer.kind !== 'raster' && layer.kind !== 'vector') || !isEffectivelyVisible(doc.layers, layer.id)) continue;
     const px = engine.sampleLayer(layer.id, p.x, p.y);
     if (px && px[3] > 8) {
       actions.selectLayer(layer.id);
@@ -711,8 +850,24 @@ export function pickLayerAt(p: PointerInfo): void {
 
 // ------------------------------------------------------------------ move layer
 
+/** A vector layer taken along by Move layer: its lines are moved, not its pixels. */
+interface MovingLines {
+  id: Id;
+  original: VectorStroke[];
+  which: Set<string>;
+  /** Bounds of the moving lines before the move. */
+  box: Rect | null;
+  /** Where they were last drawn. */
+  shown: Rect | null;
+  /** ⌥ copies the lines instead of moving them. */
+  copy: boolean;
+}
+
+const offset = (r: Rect | null, dx: number, dy: number): Rect | null => (r ? { ...r, x: r.x + dx, y: r.y + dy } : null);
+
 export class MoveSession implements ToolSession {
   private edits: { edit: DirectEdit; hole: HTMLCanvasElement; lifted: HTMLCanvasElement }[] = [];
+  private vectors: MovingLines[] = [];
   private start: PointerInfo;
   private dx = 0;
   private dy = 0;
@@ -733,6 +888,13 @@ export class MoveSession implements ToolSession {
     this.selection = s.selection;
     const sel = engine.selectionCanvas();
     ids.forEach((id, i) => {
+      const layer = findLayer(s.doc.layers, id);
+      if (layer?.kind === 'vector') {
+        const which = actions.linesToMove(layer, s.selection);
+        const box = linesBounds(layer.strokes.filter((x) => which.has(x.id)));
+        this.vectors.push({ id, original: layer.strokes, which, box, shown: box, copy: p.alt });
+        return;
+      }
       const surface = getSurface(id);
       if (!surface) return;
       const edit = new DirectEdit(id, surface, (r) => engine.invalidate(r), `move:${i}`);
@@ -757,6 +919,14 @@ export class MoveSession implements ToolSession {
     });
   }
 
+  /** A vector layer's lines at the current offset. */
+  private moved(v: MovingLines): VectorStroke[] {
+    const m: [number, number, number, number, number, number] = [1, 0, 0, 1, this.dx, this.dy];
+    if (!v.copy) return v.original.map((x) => (v.which.has(x.id) ? transformStrokes([x], m)[0] : x));
+    const copies = v.original.filter((x) => v.which.has(x.id)).map((x) => ({ ...transformStrokes([x], m)[0], id: newStrokeId() }));
+    return [...v.original, ...copies];
+  }
+
   private render(): void {
     for (const { edit, hole, lifted } of this.edits) {
       const ctx = edit.ctx;
@@ -769,6 +939,11 @@ export class MoveSession implements ToolSession {
       ctx.drawImage(lifted, this.dx, this.dy);
       ctx.restore();
       edit.changed({ x: 0, y: 0, w: hole.width, h: hole.height });
+    }
+    for (const v of this.vectors) {
+      const now = offset(v.box, this.dx, this.dy);
+      engine.renderVectorLines(v.id, this.moved(v), union(v.shown, now));
+      v.shown = now;
     }
   }
 
@@ -790,18 +965,16 @@ export class MoveSession implements ToolSession {
     this.move(p);
     const patches: (PixelPatch | null)[] = this.edits.map(({ edit }) => edit.commit());
     const list = patches.filter((x): x is PixelPatch => x !== null);
-    if (list.length === 0) return;
-    if (this.selection) {
-      const moved = translateMask(this.selection, this.dx, this.dy);
-      setState({ selection: moved });
-      actions.commit({ label: 'Move layer', patches: list, selection: { before: this.selection, after: moved } });
-    } else {
-      actions.commit({ label: 'Move layer', patches: list });
-    }
+    const lines = new Map<Id, VectorStroke[]>();
+    if (this.dx || this.dy) for (const v of this.vectors) if (v.which.size) lines.set(v.id, this.moved(v));
+    if (list.length === 0 && lines.size === 0) return;
+    const moved = this.selection ? translateMask(this.selection, this.dx, this.dy) : null;
+    actions.commitTransform('Move layer', list, lines, this.selection ? { before: this.selection, after: moved } : undefined);
   }
 
   cancel(): void {
     for (const { edit } of this.edits) edit.cancel();
+    for (const v of this.vectors) if (v.shown !== v.box || this.dx || this.dy) engine.renderVectorLines(v.id, v.original, union(v.shown, v.box));
   }
 }
 

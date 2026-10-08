@@ -4,6 +4,7 @@ import type { Id } from '../model/types';
 import { evalPressureCurve } from '../paint/curve';
 import { applyWatercolorEdge } from '../paint/effects';
 import { amountAt, densityFactor, nextDab, type Paint } from '../paint/mixing';
+import { strokeBounds, type VectorPoint, type VectorStroke } from '../paint/vector';
 import { circleBounds, inflate, intersect, union, type Rect } from '../paint/rect';
 import { affineAngle, applyAffine, type Affine, type Constraint } from '../paint/rulers';
 import { dabAlpha, interpolateDabs, pressureCurve, seededRandom, Stabilizer, stabilizerWindow, taperFactor, type Dab, type StrokePoint } from '../paint/stroke';
@@ -244,21 +245,41 @@ export class BrushStroke implements Stroke {
     return amount > 0 ? 1 - amount * this.rand() : 1;
   }
 
-  private radius(p: StrokePoint, d: number, total: number): number {
+  /** Size factor from pressure, tilt and tapering (without random variation). */
+  private sizeFactor(p: StrokePoint, d: number, total: number): number {
     const b = this.brush;
     let f = b.sizePressure ? b.minSize + (1 - b.minSize) * evalPressureCurve(b.sizeCurve, p.pressure) : 1;
     if (b.sizeTilt) f *= 1 + (p.tilt ?? 0);
     if (b.taperSize) f *= taperFactor(d, total, b.taperStart, b.taperEnd);
-    return (b.size / 2) * f * this.jitter(b.sizeRandom);
+    return f;
+  }
+
+  /** Density factor from pressure, tilt and tapering (without random variation). */
+  private densityFactor(p: StrokePoint, d: number, total: number): number {
+    const b = this.brush;
+    let f = b.opacityPressure ? b.minDensity + (1 - b.minDensity) * evalPressureCurve(b.densityCurve, p.pressure) : 1;
+    if (b.densityTilt) f *= 1 - 0.7 * (p.tilt ?? 0);
+    if (b.taperDensity) f *= taperFactor(d, total, b.taperStart, b.taperEnd);
+    return f;
+  }
+
+  private radius(p: StrokePoint, d: number, total: number): number {
+    return (this.brush.size / 2) * this.sizeFactor(p, d, total) * this.jitter(this.brush.sizeRandom);
   }
 
   private alpha(p: StrokePoint, d: number, total: number): number {
-    const b = this.brush;
-    let density = b.flow * (b.opacityPressure ? b.minDensity + (1 - b.minDensity) * evalPressureCurve(b.densityCurve, p.pressure) : 1);
-    if (b.densityTilt) density *= 1 - 0.7 * (p.tilt ?? 0);
-    if (b.taperDensity) density *= taperFactor(d, total, b.taperStart, b.taperEnd);
-    density *= this.jitter(b.densityRandom);
-    return dabAlpha(density, b.spacing, b.scatter > 0);
+    const density = this.brush.flow * this.densityFactor(p, d, total) * this.jitter(this.brush.densityRandom);
+    return dabAlpha(density, this.brush.spacing, this.brush.scatter > 0);
+  }
+
+  /** The finished stroke as a vector line path (after end()): points with size and density factors. */
+  vectorPoints(): VectorPoint[] {
+    const total = pathLength(this.trail);
+    let d = 0;
+    return this.trail.map((p, i) => {
+      if (i > 0) d += Math.hypot(p.x - this.trail[i - 1].x, p.y - this.trail[i - 1].y);
+      return { x: p.x, y: p.y, s: this.sizeFactor(p, d, total), d: this.densityFactor(p, d, total), ...(p.azimuth !== undefined ? { az: p.azimuth } : {}) };
+    });
   }
 
   private tipAngle(p: Dab | StrokePoint): number {
@@ -379,6 +400,20 @@ export class BrushStroke implements Stroke {
     return this.edit.commit();
   }
 
+  /**
+   * Ends the stroke as a vector line: the pixels drawn while drawing are taken back (the line is
+   * rendered from its path instead) and the path is returned.
+   */
+  endAsLine(): VectorPoint[] {
+    for (const raw of this.stabilizer.finish()) {
+      const p = this.snapped(raw);
+      this.last = p;
+      this.trail.push(p);
+    }
+    this.edit.cancel();
+    return this.vectorPoints();
+  }
+
   /** Denser, darker paint along the border of the finished stroke. */
   private applyWatercolorEdge(): void {
     const touched = this.edit.touchedRect;
@@ -406,6 +441,97 @@ export class BrushStroke implements Stroke {
   cancel(): void {
     this.edit.cancel();
   }
+}
+
+// ------------------------------------------------------------------ vector lines
+
+let lineBuffer: HTMLCanvasElement | null = null;
+
+/** A number from a string, for repeatable grain variants per line. */
+function hashId(id: string): number {
+  let h = 2166136261;
+  for (let i = 0; i < id.length; i++) h = Math.imul(h ^ id.charCodeAt(i), 16777619);
+  return h >>> 0;
+}
+
+/** Tips per brush and colour, shared by the lines drawn with them. */
+const tipCache = new Map<string, Tips>();
+function tipsFor(brush: BrushSettings, color: string): Tips {
+  const key = color + JSON.stringify(brush);
+  let tips = tipCache.get(key);
+  if (!tips) {
+    tips = new Tips(brush, hexToRgb(color) ?? { r: 0, g: 0, b: 0 });
+    tipCache.set(key, tips);
+    if (tipCache.size > 32) tipCache.delete(tipCache.keys().next().value!);
+  }
+  return tips;
+}
+
+/**
+ * Draws a stored vector line onto `ctx`: dabs along the path with the stored size and density
+ * factors, into a buffer the size of the line, then onto `ctx` with the stroke opacity (like a
+ * brush stroke: no opacity build-up within the line). Random variation is seeded by the line id,
+ * so a line always looks the same.
+ */
+export function renderVectorStroke(ctx: Ctx, line: VectorStroke): void {
+  const b = line.brush;
+  const box = strokeBounds(line);
+  if (!box || box.w <= 0 || box.h <= 0 || line.points.length === 0) return;
+  if (!lineBuffer || lineBuffer.width < box.w || lineBuffer.height < box.h) {
+    lineBuffer = createCanvas(Math.max(box.w, lineBuffer?.width ?? 0), Math.max(box.h, lineBuffer?.height ?? 0));
+  }
+  const buf = ctx2d(lineBuffer);
+  buf.setTransform(1, 0, 0, 1, 0, 0);
+  buf.globalAlpha = 1;
+  buf.globalCompositeOperation = 'source-over';
+  buf.clearRect(0, 0, box.w, box.h);
+  buf.translate(-box.x, -box.y);
+  const tips = tipsFor(b, line.color);
+  const rand = seededRandom(hashId(line.id));
+  tips.rand = rand;
+  const jitter = (amount: number) => (amount > 0 ? 1 - amount * rand() : 1);
+  const thin = Math.max(0.1, Math.min(1, b.thickness));
+  const base = (b.angle * Math.PI) / 180;
+  const dab = (p: VectorPoint, dir: number) => {
+    const r = (b.size / 2) * p.s * jitter(b.sizeRandom);
+    const a = dabAlpha(b.flow * p.d * jitter(b.densityRandom), b.spacing, b.scatter > 0);
+    if (r <= 0 || a <= 0) return;
+    let { x, y } = p;
+    if (b.scatter > 0) {
+      const t = rand() * Math.PI * 2;
+      const d = Math.sqrt(rand()) * b.scatter * b.size;
+      x += Math.cos(t) * d;
+      y += Math.sin(t) * d;
+    }
+    const angle = b.angleSource === 'line' ? base + dir : b.angleSource === 'tilt' ? base + (p.az ?? 0) : base;
+    tips.draw(buf, x, y, r, a, angle, b.thickness, null);
+  };
+  const pts = line.points;
+  dab(pts[0], pts.length > 1 ? Math.atan2(pts[1].y - pts[0].y, pts[1].x - pts[0].x) : 0);
+  let carry = 0;
+  for (let i = 1; i < pts.length; i++) {
+    const p0 = pts[i - 1];
+    const p1 = pts[i];
+    const dx = p1.x - p0.x;
+    const dy = p1.y - p0.y;
+    const dist = Math.hypot(dx, dy);
+    if (dist === 0) continue;
+    const step = Math.max(0.5, b.spacing * b.size * p0.s * thin);
+    const dir = Math.atan2(dy, dx);
+    let t = step - carry;
+    while (t <= dist) {
+      const f = t / dist;
+      dab({ x: p0.x + dx * f, y: p0.y + dy * f, s: p0.s + (p1.s - p0.s) * f, d: p0.d + (p1.d - p0.d) * f, az: p1.az }, dir);
+      t += step;
+    }
+    carry = dist - (t - step);
+  }
+  buf.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.save();
+  ctx.globalAlpha = b.opacity;
+  ctx.globalCompositeOperation = line.erase ? 'destination-out' : 'source-over';
+  ctx.drawImage(lineBuffer, 0, 0, box.w, box.h, box.x, box.y, box.w, box.h);
+  ctx.restore();
 }
 
 const pathLength = (pts: StrokePoint[]) => pts.reduce((n, p, i) => (i ? n + Math.hypot(p.x - pts[i - 1].x, p.y - pts[i - 1].y) : 0), 0);

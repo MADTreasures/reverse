@@ -89,6 +89,13 @@ export function invertMask(m: Mask): Mask {
 }
 
 /** Bounding box of selected pixels, or null if the mask is empty. */
+/** True when the mask covers the point (at least half). */
+export function isSelected(m: Mask, p: { x: number; y: number }): boolean {
+  const x = Math.floor(p.x);
+  const y = Math.floor(p.y);
+  return x >= 0 && y >= 0 && x < m.width && y < m.height && m.data[y * m.width + x] >= 128;
+}
+
 export function maskBounds(m: Mask): Rect | null {
   let x0 = m.width;
   let y0 = m.height;

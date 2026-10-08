@@ -142,6 +142,12 @@ export interface SubTool {
   /** Symmetrical ruler: number of lines (2–32) and line symmetry (mirroring). */
   symmetryLines?: number;
   symmetryMirror?: boolean;
+  /** Erasers on vector layers: erase the touched area, up to intersections, or whole lines. */
+  vectorErase?: 'touched' | 'intersection' | 'whole';
+  /** "Up to intersection" also stops at lines on the other vector layers. */
+  vectorReferAll?: boolean;
+  /** Object tool: scaling vector lines also scales their width. */
+  scaleLineWidth?: boolean;
 }
 
 export const DEFAULT_BRUSH: BrushSettings = {
@@ -213,7 +219,7 @@ export const TOOLS: ToolInfo[] = [
   { id: 'gradient', label: 'Gradient', key: 'G', hint: 'Drag to draw a gradient with the drawing colour' },
   { id: 'figure', label: 'Figure', key: 'U', hint: 'Drag to draw · ⇧ snaps lines to 45° and makes squares / circles' },
   { id: 'ruler', label: 'Ruler', key: 'U', hint: 'Drag to create a ruler · drag a handle to edit it · strokes snap to rulers (⌘1 / ⌘2)' },
-  { id: 'object', label: 'Object', key: 'O', hint: 'Click a ruler to select it · drag its handles or its line · Delete removes it' },
+  { id: 'object', label: 'Object', key: 'O', hint: 'Click a vector line or ruler to select it · drag to move, handles to scale and rotate · Delete removes it' },
 ];
 
 export const toolInfo = (id: ToolId): ToolInfo => TOOLS.find((t) => t.id === id)!;
@@ -380,6 +386,8 @@ export const DEFAULT_SUB_TOOLS: SubTool[] = [
     name: 'Kneaded eraser',
     brush: brush({ size: 50, sizePressure: false, flow: 0.15, opacityPressure: true, hardness: 0.3, mode: 'erase', stabilization: 0, spacing: 0.05 }),
   },
+  // On vector layers this eraser removes lines up to where they cross other lines.
+  { id: 'eraser-vector', tool: 'eraser', name: 'Vector', vectorErase: 'intersection', brush: brush({ size: 20, sizePressure: false, hardness: 1, mode: 'erase', stabilization: 0 }) },
   {
     id: 'eraser-rough',
     tool: 'eraser',
@@ -427,7 +435,7 @@ export const DEFAULT_SUB_TOOLS: SubTool[] = [
   { id: 'ruler-perspective', tool: 'ruler', name: 'Perspective ruler', rulerKind: 'perspective' },
   { id: 'ruler-symmetry', tool: 'ruler', name: 'Symmetrical ruler', rulerKind: 'symmetry', symmetryLines: 2, symmetryMirror: true },
   // Operation, view & eyedropper
-  { id: 'object', tool: 'object', name: 'Object' },
+  { id: 'object', tool: 'object', name: 'Object', scaleLineWidth: true },
   { id: 'select-layer', tool: 'selectLayer', name: 'Select layer' },
   { id: 'move', tool: 'move', name: 'Move layer' },
   { id: 'hand', tool: 'hand', name: 'Hand' },
@@ -455,8 +463,39 @@ export function mergeSubTools(saved: unknown): SubTool[] {
       ...(def.symmetryLines !== undefined && typeof s.symmetryLines === 'number' ? { symmetryLines: Math.max(2, Math.min(32, Math.round(s.symmetryLines))) } : {}),
       ...(def.symmetryMirror !== undefined && typeof s.symmetryMirror === 'boolean' ? { symmetryMirror: s.symmetryMirror } : {}),
       ...(def.specialRuler && (s.specialRuler === 'parallel' || s.specialRuler === 'radial' || s.specialRuler === 'concentric') ? { specialRuler: s.specialRuler } : {}),
+      ...(def.tool === 'eraser' && (s.vectorErase === 'touched' || s.vectorErase === 'intersection' || s.vectorErase === 'whole') ? { vectorErase: s.vectorErase } : {}),
+      ...(def.tool === 'eraser' && typeof s.vectorReferAll === 'boolean' ? { vectorReferAll: s.vectorReferAll } : {}),
+      ...(def.scaleLineWidth !== undefined && typeof s.scaleLineWidth === 'boolean' ? { scaleLineWidth: s.scaleLineWidth } : {}),
     };
   });
+}
+
+/** Brush settings read from a file or storage, completed with defaults and validated. */
+export function sanitizeBrush(raw: unknown): BrushSettings {
+  const r = raw && typeof raw === 'object' ? (raw as Partial<BrushSettings>) : {};
+  const n = (v: unknown, fallback: number, min: number, max: number) => (typeof v === 'number' && Number.isFinite(v) ? Math.min(max, Math.max(min, v)) : fallback);
+  const b = migrateBrush({ ...DEFAULT_BRUSH, ...r });
+  return {
+    ...b,
+    size: n(b.size, DEFAULT_BRUSH.size, 0.1, 5000),
+    minSize: n(b.minSize, DEFAULT_BRUSH.minSize, 0, 1),
+    opacity: n(b.opacity, 1, 0, 1),
+    flow: n(b.flow, 1, 0, 1),
+    hardness: n(b.hardness, DEFAULT_BRUSH.hardness, 0, 1),
+    spacing: n(b.spacing, DEFAULT_BRUSH.spacing, 0.01, 2),
+    stabilization: n(b.stabilization, 0, 0, 100),
+    scatter: n(b.scatter, 0, 0, 50),
+    sizePressure: b.sizePressure === true,
+    opacityPressure: b.opacityPressure === true,
+    sizeTilt: b.sizeTilt === true,
+    densityTilt: b.densityTilt === true,
+    taperSize: b.taperSize !== false,
+    taperDensity: b.taperDensity === true,
+    watercolorEdge: b.watercolorEdge === true,
+    texture: b.texture === 'grain' ? 'grain' : 'none',
+    mode: b.mode === 'erase' || b.mode === 'blend' ? b.mode : 'paint',
+    blendStyle: b.blendStyle === 'smudge' ? 'smudge' : 'blur',
+  };
 }
 
 /** Older settings stored anti-aliasing as on/off; newer settings are validated (they come from storage). */
