@@ -17,14 +17,25 @@ let clip: Clip | null = null;
 
 function copySelection(): Clip | null {
   const s = getState();
-  const layer = actions.activeRaster(s);
-  const surface = layer ? getSurface(layer.id) : null;
-  if (!layer || !surface) return null;
+  const target = actions.editTarget(s);
+  const surface = target ? getSurface(target.surfaceId) : null;
+  if (!target || !surface) return null;
   const r = s.selection ? maskBounds(s.selection) : { x: 0, y: 0, w: surface.width, h: surface.height };
   if (!r) return null;
   const c = createCanvas(r.w, r.h);
   const ctx = ctx2d(c);
-  ctx.drawImage(surface, -r.x, -r.y);
+  if (target.isMask) {
+    // A mask copies as a grey image: white shows, black hides.
+    const white = createCanvas(r.w, r.h);
+    const w = ctx2d(white);
+    w.drawImage(surface, -r.x, -r.y);
+    w.globalCompositeOperation = 'source-in';
+    w.fillStyle = '#ffffff';
+    w.fillRect(0, 0, r.w, r.h);
+    ctx.fillStyle = '#000000';
+    ctx.fillRect(0, 0, r.w, r.h);
+    ctx.drawImage(white, 0, 0);
+  } else ctx.drawImage(surface, -r.x, -r.y);
   const sel = engine.selectionCanvas();
   if (sel) {
     ctx.globalCompositeOperation = 'destination-in';

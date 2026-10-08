@@ -4,7 +4,7 @@ import { countLayers, findLayer, isEffectivelyLocked, layerBelow } from '../../m
 import type { FolderBlendMode, Id, Layer } from '../../model/types';
 import { isMac } from '../../platform/platform';
 import * as actions from '../../store/actions';
-import { useStore } from '../../store/store';
+import { getState, useStore } from '../../store/store';
 import { Icon } from '../controls/Icons';
 import { showMenu } from '../overlays';
 import { LayerThumb } from './LayerThumb';
@@ -124,6 +124,9 @@ export function LayerActionBar() {
       <button className="icon-btn" title={`Merge with layer below (${mod}E)`} aria-label="Merge with layer below" disabled={!canMerge} onClick={() => actions.mergeDown()}>
         <Icon name="mergeDown" />
       </button>
+      <button className="icon-btn" title="Mask outside selection" aria-label="Mask outside selection" onClick={() => actions.maskLayer(true)}>
+        <Icon name="mask" />
+      </button>
       <button className="icon-btn" title="Delete layer" aria-label="Delete layer" disabled={count <= 1} onClick={() => actions.deleteLayer()}>
         <Icon name="trash" />
       </button>
@@ -171,6 +174,7 @@ function LayerRow({ layer, depth, drag, setDrag, drop, setDrop }: RowsProps & { 
   const active = useStore((s) => s.activeLayerId === layer.id);
   const lockedByParent = useStore((s) => !layer.locked && isEffectivelyLocked(s.doc.layers, layer.id));
   const hasBase = useStore((s) => layer.clip && layerBelow(s.doc.layers, layer.id) !== null);
+  const maskTarget = useStore((s) => s.activeLayerId === layer.id && s.maskEditing && Boolean(layer.mask));
   const [editing, setEditing] = useState(false);
 
   const onDragOver = (e: React.DragEvent) => {
@@ -204,6 +208,37 @@ function LayerRow({ layer, depth, drag, setDrag, drop, setDrop }: RowsProps & { 
     ]);
   };
 
+  const maskMenu = (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const mask = layer.mask;
+    if (!mask) return;
+    actions.selectLayer(layer.id, true);
+    showMenu({ x: e.clientX, y: e.clientY }, [
+      { label: 'Delete mask', onClick: () => actions.deleteMask(layer.id) },
+      { label: 'Apply mask to layer', onClick: () => actions.applyMaskToLayer(layer.id) },
+      { separator: true },
+      { label: 'Enable mask', checked: mask.enabled, onClick: () => actions.toggleMaskEnabled(layer.id) },
+      { label: 'Link mask to layer', checked: mask.linked, onClick: () => actions.toggleMaskLink(layer.id) },
+      { label: 'Show mask area', checked: getState().showMaskArea, onClick: () => actions.toggleShowMaskArea() },
+      { separator: true },
+      { label: 'Select mask area', onClick: () => actions.selectMaskArea(layer.id) },
+    ]);
+  };
+
+  /** Clicking a thumbnail picks the drawing target: the layer's pixels or its mask. */
+  const pickTarget = (mask: boolean) => (e: React.PointerEvent) => {
+    if (e.button !== 0) return;
+    e.stopPropagation();
+    if (isMac ? e.metaKey : e.ctrlKey) {
+      const op = e.shiftKey ? 'add' : e.altKey ? 'subtract' : 'replace';
+      if (mask) actions.selectMaskArea(layer.id, op);
+      else if (layer.kind === 'raster') actions.selectLayerOpacity(layer.id, op);
+      return;
+    }
+    actions.selectLayer(layer.id, mask);
+  };
+
   const dropClass = drop?.id === layer.id ? `drop-${drop.pos}` : '';
   return (
     <div
@@ -227,7 +262,9 @@ function LayerRow({ layer, depth, drag, setDrag, drop, setDrop }: RowsProps & { 
         setDrop(null);
       }}
       onPointerDown={(e) => {
-        if (e.button === 0) actions.selectLayer(layer.id);
+        // Clicking the row keeps the mask as the target when it already is.
+        const s = getState();
+        if (e.button === 0) actions.selectLayer(layer.id, s.activeLayerId === layer.id && s.maskEditing);
       }}
       onContextMenu={menu}
     >
@@ -257,23 +294,41 @@ function LayerRow({ layer, depth, drag, setDrag, drop, setDrop }: RowsProps & { 
           >
             <Icon name={layer.expanded ? 'chevronDown' : 'chevronRight'} size={12} />
           </button>
-          <span className="folder-icon">
+          <span className={`folder-icon ${active && layer.mask && !maskTarget ? 'target' : ''}`} onPointerDown={pickTarget(false)}>
             <Icon name="folder" size={22} />
           </span>
         </>
       ) : (
         <span
-          className="thumb-wrap"
+          className={`thumb-wrap ${active && layer.mask && !maskTarget ? 'target' : ''}`}
           title={`${isMac ? '⌘' : 'Ctrl'}-click: select layer opacity area`}
-          onPointerDown={(e) => {
-            if (isMac ? e.metaKey : e.ctrlKey) {
-              e.stopPropagation();
-              actions.selectLayerOpacity(layer.id, e.shiftKey ? 'add' : e.altKey ? 'subtract' : 'replace');
-            }
-          }}
+          onPointerDown={pickTarget(false)}
         >
           <LayerThumb id={layer.id} />
         </span>
+      )}
+      {layer.mask && (
+        <>
+          <button
+            className={`mask-link ${layer.mask.linked ? 'on' : ''}`}
+            title="Link mask to layer"
+            aria-label="Link mask to layer"
+            aria-pressed={layer.mask.linked}
+            onPointerDown={(e) => e.stopPropagation()}
+            onClick={() => actions.toggleMaskLink(layer.id)}
+          >
+            {layer.mask.linked && <Icon name="check" size={11} />}
+          </button>
+          <span
+            className={`thumb-wrap mask-thumb ${maskTarget ? 'target' : ''} ${layer.mask.enabled ? '' : 'disabled'}`}
+            title={`Layer mask${layer.mask.enabled ? '' : ' (disabled)'} · ${isMac ? '⌘' : 'Ctrl'}-click: select mask area`}
+            data-testid="mask-thumb"
+            onPointerDown={pickTarget(true)}
+            onContextMenu={maskMenu}
+          >
+            <LayerThumb id={layer.mask.id} mask />
+          </span>
+        </>
       )}
       <span className="layer-text" onDoubleClick={() => setEditing(true)}>
         <span className="layer-meta">

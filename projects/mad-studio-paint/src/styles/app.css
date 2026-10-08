@@ -96,6 +96,28 @@
   margin: 3px 2px;
 }
 
+.menu-sub {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+}
+
+.menu-dropdown.sub {
+  display: none;
+  top: -4px;
+  left: 100%;
+}
+
+.menu-sub:hover > .menu-dropdown.sub,
+.menu-sub:focus-within > .menu-dropdown.sub {
+  display: flex;
+}
+
+.menu-sub:hover > .menu-item {
+  background: var(--select-row);
+  color: #fff;
+}
+
 .command-bar {
   display: flex;
   align-items: center;
@@ -1295,11 +1317,42 @@
 .thumb-wrap {
   flex: none;
   display: flex;
+  position: relative;
 }
 
 .layer-thumb {
   border: 1px solid #111;
   background: conic-gradient(#cfcfcf 0 25%, #fff 0 50%, #cfcfcf 0 75%, #fff 0) 0 0 / 8px 8px;
+}
+
+/* The selected thumbnail (layer pixels or mask) is the drawing target. */
+.thumb-wrap.target .layer-thumb,
+.folder-icon.target {
+  outline: 2px solid var(--accent);
+  outline-offset: 0;
+}
+
+.mask-thumb .layer-thumb {
+  background: #000;
+}
+
+.mask-thumb.disabled::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(to top right, transparent calc(50% - 1.5px), #e53935 calc(50% - 1.5px), #e53935 calc(50% + 1.5px), transparent calc(50% + 1.5px)),
+    linear-gradient(to top left, transparent calc(50% - 1.5px), #e53935 calc(50% - 1.5px), #e53935 calc(50% + 1.5px), transparent calc(50% + 1.5px));
+}
+
+.mask-link {
+  flex: none;
+  width: 12px;
+  height: 30px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text);
 }
 
 .paper-swatch {

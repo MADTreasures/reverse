@@ -1,7 +1,10 @@
 import { useEffect, useRef } from 'react';
 import { maskOutline, type Mask } from '../../paint/mask';
 import { invert, apply as applyMatrix, viewMatrix, type Matrix } from '../../paint/viewMath';
+import { findLayer } from '../../model/layers';
+import { createCanvas, ctx2d } from '../../engine/canvas';
 import { engine } from '../../engine/engine';
+import { getSurface, revisionOf } from '../../engine/surfaces';
 import { isMac } from '../../platform/platform';
 import * as actions from '../../store/actions';
 import { getState, useStore } from '../../store/store';
@@ -30,6 +33,27 @@ function outlinePath(mask: Mask): Path2D {
     outlineCache.set(mask, p);
   }
   return p;
+}
+
+/** Layer > Layer mask > Show mask area: the masked part tinted purple, cached per mask revision. */
+let maskTint: { id: string; rev: number; canvas: HTMLCanvasElement } | null = null;
+function maskAreaTint(id: string): HTMLCanvasElement | null {
+  const mask = getSurface(id);
+  if (!mask) return null;
+  const rev = revisionOf(id);
+  if (maskTint && maskTint.id === id && maskTint.rev === rev && maskTint.canvas.width === mask.width && maskTint.canvas.height === mask.height) {
+    return maskTint.canvas;
+  }
+  const c = maskTint && maskTint.canvas.width === mask.width && maskTint.canvas.height === mask.height ? maskTint.canvas : createCanvas(mask.width, mask.height);
+  const x = ctx2d(c);
+  x.globalCompositeOperation = 'copy';
+  x.fillStyle = 'rgba(136, 64, 230, 0.55)';
+  x.fillRect(0, 0, c.width, c.height);
+  x.globalCompositeOperation = 'destination-out';
+  x.drawImage(mask, 0, 0);
+  x.globalCompositeOperation = 'source-over';
+  maskTint = { id, rev, canvas: c };
+  return c;
 }
 
 let checker: HTMLCanvasElement | null = null;
@@ -105,6 +129,9 @@ export function CanvasView() {
         ctx.imageSmoothingEnabled = view.zoom < 2;
         ctx.imageSmoothingQuality = 'high';
         ctx.drawImage(engine.composite(), 0, 0);
+        const mask = s.showMaskArea ? findLayer(doc.layers, s.activeLayerId)?.mask : null;
+        const tint = mask ? maskAreaTint(mask.id) : null;
+        if (tint) ctx.drawImage(tint, 0, 0);
       }
       if (s.selection && s.showSelectionBorder) {
         const path = outlinePath(s.selection);
@@ -205,7 +232,17 @@ export function CanvasView() {
       engine.onRender(schedule),
       controller.onChange(schedule),
       useStore.subscribe((s, prev) => {
-        if (s.view !== prev.view || s.doc !== prev.doc || s.selection !== prev.selection || s.subTools !== prev.subTools || s.tool !== prev.tool || s.showSelectionBorder !== prev.showSelectionBorder) schedule();
+        if (
+          s.view !== prev.view ||
+          s.doc !== prev.doc ||
+          s.selection !== prev.selection ||
+          s.subTools !== prev.subTools ||
+          s.tool !== prev.tool ||
+          s.showSelectionBorder !== prev.showSelectionBorder ||
+          s.showMaskArea !== prev.showMaskArea ||
+          s.activeLayerId !== prev.activeLayerId
+        )
+          schedule();
       }),
     ];
     // Marching ants.

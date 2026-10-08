@@ -35,6 +35,15 @@ export type BlendMode =
 /** Folders only: 'pass-through' composites children directly onto what is below. */
 export type FolderBlendMode = BlendMode | 'pass-through';
 
+/** Hides parts of a layer without erasing them. Its pixels live in a surface of their own. */
+export interface LayerMask {
+  /** Surface id. Alpha is the visibility: 255 shows the layer, 0 hides it. */
+  id: Id;
+  enabled: boolean;
+  /** Moves and transforms together with the layer. */
+  linked: boolean;
+}
+
 interface LayerBase {
   id: Id;
   name: string;
@@ -49,6 +58,7 @@ interface LayerBase {
   reference: boolean;
   /** Draft layers are hidden in exports. */
   draft: boolean;
+  mask?: LayerMask;
 }
 
 export interface RasterLayer extends LayerBase {

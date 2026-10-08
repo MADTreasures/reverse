@@ -2,11 +2,12 @@
  * Free transform (⌘T): lifts the selection (or the whole layer) and lets the user move, scale
  * and rotate it with handles. Enter confirms, Esc cancels.
  */
+import { maskIds } from '../model/layers';
 import { maskBounds, type Mask } from '../paint/mask';
-import { type Rect } from '../paint/rect';
+import { union, type Rect } from '../paint/rect';
 import { apply as applyMatrix, invert, type Matrix } from '../paint/viewMath';
 import { createCanvas, ctx2d } from '../engine/canvas';
-import { DirectEdit } from '../engine/edit';
+import { DirectEdit, type PixelPatch } from '../engine/edit';
 import { engine } from '../engine/engine';
 import { getSurface } from '../engine/surfaces';
 import * as actions from '../store/actions';
@@ -28,38 +29,47 @@ const HANDLE_PX = 9;
 
 export type TransformMode = 'scaleRotate' | 'free';
 
+/** One surface being transformed: its edit, the lifted pixels and what stays behind. */
+interface Part {
+  edit: DirectEdit;
+  source: HTMLCanvasElement;
+  hole: HTMLCanvasElement;
+}
+
 class FreeTransform {
-  private edit: DirectEdit;
-  private source: HTMLCanvasElement;
-  private hole: HTMLCanvasElement;
+  private parts: Part[];
   readonly bounds: Rect;
   params: Params;
   private selection: Mask | null;
 
   constructor(
-    layerId: string,
-    surface: HTMLCanvasElement,
+    ids: string[],
     bounds: Rect,
     readonly mode: TransformMode,
   ) {
     this.bounds = bounds;
     this.selection = getState().selection;
-    this.edit = new DirectEdit(layerId, surface, (r) => engine.invalidate(r), 'transform');
     const sel = engine.selectionCanvas();
-    this.source = createCanvas(bounds.w, bounds.h);
-    const sctx = ctx2d(this.source);
-    sctx.drawImage(this.edit.backup, -bounds.x, -bounds.y);
-    if (sel) {
-      sctx.globalCompositeOperation = 'destination-in';
-      sctx.drawImage(sel, -bounds.x, -bounds.y);
-    }
-    this.hole = createCanvas(surface.width, surface.height);
-    const hctx = ctx2d(this.hole);
-    if (sel) {
-      hctx.drawImage(this.edit.backup, 0, 0);
-      hctx.globalCompositeOperation = 'destination-out';
-      hctx.drawImage(sel, 0, 0);
-    }
+    this.parts = ids.flatMap((id, i) => {
+      const surface = getSurface(id);
+      if (!surface) return [];
+      const edit = new DirectEdit(id, surface, (r) => engine.invalidate(r), `transform:${i}`);
+      const source = createCanvas(bounds.w, bounds.h);
+      const sctx = ctx2d(source);
+      sctx.drawImage(edit.backup, -bounds.x, -bounds.y);
+      if (sel) {
+        sctx.globalCompositeOperation = 'destination-in';
+        sctx.drawImage(sel, -bounds.x, -bounds.y);
+      }
+      const hole = createCanvas(surface.width, surface.height);
+      const hctx = ctx2d(hole);
+      if (sel) {
+        hctx.drawImage(edit.backup, 0, 0);
+        hctx.globalCompositeOperation = 'destination-out';
+        hctx.drawImage(sel, 0, 0);
+      }
+      return [{ edit, source, hole }];
+    });
     this.params = { cx: bounds.x + bounds.w / 2, cy: bounds.y + bounds.h / 2, sx: 1, sy: 1, angle: 0 };
     this.render();
   }
@@ -89,28 +99,31 @@ class FreeTransform {
   }
 
   render(): void {
-    const ctx = this.edit.ctx;
-    const { width, height } = this.hole;
-    ctx.save();
-    ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.globalAlpha = 1;
-    ctx.globalCompositeOperation = 'source-over';
-    ctx.clearRect(0, 0, width, height);
-    ctx.drawImage(this.hole, 0, 0);
-    ctx.setTransform(...this.matrix());
-    ctx.imageSmoothingEnabled = true;
-    ctx.imageSmoothingQuality = 'high';
-    ctx.drawImage(this.source, 0, 0);
-    ctx.restore();
-    this.edit.changed({ x: 0, y: 0, w: width, h: height });
+    for (const { edit, hole, source } of this.parts) {
+      const ctx = edit.ctx;
+      const { width, height } = hole;
+      ctx.save();
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.globalAlpha = 1;
+      ctx.globalCompositeOperation = 'source-over';
+      ctx.clearRect(0, 0, width, height);
+      ctx.drawImage(hole, 0, 0);
+      ctx.setTransform(...this.matrix());
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = 'high';
+      ctx.drawImage(source, 0, 0);
+      ctx.restore();
+      edit.changed({ x: 0, y: 0, w: width, h: height });
+    }
   }
 
   commit(): void {
-    const patch = this.edit.commit();
-    if (!patch) return;
+    const patches = this.parts.map(({ edit }) => edit.commit()).filter((p): p is PixelPatch => p !== null);
+    if (patches.length === 0) return;
+    const { width, height } = this.parts[0].hole;
     if (this.selection) {
       // The selection follows the transformed pixels (rasterised from the new outline).
-      const sel = createCanvas(this.hole.width, this.hole.height);
+      const sel = createCanvas(width, height);
       const s = ctx2d(sel, true);
       s.setTransform(...this.matrix());
       s.fillStyle = '#000';
@@ -125,14 +138,14 @@ class FreeTransform {
       const mask = { width: sel.width, height: sel.height, data: new Uint8Array(sel.width * sel.height) };
       for (let i = 0, p = 3; i < mask.data.length; i++, p += 4) mask.data[i] = data[p];
       setState({ selection: mask });
-      actions.commit({ label: 'Transform', patches: [patch], selection: { before: this.selection, after: mask } });
+      actions.commit({ label: 'Transform', patches, selection: { before: this.selection, after: mask } });
     } else {
-      actions.commit({ label: 'Transform', patches: [patch] });
+      actions.commit({ label: 'Transform', patches });
     }
   }
 
   cancel(): void {
-    this.edit.cancel();
+    for (const { edit } of this.parts) edit.cancel();
   }
 }
 
@@ -152,15 +165,26 @@ export function startTransform(mode: TransformMode = 'scaleRotate'): boolean {
     setState({ hint: blocker });
     return false;
   }
-  const layer = actions.activeRaster(s)!;
-  const surface = getSurface(layer.id);
-  if (!surface) return false;
-  const bounds = s.selection ? maskBounds(s.selection) : opaqueBounds(surface);
+  const ids = actions.movingSurfaces(s);
+  if (ids.length === 0) {
+    setState({ hint: 'The layer is locked' });
+    return false;
+  }
+  // The box fits the selection or the drawn pixels; masks (mostly opaque) only count when they move alone.
+  const masks = new Set(maskIds(s.doc.layers));
+  const content = ids.filter((id) => !masks.has(id));
+  let bounds: Rect | null = s.selection ? maskBounds(s.selection) : null;
+  if (!s.selection) {
+    for (const id of content.length ? content : ids) {
+      const surface = getSurface(id);
+      bounds = union(bounds, surface ? opaqueBounds(surface) : null);
+    }
+  }
   if (!bounds) {
     setState({ hint: 'Nothing to transform' });
     return false;
   }
-  active = new FreeTransform(layer.id, surface, bounds, mode);
+  active = new FreeTransform(ids, bounds, mode);
   setState({ transforming: true, hint: 'Drag handles to scale, outside to rotate · Enter to confirm, Esc to cancel' });
   return true;
 }

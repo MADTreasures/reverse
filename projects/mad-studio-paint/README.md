@@ -24,7 +24,7 @@ App-Symbol. Wie das Vorbild untersucht und verglichen wurde, steht in
 | **Zeichnen** | Pen (G-pen, Real G-pen, Mapping pen, Turnip pen · Milli pen, Felt pen, Dot pen), Pencil (Pencil, Mechanical pencil, Charcoal, Crayon), Brush (Round watercolor brush, Brush pen, Dry ink · Gouache, Soft brush), Airbrush (Soft, Spray, Droplet), Eraser (Hard, Soft, Kneaded eraser, Rough), Blend (Blend, Blur, Finger tip) |
 | **Pinsel-Engine** | Stiftdruck auf Grösse und Dichte (Pointer Events, z. B. Wacom), Stabilisierung 0–100, Kantenglättung in 4 Stufen (None / Weak / Middle / Strong), Deckkraft pro Strich und „Brush density“ pro Tupfer, Härte, Abstand, Körnung, Streuung |
 | **Werkzeuge** | Auswahlbereich (Rechteck, Ellipse, Lasso, Polylinie, Auswahlstift, Auswahl radieren), Auto select (Bearbeitungsebene / alle Ebenen / Referenzebenen), Füllen (Toleranz, **Lücke schliessen** in 5 Stufen, Bereichsvergrösserung, Mehrfachreferenz, nur verbundene Pixel), Verlauf (Vordergrund → transparent / → Hintergrund, Kreis), Figur (Gerade, Rechteck, Ellipse), Operation (Ebene wählen, Ebene verschieben), Pipette (angezeigte Farbe / Ebenenfarbe), Hand, Drehen, Zoom |
-| **Ebenen** | Rasterebenen und Ordner (Normal oder „Through“), **alle 28 Ebenenmodi** des Vorbilds (11 davon pixelweise berechnet), Deckkraft, Auf untere Ebene beschneiden, Referenz-, Entwurfsebene, Sperren, Transparente Pixel schützen, Auf untere Ebene übertragen, Mit unterer / sichtbare Ebenen vereinen, Auf eine Ebene reduzieren, Ordner erstellen/auflösen, Duplizieren (auch ⌥-Ziehen), ⌥-Klick aufs Auge = nur diese Ebene, ⌘-Klick aufs Miniaturbild = Auswahl, Papier-Ebene |
+| **Ebenen** | Rasterebenen und Ordner (Normal oder „Through“), **alle 28 Ebenenmodi** des Vorbilds (11 davon pixelweise berechnet), Deckkraft, **Ebenenmasken** (Ausserhalb der Auswahl / Auswahl maskieren, auf der Maske zeichnen: Farbe zeigt, Radierer verbirgt, Löschen = nichts maskiert, aktivieren, Maskenbereich anzeigen, mit der Ebene verknüpfen, auf die Ebene anwenden, ⌘-Klick = Auswahl), Auf untere Ebene beschneiden, Referenz-, Entwurfsebene, Sperren, Transparente Pixel schützen, Auf untere Ebene übertragen, Mit unterer / sichtbare Ebenen vereinen, Auf eine Ebene reduzieren, Ordner erstellen/auflösen, Duplizieren (auch ⌥-Ziehen), ⌥-Klick aufs Auge = nur diese Ebene, ⌘-Klick aufs Miniaturbild = Auswahl, Papier-Ebene |
 | **Auswahl** | Hinzufügen (⇧) / Abziehen (⌥) / Schnittmenge (⇧⌥), Quadrat/Kreis (⇧ beim Aufziehen), Alles, Aufheben, Erneut, Umkehren, Vergrössern/Verkleinern, laufende Ameisen und **Auswahl-Starter** (Aufheben, Zuschneiden, Umkehren, Vergrössern, Verkleinern, Löschen, Ausserhalb löschen, Ausschneiden/Kopieren & Einfügen, Transformieren, Füllen) |
 | **Bearbeiten** | Undo/Redo (200 Schritte, History-Palette), Ausschneiden/Kopieren/Einfügen (auch Bilder aus der Zwischenablage), Löschen, Füllen, Skalieren/Drehen (⌘T) und Freies Transformieren (⇧⌘T), Spiegeln, Tonwertkorrektur (Farbton/Sättigung/Helligkeit, Helligkeit/Kontrast, Umkehren), Gaussian blur, Bildauflösung, Leinwandgrösse |
 | **Ansicht** | Zoom 0,78 %–3200 % in den Stufen des Vorbilds (Mausrad, Pinch, ⌘+/⌘−), Drehen in 5°-Schritten um die Fenstermitte, Ansicht spiegeln, Navigator, Zoom/Drehung in der Statusleiste, Tab / ⇧Tab blendet Paletten / Menüleiste aus |
@@ -113,8 +113,9 @@ Wie im Handbuch des Vorbilds (macOS: Ctrl → ⌘, Alt → ⌥):
 ## Dokumente
 
 - `.madpaint` ist ein ZIP-Archiv mit `document.json` (Ebenenbaum, Modi, Deckkraft, Flags,
-  Papierfarbe – lesbares JSON) und `layers/<id>.png` (eine verlustfreie PNG-Datei pro Ebene)
-  sowie `preview.png`. Fremde Programme können die Ebenen so direkt öffnen.
+  Papierfarbe – lesbares JSON) und `layers/<id>.png` (eine verlustfreie PNG-Datei pro Ebene
+  und pro Ebenenmaske, die Maske im Alphakanal) sowie `preview.png`. Fremde Programme können
+  die Ebenen so direkt öffnen.
 - Das Clip-Studio-Format `.clip` wird **nicht** gelesen oder geschrieben (siehe
   [RESEARCH.md](RESEARCH.md)). Austausch mit anderen Programmen: PNG/JPEG/WebP.
 - Die Arbeit wird einige Sekunden nach jeder Änderung automatisch gesichert (IndexedDB)
@@ -127,12 +128,13 @@ src/
 ├── model/        Dokumentmodell (Ebenenbaum, Modi, Flags), Farben, Clipping-Gruppen – reine Logik
 ├── paint/        Pinsel-Mathematik (Dabs, Druck, Stabilisierung), Füllen, Auswahlmasken, Undo-Stapel,
 │                 Werkzeuge & Untertools, Ansichts-Transformation – reine Logik, unit-getestet
-├── engine/       Pixel-Seite: eine Canvas pro Ebene, Compositor (Modi, Ordner, Schnittmasken,
-│                 nur geänderte Bereiche), Pinsel-Engine, Bearbeitungen mit Undo-Patches
+├── engine/       Pixel-Seite: eine Canvas pro Ebene und Maske, Compositor (Modi, Ordner, Masken,
+│                 Schnittmasken, nur geänderte Bereiche), Pinsel-Engine, Bearbeitungen mit Undo-Patches
 ├── tools/        Zeiger-Eingabe → Werkzeug: Zusatztasten, Sitzungen je Werkzeug, Freies Transformieren
 ├── store/        Zustand (zustand), Aktionen (Ebenen, Auswahl, Undo/Redo, Ansicht), Zwischenablage
 ├── io/           .madpaint-Format, Öffnen/Speichern/Export, Autosave
-├── ui/           React-Oberfläche: Paletten, Zeichenfläche, Menüs, Dialoge, Tastatur
+├── ui/           React-Oberfläche: Paletten, Zeichenfläche, Menüs (eine Befehlstabelle für die
+│                 Menüleiste im Browser und das native Mac-Menü), Dialoge, Tastatur
 └── platform/     Brücke zu Electron (Dateidialoge, Menü) bzw. Browser-Fallbacks
 electron/         Electron-Hauptprozess (app://-Protokoll, natives Menü, Dateidialoge) und Preload
 tests/e2e/        Playwright-Tests der laufenden App
@@ -169,7 +171,7 @@ Was im Vergleich zum Vorbild noch fehlt, steht Punkt für Punkt in
 [RESEARCH.md](RESEARCH.md#vergleich-clip-studio-paint-laut-handbuch--mad-studio-paint). Die grössten Lücken:
 
 - Vektorebenen (Vektorradierer, Linienkorrektur), Lineale (Perspektive, Symmetrie), Text- und
-  Sprechblasen-Werkzeug, Comic-Rahmen, Rasterfolien (Töne), Ebenenmasken, Korrekturebenen,
+  Sprechblasen-Werkzeug, Comic-Rahmen, Rasterfolien (Töne), Korrekturebenen,
   Animation/Zeitleiste und 3D.
 - Farbmischung der Pinsel (Aquarellkanten, Ölfarbe), Neigung des Stifts, frei einstellbare
   Druckkurven, Verlaufseditor.

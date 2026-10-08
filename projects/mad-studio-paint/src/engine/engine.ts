@@ -2,7 +2,7 @@
  * The pixel side of the app: surfaces, compositing, selection canvas, undo history.
  * The document structure (layer tree, flags) lives in the store; this module owns the pixels.
  */
-import { flatten } from '../model/layers';
+import { maskIds, pixelIds } from '../model/layers';
 import type { Id, PaintDocument } from '../model/types';
 import { HistoryStack } from '../paint/history';
 import type { Mask } from '../paint/mask';
@@ -56,12 +56,18 @@ class PaintEngine {
   /** Sets up surfaces and compositor for a (new or opened) document. */
   load(doc: PaintDocument, images: Map<Id, HTMLCanvasElement> = new Map()): void {
     for (const id of surfaceIds()) deleteSurface(id);
-    for (const layer of flatten(doc.layers)) {
-      if (layer.kind !== 'raster') continue;
-      const s = ensureSurface(layer.id, doc.width, doc.height);
-      const img = images.get(layer.id);
-      if (img) ctx2d(s).drawImage(img, 0, 0);
-      touch(layer.id);
+    const masks = new Set(maskIds(doc.layers));
+    for (const id of pixelIds(doc.layers)) {
+      const s = ensureSurface(id, doc.width, doc.height);
+      const img = images.get(id);
+      const ctx = ctx2d(s);
+      if (img) ctx.drawImage(img, 0, 0);
+      else if (masks.has(id)) {
+        // A mask without pixels hides nothing.
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, s.width, s.height);
+      }
+      touch(id);
     }
     if (this.compositor) this.compositor.resize(doc.width, doc.height);
     else this.compositor = new Compositor(doc.width, doc.height);
@@ -76,7 +82,7 @@ class PaintEngine {
   setDocument(doc: PaintDocument): void {
     const resized = this.currentDoc && (this.currentDoc.width !== doc.width || this.currentDoc.height !== doc.height);
     this.currentDoc = doc;
-    for (const layer of flatten(doc.layers)) if (layer.kind === 'raster') ensureSurface(layer.id, doc.width, doc.height);
+    for (const id of pixelIds(doc.layers)) ensureSurface(id, doc.width, doc.height);
     if (resized) this.compositor.resize(doc.width, doc.height);
     this.invalidate();
   }
@@ -150,7 +156,7 @@ class PaintEngine {
   gc(): void {
     const keep = new Set<Id>();
     const add = (doc: PaintDocument | undefined) => {
-      if (doc) for (const l of flatten(doc.layers)) keep.add(l.id);
+      if (doc) for (const id of pixelIds(doc.layers)) keep.add(id);
     };
     add(this.currentDoc ?? undefined);
     for (const e of this.history.entries()) {

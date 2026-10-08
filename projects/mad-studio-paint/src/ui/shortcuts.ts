@@ -85,3 +85,31 @@ export function formatShortcut(s: string, mac: boolean): string {
   const names: Record<string, string> = { Mod: 'Ctrl', Alt: 'Alt', Shift: 'Shift' };
   return [...['Shift', 'Mod', 'Alt'].filter((m) => parts.includes(m)).map((m) => names[m]), label].join('+');
 }
+
+const ACCELERATOR_KEYS: Record<string, string> = {
+  backspace: 'Backspace',
+  delete: 'Delete',
+  enter: 'Enter',
+  escape: 'Escape',
+  space: 'Space',
+  tab: 'Tab',
+  arrowup: 'Up',
+  arrowdown: 'Down',
+  arrowleft: 'Left',
+  arrowright: 'Right',
+  '+': 'Plus',
+};
+
+/** Electron menu accelerator for a shortcut ("Mod+Shift+n" → "Shift+CmdOrCtrl+N"). */
+export function toAccelerator(s: string): string {
+  const parts = normalizeShortcut(s).split('+');
+  let key = parts.pop()!;
+  // "Mod++" splits into an empty key.
+  if (key === '') {
+    key = '+';
+    while (parts[parts.length - 1] === '') parts.pop();
+  }
+  const name = ACCELERATOR_KEYS[key] ?? (key.length === 1 ? key.toUpperCase() : key[0].toUpperCase() + key.slice(1));
+  const mods = [parts.includes('Shift') && 'Shift', parts.includes('Alt') && 'Alt', parts.includes('Mod') && 'CmdOrCtrl'].filter(Boolean);
+  return [...mods, name].join('+');
+}

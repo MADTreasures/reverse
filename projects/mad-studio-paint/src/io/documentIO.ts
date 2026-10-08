@@ -1,5 +1,5 @@
 /** Open, save, import, export and autosave – the browser/Electron side of the document format. */
-import { createRasterLayer, flatten, insertAbove, nextLayerName, rasterLayers } from '../model/layers';
+import { createRasterLayer, flatten, insertAbove, nextLayerName, pixelIds } from '../model/layers';
 import { createDocument } from '../model/document';
 import type { Id, PaintDocument } from '../model/types';
 import { bytesToCanvas, canvasToBytes, createCanvas, ctx2d } from '../engine/canvas';
@@ -51,9 +51,9 @@ export function renderMerged(opts: { paper: boolean; skipDraft: boolean; scale?:
 export async function buildDocumentBytes(): Promise<Uint8Array> {
   const { doc, activeLayerId } = getState();
   const layers = new Map<Id, Uint8Array>();
-  for (const layer of rasterLayers(doc.layers)) {
-    const s = getSurface(layer.id);
-    if (s) layers.set(layer.id, await canvasToBytes(s));
+  for (const id of pixelIds(doc.layers)) {
+    const s = getSurface(id);
+    if (s) layers.set(id, await canvasToBytes(s));
   }
   const previewScale = Math.min(1, 512 / Math.max(doc.width, doc.height));
   const preview = await canvasToBytes(renderMerged({ paper: true, skipDraft: true, scale: previewScale }));

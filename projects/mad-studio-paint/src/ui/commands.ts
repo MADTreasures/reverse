@@ -22,6 +22,8 @@ export interface Command {
 const hasSelection = () => getState().selection !== null;
 const canEdit = () => actions.editBlocker() === null;
 const notTransforming = () => !isTransforming();
+const hasLayer = () => actions.activeLayer() !== null;
+const hasMask = () => Boolean(actions.activeLayer()?.mask);
 
 async function askGrow(sign: 1 | -1): Promise<void> {
   const v = await promptDialog(sign > 0 ? 'Expand selected area by (px)' : 'Shrink selected area by (px)', '4');
@@ -57,7 +59,7 @@ export const COMMANDS: Command[] = [
   { id: 'undo', label: 'Undo', keys: ['Mod+z'], run: () => actions.undo(), enabled: () => getState().canUndo && notTransforming() },
   { id: 'redo', label: 'Redo', keys: ['Mod+y', 'Mod+Shift+z'], run: () => actions.redo(), enabled: () => getState().canRedo && notTransforming() },
   { id: 'cut', label: 'Cut', keys: ['Mod+x', 'F2'], run: () => void cut(), enabled: canEdit },
-  { id: 'copy', label: 'Copy', keys: ['Mod+c', 'F3'], run: () => void copy(), enabled: () => actions.activeRaster() !== null },
+  { id: 'copy', label: 'Copy', keys: ['Mod+c', 'F3'], run: () => void copy(), enabled: () => actions.editTarget() !== null },
   { id: 'paste', label: 'Paste', keys: ['Mod+v', 'F4', 'Mod+Shift+v'], run: () => void pasteImage(), enabled: () => hasClip() },
   { id: 'clear', label: 'Delete', keys: ['backspace', 'delete', 'Mod+backspace'], run: () => actions.clearLayer(), enabled: canEdit },
   { id: 'clearOutside', label: 'Delete outside selected area', keys: ['Shift+backspace', 'Shift+delete'], run: () => actions.clearOutsideSelection(), enabled: () => canEdit() && hasSelection() },
@@ -85,6 +87,14 @@ export const COMMANDS: Command[] = [
     enabled: () => actions.activeLayer()?.kind === 'folder',
   },
   { id: 'duplicateLayer', label: 'Duplicate layer', run: () => actions.duplicateLayer() },
+  // Layer > Layer mask
+  { id: 'maskOutside', label: 'Mask outside selection', run: () => actions.maskLayer(true), enabled: hasLayer },
+  { id: 'maskSelection', label: 'Mask selection', run: () => actions.maskLayer(false), enabled: hasLayer },
+  { id: 'applyMask', label: 'Apply mask to layer', run: () => actions.applyMaskToLayer(), enabled: hasMask },
+  { id: 'deleteMask', label: 'Delete mask', run: () => actions.deleteMask(), enabled: hasMask },
+  { id: 'enableMask', label: 'Enable mask', run: () => actions.toggleMaskEnabled(), enabled: hasMask, checked: () => Boolean(actions.activeLayer()?.mask?.enabled) },
+  { id: 'linkMask', label: 'Link mask to layer', run: () => actions.toggleMaskLink(), enabled: hasMask, checked: () => Boolean(actions.activeLayer()?.mask?.linked) },
+  { id: 'showMaskArea', label: 'Show mask area', run: () => actions.toggleShowMaskArea(), checked: () => getState().showMaskArea },
   { id: 'deleteLayer', label: 'Delete layer', run: () => actions.deleteLayer(), enabled: () => flatten(getState().doc.layers).length > 1 },
   { id: 'mergeDown', label: 'Merge with layer below', keys: ['Mod+e'], run: () => actions.mergeDown(), enabled: () => actions.canMergeDown() },
   { id: 'mergeVisible', label: 'Merge visible layers', keys: ['Mod+Shift+e'], run: () => actions.mergeVisible() },

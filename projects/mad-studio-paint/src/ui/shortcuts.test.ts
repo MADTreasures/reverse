@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { eventToShortcut, formatShortcut, normalizeShortcut } from './shortcuts';
+import { eventToShortcut, formatShortcut, normalizeShortcut, toAccelerator } from './shortcuts';
 
 const ev = (key: string, code: string, mods: Partial<{ shift: boolean; alt: boolean; mod: boolean }> = {}) => ({
   key,
@@ -33,5 +33,16 @@ describe('shortcuts', () => {
     expect(formatShortcut('Mod+Alt+0', true)).toBe('⌥⌘0');
     expect(formatShortcut('Mod+Shift+n', false)).toBe('Shift+Ctrl+N');
     expect(formatShortcut('delete', true)).toBe('Delete');
+  });
+
+  it('converts shortcuts to Electron menu accelerators', () => {
+    expect(toAccelerator('Mod+Shift+n')).toBe('Shift+CmdOrCtrl+N');
+    expect(toAccelerator('Alt+backspace')).toBe('Alt+Backspace');
+    expect(toAccelerator('Mod+Alt+0')).toBe('Alt+CmdOrCtrl+0');
+    expect(toAccelerator('Mod++')).toBe('CmdOrCtrl+Plus');
+    expect(toAccelerator('Alt+]')).toBe('Alt+]');
+    expect(toAccelerator('F1')).toBe('F1');
+    expect(toAccelerator('-')).toBe('-');
+    expect(toAccelerator('Shift+tab')).toBe('Shift+Tab');
   });
 });

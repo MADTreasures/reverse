@@ -6,6 +6,7 @@ import {
   clipGroups,
   cloneLayer,
   createFolder,
+  createLayerMask,
   createRasterLayer,
   findLayer,
   flatten,
@@ -14,7 +15,9 @@ import {
   isEffectivelyVisible,
   layerBelow,
   moveLayer,
+  maskIds,
   nextLayerName,
+  pixelIds,
   removeLayer,
   shiftLayer,
 } from './layers';
@@ -123,6 +126,18 @@ describe('layers', () => {
     expect(copy.id).not.toBe(folder.id);
     expect(idMap.size).toBe(3);
     expect(flatten([copy]).map((l) => l.name)).toEqual(['F', 'B', 'C']);
+  });
+
+  it('gives masks their own pixels: listed, and copied with fresh ids', () => {
+    const inner = createRasterLayer('Inner', { mask: createLayerMask() });
+    const folder = createFolder('F', [inner], { mask: createLayerMask() });
+    expect(pixelIds([folder])).toEqual([folder.mask!.id, inner.id, inner.mask!.id]);
+    expect(maskIds([folder])).toEqual([folder.mask!.id, inner.mask!.id]);
+    const { copy, idMap } = cloneLayer(folder);
+    const copied = flatten([copy]);
+    expect(copy.mask!.id).not.toBe(folder.mask!.id);
+    expect(idMap.get(inner.mask!.id)).toBe(copied[1].mask!.id);
+    expect(idMap.size).toBe(4);
   });
 
   it('names new layers uniquely', () => {

@@ -457,3 +457,143 @@ test('preferences (⌘K) switch to the light interface', async ({ page }) => {
   await page.getByRole('button', { name: 'Dark mode' }).click();
   await page.getByRole('button', { name: 'OK' }).click();
 });
+
+/** Displayed red channel at a document point (layers over white paper). */
+const shown = (page: Page, x: number, y: number) =>
+  page.evaluate(([px, py]) => window.__madPaint.engine.sampleDisplayed(px, py, '#ffffff')[0], [x, y]);
+
+const fillBlack = (page: Page) =>
+  page.evaluate(() => {
+    const m = window.__madPaint;
+    m.actions.setDrawingColor('#000000');
+    m.actions.fillWithColor();
+  });
+
+test('layer mask: mask outside selection, draw on the mask, disable, apply', async ({ page }) => {
+  await boot(page);
+  await fillBlack(page);
+  await selectTool(page, 'select');
+  await drag(page, [100, 100], [200, 200]);
+  await page.getByRole('button', { name: 'Mask outside selection' }).click();
+  await expect(page.locator('[data-testid=mask-thumb]')).toHaveCount(1);
+  expect(await shown(page, 150, 150)).toBe(0);
+  expect(await shown(page, 50, 50)).toBe(255);
+  // The layer's own pixels are untouched; the mask thumbnail is now the drawing target.
+  expect(await layerAlpha(page, 50, 50)).toBe(255);
+  expect(await page.evaluate(() => window.__madPaint.useStore.getState().maskEditing)).toBe(true);
+  await page.keyboard.press('ControlOrMeta+d');
+  // Any colour reveals, the eraser hides.
+  await selectTool(page, 'pen');
+  await drag(page, [20, 50], [80, 50]);
+  expect(await shown(page, 50, 50)).toBe(0);
+  await selectTool(page, 'eraser');
+  await drag(page, [140, 150], [160, 150]);
+  expect(await shown(page, 150, 150)).toBe(255);
+  expect(await layerAlpha(page, 150, 150)).toBe(255);
+  // Disabled, the mask hides nothing.
+  await page.evaluate(() => window.__madPaint.runCommand('enableMask'));
+  expect(await shown(page, 20, 280)).toBe(0);
+  await page.evaluate(() => window.__madPaint.runCommand('enableMask'));
+  expect(await shown(page, 20, 280)).toBe(255);
+  // Applying erases the hidden pixels and removes the mask; undo brings it back.
+  await page.evaluate(() => window.__madPaint.runCommand('applyMask'));
+  await expect(page.locator('[data-testid=mask-thumb]')).toHaveCount(0);
+  expect(await layerAlpha(page, 20, 280)).toBe(0);
+  expect(await layerAlpha(page, 120, 120)).toBe(255);
+  await page.keyboard.press('ControlOrMeta+z');
+  await expect(page.locator('[data-testid=mask-thumb]')).toHaveCount(1);
+  expect(await layerAlpha(page, 20, 280)).toBe(255);
+});
+
+test('layer mask: submenu, Delete unmasks, thumbnails pick the target, saved in the file', async ({ page }) => {
+  await boot(page);
+  await fillBlack(page);
+  await page.getByRole('navigation', { name: 'Main menu' }).getByRole('button', { name: 'Layer', exact: true }).dispatchEvent('pointerdown');
+  await page.locator('.menu-sub', { hasText: 'Layer mask' }).hover();
+  await page.locator('[data-command=maskOutside]').click();
+  await expect(page.locator('[data-testid=mask-thumb]')).toHaveCount(1);
+  // Without a selection, "Mask outside selection" hides the whole layer.
+  expect(await shown(page, 10, 10)).toBe(255);
+  await page.keyboard.press('Delete');
+  expect(await shown(page, 10, 10)).toBe(0);
+  // Clicking the layer thumbnail makes the pixels the target again: Delete now erases them.
+  await page.locator('[data-testid=layer-row] .layer-thumb').first().click();
+  expect(await page.evaluate(() => window.__madPaint.useStore.getState().maskEditing)).toBe(false);
+  await page.keyboard.press('Delete');
+  expect(await layerAlpha(page, 10, 10)).toBe(0);
+  await page.keyboard.press('ControlOrMeta+z');
+  await page.locator('[data-testid=mask-thumb]').click();
+  expect(await page.evaluate(() => window.__madPaint.useStore.getState().maskEditing)).toBe(true);
+  // Hide the left half through the mask, then save and reopen.
+  await page.evaluate(() => {
+    const m = window.__madPaint;
+    m.actions.setSelection({ width: 400, height: 300, data: new Uint8Array(400 * 300).map((_: number, i: number) => (i % 400 < 200 ? 255 : 0)) });
+  });
+  await page.evaluate(() => window.__madPaint.runCommand('maskSelection'));
+  expect(await shown(page, 100, 150)).toBe(255);
+  expect(await shown(page, 300, 150)).toBe(0);
+  await page.evaluate(async () => {
+    const m = window.__madPaint;
+    const bytes = await m.buildDocumentBytes();
+    await m.openFileBytes({ name: 'masked.madpaint', data: bytes });
+  });
+  await expect(page.locator('[data-testid=mask-thumb]')).toHaveCount(1);
+  expect(await shown(page, 100, 150)).toBe(255);
+  expect(await shown(page, 300, 150)).toBe(0);
+});
+
+test('layer mask: a linked mask moves with the layer, an unlinked one stays', async ({ page }) => {
+  await boot(page);
+  await page.evaluate(() => {
+    const m = window.__madPaint;
+    const sel = (x0: number, x1: number) => ({ width: 400, height: 300, data: new Uint8Array(400 * 300).map((_: number, i: number) => (i % 400 >= x0 && i % 400 < x1 && i / 400 >= 50 && i / 400 < 100 ? 255 : 0)) });
+    m.actions.setDrawingColor('#000000');
+    m.actions.setSelection(sel(50, 100));
+    m.actions.fillWithColor();
+    // Mask the left half of the square.
+    m.actions.setSelection(sel(50, 75));
+    m.actions.maskLayer(false);
+    m.actions.deselect();
+    m.actions.selectLayer(m.useStore.getState().activeLayerId, false);
+  });
+  expect(await shown(page, 60, 75)).toBe(255);
+  expect(await shown(page, 90, 75)).toBe(0);
+  await selectTool(page, 'move');
+  await drag(page, [90, 75], [190, 75], 6);
+  expect(await shown(page, 160, 75)).toBe(255);
+  expect(await shown(page, 190, 75)).toBe(0);
+  await page.keyboard.press('ControlOrMeta+z');
+  await page.getByRole('button', { name: 'Link mask to layer' }).click();
+  await drag(page, [90, 75], [190, 75], 6);
+  // The layer moved without its mask: nothing of it is hidden any more.
+  expect(await shown(page, 160, 75)).toBe(0);
+  expect(await shown(page, 190, 75)).toBe(0);
+});
+
+test('Through folders with opacity or a mask mix their result with the backdrop', async ({ page }) => {
+  await boot(page);
+  const px = await page.evaluate(() => {
+    const m = window.__madPaint;
+    const a = m.actions;
+    a.setDrawingColor('#ff0000');
+    a.fillWithColor();
+    const folder = a.addFolder();
+    a.setLayerProps(folder, { blend: 'pass-through', opacity: 0.5 }, 'Blending mode');
+    a.addRasterLayer();
+    a.setDrawingColor('#0000ff');
+    a.fillWithColor();
+    a.setLayerProps(m.useStore.getState().activeLayerId, { blend: 'multiply' }, 'Blending mode');
+    const half = m.engine.sampleDisplayed(10, 10, '#ffffff');
+    // Full opacity, but a mask that hides the left half of the folder.
+    a.setLayerProps(folder, { opacity: 1 }, 'Layer opacity');
+    a.setSelection({ width: 400, height: 300, data: new Uint8Array(400 * 300).map((_: number, i: number) => (i % 400 < 200 ? 255 : 0)) });
+    a.maskLayer(false, folder);
+    return { half, left: m.engine.sampleDisplayed(100, 10, '#ffffff'), right: m.engine.sampleDisplayed(300, 10, '#ffffff') };
+  });
+  // Red × blue (multiply) = black, mixed half and half with the red backdrop.
+  expect(px.half[0]).toBeGreaterThan(120);
+  expect(px.half[0]).toBeLessThan(136);
+  expect(px.half[2]).toBeLessThan(4);
+  expect(px.left.slice(0, 3)).toEqual([255, 0, 0]);
+  expect(px.right.slice(0, 3)).toEqual([0, 0, 0]);
+});

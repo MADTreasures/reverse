@@ -4,6 +4,7 @@ import { createDocument } from '../model/document';
 import {
   cloneLayer,
   createFolder,
+  createLayerMask,
   createRasterLayer,
   findLayer,
   flatten,
@@ -12,20 +13,22 @@ import {
   layerBelow,
   locate,
   moveLayer as moveLayerInTree,
+  maskIds,
   nextLayerName,
+  pixelIds,
   rasterLayers,
   removeLayer,
   shiftLayer as shiftLayerInTree,
   type DropPosition,
 } from '../model/layers';
-import type { FolderLayer, Id, Layer, PaintDocument, RasterLayer } from '../model/types';
+import type { FolderLayer, Id, Layer, LayerMask, PaintDocument, RasterLayer } from '../model/types';
 import { combine, createMask, expandMask, invertMask, isMaskEmpty, maskBounds, rectMask, type Mask, type SelectionOp } from '../paint/mask';
 import { mergeSubTools, type SubTool, type ToolId } from '../paint/tools';
 import { normalizeAngle, rotatePan } from '../paint/viewMath';
 import { createCanvas, ctx2d, withClip } from '../engine/canvas';
 import { captureLayerChange, DirectEdit, type PixelPatch } from '../engine/edit';
 import { engine, type DocState, type HistoryEntry } from '../engine/engine';
-import { ensureSurface, getSurface, setSurface } from '../engine/surfaces';
+import { ensureSurface, getSurface, setSurface, touch } from '../engine/surfaces';
 import { currentSubTool, getState, initialView, setState, type ColorState, type PaintState, type Preferences, type ViewState } from './store';
 
 // ------------------------------------------------------------------ history
@@ -75,7 +78,7 @@ export function changeDoc(label: string, fn: (doc: PaintDocument, s: PaintState)
   const doc = structuredClone(s.doc);
   const active = fn(doc, s) ?? s.activeLayerId;
   const activeLayerId = findLayer(doc.layers, active) ? active : flatten(doc.layers)[0]?.id ?? '';
-  setState({ doc, activeLayerId });
+  setState({ doc, activeLayerId, ...(activeLayerId !== s.activeLayerId ? { maskEditing: false } : {}) });
   commit({ label, before, after: { doc, activeLayerId }, patches: opts.patches ?? [], key: opts.key });
 }
 
@@ -84,13 +87,18 @@ export function commitPixels(label: string, patches: (PixelPatch | null)[]): voi
   if (list.length) commit({ label, patches: list });
 }
 
+function setActiveDoc(d: DocState): void {
+  const changed = d.activeLayerId !== getState().activeLayerId;
+  setState({ doc: d.doc, activeLayerId: d.activeLayerId, ...(changed ? { maskEditing: false } : {}) });
+}
+
 export function undo(): void {
   if (getState().transforming) return;
   const e = engine.history.undo();
   if (!e) return;
   if (e.canvasSize) engine.resizeCanvas(e.canvasSize.before.w, e.canvasSize.before.h);
   engine.applyPatches(e, 'before');
-  if (e.before) setState({ doc: e.before.doc, activeLayerId: e.before.activeLayerId });
+  if (e.before) setActiveDoc(e.before);
   if (e.selection) setState({ selection: e.selection.before });
   engine.invalidate();
   syncHistoryFlags();
@@ -102,7 +110,7 @@ export function redo(): void {
   if (!e) return;
   if (e.canvasSize) engine.resizeCanvas(e.canvasSize.after.w, e.canvasSize.after.h);
   engine.applyPatches(e, 'after');
-  if (e.after) setState({ doc: e.after.doc, activeLayerId: e.after.activeLayerId });
+  if (e.after) setActiveDoc(e.after);
   if (e.selection) setState({ selection: e.selection.after });
   engine.invalidate();
   syncHistoryFlags();
@@ -115,6 +123,7 @@ export function loadDocument(doc: PaintDocument, images: Map<Id, HTMLCanvasEleme
   setState({
     doc,
     activeLayerId: rasterLayers(doc.layers)[0]?.id ?? flatten(doc.layers)[0]?.id ?? '',
+    maskEditing: false,
     selection: null,
     canUndo: false,
     canRedo: false,
@@ -157,18 +166,57 @@ export function activeRaster(s: PaintState = getState()): RasterLayer | null {
   return l?.kind === 'raster' ? l : null;
 }
 
+/** What the drawing tools change: the active layer's mask (its thumbnail is selected) or its pixels. */
+export interface EditTarget {
+  layer: Layer;
+  /** Surface that receives the pixels. */
+  surfaceId: Id;
+  isMask: boolean;
+  lockAlpha: boolean;
+}
+
+export function editTarget(s: PaintState = getState()): EditTarget | null {
+  const l = activeLayer(s);
+  if (!l) return null;
+  if (s.maskEditing && l.mask) return { layer: l, surfaceId: l.mask.id, isMask: true, lockAlpha: false };
+  return l.kind === 'raster' ? { layer: l, surfaceId: l.id, isMask: false, lockAlpha: l.lockAlpha } : null;
+}
+
+/** True when the drawing tools edit the active layer's mask. */
+export const editingMask = (s: PaintState = getState()): boolean => editTarget(s)?.isMask ?? false;
+
 /** Why the current layer cannot be painted on, or null if it can. */
 export function editBlocker(s: PaintState = getState()): string | null {
   const l = activeLayer(s);
   if (!l) return 'No layer selected';
-  if (l.kind !== 'raster') return 'Select a raster layer to draw on (folders cannot be drawn on)';
+  if (!editTarget(s)) return 'Select a raster layer to draw on (folders cannot be drawn on)';
   if (isEffectivelyLocked(s.doc.layers, l.id)) return 'The layer is locked';
   if (!l.visible) return 'The layer is hidden';
   return null;
 }
 
-export function selectLayer(id: Id): void {
-  if (findLayer(getState().doc.layers, id)) setState({ activeLayerId: id });
+/** Selects a layer; with `mask`, its mask thumbnail (the mask becomes the drawing target). */
+export function selectLayer(id: Id, mask = false): void {
+  const l = findLayer(getState().doc.layers, id);
+  if (l) setState({ activeLayerId: id, maskEditing: mask && Boolean(l.mask) });
+}
+
+/**
+ * Surfaces that move with the active layer (Move layer tool, transforms, flips): its pixels, those of
+ * every layer inside a folder, and linked masks. An unlinked mask whose thumbnail is selected moves alone.
+ * Locked layers are left out.
+ */
+export function movingSurfaces(s: PaintState = getState()): Id[] {
+  const l = activeLayer(s);
+  if (!l) return [];
+  if (s.maskEditing && l.mask && !l.mask.linked) return [l.mask.id];
+  const ids: Id[] = [];
+  for (const x of flatten([l])) {
+    if (isEffectivelyLocked(s.doc.layers, x.id)) continue;
+    if (x.kind === 'raster') ids.push(x.id);
+    if (x.mask?.linked) ids.push(x.mask.id);
+  }
+  return ids;
 }
 
 /** New layers go directly above the selected layer, or to the top of a selected folder. */
@@ -224,7 +272,7 @@ export function selectAdjacentLayer(dir: -1 | 1): void {
   walk(s.doc.layers);
   const i = rows.indexOf(s.activeLayerId);
   const next = rows[i + dir];
-  if (next) setState({ activeLayerId: next });
+  if (next) setState({ activeLayerId: next, maskEditing: false });
 }
 
 /** Puts the selected layer into a new folder ("Create folder and insert layer"). */
@@ -377,7 +425,8 @@ export function mergeDown(): void {
   const merged = composeStack(
     [
       { ...structuredClone(upper), visible: true },
-      { ...structuredClone(lower), visible: true, opacity: 1, blend: 'normal', clip: false },
+      // The lower layer's mask stays on the merged layer, so its pixels are merged unmasked.
+      { ...structuredClone(lower), visible: true, opacity: 1, blend: 'normal', clip: false, mask: undefined },
     ],
     s.doc,
   );
@@ -439,7 +488,7 @@ export function transferToLowerLayer(): void {
   const merged = composeStack(
     [
       { ...structuredClone(upper), visible: true, clip: upper.clip },
-      { ...structuredClone(lower), visible: true, opacity: 1, blend: 'normal', clip: false },
+      { ...structuredClone(lower), visible: true, opacity: 1, blend: 'normal', clip: false, mask: undefined },
     ],
     s.doc,
   );
@@ -473,6 +522,164 @@ export function soloLayer(id: Id): void {
   });
 }
 
+// ------------------------------------------------------------------ layer masks
+
+function maskedLayer(id: Id): Layer | null {
+  const s = getState();
+  const l = findLayer(s.doc.layers, id);
+  if (!l) return null;
+  if (isEffectivelyLocked(s.doc.layers, id)) {
+    setState({ hint: 'The layer is locked' });
+    return null;
+  }
+  return l;
+}
+
+/**
+ * Layer > Layer mask > Mask outside selection (`outside`) or Mask selection. Without a selection the
+ * first hides the whole layer and the second creates a mask that hides nothing. A layer that already
+ * has a mask gets the area added to it. The mask thumbnail becomes the drawing target.
+ */
+export function maskLayer(outside: boolean, id: Id = getState().activeLayerId): void {
+  const layer = maskedLayer(id);
+  if (!layer) return;
+  const { width, height } = getState().doc;
+  const sel = engine.selectionCanvas();
+  // Alpha of `hide` is the area to mask.
+  const hide = createCanvas(width, height);
+  const h = ctx2d(hide);
+  if (outside) {
+    h.fillStyle = '#000';
+    h.fillRect(0, 0, width, height);
+    if (sel) {
+      h.globalCompositeOperation = 'destination-out';
+      h.drawImage(sel, 0, 0);
+    }
+  } else if (sel) h.drawImage(sel, 0, 0);
+  const label = outside ? 'Mask outside selection' : 'Mask selection';
+  const hideIn = (ctx: CanvasRenderingContext2D) => {
+    ctx.save();
+    ctx.globalCompositeOperation = 'destination-out';
+    ctx.drawImage(hide, 0, 0);
+    ctx.restore();
+  };
+  if (layer.mask) {
+    const surface = getSurface(layer.mask.id);
+    const patch = surface ? captureLayerChange(layer.mask.id, surface, null, hideIn) : null;
+    if (patch) {
+      engine.invalidate();
+      commitPixels(label, [patch]);
+    }
+  } else {
+    const mask = createLayerMask();
+    const surface = ensureSurface(mask.id, width, height);
+    const m = ctx2d(surface);
+    m.fillStyle = '#ffffff';
+    m.fillRect(0, 0, width, height);
+    hideIn(m);
+    touch(mask.id);
+    changeDoc(label, (doc) => {
+      const l = findLayer(doc.layers, id);
+      if (l) l.mask = mask;
+      return id;
+    });
+  }
+  setState({ activeLayerId: id, maskEditing: true });
+}
+
+/** Layer > Layer mask > Delete mask. */
+export function deleteMask(id: Id = getState().activeLayerId): void {
+  const l = maskedLayer(id);
+  if (!l?.mask) return;
+  changeDoc('Delete mask', (doc) => {
+    const x = findLayer(doc.layers, id);
+    if (x) delete x.mask;
+    return id;
+  });
+  setState({ maskEditing: false });
+}
+
+/**
+ * Layer > Layer mask > Apply mask to layer: erases what the mask hides and removes the mask.
+ * A folder becomes one raster layer, as in the reference.
+ */
+export function applyMaskToLayer(id: Id = getState().activeLayerId): void {
+  const l = maskedLayer(id);
+  if (!l?.mask) return;
+  const s = getState();
+  const maskSurface = getSurface(l.mask.id);
+  if (!maskSurface) return;
+  if (l.kind === 'raster') {
+    const surface = getSurface(l.id);
+    if (!surface) return;
+    const patch = captureLayerChange(l.id, surface, null, (ctx) => {
+      ctx.save();
+      ctx.globalCompositeOperation = 'destination-in';
+      ctx.drawImage(maskSurface, 0, 0);
+      ctx.restore();
+    });
+    changeDoc(
+      'Apply mask to layer',
+      (doc) => {
+        const x = findLayer(doc.layers, id);
+        if (x) delete x.mask;
+        return id;
+      },
+      { patches: patch ? [patch] : [] },
+    );
+  } else {
+    const raster = createRasterLayer(l.name, {
+      visible: l.visible,
+      opacity: l.opacity,
+      blend: l.blend === 'pass-through' ? 'normal' : l.blend,
+      clip: l.clip,
+      reference: l.reference,
+      draft: l.draft,
+    });
+    const merged = composeStack([{ ...structuredClone(l), visible: true, opacity: 1, blend: 'normal', clip: false, mask: { ...l.mask, enabled: true } }], s.doc);
+    ctx2d(ensureSurface(raster.id, s.doc.width, s.doc.height)).drawImage(merged, 0, 0);
+    changeDoc('Apply mask to layer', (doc) => {
+      const loc = locate(doc.layers, id);
+      if (!loc) return;
+      loc.siblings.splice(loc.index, 1, raster);
+      return raster.id;
+    });
+  }
+  setState({ maskEditing: false });
+}
+
+export function setMaskProps(id: Id, patch: Partial<Pick<LayerMask, 'enabled' | 'linked'>>, label: string): void {
+  if (!findLayer(getState().doc.layers, id)?.mask) return;
+  changeDoc(label, (doc) => {
+    const x = findLayer(doc.layers, id);
+    if (x?.mask) x.mask = { ...x.mask, ...patch };
+  });
+}
+
+/** Layer > Layer mask > Enable mask. */
+export function toggleMaskEnabled(id: Id = getState().activeLayerId): void {
+  const m = findLayer(getState().doc.layers, id)?.mask;
+  if (m) setMaskProps(id, { enabled: !m.enabled }, m.enabled ? 'Disable mask' : 'Enable mask');
+}
+
+/** Layer > Layer mask > Link mask to layer (the check mark between the thumbnails). */
+export function toggleMaskLink(id: Id = getState().activeLayerId): void {
+  const m = findLayer(getState().doc.layers, id)?.mask;
+  if (m) setMaskProps(id, { linked: !m.linked }, m.linked ? 'Unlink mask' : 'Link mask to layer');
+}
+
+/** Layer > Layer mask > Show mask area: tints the masked part of the active layer. */
+export function toggleShowMaskArea(): void {
+  setState((s) => ({ showMaskArea: !s.showMaskArea }));
+  engine.requestRender();
+}
+
+/** ⌘-click on a mask thumbnail: selects the area the mask shows. */
+export function selectMaskArea(id: Id, op: SelectionOp = 'replace'): void {
+  const m = findLayer(getState().doc.layers, id)?.mask;
+  if (m) selectLayerOpacity(m.id, op, 'Select mask area');
+}
+
 /** Live preview of a CSS filter on the current layer (tonal correction dialogs). */
 export class FilterPreview {
   private edit: DirectEdit | null = null;
@@ -481,10 +688,10 @@ export class FilterPreview {
   constructor() {
     const s = getState();
     if (editBlocker(s)) return;
-    const layer = activeRaster(s)!;
-    const surface = getSurface(layer.id);
+    const target = editTarget(s)!;
+    const surface = getSurface(target.surfaceId);
     if (!surface) return;
-    this.edit = new DirectEdit(layer.id, surface, (r) => engine.invalidate(r), 'filter');
+    this.edit = new DirectEdit(target.surfaceId, surface, (r) => engine.invalidate(r), 'filter');
     this.lifted = createCanvas(surface.width, surface.height);
     ctx2d(this.lifted).drawImage(this.edit.backup, 0, 0);
   }
@@ -583,17 +790,35 @@ export function changeImageResolution(width: number, height: number, dpi: number
   );
 }
 
+/** A mask after a canvas change: area that did not exist before hides nothing. */
+function maskWithNewAreaVisible(old: HTMLCanvasElement, w: number, h: number, transform: (old: HTMLCanvasElement) => HTMLCanvasElement): HTMLCanvasElement {
+  const solid = createCanvas(old.width, old.height);
+  const sctx = ctx2d(solid);
+  sctx.fillStyle = '#000';
+  sctx.fillRect(0, 0, solid.width, solid.height);
+  const out = createCanvas(w, h);
+  const o = ctx2d(out);
+  o.fillStyle = '#ffffff';
+  o.fillRect(0, 0, w, h);
+  o.globalCompositeOperation = 'destination-out';
+  o.drawImage(transform(solid), 0, 0);
+  o.globalCompositeOperation = 'source-over';
+  o.drawImage(transform(old), 0, 0);
+  return out;
+}
+
 function resizeDocument(label: string, w: number, h: number, transform: (old: HTMLCanvasElement) => HTMLCanvasElement, dpi?: number): void {
   const s = getState();
   const before = docState(s);
   const patches: PixelPatch[] = [];
-  for (const l of rasterLayers(s.doc.layers)) {
-    const surf = getSurface(l.id);
+  const masks = new Set(maskIds(s.doc.layers));
+  for (const id of pixelIds(s.doc.layers)) {
+    const surf = getSurface(id);
     if (!surf) continue;
     const b = ctx2d(surf, true).getImageData(0, 0, surf.width, surf.height);
-    const next = transform(surf);
-    setSurface(l.id, next);
-    patches.push({ layerId: l.id, rect: { x: 0, y: 0, w, h }, before: b, after: ctx2d(next, true).getImageData(0, 0, w, h) });
+    const next = masks.has(id) ? maskWithNewAreaVisible(surf, w, h, transform) : transform(surf);
+    setSurface(id, next);
+    patches.push({ layerId: id, rect: { x: 0, y: 0, w, h }, before: b, after: ctx2d(next, true).getImageData(0, 0, w, h) });
   }
   engine.compositor.resize(w, h);
   const doc = { ...structuredClone(s.doc), width: w, height: h, ...(dpi ? { dpi } : {}) };
@@ -619,17 +844,17 @@ export function cropCanvas(r: { x: number; y: number; w: number; h: number }): v
   const before = docState(s);
   const patches: PixelPatch[] = [];
   const beforeImages = new Map<Id, ImageData>();
-  for (const l of rasterLayers(s.doc.layers)) {
-    const surf = getSurface(l.id);
-    if (surf) beforeImages.set(l.id, ctx2d(surf, true).getImageData(0, 0, surf.width, surf.height));
+  for (const id of pixelIds(s.doc.layers)) {
+    const surf = getSurface(id);
+    if (surf) beforeImages.set(id, ctx2d(surf, true).getImageData(0, 0, surf.width, surf.height));
   }
   engine.resizeCanvas(w, h, -Math.round(r.x), -Math.round(r.y));
-  for (const l of rasterLayers(s.doc.layers)) {
-    const surf = getSurface(l.id);
-    const b = beforeImages.get(l.id);
+  for (const id of pixelIds(s.doc.layers)) {
+    const surf = getSurface(id);
+    const b = beforeImages.get(id);
     if (!surf || !b) continue;
     const after = ctx2d(surf, true).getImageData(0, 0, w, h);
-    patches.push({ layerId: l.id, rect: { x: 0, y: 0, w, h }, before: b, after });
+    patches.push({ layerId: id, rect: { x: 0, y: 0, w, h }, before: b, after });
   }
   const doc = { ...structuredClone(s.doc), width: w, height: h };
   const selectionBefore = s.selection;
@@ -647,17 +872,17 @@ export function cropCanvas(r: { x: number; y: number; w: number; h: number }): v
 
 // ------------------------------------------------------------------ pixel operations on the current layer
 
-function withActiveSurface(fn: (layer: RasterLayer, surface: HTMLCanvasElement) => PixelPatch | null, label: string): boolean {
+function withEditSurface(fn: (target: EditTarget, surface: HTMLCanvasElement) => PixelPatch | null, label: string): boolean {
   const s = getState();
   const blocker = editBlocker(s);
-  const layer = activeRaster(s);
-  if (blocker || !layer) {
+  const target = editTarget(s);
+  if (blocker || !target) {
     setState({ hint: blocker ?? '' });
     return false;
   }
-  const surface = getSurface(layer.id);
+  const surface = getSurface(target.surfaceId);
   if (!surface) return false;
-  const patch = fn(layer, surface);
+  const patch = fn(target, surface);
   if (patch) {
     engine.invalidate(patch.rect);
     commitPixels(label, [patch]);
@@ -665,14 +890,37 @@ function withActiveSurface(fn: (layer: RasterLayer, surface: HTMLCanvasElement) 
   return true;
 }
 
-/** Delete key: clears the selection (or the whole layer). */
+/** Makes a mask show everything inside `area` (alpha), or everywhere when `area` is null. */
+function revealMask(ctx: CanvasRenderingContext2D, area: HTMLCanvasElement | null): void {
+  ctx.save();
+  if (area) ctx.drawImage(area, 0, 0);
+  else {
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, ctx.canvas.width, ctx.canvas.height);
+  }
+  ctx.restore();
+}
+
+/** Opaque everywhere except the selection. */
+function outsideOf(sel: HTMLCanvasElement): HTMLCanvasElement {
+  const c = createCanvas(sel.width, sel.height);
+  const x = ctx2d(c);
+  x.fillStyle = '#ffffff';
+  x.fillRect(0, 0, c.width, c.height);
+  x.globalCompositeOperation = 'destination-out';
+  x.drawImage(sel, 0, 0);
+  return c;
+}
+
+/** Delete key: clears the selection (or the whole layer). On a layer mask it unmasks instead. */
 export function clearLayer(): void {
   const sel = engine.selectionCanvas();
   const bounds = getState().selection ? maskBounds(getState().selection!) : null;
-  withActiveSurface((layer, surface) => {
+  withEditSurface((target, surface) => {
     if (getState().selection && !bounds) return null;
-    return captureLayerChange(layer.id, surface, bounds, (ctx) => {
-      if (sel) {
+    return captureLayerChange(target.surfaceId, surface, bounds, (ctx) => {
+      if (target.isMask) revealMask(ctx, sel);
+      else if (sel) {
         ctx.save();
         ctx.globalCompositeOperation = 'destination-out';
         ctx.drawImage(sel, 0, 0);
@@ -685,9 +933,13 @@ export function clearLayer(): void {
 export function clearOutsideSelection(): void {
   const sel = engine.selectionCanvas();
   if (!sel) return;
-  withActiveSurface(
-    (layer, surface) =>
-      captureLayerChange(layer.id, surface, null, (ctx) => {
+  withEditSurface(
+    (target, surface) =>
+      captureLayerChange(target.surfaceId, surface, null, (ctx) => {
+        if (target.isMask) {
+          revealMask(ctx, outsideOf(sel));
+          return;
+        }
         ctx.save();
         ctx.globalCompositeOperation = 'destination-in';
         ctx.drawImage(sel, 0, 0);
@@ -703,7 +955,7 @@ export function fillWithColor(): void {
   const sel = engine.selectionCanvas();
   const bounds = s.selection ? maskBounds(s.selection) : null;
   const color = s.colors.active === 'main' ? s.colors.main : s.colors.sub;
-  withActiveSurface((layer, surface) => {
+  const ok = withEditSurface((target, surface) => {
     if (s.selection && !bounds) return null;
     const tmp = createCanvas(surface.width, surface.height);
     const t = ctx2d(tmp);
@@ -713,21 +965,30 @@ export function fillWithColor(): void {
       t.globalCompositeOperation = 'destination-in';
       t.drawImage(sel, 0, 0);
     }
-    return captureLayerChange(layer.id, surface, bounds, (ctx) => {
+    return captureLayerChange(target.surfaceId, surface, bounds, (ctx) => {
       ctx.save();
-      ctx.globalCompositeOperation = layer.lockAlpha ? 'source-atop' : 'source-over';
+      ctx.globalCompositeOperation = target.lockAlpha ? 'source-atop' : 'source-over';
       ctx.drawImage(tmp, 0, 0);
       ctx.restore();
     });
   }, 'Fill');
-  addColorToHistory(color);
+  if (ok && !editingMask(s)) addColorToHistory(color);
 }
 
+/** Flips the layer (and its linked mask, or a whole folder's layers) or the selected pixels. */
 export function flipLayer(horizontal: boolean): void {
   const s = getState();
+  const blocker = editBlocker(s);
+  if (blocker) {
+    setState({ hint: blocker });
+    return;
+  }
   const bounds = s.selection ? maskBounds(s.selection) : null;
   const sel = engine.selectionCanvas();
-  withActiveSurface((layer, surface) => {
+  const patches: (PixelPatch | null)[] = [];
+  for (const id of movingSurfaces(s)) {
+    const surface = getSurface(id);
+    if (!surface) continue;
     const r = bounds ?? { x: 0, y: 0, w: surface.width, h: surface.height };
     const lifted = createCanvas(surface.width, surface.height);
     const l = ctx2d(lifted);
@@ -736,21 +997,25 @@ export function flipLayer(horizontal: boolean): void {
       l.globalCompositeOperation = 'destination-in';
       l.drawImage(sel, 0, 0);
     }
-    return captureLayerChange(layer.id, surface, r, (ctx) => {
-      ctx.save();
-      if (sel) {
-        ctx.globalCompositeOperation = 'destination-out';
-        ctx.drawImage(sel, 0, 0);
-        ctx.globalCompositeOperation = 'source-over';
-      } else ctx.clearRect(0, 0, surface.width, surface.height);
-      withClip(ctx, r, () => {
-        if (horizontal) ctx.setTransform(-1, 0, 0, 1, 2 * r.x + r.w, 0);
-        else ctx.setTransform(1, 0, 0, -1, 0, 2 * r.y + r.h);
-        ctx.drawImage(lifted, 0, 0);
-      });
-      ctx.restore();
-    });
-  }, horizontal ? 'Flip horizontal' : 'Flip vertical');
+    patches.push(
+      captureLayerChange(id, surface, r, (ctx) => {
+        ctx.save();
+        if (sel) {
+          ctx.globalCompositeOperation = 'destination-out';
+          ctx.drawImage(sel, 0, 0);
+          ctx.globalCompositeOperation = 'source-over';
+        } else ctx.clearRect(0, 0, surface.width, surface.height);
+        withClip(ctx, r, () => {
+          if (horizontal) ctx.setTransform(-1, 0, 0, 1, 2 * r.x + r.w, 0);
+          else ctx.setTransform(1, 0, 0, -1, 0, 2 * r.y + r.h);
+          ctx.drawImage(lifted, 0, 0);
+        });
+        ctx.restore();
+      }),
+    );
+  }
+  engine.invalidate();
+  commitPixels(horizontal ? 'Flip horizontal' : 'Flip vertical', patches);
 }
 
 // ------------------------------------------------------------------ selection
@@ -795,15 +1060,15 @@ export function growSelection(px: number): void {
   if (selection && px !== 0) setSelection(expandMask(selection, px), px > 0 ? 'Expand selected area' : 'Shrink selected area');
 }
 
-/** Selects the opaque pixels of a layer (⌘-click on a layer thumbnail). */
-export function selectLayerOpacity(id: Id, op: SelectionOp = 'replace'): void {
+/** Selects the opaque pixels of a surface (⌘-click on a layer or mask thumbnail). */
+export function selectLayerOpacity(id: Id, op: SelectionOp = 'replace', label = 'Select layer opacity'): void {
   const s = getState();
   const surface = getSurface(id);
   if (!surface) return;
   const img = ctx2d(surface, true).getImageData(0, 0, surface.width, surface.height).data;
   const m = createMask(surface.width, surface.height);
   for (let i = 0, p = 3; i < m.data.length; i++, p += 4) m.data[i] = img[p];
-  if (s.doc.width === m.width) applySelection(m, op, 'Select layer opacity');
+  if (s.doc.width === m.width) applySelection(m, op, label);
 }
 
 // ------------------------------------------------------------------ tools

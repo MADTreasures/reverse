@@ -6,8 +6,8 @@ import { useStore } from '../../store/store';
 const W = 40;
 const H = 30;
 
-/** Small preview of a raster layer, refreshed (throttled) when its pixels change. */
-export function LayerThumb({ id }: { id: Id }) {
+/** Small preview of a raster layer (or a mask: white shows, black hides), refreshed (throttled) when its pixels change. */
+export function LayerThumb({ id, mask = false }: { id: Id; mask?: boolean }) {
   const ref = useRef<HTMLCanvasElement>(null);
   const width = useStore((s) => s.doc.width);
   const height = useStore((s) => s.doc.height);
@@ -30,7 +30,19 @@ export function LayerThumb({ id }: { id: Id }) {
       const h = height * k;
       ctx.clearRect(0, 0, c.width, c.height);
       ctx.imageSmoothingQuality = 'medium';
-      ctx.drawImage(s, (c.width - w) / 2, (c.height - h) / 2, w, h);
+      if (mask) {
+        ctx.fillStyle = '#000';
+        ctx.fillRect((c.width - w) / 2, (c.height - h) / 2, w, h);
+        const white = document.createElement('canvas');
+        white.width = c.width;
+        white.height = c.height;
+        const wctx = white.getContext('2d')!;
+        wctx.drawImage(s, (c.width - w) / 2, (c.height - h) / 2, w, h);
+        wctx.globalCompositeOperation = 'source-in';
+        wctx.fillStyle = '#fff';
+        wctx.fillRect(0, 0, c.width, c.height);
+        ctx.drawImage(white, 0, 0);
+      } else ctx.drawImage(s, (c.width - w) / 2, (c.height - h) / 2, w, h);
     };
     draw();
     const off = onSurfaceChange(() => {
@@ -40,7 +52,7 @@ export function LayerThumb({ id }: { id: Id }) {
       off();
       if (timer) clearTimeout(timer);
     };
-  }, [id, width, height]);
+  }, [id, width, height, mask]);
 
   return <canvas ref={ref} className="layer-thumb" style={{ width: W, height: H }} />;
 }

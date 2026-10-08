@@ -41,6 +41,10 @@ export const DEFAULT_PREFS: Preferences = { theme: 'dark', rotationStep: 5, undo
 export interface PaintState {
   doc: PaintDocument;
   activeLayerId: Id;
+  /** The active layer's mask thumbnail is selected: drawing tools edit the mask. */
+  maskEditing: boolean;
+  /** Layer > Layer mask > Show mask area: the masked part of the active layer is tinted. */
+  showMaskArea: boolean;
   selection: Mask | null;
   /** Default combine mode of the selection tools (modifier keys override it). */
   selectionOp: SelectionOp;
@@ -83,6 +87,8 @@ function initialState(): PaintState {
   return {
     doc,
     activeLayerId: doc.layers[0].id,
+    maskEditing: false,
+    showMaskArea: false,
     selection: null,
     selectionOp: 'replace',
     tool: 'pen',

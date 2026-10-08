@@ -133,14 +133,16 @@ Status: ✅ gleich · 🟡 ähnlich/vereinfacht · ❌ fehlt (noch)
 | ------- | ------------------------ | ---------------- | ------ | ---- |
 | Neue Illustration | „Paper“ + „Layer 1“; Ebenen heissen „Layer N“, Ordner „Folder N“, Kopien „… Copy“ [T1250, Screenshots, PRF] | gleich | ✅ | `layers: …` |
 | Ebenenmodi | 28 Modi in fester Reihenfolge + „Through“ für Ordner [BL, T656] | alle 28; die 11 Modi ohne Canvas-Entsprechung (Linear burn, Subtract, Glow dodge, Add, Vivid/Linear/Pin light, Hard mix, Darker/Lighter color, Divide) pixelweise berechnet; Glow dodge / Add (Glow) nach einem Modell (Formel nicht offiziell) | 🟡 | `per-pixel blending modes …`, Unit: `blendPixels` |
-| Ordner | Standard „Normal“ (isoliert), „Through“ wählbar; auf „Through“-Ordner kann nichts beschnitten werden [FOL] | gleich | ✅ | Unit: `never clips onto …` |
+| Ordner | Standard „Normal“ (isoliert), „Through“ wählbar; auf „Through“-Ordner kann nichts beschnitten werden [FOL] | gleich; Deckkraft und Maske eines „Through“-Ordners mischen dessen Ergebnis mit dem Hintergrund (eigenes Modell, im Handbuch nicht beschrieben) | ✅ | Unit: `never clips onto …`, `Through folders with opacity …` |
 | Schnittmaske | Alpha und Deckkraft der Basis wirken; rosa Balken [OLS] | gleich | ✅ | `layers: …` |
+| Ebenenmasken | „Mask outside selection“ / „Mask selection“ (ohne Auswahl: alles bzw. nichts maskiert), Symbol in der Ebenen-Palette; Maske per Klick aufs Miniaturbild bearbeiten: jede Farbe zeigt, Radierer/Transparenz verbirgt (Alpha-Skala); Entf = nichts maskiert; Deaktivieren (rotes Kreuz), „Show mask area“ (violett), Verknüpfung (Häkchen zwischen den Bildern) = Maske bewegt sich mit; „Apply mask to layer“ (Ordner werden zur Rasterebene), „Delete mask“ [MASK] | gleich; dazu ⌘-Klick auf die Maske = Auswahl | 🟡 | `layer mask: …` (3 Tests) |
 | Referenz-, Entwurfsebene, Sperren, Transparente Pixel schützen | Leuchtturm-Symbol; Entwurf = blauer Balken, nicht im Export und nicht in Füll-Referenz; Sperren blockiert Zeichnen und Einstellungen [REF, DR, JS] | gleich | ✅ | – |
 | Paletten-Interaktionen | ⌥-Klick aufs Auge = nur diese Ebene; ⌘-Klick aufs Miniaturbild = Auswahl; ⌥-Ziehen = Duplikat; Doppelklick = umbenennen [LP, BO] | gleich | ✅ | `layer palette: ⌥-click …` |
 | Neue Ebene | direkt über der aktiven, bzw. oben in einem gewählten Ordner [BO, FOL] | gleich | ✅ | `folders: …` |
 | Vereinen | Mit unterer: verweigert bei gesperrten, ausgeblendeten, Entwurfsebenen; behält Name/Modus der unteren. Sichtbare vereinen: Ausgeblendete und Entwürfe bleiben [T582] | gleich | ✅ | `merging is refused …` |
 | Auf untere Ebene übertragen | Pixel nach unten, obere bleibt leer [JB] | gleich | ✅ | – |
-| Vektor-, Text-, Füll-, Ton-, Korrekturebenen, Masken | vorhanden [WAL] | fehlen | ❌ | – |
+| Masken-Darstellung „Mask Expression“ (Verläufe ja/nein, Schwelle) | in den Ebeneneigenschaften [LPROP] | Masken wirken immer stufenlos | ❌ | – |
+| Vektor-, Text-, Füll-, Ton-, Korrekturebenen | vorhanden [WAL] | fehlen | ❌ | – |
 
 ### Ansicht, Undo, Dateien
 
@@ -225,6 +227,7 @@ Präfix `M/` = `https://help.clip-studio.com/en-us/manual_en/` (Handbuch Ver. 5.
 | SEL, CW, CS, CSET, CH, EYE | `M/300_color/Selecting_colors.htm`, `…/Color_Wheel_palette.htm`, `…/Color_Slider_palette.htm`, `…/Color_Set_palette.htm`, `…/Color_History_palette.htm`, `…/Eyedropper_Tool.htm` |
 | NAV, CANVAS | `M/270_canvas/Navigating_the_canvas.htm`, `…/Canvas_window.htm` |
 | LP, BO, OLS, REF, DR, FOL, BL | `M/180_layers/Using_layers.htm`, `…/Basic_operations.htm`, `…/Other_layer_settings.htm`, `…/Reference_layers.htm`, `…/Draft_layers.htm`, `…/Layer_folders.htm`, `…/Blending_modes.htm` |
+| MASK, LPROP | `M/180_layers/Layer_masks.htm`, `…/Layer_properties.htm` |
 | JB, JS | `https://help.clip-studio.com/ja-jp/manual_jp/180_layers/` (Grundoperationen, nützliche Einstellungen) |
 | FILL, GRAD | `M/420_fill/Fill_Tool.htm`, `…/Gradient_Tool.htm` |
 | SEL (Auswahl), AUTO, LCH | `M/330_selection/Selection_area.htm`, `…/Auto_select_tool.htm`, `…/Selection_Launcher.htm` |

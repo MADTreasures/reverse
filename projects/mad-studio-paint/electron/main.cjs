@@ -75,159 +75,100 @@ async function deliverOpenedFile(filePath) {
 
 // ---------------------------------------------------------------- menu
 
-function buildMenu() {
-  // Shortcuts are handled in the renderer; menu accelerators are display-only to avoid double triggers.
-  // Cut / copy / paste use roles so the renderer receives the clipboard events.
-  const item = (label, action, accelerator) => ({
-    label,
-    click: () => send(action),
-    ...(accelerator ? { accelerator, registerAccelerator: false } : {}),
-  });
-  const sep = { type: 'separator' };
-  const template = [
-    ...(isMac
-      ? [
-          {
-            label: 'MAD Studio Paint',
-            submenu: [
-              item('About MAD Studio Paint', 'about'),
-              sep,
-              item('Preferences…', 'preferences', 'CmdOrCtrl+K'),
-              sep,
-              { role: 'services' },
-              sep,
-              { role: 'hide' },
-              { role: 'hideOthers' },
-              { role: 'unhide' },
-              sep,
-              { role: 'quit' },
-            ],
-          },
-        ]
-      : []),
-    {
-      label: 'File',
-      submenu: [
-        item('New…', 'new', 'CmdOrCtrl+N'),
-        item('Open…', 'open', 'CmdOrCtrl+O'),
-        sep,
-        item('Save', 'save', 'CmdOrCtrl+S'),
-        item('Save as…', 'saveAs', 'Shift+CmdOrCtrl+S'),
-        sep,
-        item('Import image as layer…', 'importImage'),
-        item('Export (single layer)…', 'export'),
-        sep,
-        item('Canvas name…', 'renameCanvas'),
-        ...(isMac ? [] : [sep, item('Preferences…', 'preferences', 'CmdOrCtrl+K'), sep, { role: 'quit' }]),
-      ],
-    },
-    {
-      label: 'Edit',
-      submenu: [
-        item('Undo', 'undo', 'CmdOrCtrl+Z'),
-        item('Redo', 'redo', 'CmdOrCtrl+Y'),
-        sep,
-        { role: 'cut' },
-        { role: 'copy' },
-        { role: 'paste' },
-        item('Delete', 'clear', 'Backspace'),
-        item('Delete outside selected area', 'clearOutside', 'Shift+Backspace'),
-        sep,
-        item('Fill', 'fill', 'Alt+Backspace'),
-        item('Tonal correction: Hue/Saturation/Luminosity…', 'hsl', 'CmdOrCtrl+U'),
-        item('Tonal correction: Brightness/Contrast…', 'brightnessContrast'),
-        item('Tonal correction: Reverse gradient', 'negative', 'CmdOrCtrl+I'),
-        sep,
-        item('Transform: Scale up/Scale down/Rotate', 'transform', 'CmdOrCtrl+T'),
-        item('Transform: Free transform', 'freeTransform', 'Shift+CmdOrCtrl+T'),
-        item('Flip layer horizontal', 'flipLayerH'),
-        item('Flip layer vertical', 'flipLayerV'),
-        sep,
-        item('Change image resolution…', 'imageResolution'),
-        item('Change canvas size…', 'canvasSize'),
-      ],
-    },
-    {
-      label: 'Layer',
-      submenu: [
-        item('New raster layer', 'newRasterLayer', 'Shift+CmdOrCtrl+N'),
-        item('New layer folder', 'newFolder'),
-        item('Create folder and insert layer', 'groupLayer', 'CmdOrCtrl+G'),
-        item('Ungroup layer folder', 'ungroupLayer', 'Shift+CmdOrCtrl+G'),
-        sep,
-        item('Duplicate layer', 'duplicateLayer'),
-        item('Delete layer', 'deleteLayer'),
-        sep,
-        item('Clip to layer below', 'clip', 'Alt+CmdOrCtrl+G'),
-        item('Set as reference layer', 'reference'),
-        item('Set as draft layer', 'draft'),
-        item('Lock layer', 'lockLayer', 'CmdOrCtrl+L'),
-        item('Lock transparent pixels', 'lockAlpha'),
-        sep,
-        item('Merge with layer below', 'mergeDown', 'CmdOrCtrl+E'),
-        item('Merge visible layers', 'mergeVisible', 'Shift+CmdOrCtrl+E'),
-        item('Flatten image', 'flatten'),
-        sep,
-        item('Select layer above', 'selectLayerAbove', 'Alt+]'),
-        item('Select layer below', 'selectLayerBelow', 'Alt+['),
-      ],
-    },
-    {
-      label: 'Select',
-      submenu: [
-        item('Select all', 'selectAll', 'CmdOrCtrl+A'),
-        item('Deselect', 'deselect', 'CmdOrCtrl+D'),
-        item('Reselect', 'reselect', 'Shift+CmdOrCtrl+D'),
-        item('Invert selected area', 'invertSelection', 'Shift+CmdOrCtrl+I'),
-        sep,
-        item('Expand selected area…', 'expandSelection'),
-        item('Shrink selected area…', 'shrinkSelection'),
-      ],
-    },
-    {
-      label: 'View',
-      submenu: [
-        item('Zoom in', 'zoomIn', 'CmdOrCtrl+='),
-        item('Zoom out', 'zoomOut', 'CmdOrCtrl+-'),
-        item('100%', 'actualPixels', 'Alt+CmdOrCtrl+0'),
-        item('Fit to screen', 'fit', 'CmdOrCtrl+0'),
-        item('Reset display', 'resetDisplay'),
-        sep,
-        item('Rotate left', 'rotateLeft', '-'),
-        item('Rotate right', 'rotateRight', '='),
-        item('Rotate 90°', 'rotate90'),
-        item('Rotate 180°', 'rotate180'),
-        item('Rotate 270°', 'rotate270'),
-        item('Reset rotation', 'resetRotation'),
-        item('Flip horizontal', 'flipViewH'),
-        item('Flip vertical', 'flipViewV'),
-        sep,
-        item('Selection launcher', 'selectionLauncher'),
-        item('Show border of selected area', 'selectionBorder'),
-        { role: 'togglefullscreen' },
-        ...(DEV_URL ? [sep, { role: 'reload' }, { role: 'toggleDevTools' }] : []),
-      ],
-    },
-    {
-      label: 'Filter',
-      submenu: [item('Blur: Gaussian blur…', 'gaussianBlur')],
-    },
-    {
-      label: 'Window',
-      submenu: [
-        item('Workspace: Default', 'workspaceDefault'),
-        item('Workspace: Classic layout', 'workspaceClassic'),
-        sep,
-        item('Hide all palettes', 'togglePalettes', 'Tab'),
-        item('Hide title bar and menu bar', 'toggleMenuBar', 'Shift+Tab'),
-        sep,
-        { role: 'minimize' },
-        { role: 'zoom' },
-      ],
-    },
-    { role: 'help', submenu: [item('Keyboard Shortcuts', 'shortcuts', 'F1'), item('About MAD Studio Paint', 'about')] },
+const MENU_ID = /^[A-Za-z0-9_-]{1,64}$/;
+const ACCELERATOR = /^(?:(?:Shift|Alt|CmdOrCtrl)\+){0,3}(?:[A-Z0-9]|F[0-9]{1,2}|Backspace|Delete|Enter|Escape|Space|Tab|Up|Down|Left|Right|Plus|[-=[\]\\;',./`@^])$/;
+/** Commands the OS handles through roles, so the renderer receives real clipboard events. */
+const ROLE_COMMANDS = { cut: 'cut', copy: 'copy', paste: 'paste' };
+
+/** Drops separators at the ends and repeated ones (left over when items are filtered). */
+function tidy(items) {
+  const out = [];
+  for (const it of items) {
+    if (it.type === 'separator' && (out.length === 0 || out[out.length - 1].type === 'separator')) continue;
+    out.push(it);
+  }
+  while (out.length && out[out.length - 1].type === 'separator') out.pop();
+  return out;
+}
+
+/**
+ * Converts the renderer's menu template (built from the same command table as the in-window menu bar)
+ * into Electron menu items. Everything is validated: the template crosses the IPC boundary.
+ */
+function fromTemplate(items, depth) {
+  if (!Array.isArray(items) || depth > 3) return [];
+  const out = [];
+  for (const it of items.slice(0, 100)) {
+    if (!it || typeof it !== 'object') continue;
+    if (it.separator === true) {
+      out.push(sep);
+      continue;
+    }
+    const label = typeof it.label === 'string' ? it.label.slice(0, 100) : '';
+    if (!label) continue;
+    if (Array.isArray(it.submenu)) {
+      out.push({ label, submenu: fromTemplate(it.submenu, depth + 1) });
+      continue;
+    }
+    if (typeof it.id !== 'string' || !MENU_ID.test(it.id)) continue;
+    // macOS keeps Preferences in the application menu.
+    if (isMac && it.id === 'preferences') continue;
+    if (ROLE_COMMANDS[it.id]) {
+      out.push({ role: ROLE_COMMANDS[it.id] });
+      continue;
+    }
+    const accelerator = typeof it.accelerator === 'string' && ACCELERATOR.test(it.accelerator) ? it.accelerator : undefined;
+    out.push(item(label, it.id, accelerator));
+  }
+  return tidy(out);
+}
+
+const sep = { type: 'separator' };
+
+// Shortcuts are handled in the renderer; menu accelerators are display-only to avoid double triggers.
+function item(label, action, accelerator) {
+  return { label, click: () => send(action), ...(accelerator ? { accelerator, registerAccelerator: false } : {}) };
+}
+
+/** Builds the menu bar; `template` comes from the renderer (null until it has loaded). */
+function buildMenu(template) {
+  const appMenu = isMac
+    ? [
+        {
+          label: 'MAD Studio Paint',
+          submenu: [
+            item('About MAD Studio Paint', 'about'),
+            sep,
+            item('Preferences…', 'preferences', 'CmdOrCtrl+K'),
+            sep,
+            { role: 'services' },
+            sep,
+            { role: 'hide' },
+            { role: 'hideOthers' },
+            { role: 'unhide' },
+            sep,
+            { role: 'quit' },
+          ],
+        },
+      ]
+    : [];
+  const menus = Array.isArray(template) ? template.slice(0, 12) : [];
+  const built = menus
+    .filter((m) => m && typeof m.label === 'string' && Array.isArray(m.submenu))
+    .map((m) => {
+      const label = m.label.slice(0, 40);
+      const submenu = fromTemplate(m.submenu, 1);
+      if (label === 'File' && !isMac) submenu.push(sep, { role: 'quit' });
+      if (label === 'View') submenu.push(sep, { role: 'togglefullscreen' }, ...(DEV_URL ? [sep, { role: 'reload' }, { role: 'toggleDevTools' }] : []));
+      if (label === 'Window') submenu.push(sep, { role: 'minimize' }, { role: 'zoom' });
+      return label === 'Help' ? { role: 'help', submenu } : { label, submenu };
+    });
+  // Until the renderer sends its menus, keep the clipboard and window basics available.
+  const fallback = [
+    { label: 'Edit', submenu: [{ role: 'cut' }, { role: 'copy' }, { role: 'paste' }] },
+    { label: 'Window', submenu: [{ role: 'minimize' }, { role: 'zoom' }] },
   ];
-  Menu.setApplicationMenu(Menu.buildFromTemplate(template));
+  Menu.setApplicationMenu(Menu.buildFromTemplate([...appMenu, ...(built.length ? built : fallback)]));
 }
 
 // ---------------------------------------------------------------- IPC
@@ -267,6 +208,16 @@ function registerIpc() {
     if (isMac && mainWindow) mainWindow.setDocumentEdited(documentEdited);
   });
 
+  ipcMain.on('menu:set', (event, template) => {
+    if (!isTrustedSender(event)) return;
+    try {
+      buildMenu(template);
+    } catch (err) {
+      console.error('Could not build the menu:', err);
+      if (SMOKE) app.exit(1);
+    }
+  });
+
   ipcMain.on('window:set-title', (event, title) => {
     if (isTrustedSender(event) && mainWindow) mainWindow.setTitle(String(title).slice(0, 200));
   });
@@ -280,6 +231,13 @@ function registerIpc() {
   ipcMain.on('app:ready', (event) => {
     if (!isTrustedSender(event)) return;
     if (SMOKE) {
+      // The renderer sends its menus before it reports ready.
+      const labels = Menu.getApplicationMenu()?.items.map((i) => i.label) ?? [];
+      if (!labels.includes('Layer')) {
+        console.error('The menu from the renderer is missing:', labels);
+        app.exit(1);
+        return;
+      }
       console.log('MAD_PAINT_SMOKE_OK');
       app.exit(0);
     }
@@ -384,7 +342,7 @@ app.whenReady().then(() => {
   session.defaultSession.setPermissionCheckHandler((_wc, permission) => allowed.has(permission));
 
   registerIpc();
-  buildMenu();
+  buildMenu(null);
   createWindow();
 
   // Files passed on the command line (Windows/Linux, or `open -a`).

@@ -9,6 +9,7 @@ import { getState, useStore } from './store/store';
 import { controller } from './tools/controller';
 import { runCommand } from './ui/commands';
 import { installKeyboard } from './ui/keyboard';
+import { nativeMenuTemplate } from './ui/nativeMenu';
 import { toast } from './ui/overlays';
 import './styles/base.css';
 import './styles/app.css';
@@ -91,6 +92,7 @@ async function boot(): Promise<void> {
   syncTitle();
   listenForNativeOpen();
   native?.onMenu((action) => void runCommand(action));
+  native?.setMenu(nativeMenuTemplate());
 
   window.addEventListener('beforeunload', (e) => {
     if (getState().dirty && !isElectron) e.preventDefault();

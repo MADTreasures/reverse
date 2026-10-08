@@ -1,5 +1,5 @@
 import { uid } from './ids';
-import type { FolderLayer, Id, Layer, PaintDocument, RasterLayer } from './types';
+import type { FolderLayer, Id, Layer, LayerMask, PaintDocument, RasterLayer } from './types';
 
 export function createRasterLayer(name: string, patch: Partial<RasterLayer> = {}): RasterLayer {
   return {
@@ -70,6 +70,22 @@ export function flatten(layers: Layer[], out: Layer[] = []): Layer[] {
 }
 
 export const rasterLayers = (layers: Layer[]) => flatten(layers).filter((l): l is RasterLayer => l.kind === 'raster');
+
+/** A new layer mask; the caller creates its surface. */
+export const createLayerMask = (): LayerMask => ({ id: uid('m'), enabled: true, linked: true });
+
+/** Ids of everything that owns pixels: raster layers and layer masks. */
+export function pixelIds(layers: Layer[]): Id[] {
+  const ids: Id[] = [];
+  for (const l of flatten(layers)) {
+    if (l.kind === 'raster') ids.push(l.id);
+    if (l.mask) ids.push(l.mask.id);
+  }
+  return ids;
+}
+
+/** Ids of all layer masks. */
+export const maskIds = (layers: Layer[]): Id[] => flatten(layers).flatMap((l) => (l.mask ? [l.mask.id] : []));
 
 export function countLayers(layers: Layer[]): number {
   return flatten(layers).length;
@@ -181,13 +197,20 @@ export function clipGroups(siblings: Layer[]): ClipGroup[] {
   return groups;
 }
 
-/** Deep copy with fresh ids. Returns the copy and a map old id → new id (to copy pixels). */
+/** Deep copy with fresh ids (masks too). Returns the copy and a map old id → new id (to copy pixels). */
 export function cloneLayer(layer: Layer, idMap: Map<Id, Id> = new Map()): { copy: Layer; idMap: Map<Id, Id> } {
+  const copyMask = (m: LayerMask | undefined): LayerMask | undefined => {
+    if (!m) return undefined;
+    const id = uid('m');
+    idMap.set(m.id, id);
+    return { ...m, id };
+  };
   const copyOne = (l: Layer): Layer => {
     const id = uid(l.kind === 'folder' ? 'f' : 'l');
     idMap.set(l.id, id);
-    if (l.kind === 'folder') return { ...l, id, children: l.children.map(copyOne) };
-    return { ...l, id };
+    const mask = copyMask(l.mask);
+    if (l.kind === 'folder') return { ...l, id, mask, children: l.children.map(copyOne) };
+    return { ...l, id, mask };
   };
   return { copy: copyOne(layer), idMap };
 }

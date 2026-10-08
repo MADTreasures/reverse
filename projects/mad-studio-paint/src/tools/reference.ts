@@ -13,8 +13,11 @@ function referenceIds(doc: PaintDocument): Set<string> {
   return ids;
 }
 
-/** Draft layers, hidden layers and the paper are never referenced (as in the reference app's defaults). */
-export function referencePixels(doc: PaintDocument, activeLayerId: string, ref: FillReference): ImageData {
+/**
+ * Draft layers, hidden layers and the paper are never referenced (as in the reference app's defaults).
+ * "Editing layer only" reads `editSurfaceId`: the current layer, or its mask while the mask is edited.
+ */
+export function referencePixels(doc: PaintDocument, editSurfaceId: string, ref: FillReference): ImageData {
   const full = { x: 0, y: 0, w: doc.width, h: doc.height };
   if (ref === 'all') {
     const tmp = createCanvas(doc.width, doc.height);
@@ -29,7 +32,7 @@ export function referencePixels(doc: PaintDocument, activeLayerId: string, ref: 
       return ctx2d(tmp, true).getImageData(0, 0, doc.width, doc.height);
     }
   }
-  const s = getSurface(activeLayerId);
+  const s = getSurface(editSurfaceId);
   if (!s) return new ImageData(doc.width, doc.height);
   return ctx2d(s, true).getImageData(0, 0, doc.width, doc.height);
 }

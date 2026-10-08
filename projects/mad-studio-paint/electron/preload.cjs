@@ -20,5 +20,6 @@ contextBridge.exposeInMainWorld('madPaint', {
   },
   setDocumentEdited: (edited) => ipcRenderer.send('window:set-edited', Boolean(edited)),
   setTitle: (title) => ipcRenderer.send('window:set-title', String(title)),
+  setMenu: (template) => ipcRenderer.send('menu:set', template),
   ready: () => ipcRenderer.send('app:ready'),
 });

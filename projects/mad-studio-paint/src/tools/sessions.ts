@@ -1,7 +1,7 @@
 /** Press-drag-release interactions for every tool. */
 import { hexToRgb } from '../model/color';
 import { flatten, isEffectivelyVisible } from '../model/layers';
-import type { Id, RasterLayer } from '../model/types';
+import type { Id } from '../model/types';
 import { CLOSE_GAP_STEPS, floodFillMask } from '../paint/fill';
 import { combine, ellipseMask, expandMask, maskBounds, polygonMask, rectMask, translateMask, type Mask, type SelectionOp } from '../paint/mask';
 import { fromPoints, type Rect } from '../paint/rect';
@@ -25,18 +25,18 @@ function blocked(reason: string | null): boolean {
   return reason !== null;
 }
 
-/** Target for painting on the current layer, or null (with a hint) if it cannot be edited. */
+/** Target for painting on the current layer (or its mask), or null (with a hint) if it cannot be edited. */
 export function strokeTarget(): StrokeTarget | null {
   const s = getState();
   if (blocked(actions.editBlocker(s))) return null;
-  const layer = actions.activeRaster(s)!;
-  const surface = getSurface(layer.id);
+  const target = actions.editTarget(s)!;
+  const surface = getSurface(target.surfaceId);
   if (!surface) return null;
   return {
-    layerId: layer.id,
+    layerId: target.surfaceId,
     layer: surface,
     selection: engine.selectionCanvas(),
-    lockAlpha: layer.lockAlpha,
+    lockAlpha: target.lockAlpha,
     onChange: (r) => engine.invalidate(r),
   };
 }
@@ -121,7 +121,7 @@ export class BrushSession implements ToolSession {
     actions.commitPixels(this.sub.name, [patch]);
     lastStrokeEnd = { layerId: this.layerId, x: this.last.x, y: this.last.y, pressure: this.lineMode ? (this.connectFrom ?? toStroke(this.start)).pressure : this.last.pressure };
     const s = getState();
-    if (patch && this.sub.brush?.mode === 'paint' && !s.colors.transparent) actions.addColorToHistory(drawingColor(s.colors));
+    if (patch && this.sub.brush?.mode === 'paint' && !s.colors.transparent && !actions.editingMask(s)) actions.addColorToHistory(drawingColor(s.colors));
   }
 
   cancel(): void {
@@ -212,7 +212,7 @@ function regionMask(sub: SubTool, p: PointerInfo, toggleReference: boolean): Mas
   const s = getState();
   const opts = sub.fill!;
   const reference = toggleReference ? toggled(opts.reference) : opts.reference;
-  const pixels = referencePixels(s.doc, s.activeLayerId, reference);
+  const pixels = referencePixels(s.doc, actions.editTarget(s)?.surfaceId ?? s.activeLayerId, reference);
   let mask = floodFillMask(pixels.data, s.doc.width, s.doc.height, p.x, p.y, {
     tolerance: opts.tolerance,
     alphaOnly: opts.alphaOnly,
@@ -253,7 +253,7 @@ export function fillAt(sub: SubTool, p: PointerInfo): void {
   if (patch) {
     engine.invalidate(patch.rect);
     actions.commitPixels(sub.name, [patch]);
-    if (!transparent) actions.addColorToHistory(drawingColor(s.colors));
+    if (!transparent && !actions.editingMask(s)) actions.addColorToHistory(drawingColor(s.colors));
   }
 }
 
@@ -641,12 +641,10 @@ export class MoveSession implements ToolSession {
 
   static create(p: PointerInfo): MoveSession | null {
     const s = getState();
-    const active = actions.activeLayer(s);
-    if (!active) return null;
-    const layers: RasterLayer[] = active.kind === 'raster' ? [active] : (flatten([active]).filter((l) => l.kind === 'raster') as RasterLayer[]);
-    const editable = layers.filter((l) => !l.locked);
-    if (blocked(editable.length === 0 ? 'The layer is locked' : null)) return null;
-    return new MoveSession(editable.map((l) => l.id), p);
+    if (!actions.activeLayer(s)) return null;
+    const ids = actions.movingSurfaces(s);
+    if (blocked(ids.length === 0 ? 'The layer is locked' : null)) return null;
+    return new MoveSession(ids, p);
   }
 
   private constructor(ids: Id[], p: PointerInfo) {

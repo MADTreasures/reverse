@@ -33,6 +33,8 @@ export interface NativeBridge {
   onOpenFile(cb: (file: OpenedFile) => void): () => void;
   setDocumentEdited(edited: boolean): void;
   setTitle(title: string): void;
+  /** Replaces the native menu (see ui/nativeMenu.ts). */
+  setMenu(template: unknown): void;
   ready(): void;
 }
 

@@ -1,6 +1,6 @@
 /**
  * Composites the layer tree into one document-sized canvas.
- * Supports blend modes, opacity, folders (isolated or pass-through) and clipping groups.
+ * Supports blend modes, opacity, layer masks, folders (isolated or pass-through) and clipping groups.
  * Only the dirty region is recomposed, so painting stays fast on large canvases.
  */
 import { nativeOp } from '../model/blend';
@@ -160,26 +160,86 @@ export class Compositor {
   private drawLayer(layer: Layer, target: Ctx, r: Rect, opts: ComposeOptions): void {
     if (layer.kind === 'raster') {
       const s = getSurface(layer.id);
-      if (s) paint(target, s, r, layer.opacity, layer.blend);
+      if (!s) return;
+      const mask = maskOf(layer);
+      if (!mask) {
+        paint(target, s, r, layer.opacity, layer.blend);
+        return;
+      }
+      const tmp = this.pool.acquire(r);
+      tmp.drawImage(s, 0, 0);
+      applyMask(tmp, mask);
+      paint(target, tmp.canvas, r, layer.opacity, layer.blend);
+      this.pool.release(tmp);
       return;
     }
-    if (layer.blend === 'pass-through' && layer.opacity >= 1) {
-      this.composeList(layer.children, target, r, opts);
+    const mask = maskOf(layer);
+    if (layer.blend === 'pass-through') {
+      if (layer.opacity >= 1 && !mask) {
+        this.composeList(layer.children, target, r, opts);
+        return;
+      }
+      // The children blend straight into (a copy of) the backdrop; opacity and mask then mix that
+      // result with the untouched backdrop.
+      const tmp = this.pool.acquire(r);
+      tmp.drawImage(target.canvas, 0, 0);
+      this.composeList(layer.children, tmp, r, opts);
+      mixInto(target, tmp, r, layer.opacity, mask);
+      this.pool.release(tmp);
       return;
     }
     const tmp = this.pool.acquire(r);
     this.composeList(layer.children, tmp, r, opts);
-    paint(target, tmp.canvas, r, layer.opacity, layer.blend === 'pass-through' ? 'normal' : layer.blend);
+    if (mask) applyMask(tmp, mask);
+    paint(target, tmp.canvas, r, layer.opacity, layer.blend);
     this.pool.release(tmp);
   }
 
-  /** Draws a layer's pixels at full opacity in normal mode (clipping groups apply opacity later). */
+  /**
+   * Draws a layer's pixels (mask applied) at full opacity in normal mode onto an empty `target`;
+   * clipping groups apply opacity and blending later.
+   */
   private drawContent(layer: Layer, target: Ctx, r: Rect, opts: ComposeOptions): void {
     if (layer.kind === 'raster') {
       const s = getSurface(layer.id);
       if (s) target.drawImage(s, 0, 0);
-      return;
-    }
-    this.composeList(layer.children, target, r, opts);
+    } else this.composeList(layer.children, target, r, opts);
+    const mask = maskOf(layer);
+    if (mask) applyMask(target, mask);
   }
+}
+
+/** The surface of a layer's enabled mask, or null. */
+function maskOf(layer: Layer): HTMLCanvasElement | null {
+  return layer.mask?.enabled ? (getSurface(layer.mask.id) ?? null) : null;
+}
+
+/** Keeps only the parts of `ctx` that the mask shows. */
+function applyMask(ctx: Ctx, mask: HTMLCanvasElement): void {
+  ctx.globalCompositeOperation = 'destination-in';
+  ctx.drawImage(mask, 0, 0);
+  ctx.globalCompositeOperation = 'source-over';
+}
+
+/**
+ * target = target × (1 − k) + result × k, with k = opacity × mask alpha. Canvas pixels are
+ * premultiplied, so 'lighter' (a plain sum) adds the two weighted parts exactly.
+ */
+function mixInto(target: Ctx, result: Ctx, r: Rect, opacity: number, mask: HTMLCanvasElement | null): void {
+  const weigh = (ctx: Ctx, op: GlobalCompositeOperation) => {
+    ctx.globalCompositeOperation = op;
+    ctx.globalAlpha = opacity;
+    if (mask) ctx.drawImage(mask, 0, 0);
+    else {
+      ctx.fillStyle = '#000';
+      ctx.fillRect(r.x, r.y, r.w, r.h);
+    }
+    ctx.globalAlpha = 1;
+    ctx.globalCompositeOperation = 'source-over';
+  };
+  weigh(result, 'destination-in');
+  weigh(target, 'destination-out');
+  target.globalCompositeOperation = 'lighter';
+  target.drawImage(result.canvas, 0, 0);
+  target.globalCompositeOperation = 'source-over';
 }

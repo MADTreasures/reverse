@@ -1,7 +1,7 @@
 /**
  * The .madpaint document format: a ZIP archive with
  *   document.json      – format tag, version, document structure (layer tree, flags)
- *   layers/<id>.png    – pixels of each raster layer (document size, straight alpha)
+ *   layers/<id>.png    – pixels of each raster layer and layer mask (document size, straight alpha)
  *   preview.png        – merged image for previews (optional)
  * Pure (no DOM): PNG encoding/decoding happens in the browser layer.
  */
@@ -9,16 +9,17 @@ import { strFromU8, strToU8, unzipSync, zipSync } from 'fflate';
 import { isBlendMode } from '../model/blend';
 import { clampCanvasSide } from '../model/document';
 import { createRasterLayer } from '../model/layers';
-import type { FolderLayer, Id, Layer, PaintDocument, RasterLayer } from '../model/types';
+import type { FolderLayer, Id, Layer, LayerMask, PaintDocument, RasterLayer } from '../model/types';
 
 export const FORMAT = 'mad-studio-paint';
-export const FORMAT_VERSION = 1;
+/** 2: layer masks. Version 1 files open unchanged. */
+export const FORMAT_VERSION = 2;
 export const EXTENSION = 'madpaint';
 
 export interface DocumentFile {
   doc: PaintDocument;
   activeLayerId: Id | null;
-  /** PNG bytes per raster layer id. */
+  /** PNG bytes per raster layer and mask id. */
   layers: Map<Id, Uint8Array>;
   preview?: Uint8Array;
 }
@@ -29,12 +30,25 @@ const str = (v: unknown, fallback: string, maxLen = 200) => (typeof v === 'strin
 const bool = (v: unknown, fallback: boolean) => (typeof v === 'boolean' ? v : fallback);
 const color = (v: unknown, fallback: string) => (typeof v === 'string' && /^#[0-9a-f]{6}$/i.test(v) ? v.toLowerCase() : fallback);
 
+const ID = /^[A-Za-z0-9_-]+$/;
+
+function sanitizeMask(raw: unknown, seen: Set<string>): LayerMask | undefined {
+  if (!raw || typeof raw !== 'object') return undefined;
+  const r = raw as Record<string, unknown>;
+  const id = str(r.id, '', 64);
+  // A mask needs its own pixels; an unusable id drops the mask rather than sharing another surface.
+  if (!ID.test(id) || seen.has(id)) return undefined;
+  seen.add(id);
+  return { id, enabled: bool(r.enabled, true), linked: bool(r.linked, true) };
+}
+
 function sanitizeLayer(raw: unknown, seen: Set<string>, depth: number): Layer | null {
   if (!raw || typeof raw !== 'object' || depth > 32) return null;
   const r = raw as Record<string, unknown>;
   let id = str(r.id, '', 64);
-  if (!/^[A-Za-z0-9_-]+$/.test(id) || seen.has(id)) id = createRasterLayer('x').id;
+  if (!ID.test(id) || seen.has(id)) id = createRasterLayer('x').id;
   seen.add(id);
+  const mask = sanitizeMask(r.mask, seen);
   const common = {
     id,
     name: str(r.name, 'Layer', 120),
@@ -44,6 +58,7 @@ function sanitizeLayer(raw: unknown, seen: Set<string>, depth: number): Layer | 
     locked: bool(r.locked, false),
     reference: bool(r.reference, false),
     draft: bool(r.draft, false),
+    ...(mask ? { mask } : {}),
   };
   if (r.kind === 'folder') {
     const children = Array.isArray(r.children) ? r.children.map((c) => sanitizeLayer(c, seen, depth + 1)).filter((c): c is Layer => c !== null) : [];

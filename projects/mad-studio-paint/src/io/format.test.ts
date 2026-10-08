@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { createDocument } from '../model/document';
-import { createFolder, createRasterLayer, flatten } from '../model/layers';
+import { createFolder, createLayerMask, createRasterLayer, flatten } from '../model/layers';
 import { isDocumentFileName, isImageFileName, mimeForName, packDocument, sanitizeDocument, unpackDocument } from './format';
 
 describe('.madpaint format', () => {
@@ -14,6 +14,21 @@ describe('.madpaint format', () => {
     expect(back.doc).toEqual(doc);
     expect(back.activeLayerId).toBe(ink.id);
     expect([...back.layers.get(ink.id)!]).toEqual([...png]);
+  });
+
+  it('keeps layer masks and drops masks that would share pixels', () => {
+    const doc = createDocument('Masks', 100, 100, 72);
+    doc.layers[0].mask = { ...createLayerMask(), enabled: false };
+    const back = unpackDocument(packDocument({ doc, activeLayerId: null, layers: new Map() }));
+    expect(back.doc.layers[0].mask).toEqual(doc.layers[0].mask);
+    const clash = sanitizeDocument({
+      layers: [
+        { id: 'a', kind: 'raster', mask: { id: 'm1', linked: false } },
+        { id: 'b', kind: 'raster', mask: { id: 'a' } },
+        { id: 'c', kind: 'raster', mask: { id: 'm1' } },
+      ],
+    });
+    expect(clash.layers.map((l) => l.mask)).toEqual([{ id: 'm1', enabled: true, linked: false }, undefined, undefined]);
   });
 
   it('rejects foreign or damaged files', () => {

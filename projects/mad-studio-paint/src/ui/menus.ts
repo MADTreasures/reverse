@@ -1,9 +1,11 @@
 /** Menu structure shared by the in-window menu bar (browser) and the native menu (Electron). */
 export interface MenuSpec {
   label: string;
-  /** Command ids; '-' is a separator. */
-  items: string[];
+  /** Command ids, '-' for a separator, or a submenu. */
+  items: MenuItem[];
 }
+
+export type MenuItem = string | MenuSpec;
 
 export const MENUS: MenuSpec[] = [
   { label: 'File', items: ['new', 'open', '-', 'save', 'saveAs', '-', 'importImage', 'export', '-', 'renameCanvas', '-', 'preferences'] },
@@ -43,6 +45,8 @@ export const MENUS: MenuSpec[] = [
       '-',
       'duplicateLayer',
       'deleteLayer',
+      '-',
+      { label: 'Layer mask', items: ['maskOutside', 'maskSelection', '-', 'applyMask', 'deleteMask', '-', 'enableMask', 'linkMask', 'showMaskArea'] },
       '-',
       'clip',
       'reference',
@@ -87,3 +91,8 @@ export const MENUS: MenuSpec[] = [
   { label: 'Window', items: ['workspaceDefault', 'workspaceClassic', '-', 'togglePalettes', 'toggleMenuBar'] },
   { label: 'Help', items: ['shortcuts', 'about'] },
 ];
+
+/** Every command id in a menu tree, depth first. */
+export function menuCommandIds(items: MenuItem[] = MENUS.flatMap((m) => m.items)): string[] {
+  return items.flatMap((i) => (typeof i === 'string' ? (i === '-' ? [] : [i]) : menuCommandIds(i.items)));
+}
