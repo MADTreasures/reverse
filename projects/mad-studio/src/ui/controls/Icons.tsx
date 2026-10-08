@@ -116,6 +116,13 @@ export const IconEraser = (p: IconProps) => (
     <path d="M6 13.5h8M2.8 9.7l6.5-6.5 3.5 3.5-6.5 6.5H5z" />
   </Svg>
 );
+/** Mute tool: a speaker with a cross. */
+export const IconMute = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M2.5 6.2h2.4L8 3.4v9.2L4.9 9.8H2.5z" />
+    <path d="M10.4 6.2l3.4 3.6M13.8 6.2l-3.4 3.6" />
+  </Svg>
+);
 export const IconSelect = (p: IconProps) => (
   <Svg {...p}>
     <rect x="2.5" y="2.5" width="11" height="11" strokeDasharray="2 2" />

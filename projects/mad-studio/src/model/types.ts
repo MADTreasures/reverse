@@ -228,6 +228,8 @@ interface ClipBase {
   length: number;
   /** Ticks into the source material where the clip begins. */
   offset: number;
+  /** Muted clips stay in the playlist but do not play (FL Studio's clip menu › Muted, mute tool). */
+  muted?: boolean;
 }
 
 export interface PatternClip extends ClipBase {

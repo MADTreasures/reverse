@@ -8,13 +8,14 @@ import { DEFAULT_VELOCITY } from '../model/defaults';
 import { findPattern, patternLength } from '../model/patterns';
 import { findPreset } from '../model/presets';
 import { patternTimeline, songTimeline, type Timeline } from '../model/timeline';
-import { secondsPerTick, snapRound, snapTicks } from '../model/timing';
+import { secondsPerTick, snapRound } from '../model/timing';
 import type { Id, Project } from '../model/types';
 import type { EngineMessage, NativeEngineBridge } from '../platform/platform';
 import { usePlugins, type AudioDeviceInfo, type PluginParam } from '../plugins/pluginStore';
 import { addNotes, endCoalesce, setTransport, storePluginStates } from '../store/actions';
 import { noteTweaked } from '../store/automationActions';
-import { useStore, type AppState } from '../store/store';
+import { pianoRollSnap, patternStartTick } from '../store/snap';
+import { useStore, type AppState, type PlayMode } from '../store/store';
 import { toast } from '../ui/overlays';
 import { AutomationRuntime } from './automationRuntime';
 import type { EngineApi } from './engineApi';
@@ -342,7 +343,7 @@ export class NativeEngine implements EngineApi {
     const s = useStore.getState();
     this.syncAll();
     this.take += 1;
-    const from = s.transport.mode === 'song' ? s.transport.songStart : 0;
+    const from = s.transport.mode === 'song' ? s.transport.songStart : patternStartTick(s);
     const record = s.transport.recording && s.transport.recordFilter.audio;
     const countIn = s.transport.recording && s.transport.precount ? s.project.beatsPerBar * 96 : 0;
     this.recordMode = s.transport.mode;
@@ -370,11 +371,11 @@ export class NativeEngine implements EngineApi {
     this.held.clear();
   }
 
-  seek(tick: number): void {
+  seek(tick: number, mode: PlayMode = 'song'): void {
     const t = Math.max(0, Math.round(tick));
-    setTransport({ songStart: t });
+    setTransport(mode === 'song' ? { songStart: t } : { patternStart: t });
     const s = useStore.getState();
-    if (s.transport.playing && s.transport.mode === 'song') {
+    if (s.transport.playing && s.transport.mode === mode) {
       this.status = { ...this.status, tick: t, at: performance.now() };
       this.send({ type: 'transport.seek', tick: t });
     }
@@ -428,7 +429,7 @@ export class NativeEngine implements EngineApi {
     const endTick = this.patternTick();
     if (!pattern || endTick === null) return;
     const len = patternLength(pattern, s.project.beatsPerBar);
-    const grid = snapTicks(s.ui.pianoRoll.snap, s.project.beatsPerBar);
+    const grid = pianoRollSnap(s);
     const start = snapRound(note.recordStart, grid) % len;
     let length = endTick - note.recordStart;
     if (length <= 0) length += len;

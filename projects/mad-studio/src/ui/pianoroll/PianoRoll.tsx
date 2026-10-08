@@ -1,14 +1,16 @@
-import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type WheelEvent as ReactWheelEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type WheelEvent as ReactWheelEvent } from 'react';
 import { engine } from '../../audio/engine';
 import { findPattern, patternLength } from '../../model/patterns';
-import { PPQ, SNAP_OPTIONS, noteName, snapFloor, snapRound, snapTicks, type SnapId } from '../../model/timing';
+import { PPQ, SNAP_OPTIONS, formatDuration, formatPosition, gridLineTicks, noteName, snapFloor, snapLabel, snapRound, snapTicks, type SnapId } from '../../model/timing';
 import type { Note } from '../../model/types';
 import {
   addNotes,
   deleteNotes,
   endCoalesce,
   gestureKey,
+  legatoNotes,
   selectChannel,
+  setTransport,
   setUi,
   updateNotes,
 } from '../../store/actions';
@@ -17,6 +19,7 @@ import { prepareCanvas, useElementSize, useFrame } from '../animation';
 import { IconBrush, IconEraser, IconGhost, IconPencil, IconPiano, IconSelect } from '../controls/Icons';
 import { setHint } from '../hint';
 import { registerWindowKeys } from '../keyboard';
+import { openNoteProperties } from '../overlays';
 import { WindowFrame } from '../workspace/WindowFrame';
 import { KEYS_W, RULER_H, VEL_H, drawRoll, gridBottom, keyAtY, maxScrollY, tickAtX, xOfTick, type RollView } from './draw';
 
@@ -24,13 +27,14 @@ const EMPTY: Note[] = [];
 const RESIZE_ZONE = 6;
 
 type Drag =
-  | { kind: 'move'; key: string; anchor: string; originTick: number; originKey: number; orig: Map<string, Note>; lastKey: number }
+  | { kind: 'move'; key: string; anchor: string; originTick: number; originKey: number; orig: Map<string, Note>; lastKey: number; clone: boolean }
   | { kind: 'resize'; key: string; anchor: string; originTick: number; orig: Map<string, Note> }
   | { kind: 'delete'; key: string }
   | { kind: 'rubber'; t0: number; k0: number; t1: number; k1: number; base: Set<string> }
   | { kind: 'paint'; key: string; row: number; last: number }
   | { kind: 'keys'; handle: number; note: number }
   | { kind: 'velocity'; key: string }
+  | { kind: 'seek' }
   | { kind: 'pan'; x: number; y: number; scrollTick: number; scrollY: number };
 
 let clipboard: Omit<Note, 'id'>[] = [];
@@ -53,7 +57,10 @@ export function PianoRoll() {
   const dirty = useRef(true);
   const lastPlayhead = useRef<number | null>(null);
 
-  const grid = snapTicks(view.snap, beatsPerBar);
+  const mainSnap = useStore((s) => s.ui.mainSnap);
+  const patternStart = useStore((s) => s.transport.patternStart);
+  const lineTicks = gridLineTicks(view.pxPerTick, beatsPerBar);
+  const grid = snapTicks(view.snap, beatsPerBar, lineTicks, mainSnap);
   const patLen = pattern ? patternLength(pattern, beatsPerBar) : PPQ * beatsPerBar;
 
   const rollView: RollView = useMemo(
@@ -69,8 +76,8 @@ export function PianoRoll() {
   }, [view.ghostNotes, pattern, channels, channel?.id]);
 
   // Everything the canvas needs, read by the animation loop.
-  const scene = useRef({ rollView, notes, selected, ghosts, color: channel?.color ?? '#888', patLen, beatsPerBar, pressed: null as number | null });
-  scene.current = { ...scene.current, rollView, notes, selected, ghosts, color: channel?.color ?? '#888', patLen, beatsPerBar };
+  const scene = useRef({ rollView, notes, selected, ghosts, color: channel?.color ?? '#888', patLen, beatsPerBar, lineTicks, patternStart, pressed: null as number | null });
+  scene.current = { ...scene.current, rollView, notes, selected, ghosts, color: channel?.color ?? '#888', patLen, beatsPerBar, lineTicks, patternStart };
   dirty.current = true;
 
   useEffect(() => setSelected(new Set()), [channelId, patternId]);
@@ -97,6 +104,8 @@ export function PianoRoll() {
       playhead,
       rubber: d?.kind === 'rubber' ? { t0: d.t0, t1: d.t1, k0: d.k0, k1: d.k1 } : null,
       pressedKey: sc.pressed,
+      lineTicks: sc.lineTicks,
+      patternStart: sc.patternStart,
     });
   });
 
@@ -161,6 +170,13 @@ export function PianoRoll() {
 
   // ------------------------------------------------------------ pointer input
 
+  /** FL Studio: clicking the ruler moves the playback position inside the pattern. */
+  const seekTo = (x: number, free: boolean) => {
+    const tick = Math.max(0, Math.min(patLen - 1, snapFloor(tickAtX(rollView, x), free ? 1 : grid)));
+    if (useStore.getState().transport.mode !== 'pattern') setTransport({ mode: 'pattern' });
+    engine.seek(tick, 'pattern');
+  };
+
   const onPointerDown = (e: ReactPointerEvent<HTMLCanvasElement>) => {
     if (!channel || !pattern) return;
     const { x, y } = local(e);
@@ -178,7 +194,13 @@ export function PianoRoll() {
       setVelocityAt(x, y, key);
       return;
     }
-    if (y < RULER_H) return;
+    if (y < RULER_H) {
+      if (x > KEYS_W && e.button === 0) {
+        drag.current = { kind: 'seek' };
+        seekTo(x, e.altKey);
+      }
+      return;
+    }
     if (x < KEYS_W) {
       const key = keyAtY(rollView, y);
       scene.current.pressed = key;
@@ -189,6 +211,7 @@ export function PianoRoll() {
     const tick = tickAtX(rollView, x);
     const key = keyAtY(rollView, y);
     const g = e.altKey ? 1 : grid;
+    const mod = e.metaKey || e.ctrlKey;
     lastClick.current = snapFloor(Math.max(0, tick), g);
     const hit = noteAt(x, y);
     const tool: ToolId = e.button === 2 ? 'delete' : view.tool;
@@ -199,52 +222,60 @@ export function PianoRoll() {
       if (hit) deleteNotes(patternId, channel.id, [hit.note.id], { coalesce: gk });
       return;
     }
-    if ((e.metaKey || e.ctrlKey || tool === 'select') && !hit) {
+    if ((mod || tool === 'select') && !hit) {
+      // Ctrl+drag selects with a rectangle, Ctrl+Shift+drag adds to the selection.
       const base = e.shiftKey ? new Set(selected) : new Set<string>();
       drag.current = { kind: 'rubber', t0: tick, k0: key, t1: tick, k1: key, base };
       setSelected(base);
       return;
     }
     if (hit) {
-      let sel = selected;
-      if (e.shiftKey) {
-        sel = new Set(selected);
+      // The clicked note becomes the template for new notes (FL Studio).
+      setView({ noteLength: hit.note.length, noteVelocity: hit.note.velocity });
+      if (mod && e.shiftKey) {
+        const sel = new Set(selected);
         if (sel.has(hit.note.id)) sel.delete(hit.note.id);
         else sel.add(hit.note.id);
-      } else if (!selected.has(hit.note.id)) sel = new Set([hit.note.id]);
+        setSelected(sel);
+        return;
+      }
+      // Ctrl+click selects only this note; a click on a selected note drags the whole selection.
+      const sel = mod || !selected.has(hit.note.id) ? new Set([hit.note.id]) : selected;
       setSelected(sel);
-      const ids = sel.has(hit.note.id) ? sel : new Set([hit.note.id]);
-      const orig = new Map(notes.filter((n) => ids.has(n.id)).map((n) => [n.id, { ...n }]));
-      if (hit.edge) {
+      const orig = new Map(notes.filter((n) => sel.has(n.id)).map((n) => [n.id, { ...n }]));
+      if (hit.edge && !e.shiftKey) {
         drag.current = { kind: 'resize', key: gestureKey('resize'), anchor: hit.note.id, originTick: tick, orig };
       } else {
         startPreview(hit.note.key, hit.note.velocity);
-        drag.current = { kind: 'move', key: gestureKey('move'), anchor: hit.note.id, originTick: tick, originKey: key, orig, lastKey: hit.note.key };
+        // Shift+drag clones the notes; the copies appear once the mouse moves.
+        drag.current = { kind: 'move', key: gestureKey('move'), anchor: hit.note.id, originTick: tick, originKey: key, orig, lastKey: hit.note.key, clone: e.shiftKey };
       }
       return;
     }
+    const velocity = view.noteVelocity;
     if (tool === 'paint') {
       const gk = gestureKey('paint');
       const start = snapFloor(Math.max(0, tick), g);
-      addNotes(patternId, channel.id, [{ key, start, length: view.noteLength, velocity: 0.78 }], { coalesce: gk });
-      startPreview(key);
+      addNotes(patternId, channel.id, [{ key, start, length: view.noteLength, velocity }], { coalesce: gk });
+      startPreview(key, velocity);
       drag.current = { kind: 'paint', key: gk, row: key, last: start };
       return;
     }
     // Draw: create a note and keep dragging it.
     const gk = gestureKey('draw');
     const start = snapFloor(Math.max(0, tick), g);
-    const [id] = addNotes(patternId, channel.id, [{ key, start, length: view.noteLength, velocity: 0.78 }], { coalesce: gk });
-    setSelected(new Set([id]));
-    startPreview(key);
+    const [id] = addNotes(patternId, channel.id, [{ key, start, length: view.noteLength, velocity }], { coalesce: gk });
+    setSelected(new Set());
+    startPreview(key, velocity);
     drag.current = {
       kind: 'move',
       key: gk,
       anchor: id,
       originTick: tick,
       originKey: key,
-      orig: new Map([[id, { id, key, start, length: view.noteLength, velocity: 0.78 }]]),
+      orig: new Map([[id, { id, key, start, length: view.noteLength, velocity }]]),
       lastKey: key,
+      clone: false,
     };
   };
 
@@ -255,7 +286,17 @@ export function PianoRoll() {
       if (x > KEYS_W && y > RULER_H && y < gridBottom(rollView)) {
         const hit = noteAt(x, y);
         e.currentTarget.style.cursor = hit?.edge ? 'ew-resize' : hit ? 'move' : view.tool === 'delete' ? 'not-allowed' : 'crosshair';
-        setHint(hit ? `${noteName(hit.note.key)} · velocity ${Math.round(hit.note.velocity * 127)}` : `${noteName(keyAtY(rollView, y))}`);
+        // FL Studio's hint: position and length, note name and number.
+        if (hit) {
+          const n = hit.note;
+          setHint(`${formatPosition(n.start, beatsPerBar)} for ${formatDuration(n.length, beatsPerBar)} · ${noteName(n.key)} / ${n.key} · velocity ${Math.round(n.velocity * 127)}`);
+        } else {
+          const k = keyAtY(rollView, y);
+          setHint(`${formatPosition(Math.max(0, tickAtX(rollView, x)), beatsPerBar)} · ${noteName(k)} / ${k}`);
+        }
+      } else if (y < RULER_H && x > KEYS_W) {
+        e.currentTarget.style.cursor = 'text';
+        setHint('Click to set the playback position in the pattern');
       } else e.currentTarget.style.cursor = 'default';
       return;
     }
@@ -266,6 +307,9 @@ export function PianoRoll() {
     switch (d.kind) {
       case 'pan':
         setView({ scrollTick: d.scrollTick - (e.clientX - d.x) / view.pxPerTick, scrollY: d.scrollY - (e.clientY - d.y) });
+        break;
+      case 'seek':
+        seekTo(x, e.altKey);
         break;
       case 'velocity':
         setVelocityAt(x, y, d.key);
@@ -299,7 +343,7 @@ export function PianoRoll() {
         const start = snapFloor(Math.max(0, tick), g);
         if (start !== d.last && !notes.some((n) => n.key === d.row && n.start === start)) {
           d.last = start;
-          addNotes(patternId, channel.id, [{ key: d.row, start, length: view.noteLength, velocity: 0.78 }], { coalesce: d.key });
+          addNotes(patternId, channel.id, [{ key: d.row, start, length: view.noteLength, velocity: view.noteVelocity }], { coalesce: d.key });
         }
         break;
       }
@@ -311,6 +355,16 @@ export function PianoRoll() {
         let dk = key - d.originKey;
         const keys = [...d.orig.values()].map((n) => n.key);
         dk = Math.max(-Math.min(...keys), Math.min(127 - Math.max(...keys), dk));
+        if (d.clone) {
+          if (dt === 0 && dk === 0) break;
+          // First movement of a Shift+drag: the originals stay, the copies follow the mouse.
+          const originals = [...d.orig.values()];
+          const ids = addNotes(patternId, channel.id, originals.map(({ id: _id, ...n }) => n), { coalesce: d.key });
+          d.orig = new Map(originals.map((n, i) => [ids[i], { ...n, id: ids[i] }]));
+          d.anchor = ids[originals.findIndex((n) => n.id === d.anchor)];
+          d.clone = false;
+          setSelected(new Set(ids));
+        }
         updateNotes(
           patternId,
           channel.id,
@@ -329,7 +383,7 @@ export function PianoRoll() {
           d.lastKey = newKey;
           startPreview(newKey, anchor.velocity);
         }
-        setHint(`${noteName(newKey)} @ ${((anchor.start + dt) / PPQ / beatsPerBar + 1).toFixed(2)}`);
+        setHint(`${formatPosition(anchor.start + dt, beatsPerBar)} for ${formatDuration(anchor.length, beatsPerBar)} · ${noteName(newKey)} / ${newKey}`);
         break;
       }
       case 'resize': {
@@ -348,6 +402,7 @@ export function PianoRoll() {
           },
           { coalesce: d.key },
         );
+        setHint(`${formatPosition(anchor.start, beatsPerBar)} for ${formatDuration(anchor.length + delta, beatsPerBar)}`);
         break;
       }
     }
@@ -361,24 +416,53 @@ export function PianoRoll() {
       engine.noteOff(d.handle);
       scene.current.pressed = null;
     }
-    if (d?.kind === 'resize' || d?.kind === 'move') {
+    if (d?.kind === 'resize') {
       const n = useStore.getState().project.patterns.find((p) => p.id === patternId)?.notes[channelId ?? '']?.find((x) => x.id === d.anchor);
-      if (n && d.kind === 'resize') setView({ noteLength: n.length });
+      if (n) setView({ noteLength: n.length });
     }
     endCoalesce();
     dirty.current = true;
   };
 
+  const onDoubleClick = (e: ReactMouseEvent<HTMLCanvasElement>) => {
+    const { x, y } = local(e);
+    if (!channel || x < KEYS_W || y < RULER_H || y > gridBottom(rollView)) return;
+    const hit = noteAt(x, y);
+    // FL Studio: double-clicking a note opens its properties.
+    if (hit) openNoteProperties(patternId, channel.id, hit.note.id);
+  };
+
   const onWheel = (e: ReactWheelEvent<HTMLCanvasElement>) => {
-    const { x } = local(e);
+    const { x, y } = local(e);
     if (e.ctrlKey || e.metaKey) {
       const factor = Math.exp(-e.deltaY * 0.0025);
       const px = Math.min(10, Math.max(0.04, view.pxPerTick * factor));
       const anchorTick = tickAtX(rollView, x);
       setView({ pxPerTick: px, scrollTick: anchorTick - (x - KEYS_W) / px });
     } else if (e.altKey) {
-      const rh = Math.min(30, Math.max(6, Math.round(view.rowHeight + (e.deltaY < 0 ? 1 : -1))));
-      setView({ rowHeight: rh, scrollY: (view.scrollY / view.rowHeight) * rh });
+      // FL Studio: Alt+wheel changes the velocity of the note under the mouse, or of the selection.
+      const hit = x > KEYS_W && y > RULER_H && y < gridBottom(rollView) ? noteAt(x, y) : null;
+      const ids = hit ? (selected.has(hit.note.id) ? selected : new Set([hit.note.id])) : selected;
+      if (ids.size > 0 && channel) {
+        const step = (e.deltaY < 0 ? 1 : -1) * (4 / 128);
+        let shown = 0;
+        updateNotes(
+          patternId,
+          channel.id,
+          (list) => {
+            for (const n of list) {
+              if (!ids.has(n.id)) continue;
+              n.velocity = Math.min(1, Math.max(1 / 128, n.velocity + step));
+              shown = n.velocity;
+            }
+          },
+          { coalesce: 'pianoroll-wheel-velocity' },
+        );
+        setHint(`Velocity: ${Math.round(shown * 127)}`);
+      } else {
+        const rh = Math.min(30, Math.max(6, Math.round(view.rowHeight + (e.deltaY < 0 ? 1 : -1))));
+        setView({ rowHeight: rh, scrollY: (view.scrollY / view.rowHeight) * rh });
+      }
     } else if (e.shiftKey) {
       setView({ scrollTick: view.scrollTick + (e.deltaY + e.deltaX) / view.pxPerTick });
     } else {
@@ -388,14 +472,16 @@ export function PianoRoll() {
 
   // ------------------------------------------------------------ keyboard
 
-  const keyState = useRef({ notes, selected, channel, patternId, grid, beatsPerBar });
-  keyState.current = { notes, selected, channel, patternId, grid, beatsPerBar };
+  const scrollBy = (ticks: number, rows: number) => setView({ scrollTick: view.scrollTick + ticks, scrollY: view.scrollY + rows * view.rowHeight });
+  const keyState = useRef({ notes, selected, channel, patternId, grid, beatsPerBar, scrollBy });
+  keyState.current = { notes, selected, channel, patternId, grid, beatsPerBar, scrollBy };
   useEffect(
     () =>
       registerWindowKeys('pianoRoll', (e) => {
-        const { notes: list, selected: sel, channel: ch, patternId: pid, grid: g } = keyState.current;
+        const { notes: list, selected: sel, channel: ch, patternId: pid, grid: g, scrollBy: scroll } = keyState.current;
         if (!ch) return false;
         const mod = e.metaKey || e.ctrlKey;
+        const plain = !mod && !e.altKey && !e.shiftKey;
         const chosen = list.filter((n) => sel.has(n.id));
         if ((e.key === 'Delete' || e.key === 'Backspace') && chosen.length) {
           deleteNotes(pid, ch.id, chosen.map((n) => n.id));
@@ -404,6 +490,11 @@ export function PianoRoll() {
         }
         if (mod && e.code === 'KeyA') {
           setSelected(new Set(list.map((n) => n.id)));
+          return true;
+        }
+        if (mod && e.code === 'KeyD') {
+          // FL Studio: Ctrl+D deselects.
+          setSelected(new Set());
           return true;
         }
         if (mod && (e.code === 'KeyC' || e.code === 'KeyX') && chosen.length) {
@@ -422,7 +513,7 @@ export function PianoRoll() {
           setSelected(new Set(ids));
           return true;
         }
-        if (mod && (e.code === 'KeyB' || e.code === 'KeyD') && chosen.length) {
+        if (mod && e.code === 'KeyB' && chosen.length) {
           const min = Math.min(...chosen.map((n) => n.start));
           const max = Math.max(...chosen.map((n) => n.start + n.length));
           const shift = Math.max(PPQ, Math.ceil((max - min) / PPQ) * PPQ);
@@ -430,35 +521,53 @@ export function PianoRoll() {
           setSelected(new Set(ids));
           return true;
         }
+        if (mod && !e.shiftKey && e.code === 'KeyL') {
+          legatoNotes(pid, ch.id, sel);
+          return true;
+        }
         // FL Studio tool keys: P draw, B paint, D delete, E select.
-        if (!mod && !e.altKey && !e.shiftKey) {
+        if (plain) {
           const tool = ({ KeyP: 'draw', KeyB: 'paint', KeyD: 'delete', KeyE: 'select' } as const)[e.code as 'KeyP'];
           if (tool) {
             setUi((d) => void (d.pianoRoll.tool = tool));
             return true;
           }
         }
-        if ((e.key === 'ArrowUp' || e.key === 'ArrowDown') && chosen.length) {
-          // Ctrl/Cmd+Up/Down transposes by an octave (FL), Shift as well.
-          const dk = (e.key === 'ArrowUp' ? 1 : -1) * (e.shiftKey || mod ? 12 : 1);
-          updateNotes(pid, ch.id, (l) => {
-            for (const n of l) if (sel.has(n.id)) n.key += dk;
-          });
-          return true;
+        if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+          const dir = e.key === 'ArrowUp' ? 1 : -1;
+          if ((e.shiftKey || mod) && !e.altKey && chosen.length) {
+            // FL Studio: Shift+Up/Down transposes by a semitone, Ctrl+Up/Down by an octave.
+            const dk = dir * (mod ? 12 : 1);
+            updateNotes(pid, ch.id, (l) => {
+              for (const n of l) if (sel.has(n.id)) n.key += dk;
+            });
+            return true;
+          }
+          if (plain) {
+            scroll(0, -dir * 3);
+            return true;
+          }
         }
-        if ((e.key === 'ArrowLeft' || e.key === 'ArrowRight') && chosen.length && !mod) {
-          const dt = (e.key === 'ArrowRight' ? 1 : -1) * g;
-          updateNotes(pid, ch.id, (l) => {
-            for (const n of l) if (sel.has(n.id)) n.start = Math.max(0, n.start + dt);
-          });
-          return true;
+        if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+          const dir = e.key === 'ArrowRight' ? 1 : -1;
+          if (e.shiftKey && !mod && !e.altKey && chosen.length) {
+            // Shift+Left/Right moves the selection by the snap.
+            updateNotes(pid, ch.id, (l) => {
+              for (const n of l) if (sel.has(n.id)) n.start = Math.max(0, n.start + dir * g);
+            });
+            return true;
+          }
+          if (plain) {
+            scroll(dir * PPQ, 0);
+            return true;
+          }
         }
         if (e.code === 'KeyQ' && !mod) {
           // Q and FL Studio's Alt+Q both quantize.
           quantize(pid, ch.id, sel, g);
           return true;
         }
-        if (e.key === 'Escape') {
+        if (e.key === 'Escape' && sel.size) {
           setSelected(new Set());
           return true;
         }
@@ -500,10 +609,10 @@ export function PianoRoll() {
         {toolButton('delete', <IconEraser size={12} />, 'Delete tool (right mouse button works in every tool)')}
         {toolButton('select', <IconSelect size={12} />, 'Select tool: drag a rectangle')}
       </div>
-      <select className="tb-select" value={view.snap} data-hint="Snap to grid" onChange={(e) => setView({ snap: e.target.value as SnapId })}>
+      <select className="tb-select" value={view.snap} data-hint="Snap (Main follows the main snap in the toolbar; Alt while dragging: no snap)" onChange={(e) => setView({ snap: e.target.value as SnapId })}>
         {SNAP_OPTIONS.map((s) => (
           <option key={s} value={s}>
-            {s === 'none' ? 'No snap' : `Snap: ${s}`}
+            {`Snap: ${snapLabel(s)}`}
           </option>
         ))}
       </select>
@@ -527,6 +636,7 @@ export function PianoRoll() {
             onPointerUp={onPointerUp}
             onPointerCancel={onPointerUp}
             onWheel={onWheel}
+            onDoubleClick={onDoubleClick}
             onContextMenu={(e) => e.preventDefault()}
           />
           {!channel && <div className="editor-empty">Add a channel in the channel rack to start writing notes.</div>}
@@ -541,4 +651,3 @@ function quantize(patternId: string, channelId: string, selected: Set<string>, g
     for (const n of list) if (selected.size === 0 || selected.has(n.id)) n.start = snapRound(n.start, grid);
   });
 }
-

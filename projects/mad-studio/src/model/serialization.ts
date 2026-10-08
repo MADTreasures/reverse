@@ -358,6 +358,7 @@ export function parseProject(raw: unknown): Project {
       start: Math.round(num(c.start, 0, 0)),
       length: Math.max(1, Math.round(num(c.length, ticksPerBar(beatsPerBar), 1))),
       offset: Math.round(num(c.offset, 0, 0)),
+      ...(bool(c.muted, false) ? { muted: true } : {}),
     };
     if (c.kind === 'pattern' && typeof c.patternId === 'string' && patternIds.has(c.patternId)) {
       clips.push({ ...base, kind: 'pattern', patternId: c.patternId });

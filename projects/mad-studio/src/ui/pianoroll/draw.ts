@@ -48,6 +48,10 @@ export interface RollScene {
   playhead: number | null;
   rubber: { t0: number; t1: number; k0: number; k1: number } | null;
   pressedKey: number | null;
+  /** Spacing of the finest grid lines (ticks), see gridLineTicks(). */
+  lineTicks: number;
+  /** Where pattern playback starts (marker in the ruler). */
+  patternStart: number;
 }
 
 function roundRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number): void {
@@ -83,17 +87,17 @@ export function drawRoll(ctx: CanvasRenderingContext2D, v: RollView, s: RollScen
     }
   }
 
-  // --- vertical grid lines
-  const startTick = Math.max(0, Math.floor(v.scrollTick / TICKS_PER_STEP) * TICKS_PER_STEP);
+  // --- vertical grid lines (finer as you zoom in, like FL Studio's "Line" snap)
+  const line = s.lineTicks;
+  const startTick = Math.max(0, Math.floor(v.scrollTick / line) * line);
   const endTick = tickAtX(v, width);
   const bar = ticksPerBar(s.beatsPerBar);
-  const stepVisible = TICKS_PER_STEP * pxPerTick >= 6;
-  for (let t = startTick; t <= endTick; t += TICKS_PER_STEP) {
+  for (let t = startTick; t <= endTick; t += line) {
     const x = Math.round(xOfTick(v, t)) + 0.5;
     if (t % bar === 0) ctx.strokeStyle = '#ffffff33';
     else if (t % PPQ === 0) ctx.strokeStyle = '#ffffff17';
-    else if (stepVisible) ctx.strokeStyle = '#ffffff08';
-    else continue;
+    else if (t % TICKS_PER_STEP === 0) ctx.strokeStyle = '#ffffff0b';
+    else ctx.strokeStyle = '#ffffff06';
     ctx.beginPath();
     ctx.moveTo(x, RULER_H);
     ctx.lineTo(x, bottom);
@@ -180,6 +184,17 @@ export function drawRoll(ctx: CanvasRenderingContext2D, v: RollView, s: RollScen
         ctx.fillRect(Math.round(xOfTick(v, t + b * PPQ)), RULER_H - 5, 1, 4);
       }
     }
+  }
+
+  // --- pattern start marker (set by clicking the ruler)
+  const sx = xOfTick(v, s.patternStart);
+  if (s.patternStart > 0 && sx >= KEYS_W && sx <= width) {
+    ctx.fillStyle = '#7cc35b';
+    ctx.beginPath();
+    ctx.moveTo(sx, RULER_H - 1);
+    ctx.lineTo(sx - 5, RULER_H - 9);
+    ctx.lineTo(sx + 5, RULER_H - 9);
+    ctx.fill();
   }
 
   // --- keyboard

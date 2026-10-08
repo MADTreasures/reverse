@@ -2,11 +2,12 @@ import { DEFAULT_VELOCITY } from '../model/defaults';
 import { findPattern, patternLength } from '../model/patterns';
 import { findPreset } from '../model/presets';
 import { patternTimeline, songTimeline, type Timeline } from '../model/timeline';
-import { snapRound, snapTicks } from '../model/timing';
+import { snapRound } from '../model/timing';
 import type { Id, SynthChannel } from '../model/types';
 import { addNotes, endCoalesce, setTransport } from '../store/actions';
 import { toast } from '../ui/overlays';
-import { useStore, type AppState } from '../store/store';
+import { pianoRollSnap, patternStartTick } from '../store/snap';
+import { useStore, type AppState, type PlayMode } from '../store/store';
 import { AutomationRuntime } from './automationRuntime';
 import type { EngineApi } from './engineApi';
 import { WebRecorder, armedTargets, deliverTakes, monitoredTargets, type RecordedTake } from './recorder';
@@ -137,7 +138,7 @@ export class WebAudioEngine implements EngineApi {
     let s = useStore.getState();
     this.timeline = null;
     this.take += 1;
-    const from = s.transport.mode === 'song' ? s.transport.songStart : 0;
+    const from = s.transport.mode === 'song' ? s.transport.songStart : patternStartTick(s);
     if (s.transport.mode === 'song' && this.automation.update(s.project, from)) this.graph?.sync(this.automation.apply(s.project));
 
     // Audio recording: armed tracks with an input (asks for microphone access the first time).
@@ -222,11 +223,11 @@ export class WebAudioEngine implements EngineApi {
   }
 
   /** Moves the song start marker; while playing in song mode playback jumps there. */
-  seek(tick: number): void {
+  seek(tick: number, mode: PlayMode = 'song'): void {
     const t = Math.max(0, Math.round(tick));
-    setTransport({ songStart: t });
+    setTransport(mode === 'song' ? { songStart: t } : { patternStart: t });
     const s = useStore.getState();
-    if (this.scheduler.playing && s.transport.mode === 'song' && this.ctx && this.graph) {
+    if (this.scheduler.playing && s.transport.mode === mode && this.ctx && this.graph) {
       this.graph.stopAll(this.ctx.currentTime);
       this.scheduler.relocate(t, this.ctx.currentTime + 0.03);
     }
@@ -285,7 +286,7 @@ export class WebAudioEngine implements EngineApi {
     const endTick = this.patternTick();
     if (!pattern || endTick === null) return;
     const len = patternLength(pattern, s.project.beatsPerBar);
-    const grid = snapTicks(s.ui.pianoRoll.snap, s.project.beatsPerBar);
+    const grid = pianoRollSnap(s);
     const start = snapRound(note.recordStart, grid) % len;
     let length = endTick - note.recordStart;
     if (length <= 0) length += len;

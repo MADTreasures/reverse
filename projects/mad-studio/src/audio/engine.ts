@@ -4,6 +4,7 @@
  * start – uses the Web Audio engine. Both implement EngineApi.
  */
 import { native } from '../platform/platform';
+import type { PlayMode } from '../store/store';
 import { toast } from '../ui/overlays';
 import type { EngineApi } from './engineApi';
 import { NativeEngine } from './nativeEngine';
@@ -57,8 +58,8 @@ class EngineFacade implements EngineApi {
   panic() {
     this.impl.panic();
   }
-  seek(tick: number) {
-    this.impl.seek(tick);
+  seek(tick: number, mode?: PlayMode) {
+    this.impl.seek(tick, mode);
   }
   playheadTick() {
     return this.impl.playheadTick();

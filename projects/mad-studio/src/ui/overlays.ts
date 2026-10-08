@@ -22,7 +22,8 @@ export type CustomDialogId = 'export' | 'about' | 'shortcuts' | 'project' | 'plu
 type DialogSpec =
   | { kind: 'prompt'; title: string; value: string; resolve: (v: string | null) => void }
   | { kind: 'confirm'; title: string; message: string; okLabel: string; danger: boolean; resolve: (v: boolean) => void }
-  | { kind: 'custom'; id: CustomDialogId };
+  | { kind: 'custom'; id: CustomDialogId }
+  | { kind: 'note'; patternId: string; channelId: string; noteId: string };
 
 interface Toast {
   id: number;
@@ -84,6 +85,11 @@ export function confirmDialog(title: string, message: string, okLabel = 'OK', da
 
 export function openDialog(id: CustomDialogId): void {
   useOverlays.setState({ dialog: { kind: 'custom', id } });
+}
+
+/** FL Studio's note properties (double-click a note in the piano roll). */
+export function openNoteProperties(patternId: string, channelId: string, noteId: string): void {
+  useOverlays.setState({ dialog: { kind: 'note', patternId, channelId, noteId } });
 }
 
 export function closeDialog(): void {

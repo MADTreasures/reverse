@@ -2,21 +2,33 @@ import { useEffect, useMemo, useRef, useState, type DragEvent, type MouseEvent a
 import { engine } from '../../audio/engine';
 import { segmentMidValue } from '../../model/automation';
 import { describeTarget, fromNorm } from '../../model/automationTargets';
-import { songLength } from '../../model/patterns';
-import { SNAP_OPTIONS, formatPosition, snapFloor, snapRound, snapTicks, ticksPerBar, type SnapId } from '../../model/timing';
+import { findPattern, songLength } from '../../model/patterns';
+import { PALETTE, PALETTE_NAMES } from '../../model/colors';
+import { SNAP_OPTIONS, formatPosition, gridLineTicks, snapFloor, snapLabel, snapRound, snapTicks, ticksPerBar, type SnapId } from '../../model/timing';
 import { makeId } from '../../model/ids';
 import type { AutomationChannel, Clip, Id, Project } from '../../model/types';
 import { createAudioClip, importAudioFiles } from '../../project/projectIO';
 import {
   addClip,
   addTracks,
+  cloneTrack,
   deleteClips,
+  deleteTrack,
   endCoalesce,
   gestureKey,
+  insertTrack,
+  makeClipUnique,
+  moveTrack,
   placePatternClip,
+  renamePattern,
   renameTrack,
   selectChannel,
   selectPattern,
+  setChannelProps,
+  setClipPattern,
+  setClipsMuted,
+  setPatternColor,
+  setTrackClipsMuted,
   setTransport,
   setUi,
   toggleTrackMute,
@@ -27,14 +39,14 @@ import { useStore, type PlaylistPick, type ToolId } from '../../store/store';
 import { prepareCanvas, useElementSize, useFrame } from '../animation';
 import { hitTestCurve, tensionFromDrag, xToTick, yToValue, type CurveView } from '../automation/curve';
 import { pointMenu } from '../automation/pointMenu';
-import { IconEraser, IconPencil, IconPlaylist, IconSelect, IconBrush } from '../controls/Icons';
+import { IconEraser, IconMute, IconPencil, IconPlaylist, IconSelect, IconBrush } from '../controls/Icons';
 import { audioFilesFromDrop, getDragItem, hasDragItem, hasFiles, sampleInfoFor } from '../dnd';
 import { setHint } from '../hint';
 import { registerWindowKeys } from '../keyboard';
-import { promptDialog, showMenu } from '../overlays';
+import { promptDialog, showMenu, type MenuItem } from '../overlays';
 import { WindowFrame } from '../workspace/WindowFrame';
-import { focusWindow, openChannelEditor, openWindow } from '../workspace/windows';
-import { RULER_H, TRACK_W, automationClipView, drawPlaylist, tickAtX, trackAtY, xOfTick, yOfTrack, type PlaylistViewport } from './draw';
+import { focusWindow, openChannelEditor, openPianoRoll, openWindow } from '../workspace/windows';
+import { CLIP_ICON_W, RULER_H, TRACK_LED_W, TRACK_W, automationClipView, drawPlaylist, tickAtX, trackAtY, xOfTick, yOfTrack, type PlaylistViewport } from './draw';
 import { PlaylistPicker, usePick } from './PlaylistPicker';
 
 const EDGE = 7;
@@ -43,6 +55,7 @@ type Drag =
   | { kind: 'move'; key: string; originTick: number; originTrack: number; orig: Map<string, Clip>; anchor: string }
   | { kind: 'resize'; key: string; side: 'left' | 'right'; originTick: number; orig: Map<string, Clip>; anchor: string }
   | { kind: 'delete'; key: string }
+  | { kind: 'mute'; key: string; muted: boolean | null; done: Set<string> }
   | { kind: 'rubber'; t0: number; r0: number; t1: number; r1: number; base: Set<string> }
   | { kind: 'paint'; key: string; track: number; last: number }
   | { kind: 'seek' }
@@ -66,6 +79,97 @@ function pickName(project: Project, pick: PlaylistPick): string {
   return project.channels.find((c) => c.id === pick.id)?.name ?? '';
 }
 
+function clipName(project: Project, clip: Clip): string {
+  if (clip.kind === 'pattern') return findPattern(project, clip.patternId)?.name ?? 'Pattern';
+  return project.channels.find((c) => c.id === clip.channelId)?.name ?? 'Clip';
+}
+
+function randomColor(current: string | undefined): string {
+  const choices = PALETTE.filter((c) => c !== current);
+  return choices[Math.floor(Math.random() * choices.length)] ?? PALETTE[0];
+}
+
+/** The channel whose notes a pattern clip opens in the piano roll: the selected one if it has notes there. */
+function pianoRollChannelFor(project: Project, patternId: Id, selectedChannelId: Id | null): Id | null {
+  const pattern = findPattern(project, patternId);
+  const playable = project.channels.filter((c) => c.kind !== 'automation');
+  const hasNotes = (id: Id) => (pattern?.notes[id]?.length ?? 0) > 0;
+  if (selectedChannelId && hasNotes(selectedChannelId)) return selectedChannelId;
+  return playable.find((c) => hasNotes(c.id))?.id ?? selectedChannelId ?? playable[0]?.id ?? null;
+}
+
+/** FL Studio's clip menu (click the icon at the left of a clip's title). */
+function clipMenu(project: Project, clip: Clip, select: (ids: Set<string>) => void): MenuItem[] {
+  const muted: MenuItem = { label: 'Muted', checked: clip.muted === true, onClick: () => setClipsMuted([clip.id]) };
+  const remove: MenuItem = { label: 'Delete', danger: true, onClick: () => deleteClips([clip.id]) };
+  if (clip.kind === 'pattern') {
+    const pattern = findPattern(project, clip.patternId);
+    const similar = project.clips.filter((c) => c.kind === 'pattern' && c.patternId === clip.patternId);
+    return [
+      { label: 'Pattern clip', header: true },
+      muted,
+      { separator: true },
+      { label: 'Rename…', onClick: () => void promptDialog('Rename pattern', pattern?.name ?? '').then((n) => n && renamePattern(clip.patternId, n)) },
+      { label: 'Change color', submenu: PALETTE.map((c, i) => ({ label: PALETTE_NAMES[i], swatch: c, onClick: () => setPatternColor(clip.patternId, c) })) },
+      { label: 'Random color', onClick: () => setPatternColor(clip.patternId, randomColor(pattern?.color)) },
+      { separator: true },
+      {
+        label: 'Select source pattern',
+        submenu: project.patterns.map((p) => ({ label: p.name, swatch: p.color, radio: true, checked: p.id === clip.patternId, onClick: () => setClipPattern(clip.id, p.id) })),
+      },
+      {
+        label: 'Edit pattern',
+        onClick: () => {
+          selectPattern(clip.patternId);
+          openWindow('channelRack');
+          focusWindow('channelRack');
+        },
+      },
+      { label: 'Make unique', disabled: similar.length < 2, onClick: () => makeClipUnique(clip.id) },
+      { label: 'Select all similar clips', onClick: () => select(new Set(similar.map((c) => c.id))) },
+      remove,
+    ];
+  }
+  const channel = project.channels.find((c) => c.id === clip.channelId);
+  const similar = project.clips.filter((c) => c.kind === clip.kind && c.channelId === clip.channelId);
+  return [
+    { label: clip.kind === 'audio' ? 'Audio clip' : 'Automation clip', header: true },
+    muted,
+    { separator: true },
+    { label: 'Rename…', disabled: !channel, onClick: () => void promptDialog('Rename', channel?.name ?? '').then((n) => n && setChannelProps(clip.channelId, { name: n })) },
+    { label: 'Change color', submenu: PALETTE.map((c, i) => ({ label: PALETTE_NAMES[i], swatch: c, onClick: () => setChannelProps(clip.channelId, { color: c }) })) },
+    { label: 'Random color', onClick: () => setChannelProps(clip.channelId, { color: randomColor(channel?.color) }) },
+    { separator: true },
+    { label: clip.kind === 'audio' ? 'Channel settings…' : 'Edit automation…', onClick: () => openChannelEditor(clip.channelId) },
+    { label: 'Select all similar clips', onClick: () => select(new Set(similar.map((c) => c.id))) },
+    remove,
+  ];
+}
+
+/** FL Studio's playlist track menu (right-click a track header). */
+function trackMenu(project: Project, index: number): MenuItem[] {
+  const t = project.tracks[index];
+  const clips = project.clips.filter((c) => c.trackId === t.id).sort((a, b) => a.start - b.start);
+  return [
+    { label: 'Rename…', onClick: () => void promptDialog('Rename track', t.name).then((n) => n && renameTrack(t.id, n)) },
+    { label: 'Auto name', disabled: clips.length === 0, onClick: () => renameTrack(t.id, clipName(project, clips[0])) },
+    { label: 'Reset', onClick: () => renameTrack(t.id, `Track ${index + 1}`) },
+    { separator: true },
+    { label: t.muted ? 'Unmute track' : 'Mute track', onClick: () => toggleTrackMute(t.id) },
+    { label: 'Mute all clips', disabled: clips.length === 0, onClick: () => setTrackClipsMuted(t.id, true) },
+    { label: 'Unmute all clips', disabled: !clips.some((c) => c.muted), onClick: () => setTrackClipsMuted(t.id, false) },
+    { separator: true },
+    { label: 'Insert one', onClick: () => insertTrack(index) },
+    { label: 'Clone', onClick: () => cloneTrack(t.id) },
+    { label: 'Delete', danger: true, disabled: project.tracks.length <= 1, onClick: () => deleteTrack(t.id) },
+    { separator: true },
+    { label: 'Move up', disabled: index === 0, onClick: () => moveTrack(t.id, -1) },
+    { label: 'Move down', disabled: index === project.tracks.length - 1, onClick: () => moveTrack(t.id, 1) },
+    { separator: true },
+    { label: 'Add 8 tracks', onClick: () => addTracks(8) },
+  ];
+}
+
 export function Playlist() {
   const project = useStore((s) => s.project);
   const view = useStore((s) => s.ui.playlist);
@@ -82,15 +186,17 @@ export function Playlist() {
   const lastPlayhead = useRef<number | null>(null);
   const [renaming, setRenaming] = useState<{ index: number; y: number } | null>(null);
 
-  const grid = snapTicks(view.snap, project.beatsPerBar);
+  const mainSnap = useStore((s) => s.ui.mainSnap);
+  const lineTicks = gridLineTicks(view.pxPerTick, project.beatsPerBar);
+  const grid = snapTicks(view.snap, project.beatsPerBar, lineTicks, mainSnap);
   const vp: PlaylistViewport = useMemo(
     () => ({ width: size.width, height: size.height, pxPerTick: view.pxPerTick, trackHeight: view.trackHeight, scrollTick: view.scrollTick, scrollY: view.scrollY }),
     [size.width, size.height, view.pxPerTick, view.trackHeight, view.scrollTick, view.scrollY],
   );
   const songEnd = useMemo(() => songLength(project), [project]);
 
-  const scene = useRef({ vp, project, selected, songStart, songEnd });
-  scene.current = { vp, project, selected, songStart, songEnd };
+  const scene = useRef({ vp, project, selected, songStart, songEnd, lineTicks });
+  scene.current = { vp, project, selected, songStart, songEnd, lineTicks };
   dirty.current = true;
 
   useFrame(() => {
@@ -114,6 +220,7 @@ export function Playlist() {
       rubber: d?.kind === 'rubber' ? { t0: d.t0, t1: d.t1, r0: d.r0, r1: d.r1 } : null,
       dropHint: dropHint.current,
       autoFocus: autoFocus.current,
+      lineTicks: sc.lineTicks,
     });
   });
 
@@ -144,6 +251,14 @@ export function Playlist() {
       return { clip: c, edge: wide && right - x <= EDGE ? 'right' : wide && x - left <= EDGE ? 'left' : null };
     }
     return null;
+  };
+
+  /** True when (x, y) is on the menu icon at the left of the clip's title bar. */
+  const onClipIcon = (clip: Clip, x: number, y: number) => {
+    const ti = project.tracks.findIndex((t) => t.id === clip.trackId);
+    const left = Math.max(xOfTick(vp, clip.start), TRACK_W);
+    const top = yOfTrack(vp, ti) + 1;
+    return x >= left && x < left + CLIP_ICON_W + 2 && y >= top && y < top + 15 && clip.length * vp.pxPerTick > CLIP_ICON_W * 2;
   };
 
   /** Curve hit-test inside an automation clip's body (below its title). */
@@ -193,14 +308,8 @@ export function Playlist() {
     const track = project.tracks[ti];
     if (x < TRACK_W) {
       if (!track) return;
-      if (x < 26) toggleTrackMute(track.id);
-      else if (e.button === 2) {
-        showMenu(e, [
-          { label: 'Rename track…', onClick: () => void promptDialog('Rename track', track.name).then((n) => n && renameTrack(track.id, n)) },
-          { label: track.muted ? 'Unmute track' : 'Mute track', onClick: () => toggleTrackMute(track.id) },
-          { label: 'Add 8 tracks', onClick: () => addTracks(8) },
-        ]);
-      }
+      if (e.button === 2) showMenu(e, trackMenu(project, ti));
+      else if (e.button === 0 && x >= TRACK_W - TRACK_LED_W) toggleTrackMute(track.id);
       return;
     }
     if (!track) return;
@@ -208,8 +317,13 @@ export function Playlist() {
     const g = e.altKey ? 1 : grid;
     lastClick.current = { tick: snapFloor(Math.max(0, tick), g), track: ti };
     const hit = clipAt(x, y);
+    if (hit && e.button === 0 && view.tool !== 'delete' && view.tool !== 'mute' && onClipIcon(hit.clip, x, y)) {
+      drag.current = null;
+      showMenu(e, clipMenu(project, hit.clip, (ids) => setSelected(ids)));
+      return;
+    }
     const auto = hit && !hit.edge ? automationAt(hit.clip, x, y) : null;
-    if (auto && hit && view.tool !== 'delete') {
+    if (auto && hit && view.tool !== 'delete' && view.tool !== 'mute') {
       const { ch, cv } = auto;
       const key = gestureKey('automation');
       const pts = ch.automation.points;
@@ -251,6 +365,14 @@ export function Playlist() {
       if (hit) deleteClips([hit.clip.id], { coalesce: key });
       return;
     }
+    if (tool === 'mute') {
+      // FL Studio's mute tool: click toggles a clip, dragging gives the same state to every clip it touches.
+      const key = gestureKey('mute-clips');
+      const muted = hit ? !hit.clip.muted : null;
+      drag.current = { kind: 'mute', key, muted, done: new Set(hit ? [hit.clip.id] : []) };
+      if (hit) setClipsMuted([hit.clip.id], muted ?? undefined, { coalesce: key });
+      return;
+    }
     if ((e.metaKey || e.ctrlKey || tool === 'select') && !hit) {
       const base = e.shiftKey ? new Set(selected) : new Set<string>();
       drag.current = { kind: 'rubber', t0: tick, r0: ti, t1: tick, r1: ti, base };
@@ -267,12 +389,17 @@ export function Playlist() {
         setUi((u) => void (u.playlistPick = { kind, id: channelId }));
         if (kind === 'automation') selectChannel(channelId);
       }
-      let sel = selected;
-      if (e.metaKey || e.ctrlKey) {
-        sel = new Set(selected);
-        if (sel.has(hit.clip.id)) sel.delete(hit.clip.id);
-        else sel.add(hit.clip.id);
-      } else if (!selected.has(hit.clip.id)) sel = new Set([hit.clip.id]);
+      const mod = e.metaKey || e.ctrlKey;
+      if (mod && e.shiftKey) {
+        // FL Studio: Ctrl+Shift+click adds a clip to (or removes it from) the selection.
+        const next = new Set(selected);
+        if (next.has(hit.clip.id)) next.delete(hit.clip.id);
+        else next.add(hit.clip.id);
+        setSelected(next);
+        return;
+      }
+      // Ctrl+click selects only this clip; a click on a selected clip drags the whole selection.
+      let sel = mod || !selected.has(hit.clip.id) ? new Set([hit.clip.id]) : selected;
       const ids = sel.has(hit.clip.id) ? sel : new Set([hit.clip.id]);
       const key = gestureKey('clips');
       let orig = new Map(project.clips.filter((c) => ids.has(c.id)).map((c) => [c.id, { ...c }]));
@@ -322,9 +449,15 @@ export function Playlist() {
       }
       if (x < TRACK_W) {
         e.currentTarget.style.cursor = 'default';
+        if (y > RULER_H && project.tracks[trackAtY(vp, y)]) setHint(x >= TRACK_W - TRACK_LED_W ? 'Mute track' : 'Right-click: track options, double-click: rename');
         return;
       }
       const hit = clipAt(x, y);
+      if (hit && onClipIcon(hit.clip, x, y)) {
+        e.currentTarget.style.cursor = 'pointer';
+        setHint(`${clipName(project, hit.clip)} – clip menu`);
+        return;
+      }
       const auto = hit && !hit.edge ? automationAt(hit.clip, x, y) : null;
       if (auto && hit) {
         const { ch, cv } = auto;
@@ -350,13 +483,17 @@ export function Playlist() {
         return;
       }
       setAutoFocus(hit?.clip.kind === 'automation' ? { clipId: hit.clip.id, point: null, handle: null } : null);
-      e.currentTarget.style.cursor = hit?.edge ? 'ew-resize' : hit ? 'move' : view.tool === 'delete' ? 'not-allowed' : 'copy';
+      e.currentTarget.style.cursor = hit?.edge ? 'ew-resize' : hit ? (view.tool === 'mute' ? 'pointer' : 'move') : view.tool === 'delete' ? 'not-allowed' : 'copy';
       if (hit) {
         const label =
           hit.clip.kind === 'pattern'
             ? project.patterns.find((p) => p.id === (hit.clip as Extract<Clip, { kind: 'pattern' }>).patternId)?.name
             : (project.channels.find((c) => c.id === (hit.clip as Extract<Clip, { kind: 'audio' | 'automation' }>).channelId)?.name ?? 'Clip');
-        setHint(`${label} – drag: move, edges: resize, Shift+drag: duplicate, right-click: delete`);
+        setHint(
+          view.tool === 'mute'
+            ? `${label} – click: mute/unmute`
+            : `${label}${hit.clip.muted ? ' (muted)' : ''} – drag: move, edges: resize, Shift+drag: duplicate, double-click: edit, right-click: delete`,
+        );
       } else setHint(`Click to place “${pickName(project, pick)}”`);
       return;
     }
@@ -373,6 +510,15 @@ export function Playlist() {
       case 'delete': {
         const hit = clipAt(x, y);
         if (hit) deleteClips([hit.clip.id], { coalesce: d.key });
+        break;
+      }
+      case 'mute': {
+        const hit = clipAt(x, y);
+        if (hit && !d.done.has(hit.clip.id)) {
+          d.done.add(hit.clip.id);
+          if (d.muted === null) d.muted = !hit.clip.muted;
+          setClipsMuted([hit.clip.id], d.muted, { coalesce: d.key });
+        }
         break;
       }
       case 'rubber': {
@@ -482,7 +628,7 @@ export function Playlist() {
 
   const onDoubleClick = (e: ReactMouseEvent<HTMLCanvasElement>) => {
     const { x, y } = local(e);
-    if (x < TRACK_W && x >= 26 && y > RULER_H) {
+    if (x < TRACK_W - TRACK_LED_W && y > RULER_H) {
       const ti = trackAtY(vp, y);
       if (project.tracks[ti]) setRenaming({ index: ti, y: RULER_H + ti * view.trackHeight - view.scrollY });
       return;
@@ -490,9 +636,16 @@ export function Playlist() {
     const hit = clipAt(x, y);
     if (!hit) return;
     if (hit.clip.kind === 'pattern') {
+      // FL Studio opens the pattern in the piano roll.
       selectPattern(hit.clip.patternId);
-      openWindow('channelRack');
-      focusWindow('channelRack');
+      const channelId = pianoRollChannelFor(project, hit.clip.patternId, useStore.getState().ui.selectedChannelId);
+      if (channelId) {
+        openPianoRoll(channelId);
+        focusWindow('pianoRoll');
+      } else {
+        openWindow('channelRack');
+        focusWindow('channelRack');
+      }
     } else openChannelEditor(hit.clip.channelId);
   };
 
@@ -561,9 +714,9 @@ export function Playlist() {
         const { project: p, selected: sel } = keyState.current;
         const mod = e.metaKey || e.ctrlKey;
         const chosen = p.clips.filter((c) => sel.has(c.id));
-        // FL Studio tool keys: P draw, B paint, D delete, E select.
+        // FL Studio tool keys: P draw, B paint, D delete, T mute, E select.
         if (!mod && !e.altKey && !e.shiftKey) {
-          const tool = ({ KeyP: 'draw', KeyB: 'paint', KeyD: 'delete', KeyE: 'select' } as const)[e.code as 'KeyP'];
+          const tool = ({ KeyP: 'draw', KeyB: 'paint', KeyD: 'delete', KeyT: 'mute', KeyE: 'select' } as const)[e.code as 'KeyP'];
           if (tool) {
             setUi((d) => void (d.playlist.tool = tool));
             return true;
@@ -576,6 +729,11 @@ export function Playlist() {
         }
         if (mod && e.code === 'KeyA') {
           setSelected(new Set(p.clips.map((c) => c.id)));
+          return true;
+        }
+        if (mod && e.code === 'KeyD') {
+          // FL Studio: Ctrl+D deselects.
+          setSelected(new Set());
           return true;
         }
         if (mod && e.code === 'KeyC' && chosen.length) {
@@ -592,7 +750,7 @@ export function Playlist() {
           setSelected(new Set(copies.map((c) => c.id)));
           return true;
         }
-        if (mod && (e.code === 'KeyB' || e.code === 'KeyD') && chosen.length) {
+        if (mod && e.code === 'KeyB' && chosen.length) {
           const min = Math.min(...chosen.map((c) => c.start));
           const max = Math.max(...chosen.map((c) => c.start + c.length));
           const copies = chosen.map((c) => ({ ...c, id: makeId('clip'), start: c.start + (max - min) }));
@@ -602,7 +760,7 @@ export function Playlist() {
           setSelected(new Set(copies.map((c) => c.id)));
           return true;
         }
-        if (e.key === 'Escape') {
+        if (e.key === 'Escape' && sel.size) {
           setSelected(new Set());
           return true;
         }
@@ -625,12 +783,13 @@ export function Playlist() {
         {toolButton('draw', <IconPencil size={12} />, 'Draw (P): click to place the picked pattern or clip, drag to move')}
         {toolButton('paint', <IconBrush size={12} />, 'Paint (B): drag to place several clips')}
         {toolButton('delete', <IconEraser size={12} />, 'Delete (D) – the right mouse button deletes in every tool')}
+        {toolButton('mute', <IconMute size={12} />, 'Mute (T): click clips to mute or unmute them')}
         {toolButton('select', <IconSelect size={12} />, 'Select (E): drag a rectangle')}
       </div>
-      <select className="tb-select" value={view.snap} data-hint="Snap to grid" onChange={(e) => setView({ snap: e.target.value as SnapId })}>
+      <select className="tb-select" value={view.snap} data-hint="Snap (Main follows the main snap in the toolbar; Alt while dragging: no snap)" onChange={(e) => setView({ snap: e.target.value as SnapId })}>
         {SNAP_OPTIONS.map((s) => (
           <option key={s} value={s}>
-            {s === 'none' ? 'No snap' : `Snap: ${s}`}
+            {`Snap: ${snapLabel(s)}`}
           </option>
         ))}
       </select>
@@ -657,7 +816,7 @@ export function Playlist() {
             <input
               className="track-name-input"
               autoFocus
-              style={{ left: 24, top: renaming.y + 8, width: TRACK_W - 30 }}
+              style={{ left: 6, top: renaming.y + 8, width: TRACK_W - TRACK_LED_W - 10 }}
               defaultValue={project.tracks[renaming.index]?.name}
               onBlur={(e) => {
                 const t = project.tracks[renaming.index];

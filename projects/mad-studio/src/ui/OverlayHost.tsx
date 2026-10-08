@@ -4,6 +4,7 @@ import { ExportDialog } from './dialogs/ExportDialog';
 import { AboutDialog, ShortcutsDialog } from './dialogs/InfoDialogs';
 import { AudioSettingsDialog } from './dialogs/AudioSettings';
 import { PluginManagerDialog } from './dialogs/PluginManager';
+import { NotePropertiesDialog } from './dialogs/NoteProperties';
 
 /** Context menus, modal dialogs and toast notifications. */
 export function OverlayHost() {
@@ -36,6 +37,7 @@ export function OverlayHost() {
           {dialog.kind === 'custom' && dialog.id === 'shortcuts' && <ShortcutsDialog />}
           {dialog.kind === 'custom' && dialog.id === 'plugins' && <PluginManagerDialog />}
           {dialog.kind === 'custom' && dialog.id === 'audio' && <AudioSettingsDialog />}
+          {dialog.kind === 'note' && <NotePropertiesDialog patternId={dialog.patternId} channelId={dialog.channelId} noteId={dialog.noteId} />}
         </div>
       )}
       <div className="toasts">

@@ -139,8 +139,8 @@ export function loadProject(project: Project, fileName: string | null = null): v
     coalesceKey: null,
     dirty: false,
     fileName,
-    ui: { ...fresh, windows: s.ui.windows, topZ: s.ui.topZ, browserOpen: s.ui.browserOpen, browserWidth: s.ui.browserWidth },
-    transport: { ...s.transport, songStart: 0 },
+    ui: { ...fresh, windows: s.ui.windows, topZ: s.ui.topZ, browserOpen: s.ui.browserOpen, browserWidth: s.ui.browserWidth, mainSnap: s.ui.mainSnap },
+    transport: { ...s.transport, songStart: 0, patternStart: 0 },
   });
   setUi((d) => {
     for (const key of Object.keys(d.windows)) {
@@ -488,6 +488,18 @@ export function deleteNotes(patternId: Id, channelId: Id, ids: Id[], opts?: Edit
   }, opts);
 }
 
+/** FL Studio's quick legato (Ctrl+L): each note (of the selection, or all) lasts until the next note starts. */
+export function legatoNotes(patternId: Id, channelId: Id, selected: ReadonlySet<Id>): void {
+  updateNotes(patternId, channelId, (list) => {
+    const chosen = list.filter((n) => selected.size === 0 || selected.has(n.id));
+    const starts = [...new Set(chosen.map((n) => n.start))].sort((a, b) => a - b);
+    for (const n of chosen) {
+      const next = starts.find((t) => t > n.start);
+      if (next !== undefined) n.length = next - n.start;
+    }
+  });
+}
+
 export function clearChannelNotes(patternId: Id, channelId: Id): void {
   edit((d) => {
     const p = patternOf(d, patternId);
@@ -617,6 +629,54 @@ export function deleteClips(ids: Id[], opts?: EditOptions): void {
   }, opts);
 }
 
+/** Mutes or unmutes clips; without `muted` each clip toggles. */
+export function setClipsMuted(ids: Id[], muted?: boolean, opts?: EditOptions): void {
+  if (ids.length === 0) return;
+  const set = new Set(ids);
+  edit((d) => {
+    for (const c of d.clips) {
+      if (!set.has(c.id)) continue;
+      const next = muted ?? !c.muted;
+      if (next) c.muted = true;
+      else delete c.muted;
+    }
+  }, opts);
+}
+
+/** Points a pattern clip at another pattern (FL Studio: clip menu › Select source pattern). */
+export function setClipPattern(clipId: Id, patternId: Id): void {
+  const project = useStore.getState().project;
+  const pattern = findPattern(project, patternId);
+  if (!pattern) return;
+  edit((d) => {
+    const c = d.clips.find((x) => x.id === clipId);
+    if (c?.kind === 'pattern') c.patternId = patternId;
+  });
+}
+
+/** Gives a pattern clip its own copy of the pattern (FL Studio: clip menu › Make unique). */
+export function makeClipUnique(clipId: Id): Id | null {
+  const project = useStore.getState().project;
+  const clip = project.clips.find((c) => c.id === clipId);
+  if (clip?.kind !== 'pattern') return null;
+  const src = findPattern(project, clip.patternId);
+  if (!src) return null;
+  const copy: Pattern = {
+    ...structuredClone(src),
+    id: makeId('pat'),
+    name: uniqueName(project.patterns.map((p) => p.name), `${src.name} #2`),
+  };
+  for (const list of Object.values(copy.notes)) for (const n of list) n.id = makeId('n');
+  const index = project.patterns.findIndex((p) => p.id === src.id);
+  edit((d) => {
+    d.patterns.splice(index + 1, 0, copy);
+    const c = d.clips.find((x) => x.id === clipId);
+    if (c?.kind === 'pattern') c.patternId = copy.id;
+  });
+  selectPattern(copy.id);
+  return copy.id;
+}
+
 export function toggleTrackMute(trackId: Id): void {
   edit((d) => {
     const t = d.tracks.find((x) => x.id === trackId);
@@ -636,6 +696,56 @@ export function addTracks(count: number): void {
     const start = d.tracks.length;
     for (let i = 0; i < count; i++) d.tracks.push(createPlaylistTrack(start + i));
   });
+}
+
+/** Inserts an empty playlist track at `index` (FL Studio: track menu › Insert one). */
+export function insertTrack(index: number): void {
+  edit((d) => {
+    const at = Math.max(0, Math.min(d.tracks.length, index));
+    const names = d.tracks.map((t) => t.name);
+    const track = createPlaylistTrack(d.tracks.length);
+    track.name = uniqueName(names, `Track ${at + 1}`);
+    d.tracks.splice(at, 0, track);
+  });
+}
+
+/** Removes a playlist track and its clips; at least one track stays. */
+export function deleteTrack(trackId: Id): void {
+  edit((d) => {
+    const i = d.tracks.findIndex((t) => t.id === trackId);
+    if (i < 0) return;
+    d.tracks.splice(i, 1);
+    d.clips = d.clips.filter((c) => c.trackId !== trackId);
+    if (d.tracks.length === 0) d.tracks.push(createPlaylistTrack(0));
+  });
+}
+
+/** Copies a playlist track with its clips below the original (FL Studio: track menu › Clone). */
+export function cloneTrack(trackId: Id): void {
+  edit((d) => {
+    const i = d.tracks.findIndex((t) => t.id === trackId);
+    if (i < 0) return;
+    const src = d.tracks[i];
+    const copy = { ...createPlaylistTrack(d.tracks.length), name: uniqueName(d.tracks.map((t) => t.name), src.name), muted: src.muted };
+    d.tracks.splice(i + 1, 0, copy);
+    for (const c of d.clips.filter((x) => x.trackId === trackId)) d.clips.push({ ...c, id: makeId('clip'), trackId: copy.id });
+  });
+}
+
+export function moveTrack(trackId: Id, delta: number): void {
+  edit((d) => {
+    const i = d.tracks.findIndex((t) => t.id === trackId);
+    const j = i + delta;
+    if (i < 0 || j < 0 || j >= d.tracks.length) return;
+    const [t] = d.tracks.splice(i, 1);
+    d.tracks.splice(j, 0, t);
+  });
+}
+
+/** Mutes or unmutes every clip on a track (FL Studio: Mute all clips / Unmute all clips). */
+export function setTrackClipsMuted(trackId: Id, muted: boolean): void {
+  const ids = useStore.getState().project.clips.filter((c) => c.trackId === trackId).map((c) => c.id);
+  setClipsMuted(ids, muted);
 }
 
 // ---------------------------------------------------------------------------

@@ -3,9 +3,10 @@ import { engine } from '../../audio/engine';
 import { describeTarget, mixerTarget } from '../../model/automationTargets';
 import { findPattern } from '../../model/patterns';
 import { usePlugins } from '../../plugins/pluginStore';
-import { MAX_BPM, MIN_BPM, formatClock, formatDb, formatPosition, ticksToSeconds, volumeToGain } from '../../model/timing';
+import { MAIN_SNAP_OPTIONS, MAX_BPM, MIN_BPM, formatClock, formatDb, formatPosition, snapLabel, ticksToSeconds, volumeToGain, type SnapId } from '../../model/timing';
 import { isElectron, isMac } from '../../platform/platform';
-import { selectPattern, setBpm, setMixerTrackProps, setTransport } from '../../store/actions';
+import { selectPattern, setBpm, setMixerTrackProps, setTransport, setUi } from '../../store/actions';
+import { patternStartTick } from '../../store/snap';
 import { useStore } from '../../store/store';
 import { prepareCanvas, useFrame } from '../animation';
 import { DragNumber } from '../controls/DragNumber';
@@ -39,20 +40,22 @@ function cmd(label: string, id: CommandId, extra: Partial<MenuItem> = {}): MenuI
   return { label, shortcut: SHORTCUTS[id], onClick: () => void runCommand(id), ...extra };
 }
 
+/** Same layout as FL Studio's FILE menu, limited to what MAD Studio supports. */
 function fileMenu(): MenuItem[] {
   return [
-    cmd('New project', 'new'),
+    cmd('New (Basic drum kit)', 'new'),
+    {
+      label: 'New from template',
+      submenu: [cmd('Basic drum kit', 'new'), cmd('Demo song “MAD Groove”', 'demo')],
+    },
     cmd('Open…', 'open'),
-    cmd('Open demo song', 'demo'),
     { separator: true },
     cmd('Save', 'save'),
     cmd('Save as…', 'saveAs'),
     cmd('Save new version', 'saveNewVersion'),
     { separator: true },
-    cmd('Import audio files…', 'importSamples'),
-    cmd('Export WAV…', 'export'),
-    { separator: true },
-    cmd('Project name…', 'projectInfo'),
+    { label: 'Import', submenu: [cmd('Audio files…', 'importSamples')] },
+    { label: 'Export', submenu: [{ label: 'Audio', header: true }, cmd('Wave file…', 'export')] },
   ];
 }
 
@@ -101,6 +104,7 @@ function viewMenu(): MenuItem[] {
 function optionsMenu(): MenuItem[] {
   const s = useStore.getState();
   return [
+    cmd('Project info…', 'projectInfo'),
     cmd('Audio settings…', 'audioSettings'),
     cmd('Manage plugins…', 'pluginPicker'),
     { separator: true },
@@ -307,6 +311,7 @@ export function TopBar() {
             <IconPlug size={16} />
           </WindowToggle>
         </div>
+        <MainSnap />
         <PatternSelector />
         <button
           className={`engine-status ${native ? 'native' : ''}`}
@@ -336,7 +341,7 @@ function TimeDisplay() {
     const el = ref.current;
     if (!el) return;
     const s = useStore.getState();
-    const pos = engine.playheadTick() ?? (s.transport.mode === 'song' ? s.transport.songStart : 0);
+    const pos = engine.playheadTick() ?? (s.transport.mode === 'song' ? s.transport.songStart : patternStartTick(s));
     const text = mode === 'clock' ? formatClock(ticksToSeconds(pos, s.project.bpm)) : formatPosition(pos, s.project.beatsPerBar);
     if (el.textContent !== text) el.textContent = text;
   });
@@ -347,6 +352,26 @@ function TimeDisplay() {
       data-hint="Song position – click to switch bars / time"
       onClick={() => useStore.setState((s) => ({ ui: { ...s.ui, timeDisplay: s.ui.timeDisplay === 'bars' ? 'clock' : 'bars' } }))}
     />
+  );
+}
+
+/** FL Studio's main snap selector; piano roll and playlist set to "Main" follow it. */
+function MainSnap() {
+  const snap = useStore((s) => s.ui.mainSnap);
+  return (
+    <select
+      className="tb-select main-snap"
+      value={snap}
+      aria-label="Main snap"
+      data-hint="Main snap / quantization – piano roll and playlist set to “Main” follow it"
+      onChange={(e) => setUi((d) => void (d.mainSnap = e.target.value as SnapId))}
+    >
+      {MAIN_SNAP_OPTIONS.map((x) => (
+        <option key={x} value={x}>
+          {snapLabel(x)}
+        </option>
+      ))}
+    </select>
   );
 }
 

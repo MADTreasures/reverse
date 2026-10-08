@@ -111,6 +111,13 @@ export function openChannelEditor(channelId: string): void {
   openWindow(`channel:${channelId}`, { w: 640, h: 420 });
 }
 
+/** FL Studio's channel button: the first click opens the channel's window, the next one closes it. */
+export function toggleChannelEditor(channelId: string): void {
+  const id = `channel:${channelId}`;
+  if (useStore.getState().ui.windows[id]?.open) closeWindow(id);
+  else openChannelEditor(channelId);
+}
+
 export function openEffectEditor(trackIndex: number, slotId: string): void {
   openWindow(`effect:${trackIndex}:${slotId}`, { w: 420, h: 230 });
 }

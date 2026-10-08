@@ -34,32 +34,75 @@ export function ceilToBar(ticks: number, beatsPerBar: number): number {
 }
 
 export type SnapId =
+  | 'main'
+  | 'line'
+  | 'cell'
   | 'none'
   | '1/6 step'
   | '1/4 step'
   | '1/3 step'
   | '1/2 step'
   | 'step'
+  | '1/6 beat'
+  | '1/4 beat'
   | '1/3 beat'
   | '1/2 beat'
   | 'beat'
   | 'bar';
 
+/**
+ * FL Studio's snap menu. "Main" follows the main snap in the toolbar; "Line" and "Cell" follow the
+ * grid lines the editor currently draws, so they get finer as you zoom in.
+ */
 export const SNAP_OPTIONS: SnapId[] = [
+  'main',
+  'line',
+  'cell',
   'none',
   '1/6 step',
   '1/4 step',
   '1/3 step',
   '1/2 step',
   'step',
+  '1/6 beat',
+  '1/4 beat',
   '1/3 beat',
   '1/2 beat',
   'beat',
   'bar',
 ];
 
-export function snapTicks(snap: SnapId, beatsPerBar: number): number {
+/** The toolbar's main snap cannot follow itself. */
+export const MAIN_SNAP_OPTIONS: SnapId[] = SNAP_OPTIONS.filter((s) => s !== 'main');
+
+export function snapLabel(snap: SnapId): string {
+  if (snap === 'none') return '(none)';
+  return snap.charAt(0).toUpperCase() + snap.slice(1);
+}
+
+/** Minimum distance in pixels between the finest grid lines an editor draws. */
+export const GRID_MIN_PX = 16;
+
+/** Spacing (ticks) of the finest grid lines an editor draws at this zoom – what "Line" snaps to. */
+export function gridLineTicks(pxPerTick: number, beatsPerBar: number, minPx = GRID_MIN_PX): number {
+  for (const t of [3, 6, 12, TICKS_PER_STEP, PPQ / 2, PPQ]) if (t * pxPerTick >= minPx) return t;
+  const bar = ticksPerBar(beatsPerBar);
+  let t = bar;
+  while (t * pxPerTick < minPx && t < bar * 1024) t *= 2;
+  return t;
+}
+
+/**
+ * Snap size in ticks. `lineTicks` is the editor's current grid spacing (for "Line"/"Cell"),
+ * `mainSnap` the toolbar's main snap (for "Main").
+ */
+export function snapTicks(snap: SnapId, beatsPerBar: number, lineTicks = TICKS_PER_STEP, mainSnap: SnapId = 'line'): number {
   switch (snap) {
+    case 'main':
+      return snapTicks(mainSnap === 'main' ? 'line' : mainSnap, beatsPerBar, lineTicks);
+    case 'line':
+    case 'cell':
+      return lineTicks;
     case 'none':
       return 1;
     case '1/6 step':
@@ -72,6 +115,10 @@ export function snapTicks(snap: SnapId, beatsPerBar: number): number {
       return TICKS_PER_STEP / 2;
     case 'step':
       return TICKS_PER_STEP;
+    case '1/6 beat':
+      return PPQ / 6;
+    case '1/4 beat':
+      return PPQ / 4;
     case '1/3 beat':
       return PPQ / 3;
     case '1/2 beat':
@@ -99,6 +146,14 @@ export function formatPosition(tick: number, beatsPerBar: number): string {
   const step = Math.floor(inBar / TICKS_PER_STEP) + 1;
   const sub = inBar % TICKS_PER_STEP;
   return `${bar}:${String(step).padStart(2, '0')}:${String(sub).padStart(2, '0')}`;
+}
+
+/** Formats a length as BARS:STEPS:TICKS, counted from zero (FL Studio's "for 0:06:00"). */
+export function formatDuration(ticks: number, beatsPerBar: number): string {
+  const t = Math.max(0, Math.round(ticks));
+  const bar = ticksPerBar(beatsPerBar);
+  const inBar = t % bar;
+  return `${Math.floor(t / bar)}:${String(Math.floor(inBar / TICKS_PER_STEP)).padStart(2, '0')}:${String(inBar % TICKS_PER_STEP).padStart(2, '0')}`;
 }
 
 /** Formats seconds as M:SS.CS (centiseconds). */

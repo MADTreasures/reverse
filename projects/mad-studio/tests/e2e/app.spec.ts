@@ -294,3 +294,127 @@ test('recording: an armed mixer track records its input into a playlist audio cl
   expect(s.transport.recording).toBe(true);
   expect(errors).toEqual([]);
 });
+
+// ---------------------------------------------------------------- FL Studio editing behaviour
+
+async function openLeadInPianoRoll(page: Page) {
+  const info = await page.evaluate(() => {
+    const m = window.__madStudio;
+    const s = m.useStore.getState();
+    const lead = s.project.channels.find((c: any) => c.name === 'Lead');
+    const pat = s.project.patterns.find((p: any) => p.name === 'Lead');
+    m.actions.selectPattern(pat.id);
+    m.actions.selectChannel(lead.id);
+    m.actions.setUi((d: any) => {
+      d.pianoRollChannelId = lead.id;
+      d.windows.channelRack.open = false;
+    });
+    return { channelId: lead.id, patternId: pat.id };
+  });
+  await page.keyboard.press('F7');
+  const canvas = page.locator('[data-window="pianoRoll"] canvas');
+  await expect(canvas).toBeVisible();
+  const box = (await canvas.boundingBox())!;
+  const view = (await state(page)).ui.pianoRoll;
+  const at = (tick: number, key: number) => ({
+    x: box.x + 62 + (tick - view.scrollTick) * view.pxPerTick,
+    y: box.y + 22 + (127 - key) * view.rowHeight - view.scrollY + view.rowHeight / 2,
+  });
+  const notes = () =>
+    page.evaluate(
+      ({ channelId, patternId }) => window.__madStudio.useStore.getState().project.patterns.find((p: any) => p.id === patternId).notes[channelId],
+      info,
+    );
+  return { ...info, at, notes, box };
+}
+
+test('piano roll: Shift+drag clones, Ctrl+D deselects, double-click opens note properties, ruler sets the position', async ({ page }) => {
+  await boot(page);
+  const roll = await openLeadInPianoRoll(page);
+  const key = 59; // B4 – the demo's lead pattern does not use it
+  const p = roll.at(192 + 4, key);
+  await page.mouse.click(p.x, p.y);
+  expect((await roll.notes()).filter((n: any) => n.key === key).map((n: any) => n.start)).toEqual([192]);
+
+  // Shift+drag leaves the original and drags a copy (FL Studio).
+  const to = roll.at(288 + 4, key);
+  await page.keyboard.down('Shift');
+  await page.mouse.move(p.x, p.y);
+  await page.mouse.down();
+  await page.mouse.move((p.x + to.x) / 2, p.y, { steps: 4 });
+  await page.mouse.move(to.x, to.y, { steps: 4 });
+  await page.mouse.up();
+  await page.keyboard.up('Shift');
+  expect((await roll.notes()).filter((n: any) => n.key === key).map((n: any) => n.start).sort((a: number, b: number) => a - b)).toEqual([192, 288]);
+
+  // Ctrl+D deselects instead of duplicating.
+  const count = (await roll.notes()).length;
+  await page.keyboard.press('ControlOrMeta+a');
+  await page.keyboard.press('ControlOrMeta+d');
+  expect((await roll.notes()).length).toBe(count);
+
+  // Double-click → note properties; the duration is typed in as BARS:STEPS:TICKS.
+  await page.mouse.dblclick(to.x, to.y);
+  const dialog = page.getByRole('dialog', { name: 'Note properties' });
+  await expect(dialog).toBeVisible();
+  await dialog.getByLabel('Duration').fill('0:08:00');
+  await dialog.getByRole('button', { name: 'Accept' }).click();
+  await expect(dialog).toBeHidden();
+  expect((await roll.notes()).find((n: any) => n.key === key && n.start === 288).length).toBe(8 * 24);
+
+  // Clicking the ruler moves the playback position inside the pattern.
+  const r = roll.at(384, 60);
+  await page.mouse.click(r.x + 2, roll.box.y + 10);
+  const t = (await state(page)).transport;
+  expect(t.mode).toBe('pattern');
+  expect(t.patternStart).toBe(384);
+});
+
+test('playlist: clip menu and mute tool mute clips, track menu inserts a track, double-click opens the piano roll', async ({ page }) => {
+  await boot(page);
+  await page.evaluate(() => window.__madStudio.actions.setUi((d: any) => void (d.windows.channelRack.open = false)));
+  const s = await state(page);
+  const view = s.ui.playlist;
+  const clip = s.project.clips.find((c: any) => c.kind === 'pattern' && c.start === 0 && c.length * view.pxPerTick > 60);
+  const ti = s.project.tracks.findIndex((t: any) => t.id === clip.trackId);
+  const canvas = page.locator('[data-window="playlist"] canvas');
+  const box = (await canvas.boundingBox())!;
+  const left = box.x + 150 + (clip.start - view.scrollTick) * view.pxPerTick;
+  const top = box.y + 24 + ti * view.trackHeight - view.scrollY;
+  const muted = async () => (await state(page)).project.clips.find((c: any) => c.id === clip.id).muted === true;
+
+  // The icon at the left of the title opens FL Studio's clip menu.
+  await page.mouse.click(left + 7, top + 8);
+  await page.getByRole('menuitem', { name: 'Muted' }).click();
+  expect(await muted()).toBe(true);
+
+  // Mute tool (T): a click toggles the clip back.
+  await page.keyboard.press('t');
+  expect((await state(page)).ui.playlist.tool).toBe('mute');
+  await page.mouse.click(left + 40, top + view.trackHeight / 2 + 4);
+  expect(await muted()).toBe(false);
+  await page.keyboard.press('p');
+
+  // Track menu → Insert one.
+  const tracks = s.project.tracks.length;
+  await page.mouse.click(box.x + 40, top + view.trackHeight / 2, { button: 'right' });
+  await page.getByRole('menuitem', { name: 'Insert one' }).click();
+  expect((await state(page)).project.tracks.length).toBe(tracks + 1);
+
+  // Double-clicking a pattern clip opens the piano roll (the clip moved down one track).
+  await page.mouse.dblclick(left + 40, top + view.trackHeight * 1.5 + 4);
+  const after = await state(page);
+  expect(after.ui.windows.pianoRoll.open).toBe(true);
+  expect(after.ui.focusedWindow).toBe('pianoRoll');
+  expect(after.ui.selectedPatternId).toBe(clip.patternId);
+});
+
+test('channel rack: the channel button opens and closes the channel window', async ({ page }) => {
+  await boot(page);
+  const id = (await state(page)).project.channels[0].id;
+  const button = page.locator('.rack-row').first().locator('.channel-name');
+  await button.click();
+  expect((await state(page)).ui.windows[`channel:${id}`]?.open).toBe(true);
+  await button.click();
+  expect((await state(page)).ui.windows[`channel:${id}`]?.open ?? false).toBe(false);
+});

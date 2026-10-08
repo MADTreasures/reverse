@@ -230,7 +230,7 @@ function automationClipsByTarget(project: Project): Map<string, { clip: Clip; da
   for (const ch of project.channels) if (ch.kind === 'automation' && !ch.muted) data.set(ch.id, ch.automation);
   const out = new Map<string, { clip: Clip; data: AutomationData }[]>();
   for (const clip of project.clips) {
-    if (clip.kind !== 'automation' || !trackIds.has(clip.trackId) || mutedTracks.has(clip.trackId)) continue;
+    if (clip.kind !== 'automation' || clip.muted || !trackIds.has(clip.trackId) || mutedTracks.has(clip.trackId)) continue;
     const d = data.get(clip.channelId);
     if (!d || !d.target || d.points.length === 0 || clip.length <= 0) continue;
     const list = out.get(d.target) ?? [];

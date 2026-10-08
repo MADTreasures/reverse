@@ -1,0 +1,135 @@
+import { beforeEach, describe, expect, it } from 'vitest';
+import { compileAutomationLanes } from '../model/automation';
+import { songTimeline } from '../model/timeline';
+import { PPQ, TICKS_PER_STEP, formatDuration, gridLineTicks, snapTicks } from '../model/timing';
+import {
+  addNotes,
+  cloneTrack,
+  deleteTrack,
+  insertTrack,
+  legatoNotes,
+  makeClipUnique,
+  moveTrack,
+  placePatternClip,
+  setClipPattern,
+  setClipsMuted,
+  setTrackClipsMuted,
+} from './actions';
+import { createAutomationClip } from './automationActions';
+import { pianoRollSnap, patternStartTick } from './snap';
+import { resetStore, useStore } from './store';
+
+const state = () => useStore.getState();
+
+beforeEach(() => resetStore());
+
+describe('snap (FL Studio: Main, Line, Cell)', () => {
+  it('follows the zoom for Line and Cell', () => {
+    expect(gridLineTicks(0.9, 4)).toBe(TICKS_PER_STEP);
+    expect(gridLineTicks(2, 4)).toBe(12);
+    expect(gridLineTicks(0.18, 4)).toBe(PPQ);
+    expect(gridLineTicks(0.01, 4)).toBe(PPQ * 4 * 8);
+    expect(snapTicks('line', 4, 48)).toBe(48);
+    expect(snapTicks('cell', 4, 12)).toBe(12);
+  });
+
+  it('resolves Main through the toolbar snap', () => {
+    expect(snapTicks('main', 4, 24, 'beat')).toBe(PPQ);
+    expect(snapTicks('main', 4, 24, 'line')).toBe(24);
+    expect(snapTicks('1/6 beat', 4)).toBe(16);
+    expect(snapTicks('1/4 beat', 4)).toBe(24);
+    useStore.setState((s) => ({ ui: { ...s.ui, mainSnap: 'bar', pianoRoll: { ...s.ui.pianoRoll, snap: 'main' } } }));
+    expect(pianoRollSnap(state())).toBe(PPQ * 4);
+  });
+
+  it('formats lengths from zero', () => {
+    expect(formatDuration(TICKS_PER_STEP * 6, 4)).toBe('0:06:00');
+    expect(formatDuration(PPQ * 4 + 5, 4)).toBe('1:00:05');
+  });
+});
+
+describe('pattern start position', () => {
+  it('only applies inside the pattern', () => {
+    useStore.setState((s) => ({ transport: { ...s.transport, patternStart: PPQ } }));
+    expect(patternStartTick(state())).toBe(PPQ);
+    useStore.setState((s) => ({ transport: { ...s.transport, patternStart: PPQ * 400 } }));
+    expect(patternStartTick(state())).toBe(0);
+  });
+});
+
+describe('quick legato', () => {
+  it('extends notes to the next note start', () => {
+    const { ui, project } = state();
+    const ch = project.channels[0].id;
+    addNotes(ui.selectedPatternId, ch, [
+      { key: 60, start: 0, length: 12, velocity: 0.8 },
+      { key: 64, start: 0, length: 12, velocity: 0.8 },
+      { key: 62, start: 96, length: 12, velocity: 0.8 },
+      { key: 65, start: 240, length: 12, velocity: 0.8 },
+    ]);
+    legatoNotes(ui.selectedPatternId, ch, new Set());
+    const notes = state().project.patterns[0].notes[ch];
+    expect(notes.filter((n) => n.start === 0).map((n) => n.length)).toEqual([96, 96]);
+    expect(notes.find((n) => n.start === 96)?.length).toBe(144);
+    expect(notes.find((n) => n.start === 240)?.length).toBe(12);
+  });
+});
+
+describe('clips', () => {
+  it('muted clips stay in the playlist but do not play', () => {
+    const { ui, project } = state();
+    const ch = project.channels[0].id;
+    addNotes(ui.selectedPatternId, ch, [{ key: 60, start: 0, length: 24, velocity: 0.8 }]);
+    const id = placePatternClip(ui.selectedPatternId, project.tracks[0].id, 0)!;
+    expect(songTimeline(state().project).events.length).toBeGreaterThan(0);
+    setClipsMuted([id]);
+    expect(state().project.clips[0].muted).toBe(true);
+    expect(songTimeline(state().project).events.length).toBe(0);
+    setTrackClipsMuted(project.tracks[0].id, false);
+    expect(state().project.clips[0].muted).toBeUndefined();
+  });
+
+  it('muted automation clips are ignored', () => {
+    const target = `ch:${state().project.channels[0].id}:volume`;
+    createAutomationClip(target);
+    expect(compileAutomationLanes(state().project).some((l) => l.target === target)).toBe(true);
+    const clip = state().project.clips.find((c) => c.kind === 'automation')!;
+    setClipsMuted([clip.id], true);
+    expect(compileAutomationLanes(state().project).some((l) => l.target === target)).toBe(false);
+  });
+
+  it('make unique gives a shared clip its own pattern', () => {
+    const { ui, project } = state();
+    const a = placePatternClip(ui.selectedPatternId, project.tracks[0].id, 0)!;
+    placePatternClip(ui.selectedPatternId, project.tracks[0].id, PPQ * 8);
+    const before = state().project.patterns.length;
+    const copy = makeClipUnique(a)!;
+    const s = state().project;
+    expect(s.patterns.length).toBe(before + 1);
+    expect(s.clips.find((c) => c.id === a)).toMatchObject({ kind: 'pattern', patternId: copy });
+    expect(s.patterns.find((p) => p.id === copy)?.name).toMatch(/#2$/);
+    setClipPattern(a, ui.selectedPatternId);
+    expect(state().project.clips.find((c) => c.id === a)).toMatchObject({ patternId: ui.selectedPatternId });
+  });
+});
+
+describe('playlist tracks', () => {
+  it('inserts, clones, moves and deletes tracks with their clips', () => {
+    const { ui, project } = state();
+    const count = project.tracks.length;
+    const first = project.tracks[0].id;
+    placePatternClip(ui.selectedPatternId, first, 0);
+    insertTrack(0);
+    expect(state().project.tracks.length).toBe(count + 1);
+    expect(state().project.tracks[1].id).toBe(first);
+    cloneTrack(first);
+    const s = state().project;
+    expect(s.tracks[2].name).not.toBe(s.tracks[1].name);
+    expect(s.clips.filter((c) => c.trackId === s.tracks[2].id).length).toBe(1);
+    moveTrack(first, -1);
+    expect(state().project.tracks[0].id).toBe(first);
+    deleteTrack(first);
+    expect(state().project.tracks.some((t) => t.id === first)).toBe(false);
+    expect(state().project.clips.some((c) => c.trackId === first)).toBe(false);
+  });
+});

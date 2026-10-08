@@ -37,7 +37,7 @@ import { addChannelMenu, channelContextMenu } from '../menus/channelMenus';
 import { registerWindowKeys } from '../keyboard';
 import { showMenu, toast } from '../overlays';
 import { WindowFrame } from '../workspace/WindowFrame';
-import { openChannelEditor, openPianoRoll } from '../workspace/windows';
+import { openChannelEditor, openPianoRoll, toggleChannelEditor } from '../workspace/windows';
 
 const STEP_W = 20;
 const STEP_GAP = 2;
@@ -341,10 +341,10 @@ const ChannelRow = memo(function ChannelRow({ channel, patternId, stepCount }: R
         <button
           className={`channel-name ${channel.kind}`}
           style={{ ['--ch' as string]: channel.color }}
-          data-hint={`${channel.name} – click: instrument, right-click: options`}
+          data-hint={`${channel.name} – click: show/hide the channel window, right-click: options`}
           onClick={() => {
             selectChannel(channel.id);
-            openChannelEditor(channel.id);
+            toggleChannelEditor(channel.id);
           }}
           onContextMenu={(e) => {
             e.preventDefault();

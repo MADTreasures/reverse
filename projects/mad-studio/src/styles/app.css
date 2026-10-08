@@ -2025,3 +2025,33 @@ button.link {
   letter-spacing: 0.05em;
   color: var(--text-dim);
 }
+
+/* -------------------------------------------------------------- main snap, note properties */
+
+.tb-select.main-snap {
+  width: 74px;
+  height: 22px;
+}
+
+.note-props h2 .accent {
+  color: var(--accent);
+}
+
+.note-props h3 {
+  margin: 10px 0 6px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.note-props-levels {
+  display: flex;
+  gap: 14px;
+  padding: 4px 0 6px;
+}
+
+.note-props input[aria-invalid='true'] {
+  border-color: var(--danger, #e0705a);
+}

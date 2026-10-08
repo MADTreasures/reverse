@@ -1,4 +1,5 @@
 import type { Id } from '../model/types';
+import type { PlayMode } from '../store/store';
 import type { AutomationRuntime } from './automationRuntime';
 import type { RenderOptions } from './render';
 import type { WavBitDepth } from './wav';
@@ -19,7 +20,8 @@ export interface EngineApi {
   stop(): void;
   togglePlay(): void;
   panic(): void;
-  seek(tick: number): void;
+  /** Moves the song position, or with mode 'pattern' the position inside the current pattern. */
+  seek(tick: number, mode?: PlayMode): void;
   /** Position (ticks) currently heard, or null when stopped. */
   playheadTick(): number | null;
   /** Position inside the selected pattern (recording, step highlight). */

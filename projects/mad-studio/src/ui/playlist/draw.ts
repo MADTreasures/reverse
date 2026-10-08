@@ -42,7 +42,15 @@ export interface PlaylistScene {
   dropHint: { tick: number; track: number } | null;
   /** Automation clip under the mouse (points and handles are shown) and the part being edited. */
   autoFocus: { clipId: string; point: number | null; handle: number | null } | null;
+  /** Spacing of the finest grid lines (ticks), see gridLineTicks(). */
+  lineTicks: number;
 }
+
+/** Width of the clip menu icon at the left of a clip's title bar (FL Studio opens the clip menu there). */
+export const CLIP_ICON_W = 14;
+
+/** Width of the mute LED area at the right of a track header. */
+export const TRACK_LED_W = 24;
 
 /** Curve area of an automation clip drawn at (x, y) with height h (below the 14 px title). */
 export function automationClipView(v: PlaylistViewport, clip: Clip, x: number, y: number, h: number): CurveView {
@@ -181,15 +189,13 @@ export function drawPlaylist(ctx: CanvasRenderingContext2D, v: PlaylistViewport,
     ctx.fillRect(TRACK_W, below, width - TRACK_W, height - below);
   }
 
-  // --- grid lines
+  // --- grid lines (finer as you zoom in, like FL Studio's "Line" snap)
   const bar = ticksPerBar(project.beatsPerBar);
   const endTick = tickAtX(v, width);
-  const beatPx = PPQ * pxPerTick;
-  for (let t = Math.max(0, Math.floor(v.scrollTick / PPQ) * PPQ); t <= endTick; t += PPQ) {
-    const isBar = t % bar === 0;
-    if (!isBar && beatPx < 8) continue;
+  const line = s.lineTicks;
+  for (let t = Math.max(0, Math.floor(v.scrollTick / line) * line); t <= endTick; t += line) {
     const x = Math.round(xOfTick(v, t)) + 0.5;
-    ctx.strokeStyle = isBar ? '#ffffff30' : '#ffffff10';
+    ctx.strokeStyle = t % bar === 0 ? '#ffffff30' : t % PPQ === 0 ? '#ffffff10' : '#ffffff08';
     ctx.beginPath();
     ctx.moveTo(x, RULER_H);
     ctx.lineTo(x, Math.min(height, below));
@@ -213,7 +219,7 @@ export function drawPlaylist(ctx: CanvasRenderingContext2D, v: PlaylistViewport,
     if (x > width || x + w < TRACK_W) continue;
     const y = yOfTrack(v, ti) + 1;
     const h = trackHeight - 3;
-    const muted = project.tracks[ti].muted;
+    const muted = project.tracks[ti].muted || clip.muted === true;
     const color =
       clip.kind === 'pattern'
         ? (project.patterns.find((p) => p.id === clip.patternId)?.color ?? '#777')
@@ -236,9 +242,14 @@ export function drawPlaylist(ctx: CanvasRenderingContext2D, v: PlaylistViewport,
           ? drawAudioClip(ctx, v, project, clip, x, y, w, h)
           : drawAutomationClip(ctx, v, s, clip, x, y, h);
     ctx.fillStyle = '#0d1114';
+    if (clip.kind !== 'automation') {
+      // Clip menu icon: three short bars, like the menu icon in FL Studio's clip titles.
+      const ix = Math.max(x, TRACK_W) + 4;
+      for (let i = 0; i < 3; i++) ctx.fillRect(ix, y + 4 + i * 2.5, 6, 1.2);
+    }
     ctx.font = '600 10px -apple-system, sans-serif';
     ctx.textBaseline = 'middle';
-    ctx.fillText(label, Math.max(x, TRACK_W) + (clip.kind === 'automation' ? 16 : 5), y + 7.5);
+    ctx.fillText(label, Math.max(x, TRACK_W) + 16, y + 7.5);
     ctx.restore();
     ctx.strokeStyle = selected ? '#ffffff' : '#0b0e10';
     ctx.lineWidth = selected ? 1.6 : 1;
@@ -303,6 +314,7 @@ export function drawPlaylist(ctx: CanvasRenderingContext2D, v: PlaylistViewport,
   }
 
   // --- track headers
+  const used = new Set(project.clips.map((c) => c.trackId));
   ctx.save();
   ctx.beginPath();
   ctx.rect(0, RULER_H, TRACK_W, height - RULER_H);
@@ -314,17 +326,18 @@ export function drawPlaylist(ctx: CanvasRenderingContext2D, v: PlaylistViewport,
     ctx.fillRect(0, y, TRACK_W - 1, trackHeight);
     ctx.fillStyle = '#2b343a';
     ctx.fillRect(0, y + trackHeight - 1, TRACK_W, 1);
-    // mute LED
+    // mute LED at the right, as in FL Studio
     ctx.beginPath();
-    ctx.arc(14, y + trackHeight / 2, 5, 0, Math.PI * 2);
+    ctx.arc(TRACK_W - TRACK_LED_W / 2, y + trackHeight / 2, 5, 0, Math.PI * 2);
     ctx.fillStyle = t.muted ? '#2b3a26' : '#8fe06a';
     ctx.fill();
     ctx.strokeStyle = '#0a0d0f';
     ctx.stroke();
-    ctx.fillStyle = t.muted ? '#8e9aa2' : '#eaeef1';
+    // Tracks without clips have dimmed names.
+    ctx.fillStyle = t.muted ? '#8e9aa2' : used.has(t.id) ? '#eaeef1' : '#9aa6ae';
     ctx.font = '11px -apple-system, sans-serif';
     ctx.textBaseline = 'middle';
-    ctx.fillText(t.name, 28, y + trackHeight / 2, TRACK_W - 36);
+    ctx.fillText(t.name, 10, y + trackHeight / 2, TRACK_W - TRACK_LED_W - 14);
   }
   ctx.restore();
   ctx.fillStyle = '#1f282e';

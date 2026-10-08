@@ -1,9 +1,9 @@
 import { create } from 'zustand';
-import { createEmptyProject } from '../model/defaults';
+import { DEFAULT_VELOCITY, createEmptyProject } from '../model/defaults';
 import type { SnapId } from '../model/timing';
 import type { Id, Project } from '../model/types';
 
-export type ToolId = 'draw' | 'paint' | 'delete' | 'select';
+export type ToolId = 'draw' | 'paint' | 'delete' | 'mute' | 'select';
 export type PlayMode = 'pattern' | 'song';
 
 /** Fixed windows plus dynamic ones: `channel:<channelId>` and `effect:<mixerIndex>:<slotId>`. */
@@ -26,8 +26,10 @@ export interface PianoRollView {
   scrollTick: number;
   scrollY: number;
   tool: ToolId;
-  /** Length (ticks) of newly drawn notes; follows the last edited note. */
+  /** Length (ticks) of newly drawn notes; follows the last clicked or edited note (FL Studio). */
   noteLength: number;
+  /** Velocity of newly drawn notes; follows the last clicked note. */
+  noteVelocity: number;
   ghostNotes: boolean;
 }
 
@@ -69,6 +71,8 @@ export interface UiState {
   browserWidth: number;
   pianoRoll: PianoRollView;
   playlist: PlaylistView;
+  /** FL Studio's main snap in the toolbar; editors set to "Main" follow it. */
+  mainSnap: SnapId;
   typingKeyboard: boolean;
   timeDisplay: 'bars' | 'clock';
   hint: string;
@@ -88,6 +92,8 @@ export interface TransportState {
   metronome: boolean;
   /** Where song playback starts (ticks). */
   songStart: number;
+  /** Where pattern playback starts (ticks into the pattern; set from the piano roll's ruler). */
+  patternStart: number;
   /** Metronome count-in before recording (FL: recording precount, Ctrl+P). */
   precount: boolean;
   recordFilter: RecordFilter;
@@ -139,16 +145,18 @@ export function initialUi(project: Project): UiState {
     browserOpen: true,
     browserWidth: 220,
     pianoRoll: {
-      snap: 'step',
+      snap: 'main',
       pxPerTick: 0.9,
       rowHeight: 14,
       scrollTick: 0,
       scrollY: 14 * (127 - 84),
       tool: 'draw',
       noteLength: 24,
+      noteVelocity: DEFAULT_VELOCITY,
       ghostNotes: true,
     },
-    playlist: { snap: 'beat', pxPerTick: 0.18, trackHeight: 44, scrollTick: 0, scrollY: 0, tool: 'draw' },
+    playlist: { snap: 'main', pxPerTick: 0.18, trackHeight: 44, scrollTick: 0, scrollY: 0, tool: 'draw' },
+    mainSnap: 'line',
     typingKeyboard: false,
     timeDisplay: 'bars',
     hint: '',
@@ -175,6 +183,7 @@ function initialState(): AppState {
       recording: false,
       metronome: false,
       songStart: 0,
+      patternStart: 0,
       precount: false,
       recordFilter: { notes: true, audio: true, automation: true },
       monitoring: 'off',

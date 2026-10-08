@@ -50,7 +50,7 @@ export function songTimeline(project: Project): Timeline {
   const events: SequencedEvent[] = [];
 
   for (const clip of project.clips) {
-    if (!trackIds.has(clip.trackId) || mutedTracks.has(clip.trackId) || clip.length <= 0) continue;
+    if (!trackIds.has(clip.trackId) || mutedTracks.has(clip.trackId) || clip.muted || clip.length <= 0) continue;
     if (clip.kind === 'automation') continue; // evaluated separately (automation.ts)
     const clipEnd = clip.start + clip.length;
 
