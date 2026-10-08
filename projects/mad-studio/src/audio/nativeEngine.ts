@@ -193,6 +193,9 @@ export class NativeEngine implements EngineApi {
         noteTweaked(`plug:${key}:${index}`);
         return;
       }
+      case 'render.progress':
+        // Carries the render's requestId, but the request only completes with render.done.
+        return;
       case 'error':
         if (waiting) {
           clearTimeout(waiting.timer);

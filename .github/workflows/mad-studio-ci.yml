@@ -79,3 +79,56 @@ jobs:
           name: mad-studio-playwright-report
           path: projects/mad-studio/playwright-report
           retention-days: 7
+
+  engine:
+    name: Native engine (Linux) · build · self-test · protocol test · desktop app
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install build dependencies
+        working-directory: .
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ninja-build pkg-config \
+            libasound2-dev libjack-jackd2-dev libfreetype-dev libfontconfig1-dev \
+            libx11-dev libxcomposite-dev libxcursor-dev libxext-dev libxinerama-dev \
+            libxrandr-dev libxrender-dev libgl1-mesa-dev
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: projects/mad-studio/package-lock.json
+
+      - name: Configure (downloads JUCE 8.0.15 and checks its SHA256)
+        run: cmake -S engine -B engine/build/Release -G Ninja -DCMAKE_BUILD_TYPE=Release -DMAD_BUILD_TEST_PLUGINS=ON
+
+      - name: Build engine and test plugins
+        run: cmake --build engine/build/Release -j4
+
+      - name: Engine self-test
+        run: engine/build/Release/mad-engine --self-test
+
+      - name: Engine protocol test (stdio, VST3 test plugins, stress)
+        run: node engine/tests/protocol-test.mjs
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build web bundle
+        run: npm run build
+
+      - name: Electron smoke test with the native engine
+        run: |
+          xvfb-run -a npx electron . --smoke-test --no-sandbox | tee smoke.log
+          grep -q MAD_STUDIO_ENGINE_PONG smoke.log
+        env:
+          ELECTRON_DISABLE_SANDBOX: '1'
+
+      - name: Desktop app + native engine (playback, plugins, render, plugin state)
+        run: xvfb-run -a npx playwright test -c playwright.native.config.ts
+        env:
+          ELECTRON_DISABLE_SANDBOX: '1'
+

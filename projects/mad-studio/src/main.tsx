@@ -6,12 +6,14 @@ import { renderProject, bufferChannels } from './audio/render';
 import { samplePool } from './audio/samplePool';
 import { signalStats } from './audio/wav';
 import { native, isElectron, isMac } from './platform/platform';
+import { usePlugins } from './plugins/pluginStore';
 import { buildProjectBundle, listenForNativeOpen, openProjectBytes, restoreSession, startAutosave } from './project/projectIO';
 import * as actions from './store/actions';
 import { createAutomationClip, updateAutomation } from './store/automationActions';
 import { defaultWindows, useStore, type UiState } from './store/store';
 import { runCommand, type CommandId } from './ui/commands';
 import { enableMidi, installKeyboard } from './ui/keyboard';
+import { pluginInstanceFrom } from './ui/menus/pluginMenus';
 import { toast } from './ui/overlays';
 import './styles/base.css';
 import './styles/app.css';
@@ -115,6 +117,8 @@ async function boot(): Promise<void> {
       runCommand,
       createAutomationClip,
       updateAutomation,
+      usePlugins,
+      pluginInstanceFrom,
     },
   });
   native?.ready();

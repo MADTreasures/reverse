@@ -1,7 +1,7 @@
 # MAD Studio
 
 > **Vorbild:** FL Studio (Image-Line, <https://www.image-line.com/>) · **Plattform:** macOS (Electron-App) und Browser ·
-> **Status:** 🟢 v0.2 – Automation, Audioaufnahme, FL-Bedienung · 🟡 native Engine für VST3/AU in Arbeit
+> **Status:** 🟢 v0.2 – Automation, Audioaufnahme, FL-Bedienung, native Engine mit VST3/AU-Hosting
 
 [![MAD Studio CI](https://github.com/MADTreasures/reverse/actions/workflows/mad-studio-ci.yml/badge.svg)](https://github.com/MADTreasures/reverse/actions/workflows/mad-studio-ci.yml)
 [![MAD Studio macOS](https://github.com/MADTreasures/reverse/actions/workflows/mad-studio-macos.yml/badge.svg)](https://github.com/MADTreasures/reverse/actions/workflows/mad-studio-macos.yml)
@@ -9,8 +9,8 @@
 MAD Studio ist eine **pattern-basierte Musikproduktions-Software (DAW)** mit dem Workflow,
 den man von FL Studio kennt: Beats im **Channel Rack** per Step-Sequencer bauen, Melodien
 in der **Piano Roll** schreiben, Patterns in der **Playlist** zu einem Song anordnen und
-alles im **Mixer** mit Effekten abmischen – dazu **Automation-Clips** und **Audioaufnahme**;
-**VST3/AU-Plugins** kommen mit der nativen Engine (in Arbeit). Bedienung, Menüs, Mausbelegung und Tastenkürzel sind an FL Studio
+alles im **Mixer** mit Effekten abmischen – dazu **Automation-Clips**, **Audioaufnahme** und
+**VST3/AU-Plugins** (über die native Engine der Desktop-App). Bedienung, Menüs, Mausbelegung und Tastenkürzel sind an FL Studio
 angeglichen (verglichen mit der installierten Testversion, siehe [RESEARCH.md](RESEARCH.md)).
 Alles ist selbst geschrieben – Code, Klänge und Grafiken. Das mitgelieferte Drum-Kit wird beim
 Start synthetisiert, es sind keine fremden Samples enthalten.
@@ -28,7 +28,7 @@ Start synthetisiert, es sind keine fremden Samples enthalten.
 | **Automation** | Rechtsklick auf jeden Regler → *Create automation clip* (wie in FL): Automation-Kanal im Channel Rack + Clip in der Playlist; Punkte per Rechtsklick setzen, ziehen, Kurven biegen, 13 Kurvenmodi; Tempo-Automation; Reglerbewegungen während der Song-Aufnahme werden aufgezeichnet; *Tools → Last tweaked* |
 | **Aufnahme** | Mikrofon/Line-In: im Mixer-Track-Inspector Eingang wählen (armt die Spur), Record + Play → Audio-Clip in der Playlist (Song-Modus) bzw. Audio-Clip-Kanal (Pattern-Modus); Vorzähler, Latenzkompensation, Monitoring, Auto-unarm; Ordner „Recorded“ im Browser |
 | **Mixer** | Master + 16 Insert-Spuren (erweiterbar bis 64), Fader, Pan, Mute-LED (Ctrl-Klick = Solo), Arm-Taste, Track-Inspector mit Eingang, **10 Effekt-Slots** und Ausgang, Stereo-Pegelanzeigen |
-| **Plugins** *(in Arbeit)* | Oberfläche vorhanden: VST3 (macOS/Linux) und Audio Units (macOS) als Instrumente im Channel Rack und als Effekte in Mixer-Slots, Plugin-Manager mit Scan (jedes Plugin in eigenem Prozess), Plugin-Fenster, alle Parameter automatisierbar, Plugin-Zustand im Projekt gespeichert. Abspielen setzt die **native Engine** der Desktop-App voraus, die noch nicht in diesem Branch ist |
+| **Plugins** | VST3 (macOS/Linux) und Audio Units (macOS) als Instrumente im Channel Rack und als Effekte in Mixer-Slots, Plugin-Manager mit Scan (jedes Plugin in eigenem Prozess – ein abstürzendes Plugin reisst nichts mit), Plugin-Fenster mit dem Editor des Plugins, alle Parameter automatisierbar, Plugin-Zustand im Projekt gespeichert – über die **native Engine** der Desktop-App |
 | **Effekte** | Parametric EQ, Auto Filter (mit LFO), Compressor, Distortion, Chorus, Tempo Delay (Ping-Pong, tempo-synchron), Reverb, Limiter |
 | **Instrumente** | 3-Oszillator-Synth (Sinus/Dreieck/Säge/Rechteck/Rauschen, Unison, Filter mit Hüllkurve, LFO) mit 14 Presets · Sampler (Root-Key, Feinstimmung, Reverse, One-Shot, Loop, Choke-Gruppen, ADSR) |
 | **Sounds** | 20 synthetisierte Factory-Sounds: Kicks, Snares, Claps, Hi-Hats, Becken, Toms, Percussion, 808-Bass, Riser, Impact |
@@ -36,7 +36,7 @@ Start synthetisiert, es sind keine fremden Samples enthalten.
 | **Eingabe** | Computertastatur als Klavier (funktioniert auch mit Schweizer/Deutscher QWERTZ-Tastatur), MIDI-Keyboards (Web MIDI) |
 | **Dateien** | Projekte als `.madstudio` (ZIP mit `project.json` und allen eigenen Samples), Autosave & Wiederherstellung, Audio-Import per Drag & Drop (WAV, AIFF, MP3, …), **WAV-Export** (16/24-bit, 32-bit float, 44.1–96 kHz) |
 | **Komfort** | Undo/Redo wie in FL Studio 26 (Ctrl/⌘Z rückgängig, Ctrl/⌘⌥Z wiederherstellen, benannte Schritte), Score-Logger (nachträglich ins Pattern übernehmen, was gespielt wurde), frei verschiebbare Fenster wie im Vorbild, Hinweisleiste für jedes Bedienelement, Demo-Song „MAD Groove“ |
-| **Audio-Engines** | Web-Audio-Engine (Browser und Desktop-App); die native Engine (C++/JUCE, eigener Prozess, CoreAudio/ALSA, VST3/AU, Aufnahme) ist in Arbeit – die Desktop-App nutzt sie automatisch, sobald sie mitgeliefert wird |
+| **Audio-Engines** | Desktop-App: **native Engine** (C++/JUCE, eigener Prozess, CoreAudio/ALSA/JACK, VST3/AU, Aufnahme, Offline-Rendering; klingt wie die Web-Engine: Demo-Song innerhalb 0,02 dB RMS); Browser bzw. ohne Engine: Web-Audio-Engine – gleiche Bedienung, automatische Umschaltung |
 
 ## Installation auf dem Mac
 
@@ -61,11 +61,16 @@ Voraussetzung: [Node.js](https://nodejs.org/) 22.12 oder neuer.
 ```bash
 cd projects/mad-studio
 npm ci
-npm run dist:mac        # erzeugt release/MAD Studio-0.1.0-arm64.dmg und …-x64.dmg
+# native Engine (VST3/AU, Aufnahme) – braucht CMake, Ninja und Xcode; ohne sie läuft die App mit der Web-Engine
+cmake -S engine -B engine/build/Release -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64"
+cmake --build engine/build/Release
+npm run dist:mac        # erzeugt release/MAD Studio-0.1.0-arm64.dmg und …-x64.dmg (mit Engine)
 ```
 
 Selbst gebaute Apps sind nicht unter Quarantäne und starten direkt. Zum schnellen
-Ausprobieren ohne Paketieren: `npm run app` (baut und startet die App).
+Ausprobieren ohne Paketieren: `npm run app` (baut und startet die App; eine gebaute Engine unter
+`engine/build/Release` wird automatisch verwendet). Details zur Engine (Linux-Abhängigkeiten,
+Optionen, Tests): [engine/README.md](engine/README.md).
 
 ### Variante C – im Browser
 
@@ -98,7 +103,7 @@ MIDI-Keyboards funktionieren in der Mac-App automatisch, im Browser (nur Chrome/
    („In 1 - In 2“ stereo oder „In 1“ mono; die Spur wird scharf geschaltet). Record (**R**), dann
    Play – nach Stop liegt die Aufnahme als Audio-Clip in der Playlist. Rechtsklick auf Record:
    Aufnahmefilter, **⌘P** Vorzähler.
-8. **Plugins (Desktop-App, sobald die native Engine mitgeliefert wird):** **F8** öffnet den Plugin-Manager → *Find installed plugins*.
+8. **Plugins (Desktop-App):** **F8** öffnet den Plugin-Manager → *Find installed plugins*.
    Instrumente kommen als Kanal ins Channel Rack, Effekte in einen Mixer-Slot (Klick auf einen
    leeren Slot). Im Plugin-Fenster öffnet *Show plugin editor* die Oberfläche des Plugins.
 9. **Exportieren:** *File → Export WAV…* (**⌘R**).
@@ -153,8 +158,12 @@ src/
 ├── ui/           React-Oberfläche; Piano Roll und Playlist zeichnen auf <canvas>
 ├── project/      Öffnen/Speichern/Import/Export, Autosave
 └── platform/     Brücke zu Electron (Dateidialoge, Menü) bzw. Browser-Fallbacks
-electron/         Electron-Hauptprozess (app://-Protokoll, Menü, Dateidialoge) und Preload
-tests/e2e/        Playwright-Tests der laufenden App
+electron/         Electron-Hauptprozess (app://-Protokoll, Menü, Dateidialoge), Preload und
+                  engine.cjs (startet die native Engine und reicht ihre Nachrichten durch)
+engine/           native Engine (C++20/JUCE 8, AGPLv3): Audio-Graph, Instrumente, Effekte,
+                  VST3/AU-Hosting, Aufnahme, Offline-Rendering; Protokoll in engine/PROTOCOL.md
+tests/e2e/        Playwright-Tests der laufenden App (Browser)
+tests/native/     Playwright-Test der Desktop-App mit nativer Engine (Plugins, Rendern, Zustand)
 ```
 
 Datenfluss: Jede Bearbeitung erzeugt über `edit()` einen neuen, unveränderlichen
@@ -163,6 +172,13 @@ Graphen ab: Kanal → Instrument → Kanal-Strip → Mixer-Insert → Effekte �
 plant Noten etwa 120 ms im Voraus auf die Sample-genaue Audio-Uhr (Look-ahead-Verfahren),
 sodass Timing-Schwankungen der Oberfläche nicht hörbar sind. Dieselbe Graph-Klasse rendert
 offline für den WAV-Export.
+
+In der Desktop-App rechnet stattdessen die **native Engine** in einem eigenen Prozess: Der
+Renderer schickt ihr Projektzustand, fertig berechnete Timeline und Automation als JSON-Zeilen
+(`project.sync`, `timeline.set`, `automation.set`), die Engine meldet Position, Pegel, Plugin-
+Ereignisse und Aufnahmen zurück. Patterns und Clips werden also an genau einer Stelle (TypeScript)
+interpretiert; beide Engines spielen dieselben Ereignisse. Startet die Engine nicht, schaltet die
+App automatisch auf Web Audio um.
 
 ## Entwicklung
 
@@ -173,14 +189,22 @@ npm run typecheck    # TypeScript prüfen
 npm test             # Unit-Tests (Vitest): Timing, Timeline, Scheduler, Store, Dateiformat, WAV, Sounds
 npm run test:e2e     # End-to-End-Tests der laufenden App (Playwright, Chromium)
 npm run check        # Typecheck + Unit-Tests + Build
-npm run dist:mac     # macOS-App als DMG (arm64 + x64) nach release/
+npm run dist:mac     # macOS-App als DMG (arm64 + x64) nach release/, inkl. gebauter Engine
 npm run icon         # App-Icon aus build/icon.svg neu erzeugen
+
+# native Engine
+npm run engine:configure && npm run engine:build   # cmake (Release) nach engine/build/Release
+npm run engine:test                                # Protokolltest (stdio, Test-Plugins, Stresstest)
+engine/build/Release/mad-engine --self-test        # native Unit-Tests (macOS: MAD Engine.app/…)
+npx playwright test -c playwright.native.config.ts # Desktop-App + Engine (Linux: unter xvfb-run)
 ```
 
 CI: [`mad-studio-ci.yml`](../../.github/workflows/mad-studio-ci.yml) prüft jede Änderung unter
-Linux (Typecheck, Tests, Build, E2E, Electron-Start).
-[`mad-studio-macos.yml`](../../.github/workflows/mad-studio-macos.yml) baut die Mac-App auf
-einem macOS-Runner, startet sie testweise und stellt die DMGs als Artefakte bereit. Bei einem Tag
+Linux (Typecheck, Tests, Build, E2E, Electron-Start) und baut in einem zweiten Job die native
+Engine (Self-Test, Protokolltest mit VST3-Test-Plugins, Electron mit Engine).
+[`mad-studio-macos.yml`](../../.github/workflows/mad-studio-macos.yml) baut die Engine als
+Universal-Binary (Self-Test, Protokolltest inkl. Audio Units), die Mac-App mit Engine, startet sie
+testweise und stellt die DMGs als Artefakte bereit. Bei einem Tag
 `mad-studio-v*` wird daraus ein GitHub-Release.
 
 ## Grenzen und nächste Schritte
@@ -188,6 +212,7 @@ einem macOS-Runner, startet sie testweise und stellt die DMGs als Artefakte bere
 Noch nicht enthalten (Roadmap):
 
 - Plugin-Latenzausgleich (PDC), Sidechain-Eingänge und Mehrkanal-Ausgänge von Plugins, Plugin-Presets im Wrapper
+- Native Engine unter Windows (vorbereitet, aber nicht gebaut/getestet); Plugin-Editoren brauchen ein Fenstersystem
 - Time-Stretching von Audio-Clips, Takes/Comping, Punch-in
 - Sends/Busse zwischen Mixer-Spuren
 - MIDI-Datei-Import/Export, Import von `.flp`-Projekten (Format ist öffentlich dokumentiert)
@@ -195,10 +220,12 @@ Noch nicht enthalten (Roadmap):
 
 ## Lizenz der nativen Engine
 
-Die native Engine (`engine/`, in Arbeit) nutzt das JUCE-Framework unter der **GNU AGPLv3** und
-steht deshalb selbst unter AGPLv3. Wer die App mit Engine weitergibt, muss den
-Quellcode der Engine mitliefern bzw. zugänglich machen – oder eine kommerzielle JUCE-Lizenz
-verwenden. Die Oberfläche (`src/`, `electron/`) läuft in einem eigenen Prozess und spricht mit der
+Die native Engine (`engine/`) nutzt das JUCE-Framework unter der **GNU AGPLv3** und steht
+deshalb selbst unter AGPLv3 (siehe [engine/LICENSE](engine/LICENSE)). Wer die App mit Engine
+weitergibt, muss den Quellcode zugänglich machen (AGPL) – oder eine kommerzielle JUCE-Lizenz
+verwenden (JUCE 8: kostenlose *Starter*-Stufe bis zu einer Umsatzgrenze, sonst *Indie*/*Pro*;
+aktuelle Bedingungen auf juce.com prüfen). Für das VST3-SDK gelten zusätzlich die Bedingungen von
+Steinberg. Die Oberfläche (`src/`, `electron/`) läuft in einem eigenen Prozess und spricht mit der
 Engine nur über JSON-Nachrichten; ob das lizenzrechtlich als getrenntes Werk gilt, ist im Zweifel
 juristisch zu klären.
 

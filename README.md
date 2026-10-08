@@ -8,7 +8,7 @@ Abhängigkeiten, eigene Tests, eigene CI. Projekte beeinflussen sich gegenseitig
 
 | Projekt | Ordner | Vorbild | Plattform | Stack | Status |
 | ------- | ------ | ------- | --------- | ----- | ------ |
-| **MAD Studio** – pattern-basierte DAW | [`projects/mad-studio`](projects/mad-studio) | FL Studio (Image-Line) | macOS · Browser | TypeScript · React · Web Audio · Electron | 🟢 v0.1 lauffähig |
+| **MAD Studio** – pattern-basierte DAW | [`projects/mad-studio`](projects/mad-studio) | FL Studio (Image-Line) | macOS · Browser | TypeScript · React · Web Audio · Electron · C++/JUCE (native Engine) | 🟢 v0.2 – Automation, Aufnahme, VST3/AU |
 
 <!-- Neue Projekte hier als Zeile ergänzen. Status: 🔵 Recherche · 🟡 in Arbeit · 🟢 lauffähig · ⚪ pausiert -->
 

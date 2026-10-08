@@ -66,7 +66,7 @@ class EngineHost {
     } catch {
       // The renderer reports recording errors; startup must not fail.
     }
-    const child = spawn(this.binary, ['--stdio', '--data-dir', this.dataDir], { stdio: ['pipe', 'pipe', 'pipe'] });
+    const child = spawn(this.binary, ['--stdio', '--data-dir', this.dataDir], { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
     this.child = child;
     const lines = readline.createInterface({ input: child.stdout, crlfDelay: Infinity });
     lines.on('line', (line) => this.onLine(line));
@@ -164,6 +164,8 @@ class EngineHost {
     this.stopping = true;
     if (this.child) {
       try {
+        // "quit" shuts the engine down gracefully (closing stdin does the same).
+        this.child.stdin.write(`${JSON.stringify({ type: 'quit' })}\n`);
         this.child.stdin.end();
       } catch {
         // ignore

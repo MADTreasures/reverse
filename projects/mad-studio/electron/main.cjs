@@ -9,6 +9,9 @@ const { EngineHost } = require('./engine.cjs');
 const DIST = path.join(__dirname, '..', 'dist');
 const DEV_URL = process.env.MAD_DEV_URL || '';
 const SMOKE = process.argv.includes('--smoke-test');
+// Automated tests run the app with a throwaway profile and without the "unsaved changes" prompt.
+const TEST_PROFILE = process.env.MAD_STUDIO_TEST_PROFILE || '';
+if (TEST_PROFILE) app.setPath('userData', TEST_PROFILE);
 const APP_ORIGIN = 'app://mad-studio';
 const isMac = process.platform === 'darwin';
 
@@ -62,10 +65,14 @@ function send(action) {
   if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('menu:action', action);
 }
 
+/** Smoke test: called when the engine answered the ping. */
+let smokeEngineDone = null;
+
 function sendEngineMessage(msg) {
   if (msg.type === 'ready') lastEngineReady = msg;
   if (msg.type === 'engine.exit') lastEngineReady = null;
   if (SMOKE && msg.type === 'ready') console.log(`MAD_STUDIO_ENGINE_OK ${msg.version ?? ''} ${msg.sampleRate ?? ''}Hz null=${msg.device?.null ?? '?'}`);
+  if (SMOKE && msg.type === 'pong' && smokeEngineDone) smokeEngineDone();
   if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('engine:message', msg);
 }
 
@@ -296,17 +303,23 @@ function registerIpc() {
     if (!isTrustedSender(event)) return;
     if (SMOKE) {
       console.log('MAD_STUDIO_SMOKE_OK');
-      // With a bundled engine the smoke test also waits for the engine to report "ready".
-      if (!engine?.available) app.exit(0);
-      else if (lastEngineReady) app.exit(0);
-      else {
-        const timer = setInterval(() => {
-          if (lastEngineReady) {
-            clearInterval(timer);
-            app.exit(0);
-          }
-        }, 100);
-      }
+      // With a bundled engine the smoke test also waits for the engine: its "ready", then a
+      // ping/pong round trip over stdio.
+      if (!engine?.available) return void app.exit(0);
+      const deadline = setTimeout(() => {
+        console.log('MAD_STUDIO_ENGINE_FAILED');
+        app.exit(1);
+      }, 30_000);
+      smokeEngineDone = () => {
+        clearTimeout(deadline);
+        console.log('MAD_STUDIO_ENGINE_PONG');
+        app.exit(0);
+      };
+      const waitReady = setInterval(() => {
+        if (!lastEngineReady) return;
+        clearInterval(waitReady);
+        engine.send({ type: 'ping', requestId: 'smoke' });
+      }, 100);
     }
   });
 
@@ -396,7 +409,7 @@ function createWindow() {
 
   mainWindow.on('close', (e) => {
     saveWindowState(mainWindow);
-    if (!documentEdited || SMOKE) return;
+    if (!documentEdited || SMOKE || TEST_PROFILE) return;
     const choice = dialog.showMessageBoxSync(mainWindow, {
       type: 'warning',
       buttons: ['Quit', 'Cancel'],
