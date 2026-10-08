@@ -3,6 +3,7 @@ import { flatten } from '../model/layers';
 import { isMac } from '../platform/platform';
 import { importImages, openDocument, saveDocument } from '../io/documentIO';
 import * as actions from '../store/actions';
+import { activeFrameFolder } from '../store/frameActions';
 import { copy, cut, hasClip, pasteImage } from '../store/clipboard';
 import { getState, setState } from '../store/store';
 import { cancelTransform, confirmTransform, isTransforming, startTransform } from '../tools/transform';
@@ -115,11 +116,18 @@ export const COMMANDS: Command[] = [
   { id: 'newRasterLayer', label: 'New raster layer', keys: ['Mod+Shift+n'], run: () => void actions.addRasterLayer() },
   { id: 'newVectorLayer', label: 'New vector layer', run: () => void actions.addVectorLayer() },
   { id: 'newFolder', label: 'New layer folder', run: () => void actions.addFolder() },
+  { id: 'newFrameFolder', label: 'New frame border folder…', run: () => openDialog('newFrameFolder') },
+  {
+    id: 'divideFrame',
+    label: 'Divide frame border equally…',
+    run: () => openDialog('divideFrame'),
+    enabled: () => activeFrameFolder() !== null,
+  },
   {
     id: 'rasterize',
     label: 'Rasterize',
     run: () => actions.rasterizeLayer(),
-    enabled: () => actions.isObjectLayer(actions.activeLayer()) && !actions.activeLayer()?.locked,
+    enabled: () => actions.isRenderedLayer(actions.activeLayer()) && !actions.activeLayer()?.locked,
   },
   { id: 'groupLayer', label: 'Create folder and insert layer', keys: ['Mod+g'], run: () => actions.groupLayer() },
   {

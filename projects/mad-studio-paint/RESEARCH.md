@@ -101,6 +101,7 @@ Status: ✅ gleich · 🟡 ähnlich/vereinfacht · ❌ fehlt (noch)
 | Objekt-Werkzeug auf Vektorebenen | Linie antippen = auswählen (Linie und Kontrollpunkte hervorgehoben), verschieben, Griffe skalieren, Drehgriff oben; „Adjust line thickness when scaling“; Farbe, Grösse, Pinselform der gewählten Linien in Tool Settings; „Operation of transparent part: Switch to a different layer“; Auswahlmodus [VEC, OBJ, V] | Auswählen (⇧ ergänzt/entfernt), verschieben, skalieren (Ecken; ⇧ frei), drehen (⇧ 15°), Linienfarbe (Farbwähler oder Zeichenfarbe), Breite, Deckkraft, Linienstärke beim Skalieren ein/aus, Klick auf eine Linie einer anderen Vektorebene wechselt die Ebene, Entf löscht; Kontrollpunkte und Pinselform-Wechsel fehlen | 🟡 | `Object tool: select, move, recolour …` |
 | Text-Werkzeug | T; Klick = Text an der Stelle, Ziehen = Textrahmen mit „Wrap text at frame“ (Umbruch, Überstehendes unsichtbar); OK-/Abbrechen-Starter; Schrift, Grösse, Stil (fett, kursiv, durchgestrichen …), Ausrichtung, Richtung (vertikal: lateinische Zeichen gedreht), Textfarbe; erweitert: Zeilen-/Zeichenabstand, Rand; Text anklicken = bearbeiten; Objekt-Werkzeug: verschieben (⇧ Achse), drehen, skalieren (ohne Umbruch: Schriftgrösse) [TXT, TXE, TXS, TXV] | gleich; Grösse in pt (bei der Dokumentauflösung); Esc = Abbrechen, ⌘Enter = OK; neue Ebene je Text, benannt nach dem Text; Stile gelten für den ganzen Rahmen (nicht pro Buchstabe); Rubi, TateChuYoko, Kreistext, Verzerren fehlen | 🟡 | `text tool: …`, Unit: `text layout` |
 | Sprechblasen | T (Gruppe Balloon): Ellipse-Sprechblase wie eine Figur aufziehen, Linienbreite, Linien- und Füllfarbe; „Balloon tail“ von innen nach aussen ziehen (Biegung, Breite); Blase über vorhandenem Text → Textebene wird Sprechblasenebene; überlappende Blasen derselben Ebene verschmelzen; Objekt-Werkzeug: verschieben, skalieren (Text bleibt gleich gross), drehen [BAL] | Ellipse, abgerundet, Rechteck, Gedanken-Wolke; Schwanz gebogen oder als Gedankenbläschen; Text in der Blase wird zentriert und bewegt sich mit; Linie = Hauptfarbe, Füllung = Unterfarbe (eigene Annahme); Kurven-Sprechblase, Sprechblasenstift, Kontrollpunkte, Blitz-Blasen fehlen | 🟡 | `balloons: …`, Unit: `text boxes and balloons`, `layer objects` |
+| Comic-Rahmen | *Layer > New Layer > Frame Border folder* (Draw border, Linienbreite; Rahmen = Innenrand); Werkzeuge Rectangle frame (rastet am Innenrand ein), Polyline frame, Frame border pen; Divide frame border (Ziehen mit Vorschau, vertikale/horizontale Stegbreite, Ordner teilen); *Divide frame border equally* (Anzahl, Ordner: duplizieren / leer / unverändert); Inhalt nur im Rahmen sichtbar; Objekt-Werkzeug: an der Linie verschieben, Griffe, Drehen, Linienbreite und -farbe; Entf löscht; Rahmen als Lineal [FRM] | Rahmenordner mit Panels (Maske = Panelpolygone, Rahmenlinie darüber), Rechteck- und Polylinienrahmen, Teilen (Steg oben/unten 4 mm, links/rechts 2 mm, eigene Werte), gleichmässig teilen (neue leere Ordner oder Panels im selben Ordner), Objekt-Werkzeug, Rahmenkanten als Lineal beim Einrasten (⌘1); ohne Comic-Projekt gibt es keinen Innenrand: neue Rahmen liegen 5 % innerhalb der Leinwand (eigene Annahme). Rahmenstift, Vorlagen, Kontrollpunkte, Verbinden, Anti-Aliasing-Stufen und „Ordner duplizieren“ fehlen | 🟡 | `comic frames: …`, Unit: `comic frames` |
 | Ebene verschieben | in der Gruppe „Operation“ (K); ⌥-Ziehen kopiert, ⇧ fixiert die Richtung [LAY, MOD] | gleich; auch Gruppe „Operation“ mit „Select layer“ (D) | ✅ | `free transform …` |
 | Transformieren | ⌘T Skalieren/Drehen (Seitenverhältnis bleibt), ⇧⌘T frei; ausserhalb ziehen = drehen; ⇧ = 45°-Schritte; Enter/Doppelklick bestätigt, Esc bricht ab [TR] | gleich; Verzerren, Perspektive, Netz fehlen | 🟡 | `free transform …` |
 | Pipette | „Pick displayed color“ / „Pick color from layer“; ⌥-Klick in Zeichenwerkzeugen; Rechtsklick überall [EYE, MOD] | gleich | ✅ | `⌥-click with a brush picks …` |
@@ -126,7 +127,7 @@ Status: ✅ gleich · 🟡 ähnlich/vereinfacht · ❌ fehlt (noch)
 
 | Funktion | Clip Studio Paint [TS, MENU, OPT] | MAD Studio Paint | Status |
 | -------- | --------------------------------- | ---------------- | ------ |
-| Werkzeuge | / Zoom · H Hand · R Drehen · O Objekt · D Ebene wählen · K Ebene verschieben · M Auswahl · W Auto select · I Pipette · P Pen/Pencil · B Brush/Airbrush · E Radierer · J Blend · G Füllen/Verlauf · U Figur/Lineal · T Text/Sprechblase | gleich | ✅ |
+| Werkzeuge | / Zoom · H Hand · R Drehen · O Objekt · D Ebene wählen · K Ebene verschieben · M Auswahl · W Auto select · I Pipette · P Pen/Pencil · B Brush/Airbrush · E Radierer · J Blend · G Füllen/Verlauf · U Figur/Rahmen/Lineal · T Text/Sprechblase | gleich | ✅ |
 | Gruppen | mehrmals drücken wechselt; , / . = voriges/nächstes Werkzeug der Gruppe | gleich | ✅ |
 | Datei | ⌘N, ⌘O, ⌘S, ⇧⌘S | gleich | ✅ |
 | Bearbeiten | ⌘Z, ⌘Y/⇧⌘Z, ⌘X/F2, ⌘C/F3, ⌘V/F4, ⌫ Löschen, ⇧⌫ ausserhalb löschen, ⌥⌫ Füllen, ⌘U HSL, ⌘I Umkehren, ⌘T, ⇧⌘T | gleich | ✅ |
@@ -223,7 +224,11 @@ vergleichen. Abweichungen bitte als Issue oder Nachricht melden – mit dem Punk
 - **Glow dodge / Add (Glow):** offiziell nur „stärker bei halbtransparenten Pixeln“; Formel nach
   einem Community-Modell (niedrige Konfidenz).
 - **Pinsel:** Materialspitzen, Texturen, Doppelpinsel, Tempo-Dynamik und „Smear“ fehlen.
-- **Comic-Rahmen, Animation und 3D** sind nicht umgesetzt; bei den Linealen fehlen die Kurven-Arten.
+- **Animation und 3D** sind nicht umgesetzt; bei den Linealen fehlen die Kurven-Arten.
+- **Comic-Rahmen:** Standardwerte (Linienbreite, Stegbreiten) und ob „Divide folder“ beim
+  Werkzeug standardmässig an ist, sind nicht dokumentiert; gewählt: 5 px, 4 mm / 2 mm, an.
+  Welche Stegbreite („vertical gutter“ / „horizontal gutter“) zu welcher Schnittrichtung gehört,
+  ist nicht eindeutig; benannt nach der Lage des Stegs (oben/unten, links/rechts).
 - **Text:** Grösse-Einheit, Standardgrösse und Standardschrift des Text-Werkzeugs sind nicht
   dokumentiert; gewählt: pt bei der Dokumentauflösung, 24 pt, Systemschrift „sans-serif“. Ob Esc
   im Text bestätigt oder abbricht, sagt das Handbuch nicht (umgesetzt: abbrechen).
@@ -259,6 +264,7 @@ Präfix `M/` = `https://help.clip-studio.com/en-us/manual_en/` (Handbuch Ver. 5.
 | LP, BO, OLS, REF, DR, FOL, BL | `M/180_layers/Using_layers.htm`, `…/Basic_operations.htm`, `…/Other_layer_settings.htm`, `…/Reference_layers.htm`, `…/Draft_layers.htm`, `…/Layer_folders.htm`, `…/Blending_modes.htm` |
 | MASK, LPROP | `M/180_layers/Layer_masks.htm`, `…/Layer_properties.htm` |
 | VEC, ERASE | `M/180_layers/Vector_layers.htm`, `M/240_brushes/Eraser_tools.htm` |
+| FRM | `M/540_comic/Frames_and_Panels.htm` |
 | TXT, TXE, TXS, TXV, BAL | `M/480_text/Adding_text.htm`, `…/Editing_text.htm`, `…/Text_settings.htm`, `…/Vertical_text_and_readings.htm`, `M/540_comic/Balloons.htm` |
 | OBJ, V | `M/810_subtools/O.htm` (Operation), `M/810_subtools/V.htm` (Vector) |
 | TC, TCE, GD | `M/390_filters/Tonal_Correction.htm`, `…/Tonal_Correction_Effects.htm`, `M/810_subtools/G.htm` (Gradient dialog) |

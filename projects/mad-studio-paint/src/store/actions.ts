@@ -32,6 +32,7 @@ import { eraseWhere, keepWhere, type VectorStroke } from '../paint/vector';
 import type { Rect } from '../paint/rect';
 import { contentOf, EMPTY_CONTENT, idsTouching, objectIds, removeObjects, transformContent, type Content } from '../paint/objects';
 import type { Balloon, TextBox } from '../paint/text';
+import type { FrameBorder } from '../paint/frames';
 import { fitTextBox } from '../engine/textRender';
 import { sanitizeCurve01 } from '../paint/curve';
 import type { LayerEffects } from '../paint/effects';
@@ -594,9 +595,13 @@ export function soloLayer(id: Id): void {
 
 // ------------------------------------------------------------------ vector and text layers
 
-/** Layers whose pixels are rendered from objects: vector lines, or text boxes and balloons. */
-export type ObjectLayer = VectorLayer | TextLayer;
-export const isObjectLayer = (l: Layer | null | undefined): l is ObjectLayer => l?.kind === 'vector' || l?.kind === 'text';
+/** A folder with comic frame panels. */
+export type FrameFolder = FolderLayer & { frame: FrameBorder };
+export const isFrameFolder = (l: Layer | null | undefined): l is FrameFolder => l?.kind === 'folder' && Boolean(l.frame);
+
+/** Layers with objects for the Object tool: vector lines, text boxes and balloons, frame panels. */
+export type ObjectLayer = VectorLayer | TextLayer | FrameFolder;
+export const isObjectLayer = (l: Layer | null | undefined): l is ObjectLayer => l?.kind === 'vector' || l?.kind === 'text' || isFrameFolder(l);
 
 export function addVectorLayer(): Id {
   const layer = createVectorLayer(nextLayerName(getState().doc));
@@ -613,15 +618,25 @@ export function setLayerContent(layerId: Id, c: Content, label: string, key?: st
     label,
     (doc) => {
       const l = findLayer(doc.layers, layerId);
-      if (l?.kind === 'vector') l.strokes = c.strokes;
-      else if (l?.kind === 'text') {
-        l.texts = c.texts;
-        l.balloons = c.balloons;
-      } else return;
-      l.rev = nextRev();
+      if (l) setContentIn(l, c);
     },
     { key },
   );
+}
+
+/** Puts new objects into a layer of a document copy (a frame folder without panels becomes a plain folder). */
+function setContentIn(l: Layer, c: Content): void {
+  if (l.kind === 'vector') {
+    l.strokes = c.strokes;
+    l.rev = nextRev();
+  } else if (l.kind === 'text') {
+    l.texts = c.texts;
+    l.balloons = c.balloons;
+    l.rev = nextRev();
+  } else if (l.kind === 'folder' && l.frame) {
+    if (c.panels.length) l.frame = { ...l.frame, panels: c.panels };
+    else delete l.frame;
+  }
 }
 
 /** Replaces a vector layer's lines as one undo step; its pixels are rendered again from them. */
@@ -738,14 +753,10 @@ export function commitTransform(label: string, patches: PixelPatch[], contents: 
     const doc = cloneDocument(s.doc);
     for (const [id, c] of contents) {
       const l = findLayer(doc.layers, id);
-      if (l?.kind === 'vector') {
-        l.strokes = c.strokes;
-        engine.expectVectorLines(id, c.strokes);
-      } else if (l?.kind === 'text') {
-        l.texts = c.texts;
-        l.balloons = c.balloons;
-      } else continue;
-      l.rev = nextRev();
+      if (!l) continue;
+      if (l.kind === 'vector') engine.expectVectorLines(id, c.strokes);
+      if (l.kind === 'folder') engine.previewFrame(id, null);
+      setContentIn(l, c);
     }
     after = { doc, activeLayerId: s.activeLayerId };
     setState({ doc });
@@ -764,14 +775,18 @@ export function objectsToMove(l: ObjectLayer, selection: Mask | null): Set<strin
 /** Shows new objects of a vector or text layer while a tool changes them (lines only inside `r`). */
 export function previewContent(l: ObjectLayer, c: Content, r: Rect | null): void {
   if (l.kind === 'vector') engine.renderVectorLines(l.id, c.strokes, r);
-  else engine.previewText(l, c);
+  else if (l.kind === 'text') engine.previewText(l, c);
+  else engine.previewFrame(l.id, c.panels);
 }
+
+/** Vector and text layers: their pixels are rendered from their objects. */
+export const isRenderedLayer = (l: Layer | null | undefined): l is VectorLayer | TextLayer => l?.kind === 'vector' || l?.kind === 'text';
 
 /** Layer > Rasterize: a vector or text layer becomes a raster layer with the same pixels. */
 export function rasterizeLayer(id: Id = getState().activeLayerId): void {
   const s = getState();
   const l = findLayer(s.doc.layers, id);
-  if (!isObjectLayer(l)) return;
+  if (!isRenderedLayer(l)) return;
   const src = getSurface(l.id);
   const raster = createRasterLayer(l.name, {
     visible: l.visible,
@@ -1293,18 +1308,14 @@ function maskWithNewAreaVisible(old: HTMLCanvasElement, w: number, h: number, tr
   return out;
 }
 
-/** Applies `m` to the objects of every vector and text layer (canvas size and resolution changes). */
+/** Applies `m` to the objects of every vector and text layer and frame (canvas size and resolution changes). */
 function transformVectorLayers(doc: PaintDocument, m: Affine): void {
+  const k = Math.sqrt(Math.abs(m[0] * m[3] - m[1] * m[2])) || 1;
   for (const l of flatten(doc.layers)) {
     if (!isObjectLayer(l)) continue;
-    // The whole image scales: letters and balloon outlines too.
-    const c = transformContent(contentOf(l), null, m, { scaleText: true, scaleLine: true });
-    if (l.kind === 'vector') l.strokes = c.strokes;
-    else {
-      l.texts = c.texts;
-      l.balloons = c.balloons;
-    }
-    l.rev = nextRev();
+    // The whole image scales: letters, balloon outlines and frame lines too.
+    setContentIn(l, transformContent(contentOf(l), null, m, { scaleText: true, scaleLine: true }));
+    if (l.kind === 'folder' && l.frame) l.frame = { ...l.frame, lineWidth: l.frame.lineWidth * k };
   }
 }
 

@@ -7,7 +7,7 @@ const text = (id: string, x: number, y: number, patch: Partial<TextBox> = {}): T
 const balloon = (id: string, x: number, y: number): Balloon => ({ id, shape: 'ellipse', x, y, w: 100, h: 60, angle: 0, lineWidth: 2, lineColor: '#000000', fillColor: '#ffffff', tails: [] });
 const line = (id: string, y: number) => ({ id, color: '#000000', brush: { ...DEFAULT_BRUSH, size: 4 }, points: [0, 50, 100].map((x) => ({ x, y, s: 1, d: 1 })) });
 
-const content: Content = { strokes: [line('l', 300)], balloons: [balloon('b', 0, 0)], texts: [text('in', 30, 20), text('out', 200, 200)] };
+const content: Content = { strokes: [line('l', 300)], balloons: [balloon('b', 0, 0)], texts: [text('in', 30, 20), text('out', 200, 200)], panels: [] };
 
 describe('layer objects', () => {
   it('text in a balloon moves with it; other objects stay', () => {
@@ -19,7 +19,7 @@ describe('layer objects', () => {
   });
 
   it('scaling grows letters of text that does not wrap, and only the frame of text that does', () => {
-    const c: Content = { strokes: [], balloons: [], texts: [text('a', 0, 0), text('b', 100, 0, { wrap: true })] };
+    const c: Content = { strokes: [], balloons: [], panels: [], texts: [text('a', 0, 0), text('b', 100, 0, { wrap: true })] };
     const big = transformContent(c, null, [2, 0, 0, 2, 0, 0]);
     expect(big.texts.map((t) => t.size)).toEqual([48, 24]);
     expect(big.texts[1].w).toBe(80);

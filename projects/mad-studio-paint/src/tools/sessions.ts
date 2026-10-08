@@ -12,6 +12,7 @@ import { type FillReference, type SubTool } from '../paint/tools';
 import { eraseAt, linesBounds, newStrokeId, transformStrokes, type VectorEraseMode, type VectorStroke } from '../paint/vector';
 import { contentBounds, contentOf, pickContent, transformContent, type Content } from '../paint/objects';
 import { newObjectId } from '../paint/text';
+import { newPanelId, panelEdges } from '../paint/frames';
 import { apply as applyMatrix, normalizeAngle } from '../paint/viewMath';
 import { BlendStroke, BrushStroke, type Stroke, type StrokeTarget } from '../engine/brushEngine';
 import { createCanvas, ctx2d, maskToCanvas } from '../engine/canvas';
@@ -128,6 +129,14 @@ export function rulerSnap(start: Pt): Snap {
       if (isSpecial(r)) continue;
       const c = rulerConstraint(r, start, reach);
       if (c) return { ...none, constrain: c };
+    }
+    // Comic frame borders work as rulers too.
+    for (const l of flatten(s.doc.layers)) {
+      if (!actions.isFrameFolder(l) || !isEffectivelyVisible(s.doc.layers, l.id)) continue;
+      for (const [a, b] of panelEdges(l.frame.panels)) {
+        const c = rulerConstraint({ kind: 'linear', id: 'frame', a, b }, start, reach);
+        if (c) return { ...none, constrain: c };
+      }
     }
   }
   return none;
@@ -873,6 +882,7 @@ function duplicateContent(c: Content): Content {
     strokes: c.strokes.map((x) => ({ ...x, id: newStrokeId() })),
     texts: c.texts.map((x) => ({ ...x, id: newObjectId('t') })),
     balloons: c.balloons.map((x) => ({ ...x, id: newObjectId('b'), tails: x.tails.map((t) => ({ ...t, id: newObjectId('q') })) })),
+    panels: c.panels.map((x) => ({ ...x, id: newPanelId() })),
   };
 }
 
@@ -936,7 +946,12 @@ export class MoveSession implements ToolSession {
     const m: Affine = [1, 0, 0, 1, this.dx, this.dy];
     if (!v.copy) return transformContent(v.original, v.which, m);
     const copies = duplicateContent(transformContent(pickContent(v.original, v.which), null, m));
-    return { strokes: [...v.original.strokes, ...copies.strokes], texts: [...v.original.texts, ...copies.texts], balloons: [...v.original.balloons, ...copies.balloons] };
+    return {
+      strokes: [...v.original.strokes, ...copies.strokes],
+      texts: [...v.original.texts, ...copies.texts],
+      balloons: [...v.original.balloons, ...copies.balloons],
+      panels: [...v.original.panels, ...copies.panels],
+    };
   }
 
   private render(): void {
@@ -996,7 +1011,10 @@ export class MoveSession implements ToolSession {
 
 // ------------------------------------------------------------------ polyline selection
 
-/** Polyline selection: each click adds a corner; double-click, Enter or clicking the first point closes it. */
+/**
+ * Polyline input: each click adds a corner; double-click, Enter or clicking the first point closes
+ * it. Used for the polyline selection and polyline frames (`onClose`).
+ */
 export class PolylineSelect {
   static active: PolylineSelect | null = null;
   private points: { x: number; y: number; sx: number; sy: number }[] = [];
@@ -1004,13 +1022,16 @@ export class PolylineSelect {
   private op: SelectionOp;
   hover: { x: number; y: number } | null = null;
 
-  private constructor(p: PointerInfo) {
+  private constructor(
+    p: PointerInfo,
+    private onClose: ((points: { x: number; y: number }[]) => void) | null,
+  ) {
     this.op = selectionOpFor(p);
   }
 
-  static click(p: PointerInfo): void {
+  static click(p: PointerInfo, onClose: ((points: { x: number; y: number }[]) => void) | null = null): void {
     let poly = PolylineSelect.active;
-    if (!poly) poly = PolylineSelect.active = new PolylineSelect(p);
+    if (!poly) poly = PolylineSelect.active = new PolylineSelect(p, onClose);
     poly.add(p);
   }
 
@@ -1046,6 +1067,10 @@ export class PolylineSelect {
   private close(): void {
     PolylineSelect.active = null;
     if (this.points.length < 3) return;
+    if (this.onClose) {
+      this.onClose(this.points.map(({ x, y }) => ({ x, y })));
+      return;
+    }
     const { doc } = getState();
     actions.applySelection(polygonMask(doc.width, doc.height, this.points), this.op, 'Selection: Polyline');
   }

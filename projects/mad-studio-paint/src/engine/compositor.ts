@@ -9,6 +9,7 @@ import type { BlendMode, CorrectionLayer, FolderBlendMode, FolderLayer, Layer, P
 import { applyEdge, applyLayerColor, applyWatercolorEdge, effectReach } from '../paint/effects';
 import { inflate, intersect, union, type Rect } from '../paint/rect';
 import { applyCorrection } from '../paint/tonal';
+import type { FramePanel } from '../paint/frames';
 import { blendInto } from './blendPixels';
 import { clearRect, createCanvas, ctx2d, type Ctx } from './canvas';
 import { getSurface } from './surfaces';
@@ -80,6 +81,8 @@ export class Compositor {
   private ctx: Ctx;
   private pool = new CanvasPool();
   private dirty: Rect | null = null;
+  /** Frame panels shown instead of the document's while a tool changes them. */
+  readonly framePreview = new Map<string, FramePanel[]>();
 
   constructor(width: number, height: number) {
     this.canvas = createCanvas(width, height);
@@ -220,7 +223,8 @@ export class Compositor {
       return;
     }
     const mask = maskOf(layer);
-    if (layer.blend === 'pass-through') {
+    // Frame border folders are always isolated (their panels clip the result).
+    if (layer.blend === 'pass-through' && !layer.frame) {
       if (layer.opacity >= 1 && !mask) {
         this.composeList(layer.children, target, r, opts);
         return;
@@ -253,6 +257,7 @@ export class Compositor {
     } else this.composeList(layer.children, ctx, rr, opts);
     const mask = maskOf(layer);
     if (mask) applyMask(ctx, mask);
+    if (layer.kind === 'folder' && layer.frame) this.drawFrame(ctx, layer.id, layer.frame);
     const fx = layer.effects;
     if (fx && hasEffects(layer)) {
       const img = ctx.getImageData(rr.x, rr.y, rr.w, rr.h);
@@ -265,6 +270,29 @@ export class Compositor {
       ctx.putImageData(new ImageData(data, rr.w, rr.h), rr.x, rr.y);
     }
     return ctx;
+  }
+
+  /** Frame border folder: keeps the content inside the panels and draws their border on top. */
+  private drawFrame(ctx: Ctx, id: string, frame: NonNullable<FolderLayer['frame']>): void {
+    const panels = this.framePreview.get(id) ?? frame.panels;
+    if (panels.length === 0) return;
+    const path = new Path2D();
+    for (const panel of panels) {
+      panel.points.forEach((p, i) => (i === 0 ? path.moveTo(p.x, p.y) : path.lineTo(p.x, p.y)));
+      path.closePath();
+    }
+    ctx.save();
+    ctx.globalCompositeOperation = 'destination-in';
+    ctx.fillStyle = '#000';
+    ctx.fill(path, 'nonzero');
+    ctx.restore();
+    if (!frame.draw || frame.lineWidth <= 0) return;
+    ctx.save();
+    ctx.lineWidth = frame.lineWidth;
+    ctx.lineJoin = 'miter';
+    ctx.strokeStyle = frame.color;
+    ctx.stroke(path);
+    ctx.restore();
   }
 
   /**

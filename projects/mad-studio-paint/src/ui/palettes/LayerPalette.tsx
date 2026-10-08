@@ -206,8 +206,8 @@ function LayerRow({ layer, depth, drag, setDrag, drop, setDrop }: RowsProps & { 
       ...(layer.kind === 'correction' && layer.correction.type !== 'reverse'
         ? [{ label: 'Correction layer settings…', onClick: () => openTonalDialog({ kind: 'layer', layerId: layer.id }) }]
         : []),
-      ...(layer.kind === 'raster' || actions.isObjectLayer(layer) ? [{ label: 'Select layer opacity area', onClick: () => actions.selectLayerOpacity(layer.id) }] : []),
-      ...(actions.isObjectLayer(layer) ? [{ label: 'Rasterize', disabled: layer.locked, onClick: () => actions.rasterizeLayer(layer.id) }] : []),
+      ...(layer.kind === 'raster' || actions.isRenderedLayer(layer) ? [{ label: 'Select layer opacity area', onClick: () => actions.selectLayerOpacity(layer.id) }] : []),
+      ...(actions.isRenderedLayer(layer) ? [{ label: 'Rasterize', disabled: layer.locked, onClick: () => actions.rasterizeLayer(layer.id) }] : []),
       { separator: true },
       { label: 'Clip to layer below', checked: layer.clip, onClick: () => actions.setLayerProps(layer.id, { clip: !layer.clip }, 'Clip to layer below') },
       { label: 'Set as reference layer', checked: layer.reference, onClick: () => actions.setLayerProps(layer.id, { reference: !layer.reference }, 'Reference layer') },
@@ -302,8 +302,13 @@ function LayerRow({ layer, depth, drag, setDrag, drop, setDrop }: RowsProps & { 
           >
             <Icon name={layer.expanded ? 'chevronDown' : 'chevronRight'} size={12} />
           </button>
-          <span className={`folder-icon ${active && layer.mask && !maskTarget ? 'target' : ''}`} onPointerDown={pickTarget(false)}>
-            <Icon name="folder" size={22} />
+          <span
+            className={`folder-icon ${active && layer.mask && !maskTarget ? 'target' : ''}`}
+            onPointerDown={pickTarget(false)}
+            title={layer.frame ? 'Frame border folder' : undefined}
+            data-testid={layer.frame ? 'frame-icon' : undefined}
+          >
+            <Icon name={layer.frame ? 'frame' : 'folder'} size={22} />
           </span>
         </>
       ) : layer.kind === 'correction' ? (

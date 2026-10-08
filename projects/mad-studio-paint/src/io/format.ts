@@ -18,9 +18,10 @@ import { sanitizeCorrection } from '../paint/tonal';
 import { sanitizeBrush, type BrushSettings } from '../paint/tools';
 import { packStroke, unpackStroke, type VectorStroke } from '../paint/vector';
 import { sanitizeBalloon, sanitizeTextBox, type Balloon, type TextBox } from '../paint/text';
+import { sanitizeFrame } from '../paint/frames';
 
 export const FORMAT = 'mad-studio-paint';
-/** 2: layer masks, correction layers, effects, rulers. 3: vector and text layers. Older files open unchanged. */
+/** 2: layer masks, correction layers, effects, rulers. 3: vector and text layers, comic frames. Older files open unchanged. */
 export const FORMAT_VERSION = 3;
 export const EXTENSION = 'madpaint';
 
@@ -89,6 +90,12 @@ function sanitizeLayer(raw: unknown, seen: Set<string>, depth: number): Layer | 
       expanded: bool(r.expanded, true),
       children,
     };
+    const frame = sanitizeFrame(r.frame);
+    if (frame) {
+      folder.frame = frame;
+      // Frame border folders are isolated.
+      if (folder.blend === 'pass-through') folder.blend = 'normal';
+    }
     return folder;
   }
   if (r.kind === 'correction') {

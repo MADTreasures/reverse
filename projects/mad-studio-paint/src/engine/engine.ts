@@ -7,6 +7,7 @@ import type { Id, PaintDocument, TextLayer, VectorLayer } from '../model/types';
 import { HistoryStack } from '../paint/history';
 import type { Mask } from '../paint/mask';
 import { intersect, type Rect } from '../paint/rect';
+import type { FramePanel } from '../paint/frames';
 import { linesBounds, strokeBounds, type VectorStroke } from '../paint/vector';
 import { renderVectorStroke } from './brushEngine';
 import { renderTextLayer } from './textRender';
@@ -142,8 +143,16 @@ class PaintEngine {
 
   /** Renders vector and text layers again where a tool's preview left them out of date (cancel). */
   resync(): void {
+    this.compositor?.framePreview.clear();
     if (!this.currentDoc) return;
     this.syncVectors(this.currentDoc);
+    this.invalidate();
+  }
+
+  /** Shows other panels for a frame border folder while a tool changes them (null: the document's). */
+  previewFrame(id: Id, panels: FramePanel[] | null): void {
+    if (panels) this.compositor.framePreview.set(id, panels);
+    else this.compositor.framePreview.delete(id);
     this.invalidate();
   }
 

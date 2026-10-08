@@ -26,6 +26,7 @@ App-Symbol. Wie das Vorbild untersucht und verglichen wurde, steht in
 | **Werkzeuge** | Auswahlbereich (Rechteck, Ellipse, Lasso, Polylinie, Auswahlstift, Auswahl radieren), Auto select (Bearbeitungsebene / alle Ebenen / Referenzebenen), Füllen (Toleranz, **Lücke schliessen** in 5 Stufen, Bereichsvergrösserung, Mehrfachreferenz, nur verbundene Pixel), Verlauf (Vordergrund → transparent / → Hintergrund, Kreis), Figur (Gerade, Rechteck, Ellipse), **Lineale** (Lineal, Hilfslinie, Spezial-Lineale: parallel, radial, konzentrisch, **Symmetrie-Lineal** mit 2–32 Linien und Spiegelung, **Perspektiv-Lineal** mit 1–3 Fluchtpunkten; Striche und Figur-Linien rasten ein, *Snap to ruler* ⌘1 / *Snap to special ruler* ⌘2, Geltungsbereich je Ebene), Operation (Objekt: **Vektorlinien** wählen (⇧ ergänzt), verschieben, skalieren, drehen, Farbe/Breite/Deckkraft ändern, löschen; Lineale wählen/verschieben/bearbeiten/löschen; Ebene wählen, Ebene verschieben), Pipette (angezeigte Farbe / Ebenenfarbe), Hand, Drehen, Zoom |
 | **Ebenen** | Rasterebenen, **Vektorebenen** und Ordner (Normal oder „Through“), **alle 28 Ebenenmodi** des Vorbilds (11 davon pixelweise berechnet), Deckkraft, **Ebeneneigenschaften** (Randeffekt: Kante oder Aquarellkante, Ebenenfarbe mit Unterfarbe), **Korrekturebenen** (die neun Tonwertkorrekturen als Ebene, mit eigener Maske, beschneidbar, Einstellungen per Klick aufs Symbol), **Ebenenmasken** (Ausserhalb der Auswahl / Auswahl maskieren, auf der Maske zeichnen: Farbe zeigt, Radierer verbirgt, Löschen = nichts maskiert, aktivieren, Maskenbereich anzeigen, mit der Ebene verknüpfen, auf die Ebene anwenden, ⌘-Klick = Auswahl), Auf untere Ebene beschneiden, Referenz-, Entwurfsebene, Sperren, Transparente Pixel schützen, Auf untere Ebene übertragen, Mit unterer / sichtbare Ebenen vereinen, Auf eine Ebene reduzieren, Ordner erstellen/auflösen, Duplizieren (auch ⌥-Ziehen), ⌥-Klick aufs Auge = nur diese Ebene, ⌘-Klick aufs Miniaturbild = Auswahl, Papier-Ebene (wie im Vorbild Teil des Stapels: Ebenenmodi und Korrekturebenen wirken auf sie) |
 | **Text & Sprechblasen** | **Text-Werkzeug** (T): klicken und tippen oder einen Rahmen aufziehen (Umbruch am Rahmen, Überstehendes verborgen), direkt auf der Leinwand mit Zoom und Drehung (auch Eingabemethoden für Japanisch usw.), Text-Starter mit OK/Abbrechen, ⌘Enter bestätigt, Esc bricht ab; Text anklicken = bearbeiten. Schrift (beliebige installierte), Grösse in pt, fett/kursiv/unterstrichen/durchgestrichen, Ausrichtung, **vertikaler Text** (Spalten von rechts nach links, lateinische Zeichen gedreht), Zeilen- und Zeichenabstand, Textrand. Textebenen heissen nach ihrem Text. **Sprechblasen** (T): Ellipse, abgerundet, Rechteck, Gedankenblase (Wolke); Linie in Haupt-, Füllung in Unterfarbe; **Sprechblasenschwanz** (gebogen) und Gedankenschwanz (Bläschen) von innen nach aussen ziehen; Blasen über Text nehmen ihn auf und zentrieren ihn, überlappende Blasen verschmelzen. Objekt-Werkzeug: Text/Blasen wählen, verschieben (Text in der Blase geht mit), skalieren, drehen, Doppelklick = Text bearbeiten, Linien- und Füllfarbe |
+| **Comic-Rahmen** | **Rahmenordner** (*Layer → New frame border folder*: ein Rahmen innerhalb der Seitenränder, Linienbreite, „Draw border“): der Inhalt des Ordners ist nur im Rahmen sichtbar, die Rahmenlinie liegt darüber. Werkzeug **Frame border** (U): Rechteckrahmen (rastet an Leinwand und anderen Rahmen ein), Polylinienrahmen, **Rahmen teilen** (über einen Rahmen ziehen, Stege oben/unten und links/rechts in mm, neuer Rahmenordner je Teil), *Layer → Ruler/Frame → Divide frame border equally* (Spalten × Zeilen). Objekt-Werkzeug: Rahmen an der Linie greifen, verschieben, skalieren, drehen, Linienbreite/-farbe, Entf löscht den Rahmen (der Ordner bleibt). Rahmenkanten wirken als Lineal (⌘1) |
 | **Vektorebenen** | Jeder Strich (Pinsel, Figur, auch mit Symmetrie) wird als Linie mit Breite und Dichte je Punkt gespeichert und daraus gezeichnet: Verschieben, ⌘T, Spiegeln, Bildauflösung und Leinwandgrösse verlieren nichts. **Vektorradierer** (berührten Bereich, **bis zum Schnittpunkt** – auf Wunsch mit allen Ebenen –, ganze Linie), normale Radierer radieren den berührten Teil, Transparentfarbe zeichnet radierende Linien; *Select → Select overlapping vectors / Select vectors within area*; Füllen, Verlauf und Mischen sind wie im Vorbild gesperrt; *Layer → Rasterize*; Vektorebenen lassen sich in Vektorebenen vereinen |
 | **Auswahl** | Hinzufügen (⇧) / Abziehen (⌥) / Schnittmenge (⇧⌥), Quadrat/Kreis (⇧ beim Aufziehen), Alles, Aufheben, Erneut, Umkehren, Vergrössern/Verkleinern, laufende Ameisen und **Auswahl-Starter** (Aufheben, Zuschneiden, Umkehren, Vergrössern, Verkleinern, Löschen, Ausserhalb löschen, Ausschneiden/Kopieren & Einfügen, Transformieren, Füllen) |
 | **Bearbeiten** | Undo/Redo (200 Schritte, History-Palette), Ausschneiden/Kopieren/Einfügen (auch Bilder aus der Zwischenablage), Löschen, Füllen, Skalieren/Drehen (⌘T) und Freies Transformieren (⇧⌘T), Spiegeln, **Tonwertkorrektur** mit Vorschau – alle neun des Vorbilds: Helligkeit/Kontrast, Tonwertkorrektur mit Histogramm, Gradationskurve, Farbton/Sättigung/Helligkeit (⌘U), Farbbalance, Umkehren (⌘I), Posterisieren, Binarisieren, Verlaufsumsetzung, Gaussian blur, Bildauflösung, Leinwandgrösse |
@@ -88,7 +89,8 @@ Die Bedienung folgt dem öffentlichen Handbuch des Vorbilds (Ver. 5). Die wichti
 | Ebenen-Palette: Modus + Deckkraft oben, Schalter für Schnittmaske/Referenz/Entwurf/Sperren, Stift-Symbol markiert die Bearbeitungsebene | gleich |
 | Vektorebenen: Vektorradierer, Objekt-Werkzeug | gleich (Linienkorrektur-Werkzeuge noch nicht) |
 | Text-Werkzeug und Sprechblasen (T) | gleich (ohne Rubi, Kreistext, Zeichenformat pro Buchstabe) |
-| 3D, Animation, Comic-Rahmen | noch nicht (siehe unten) |
+| Comic-Rahmen (Rahmenordner, Rahmen teilen) | gleich (ohne Vorlagen, Kontrollpunkte, Rahmen verbinden) |
+| 3D, Animation | noch nicht (siehe unten) |
 
 ### Tastenkürzel
 
@@ -101,7 +103,7 @@ Wie im Handbuch des Vorbilds (macOS: Ctrl → ⌘, Alt → ⌥):
 | E | Eraser | I | Pipette |
 | J | Blend | K / D | Ebene verschieben / Ebene wählen |
 | G | Füllen / Verlauf | H / R / `/` | Hand / Drehen / Zoom |
-| U | Figur / Lineal | , / . | Voriges / nächstes Werkzeug der Gruppe |
+| U | Figur / Rahmen / Lineal | , / . | Voriges / nächstes Werkzeug der Gruppe |
 | T | Text / Sprechblase | O | Objekt (auch ⌘ mit Zeichenwerkzeugen) |
 | [ / ] | Pinselgrösse (Voreinstellungen) | ⌘[ / ⌘] | Deckkraft − / + |
 | X / C | Farben tauschen / Transparentfarbe | ⇧⌘O / ⇧⌘P | Dichte − / + |
@@ -178,8 +180,9 @@ Was im Vergleich zum Vorbild noch fehlt, steht Punkt für Punkt in
 [RESEARCH.md](RESEARCH.md#vergleich-clip-studio-paint-laut-handbuch--mad-studio-paint). Die grössten Lücken:
 
 - Linienkorrektur auf Vektorebenen (Kontrollpunkte, Linien ziehen/vereinfachen/verbinden),
-  Kurven- und Figur-Lineale, Raster, Comic-Rahmen, Rasterfolien (Töne), Animation/Zeitleiste
-  und 3D; beim Text: Formatierung einzelner Buchstaben, Rubi (Lesehilfe), Kreistext.
+  Kurven- und Figur-Lineale, Raster, Rasterfolien (Töne), Animation/Zeitleiste und 3D; beim
+  Text: Formatierung einzelner Buchstaben, Rubi (Lesehilfe), Kreistext; bei Rahmen: Vorlagen,
+  Rahmen verbinden, Kontrollpunkte, Comic-Seiten mit Beschnitt und Innenrand.
 - Pinsel-Materialien (Bildspitzen, Texturen, Doppelpinsel), Tempo als Dynamik, Verlaufseditor.
 - Import/Export von `.clip` oder PSD.
 

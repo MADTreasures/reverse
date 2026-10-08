@@ -4,6 +4,7 @@ import { BRUSH_SIZE_PRESETS } from '../../store/actions';
 import * as actions from '../../store/actions';
 import { currentSubTool, drawingColor, getState, setState, useStore } from '../../store/store';
 import { pxToPt, setTextStyle, setTextWrap, textToolStyle } from '../../store/textActions';
+import { setFrameProps } from '../../store/frameActions';
 import type { Balloon } from '../../paint/text';
 import { entryForTool, PALETTE_ENTRIES, PALETTE_LAYOUT, subToolsOf, toolInfo, type FillReference, type SubTool, type ToolId } from '../../paint/tools';
 import { Icon } from '../controls/Icons';
@@ -233,6 +234,7 @@ export function ToolProperty() {
       {sub.tool === 'text' && <TextSettings />}
       {sub.tool === 'balloon' && sub.balloon && <BalloonToolSettings sub={sub} update={update} />}
       {sub.tool === 'balloon' && sub.tail && <TailSettings sub={sub} update={update} />}
+      {sub.tool === 'frame' && <FrameToolSettings sub={sub} update={update} />}
       {sub.tool === 'select' && <SelectionModeRow />}
       {sub.tool === 'ruler' && sub.rulerKind === 'symmetry' && (
         <>
@@ -274,7 +276,7 @@ export function ToolProperty() {
           </div>
         </div>
       )}
-      {!b && !f && !['select', 'gradient', 'object', 'text', 'balloon'].includes(sub.tool) && <div className="prop-note">{toolInfo(sub.tool).hint}</div>}
+      {!b && !f && !['select', 'gradient', 'object', 'text', 'balloon', 'frame'].includes(sub.tool) && <div className="prop-note">{toolInfo(sub.tool).hint}</div>}
       <div className="prop-footer">
         <button className="icon-btn" title="Reset to the default settings" aria-label="Reset sub tool" onClick={() => actions.resetSubTool(sub.id)}>
           <Icon name="resetRotation" size={15} />
@@ -337,10 +339,15 @@ function ObjectLineSettings({ sub, update }: { sub: SubTool; update: (patch: Par
   const change = (fn: Parameters<typeof actions.updateSelectedLines>[0], label: string, key?: string) => actions.updateSelectedLines(fn, label, key);
   const texts = useStore(useShallow((s) => actions.selectedTextObjects(s)?.texts ?? []));
   const balloons = useStore(useShallow((s) => actions.selectedTextObjects(s)?.balloons ?? []));
+  const frame = useStore((s) => {
+    const sel = actions.selectedObjectsOf(s);
+    return sel && sel.layer.kind === 'folder' ? sel.layer : null;
+  });
   return (
     <>
       {texts.length > 0 && <TextSettings />}
       {balloons.length > 0 && <BalloonObjectSettings balloons={balloons} />}
+      {frame && <FrameObjectSettings folder={frame} />}
       {first ? (
         <>
           <div className="prop-row">
@@ -392,7 +399,7 @@ function ObjectLineSettings({ sub, update }: { sub: SubTool; update: (patch: Par
           </div>
         </>
       ) : (
-        texts.length + balloons.length === 0 && <div className="prop-note">{toolInfo('object').hint}</div>
+        texts.length + balloons.length === 0 && !frame && <div className="prop-note">{toolInfo('object').hint}</div>
       )}
       <label className="check prop-check">
         <input type="checkbox" checked={sub.scaleLineWidth !== false} onChange={(e) => update({ scaleLineWidth: e.target.checked })} />
@@ -529,6 +536,47 @@ function TextSettings() {
         </span>
       </div>
       <PropSlider label="Edge width" unit="px" value={st.edge} min={0} max={50} step={0.5} decimals={1} onChange={(v) => set({ edge: v })} />
+    </>
+  );
+}
+
+/** Frame tools: border width; dividing: gutters and folders. */
+function FrameToolSettings({ sub, update }: { sub: SubTool; update: (patch: Partial<SubTool>) => void }) {
+  if (sub.frameShape === 'divide') {
+    return (
+      <>
+        <PropSlider label="Gutter top/bottom" unit="mm" value={sub.gutterTopBottom ?? 4} min={0} max={30} step={0.5} decimals={1} onChange={(v) => update({ gutterTopBottom: v })} />
+        <PropSlider label="Gutter left/right" unit="mm" value={sub.gutterLeftRight ?? 2} min={0} max={30} step={0.5} decimals={1} onChange={(v) => update({ gutterLeftRight: v })} />
+        <label className="check prop-check">
+          <input type="checkbox" checked={sub.divideFolder !== false} onChange={(e) => update({ divideFolder: e.target.checked })} />
+          Divide folder (new frame border folder)
+        </label>
+        <div className="prop-note">Drag across a frame to divide it (⇧: in 45° steps).</div>
+      </>
+    );
+  }
+  return (
+    <>
+      <PropSlider label="Brush Size" unit="px" value={sub.frameLine ?? 5} min={0} max={100} step={0.5} decimals={1} onChange={(v) => update({ frameLine: v })} />
+      <div className="prop-note">{sub.frameShape === 'polyline' ? 'Click the corners; double-click, Enter or the first corner closes the frame.' : 'Drag to make a frame; its edges snap to the canvas and other frames.'}</div>
+    </>
+  );
+}
+
+/** Object tool with a frame selected: the border of its frame border folder. */
+function FrameObjectSettings({ folder }: { folder: actions.FrameFolder }) {
+  const f = folder.frame;
+  return (
+    <>
+      <PropSlider label="Brush Size" unit="px" value={f.lineWidth} min={0} max={100} step={0.5} decimals={1} onChange={(v) => setFrameProps(folder.id, { lineWidth: v }, 'frame:line')} />
+      <div className="prop-row">
+        <span className="prop-label">Line color</span>
+        <input type="color" className="line-color" aria-label="Frame color" value={f.color} onChange={(e) => setFrameProps(folder.id, { color: e.target.value }, 'frame:color')} />
+      </div>
+      <label className="check prop-check">
+        <input type="checkbox" checked={f.draw} onChange={(e) => setFrameProps(folder.id, { draw: e.target.checked })} />
+        Draw border
+      </label>
     </>
   );
 }

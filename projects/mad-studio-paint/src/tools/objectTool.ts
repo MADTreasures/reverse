@@ -1,6 +1,6 @@
 /**
- * Object tool on vector and text layers: click a line, text or balloon to select it (⇧ adds or
- * removes it), drag to move the selection, drag a corner of its box to scale (⇧ frees the aspect
+ * Object tool on vector and text layers and comic frames: click a line, text, balloon or frame
+ * border to select it (⇧ adds or removes it), drag to move the selection, drag a corner of its box to scale (⇧ frees the aspect
  * ratio) and the round handle above it to rotate (⇧ in 15° steps). Clicking an object on another
  * layer switches to that layer; double-clicking text edits it. Delete removes the selection; Tool
  * Settings changes colour, width, font and so on.
@@ -168,7 +168,7 @@ function pickAt(p: PointerInfo): { layer: actions.ObjectLayer; id: string } | nu
   const layers = flatten(s.doc.layers).filter((l): l is actions.ObjectLayer => actions.isObjectLayer(l) && isEffectivelyVisible(s.doc.layers, l.id));
   if (active) layers.sort((a, b) => Number(b.id === active.id) - Number(a.id === active.id));
   for (const layer of layers) {
-    const id = pickObject(contentOf(layer), p, tolerance);
+    const id = pickObject(contentOf(layer), p, tolerance, layer.kind === 'folder' ? layer.frame.lineWidth : 0);
     if (id) return { layer, id };
   }
   return null;
@@ -239,6 +239,7 @@ function drawOutlines(ctx: CanvasRenderingContext2D, view: OverlayView, c: Conte
     poly(balloonBody(b), true);
     for (const t of b.tails) for (const shape of tailShapes(b, t)) poly(shape, true);
   }
+  for (const panel of c.panels) if (ids.has(panel.id)) poly(panel.points, true);
   ctx.setLineDash([3, 3]);
   for (const t of c.texts) if (ids.has(t.id)) poly(frameCorners(t), true);
   ctx.restore();

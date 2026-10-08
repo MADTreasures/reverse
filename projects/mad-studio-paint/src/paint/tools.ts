@@ -23,7 +23,8 @@ export type ToolId =
   | 'ruler'
   | 'object'
   | 'text'
-  | 'balloon';
+  | 'balloon'
+  | 'frame';
 
 export type BrushMode = 'paint' | 'erase' | 'blend';
 export type TipTexture = 'none' | 'grain';
@@ -157,6 +158,13 @@ export interface SubTool {
   balloon?: { shape: BalloonShape; lineWidth: number; fill: boolean };
   /** Balloon tail tools. */
   tail?: { width: number; bend: number; kind: 'pointed' | 'thought' };
+  /** Frame tools: how a frame is made, and its border width (px). */
+  frameShape?: 'rect' | 'polyline' | 'divide';
+  frameLine?: number;
+  /** Divide frame border: gutters (mm) for cuts across (top/bottom) and down (left/right), and whether the new part gets its own folder. */
+  gutterTopBottom?: number;
+  gutterLeftRight?: number;
+  divideFolder?: boolean;
 }
 
 export const DEFAULT_BRUSH: BrushSettings = {
@@ -227,6 +235,7 @@ export const TOOLS: ToolInfo[] = [
   { id: 'fill', label: 'Fill', key: 'G', hint: 'Click to fill an area · ⇧-click toggles "refer multiple"' },
   { id: 'gradient', label: 'Gradient', key: 'G', hint: 'Drag to draw a gradient with the drawing colour' },
   { id: 'figure', label: 'Figure', key: 'U', hint: 'Drag to draw · ⇧ snaps lines to 45° and makes squares / circles' },
+  { id: 'frame', label: 'Frame border', key: 'U', hint: 'Drag to make a comic frame (it snaps to the canvas and other frames) · divide: drag across a frame' },
   { id: 'ruler', label: 'Ruler', key: 'U', hint: 'Drag to create a ruler · drag a handle to edit it · strokes snap to rulers (⌘1 / ⌘2)' },
   { id: 'object', label: 'Object', key: 'O', hint: 'Click a vector line, text, balloon or ruler to select it · drag to move, handles to scale and rotate · Delete removes it' },
   { id: 'text', label: 'Text', key: 'T', hint: 'Click to type, drag to type in a frame (the text wraps at it) · click text to edit it · ⌘Enter or a click outside confirms' },
@@ -439,6 +448,10 @@ export const DEFAULT_SUB_TOOLS: SubTool[] = [
   { id: 'fig-line', tool: 'figure', name: 'Straight line', figureShape: 'line', brush: brush({ size: 3, sizePressure: false, stabilization: 0 }) },
   { id: 'fig-rect', tool: 'figure', name: 'Rectangle', figureShape: 'rect', brush: brush({ size: 3, sizePressure: false, stabilization: 0 }) },
   { id: 'fig-ellipse', tool: 'figure', name: 'Ellipse', figureShape: 'ellipse', brush: brush({ size: 3, sizePressure: false, stabilization: 0 }) },
+  // Frame border
+  { id: 'frame-rect', tool: 'frame', name: 'Rectangle frame', frameShape: 'rect', frameLine: 5 },
+  { id: 'frame-polyline', tool: 'frame', name: 'Polyline frame', frameShape: 'polyline', frameLine: 5 },
+  { id: 'frame-divide', tool: 'frame', name: 'Divide frame border', frameShape: 'divide', gutterTopBottom: 4, gutterLeftRight: 2, divideFolder: true },
   // Ruler
   { id: 'ruler-linear', tool: 'ruler', name: 'Linear ruler', rulerKind: 'linear' },
   { id: 'ruler-special', tool: 'ruler', name: 'Special ruler', rulerKind: 'special', specialRuler: 'parallel' },
@@ -496,6 +509,10 @@ export function mergeSubTools(saved: unknown): SubTool[] {
             },
           }
         : {}),
+      ...(def.frameLine !== undefined && typeof s.frameLine === 'number' && Number.isFinite(s.frameLine) ? { frameLine: Math.max(0, Math.min(100, s.frameLine)) } : {}),
+      ...(def.gutterTopBottom !== undefined && typeof s.gutterTopBottom === 'number' && Number.isFinite(s.gutterTopBottom) ? { gutterTopBottom: Math.max(0, Math.min(100, s.gutterTopBottom)) } : {}),
+      ...(def.gutterLeftRight !== undefined && typeof s.gutterLeftRight === 'number' && Number.isFinite(s.gutterLeftRight) ? { gutterLeftRight: Math.max(0, Math.min(100, s.gutterLeftRight)) } : {}),
+      ...(def.divideFolder !== undefined && typeof s.divideFolder === 'boolean' ? { divideFolder: s.divideFolder } : {}),
       ...(def.tail && s.tail && typeof s.tail === 'object'
         ? {
             tail: {
@@ -598,6 +615,7 @@ export const PALETTE_ENTRIES: PaletteEntry[] = [
   { id: 'fill', label: 'Fill', icon: 'fill', tools: ['fill'] },
   { id: 'gradient', label: 'Gradient', icon: 'gradient', tools: ['gradient'] },
   { id: 'figure', label: 'Figure', icon: 'figure', tools: ['figure'] },
+  { id: 'frame', label: 'Frame border', icon: 'frame', tools: ['frame'] },
   { id: 'ruler', label: 'Ruler', icon: 'ruler', tools: ['ruler'] },
   { id: 'text', label: 'Text (Text, Balloon)', icon: 'text', tools: ['text', 'balloon'] },
 ];
@@ -613,12 +631,12 @@ export const PALETTE_LAYOUT: Record<WorkspaceId, string[][]> = {
   default: [
     ['pen', 'pencil', 'brush', 'eraser', 'airbrush', 'blend'],
     ['select', 'autoSelect', 'fill', 'gradient'],
-    ['operation', 'figure', 'ruler', 'text', 'navigate', 'eyedropper'],
+    ['operation', 'figure', 'frame', 'ruler', 'text', 'navigate', 'eyedropper'],
   ],
   classic: [
     ['zoom', 'navigate', 'operation', 'select', 'autoSelect', 'eyedropper'],
     ['pen', 'pencil', 'brush', 'airbrush', 'eraser', 'blend'],
-    ['fill', 'gradient', 'figure', 'ruler', 'text'],
+    ['fill', 'gradient', 'figure', 'frame', 'ruler', 'text'],
   ],
 };
 

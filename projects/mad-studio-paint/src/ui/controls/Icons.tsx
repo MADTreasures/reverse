@@ -263,6 +263,12 @@ const paths: Record<string, ReactNode> = {
   ),
   check: <path d="m5 10.5 3.2 3.2L15 7" />,
   close: <path d="M5.5 5.5l9 9M14.5 5.5l-9 9" />,
+  frame: (
+    <>
+      <rect x="2.5" y="2.5" width="15" height="15" />
+      <path d="M2.5 9.5h15M10.5 2.5v7M7.5 9.5v8" />
+    </>
+  ),
   text: (
     <>
       <path d="M4.5 5V3.5h11V5M10 3.5v13M7.5 16.5h5" />

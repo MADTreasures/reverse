@@ -1200,3 +1200,56 @@ test('balloons: drawn over text, with a tail; the Object tool moves balloon and 
   expect((await state(page)).layers[0].kind).toBe('raster');
   expect(errors).toEqual([]);
 });
+
+test('comic frames: frame border folder, divide with gutters, content shows only inside, Object tool, saved', async ({ page }) => {
+  const errors = await boot(page);
+  // Layer > New frame border folder: one frame 15 px inside the canvas (5 % of 300).
+  await page.evaluate(() => window.__madPaint.runCommand('newFrameFolder'));
+  await page.getByRole('dialog', { name: 'New frame border folder' }).getByRole('button', { name: 'OK' }).click();
+  let layers = (await state(page)).layers;
+  expect(layers[0].frame.panels[0].points[0]).toEqual({ x: 15, y: 15 });
+  await expect(page.getByTestId('frame-icon')).toHaveCount(1);
+  // Divide it with a cut across: two frame border folders with a gutter between them.
+  await useSubTool(page, 'frame', 'frame-divide');
+  await drag(page, [5, 150], [395, 150], 8);
+  layers = (await state(page)).layers;
+  expect(layers.filter((l: any) => l.frame)).toHaveLength(2);
+  const top = layers.find((l: any) => l.frame && l.frame.panels[0].points[0].y < 20);
+  const bottomY = Math.min(...layers.find((l: any) => l.frame && l !== top).frame.panels[0].points.map((p: any) => p.y));
+  const topY = Math.max(...top.frame.panels[0].points.map((p: any) => p.y));
+  expect(bottomY - topY).toBeGreaterThan(8);
+  // A layer in the top frame shows only inside it.
+  await page.evaluate((id) => {
+    const a = window.__madPaint.actions;
+    a.selectLayer(id);
+    a.addRasterLayer();
+  }, top.id);
+  await thinPen(page);
+  await drag(page, [100, 60], [100, 260], 12);
+  expect(await layerAlpha(page, 100, 240)).toBeGreaterThan(200);
+  expect(await shown(page, 100, 100)).toBeLessThan(60);
+  expect(await shown(page, 100, 240)).toBe(255);
+  // The border is drawn.
+  expect(await shown(page, 15, 100)).toBeLessThan(60);
+  // Object tool: drag the bottom frame by its border.
+  await selectTool(page, 'object');
+  await drag(page, [15, 220], [35, 220], 6);
+  const moved = Math.min(...(await state(page)).layers.find((l: any) => l.frame && l.id !== top.id).frame.panels[0].points.map((p: any) => p.x));
+  expect(Math.abs(moved - 35)).toBeLessThan(2.5);
+  // Divide equally (Layer > Ruler/Frame).
+  await page.evaluate((id) => window.__madPaint.actions.selectLayer(id), top.id);
+  await page.evaluate(() => window.__madPaint.runCommand('divideFrame'));
+  const dlg = page.getByRole('dialog', { name: 'Divide frame border equally' });
+  await dlg.getByLabel('Vertical divisions (columns)').fill('2');
+  await dlg.getByLabel('Horizontal divisions (rows)').fill('1');
+  await dlg.getByRole('button', { name: 'OK' }).click();
+  expect((await state(page)).layers.filter((l: any) => l.frame)).toHaveLength(3);
+  // Saved and opened again.
+  const back = await page.evaluate(async () => {
+    const m = window.__madPaint;
+    await m.openFileBytes({ name: 'frames.madpaint', data: await m.buildDocumentBytes() });
+    return m.useStore.getState().doc.layers.filter((l: any) => l.frame).length;
+  });
+  expect(back).toBe(3);
+  expect(errors).toEqual([]);
+});

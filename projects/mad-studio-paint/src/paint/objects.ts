@@ -2,6 +2,7 @@
  * The objects of vector and text layers – lines, text boxes and balloons – as one content type, so
  * the Object tool, Move layer, transforms and flips treat them alike. Pure, unit tested.
  */
+import { distanceToEdge, polygonBounds, transformPanel, type FramePanel } from './frames';
 import type { Affine, Pt } from './rulers';
 import {
   balloonBody,
@@ -24,17 +25,20 @@ export interface Content {
   strokes: VectorStroke[];
   texts: TextBox[];
   balloons: Balloon[];
+  /** Comic frame panels (frame border folders). */
+  panels: FramePanel[];
 }
 
-export const EMPTY_CONTENT: Content = { strokes: [], texts: [], balloons: [] };
+export const EMPTY_CONTENT: Content = { strokes: [], texts: [], balloons: [], panels: [] };
 
-export const contentOf = (l: { kind: string; strokes?: VectorStroke[]; texts?: TextBox[]; balloons?: Balloon[] }): Content => ({
+export const contentOf = (l: { kind: string; strokes?: VectorStroke[]; texts?: TextBox[]; balloons?: Balloon[]; frame?: { panels: FramePanel[] } }): Content => ({
   strokes: l.strokes ?? [],
   texts: l.texts ?? [],
   balloons: l.balloons ?? [],
+  panels: l.frame?.panels ?? [],
 });
 
-export const objectIds = (c: Content): string[] => [...c.strokes, ...c.balloons, ...c.texts].map((o) => o.id);
+export const objectIds = (c: Content): string[] => [...c.strokes, ...c.balloons, ...c.texts, ...c.panels].map((o) => o.id);
 
 export const textCenter = (t: TextBox): Pt => {
   const m = frameMatrix(t);
@@ -70,6 +74,7 @@ export function transformContent(c: Content, which: Set<string> | null, m: Affin
     strokes: c.strokes.map((s) => (picked(s.id) ? transformStrokes([s], m, opts.scaleWidth ?? true)[0] : s)),
     balloons: c.balloons.map((b) => (picked(b.id) ? transformBalloon(b, m, opts.scaleLine) : b)),
     texts: c.texts.map((t) => (picked(t.id) || carried.has(t.id) ? transformText(t, m, opts.scaleText ?? !t.wrap) : t)),
+    panels: c.panels.map((p) => (picked(p.id) ? transformPanel(p, m) : p)),
   };
 }
 
@@ -80,6 +85,7 @@ export function contentBounds(c: Content, which: Set<string> | null = null): Box
     ...c.strokes.filter((s) => picked(s.id)).map(strokeBounds),
     ...c.balloons.filter((b) => picked(b.id)).map(balloonBounds),
     ...c.texts.filter((t) => picked(t.id)).map(textBounds),
+    ...c.panels.filter((p) => picked(p.id)).map((p) => polygonBounds(p.points)),
   ].filter((b): b is Box => b !== null);
   return boundsOf(boxes.flatMap((b) => [
     { x: b.x, y: b.y },
@@ -87,12 +93,14 @@ export function contentBounds(c: Content, which: Set<string> | null = null): Box
   ]));
 }
 
-/** The top-most object under p: text above balloons, then lines. */
-export function pickObject(c: Content, p: Pt, tolerance: number): string | null {
+/** The top-most object under p: text above balloons, then lines, then frame borders (on their line). */
+export function pickObject(c: Content, p: Pt, tolerance: number, frameLine = 0): string | null {
   for (let i = c.texts.length - 1; i >= 0; i--) if (hitTextBox(c.texts[i], p, tolerance)) return c.texts[i].id;
   for (let i = c.balloons.length - 1; i >= 0; i--) if (hitBalloon(c.balloons[i], p)) return c.balloons[i].id;
   const k = hitStroke(c.strokes, p, tolerance);
-  return k >= 0 ? c.strokes[k].id : null;
+  if (k >= 0) return c.strokes[k].id;
+  for (const panel of c.panels) if (distanceToEdge(panel.points, p) <= tolerance + frameLine / 2) return panel.id;
+  return null;
 }
 
 /**
@@ -103,6 +111,10 @@ export function idsTouching(c: Content, inside: (p: Pt) => boolean): Set<string>
   const ids = new Set<string>();
   for (const s of c.strokes) if (keepWhere([s], inside).length > 0) ids.add(s.id);
   for (const t of c.texts) if (inside(textCenter(t))) ids.add(t.id);
+  for (const panel of c.panels) {
+    const b = polygonBounds(panel.points);
+    if (inside({ x: b.x + b.w / 2, y: b.y + b.h / 2 })) ids.add(panel.id);
+  }
   for (const b of c.balloons) {
     const r = { x: b.w / 2, y: b.h / 2 };
     const m = frameMatrix(b);
@@ -116,6 +128,7 @@ export const removeObjects = (c: Content, ids: Set<string>): Content => ({
   strokes: c.strokes.filter((s) => !ids.has(s.id)),
   texts: c.texts.filter((t) => !ids.has(t.id)),
   balloons: c.balloons.filter((b) => !ids.has(b.id)),
+  panels: c.panels.filter((p) => !ids.has(p.id)),
 });
 
 /** Only the objects in `ids`. */
@@ -123,4 +136,5 @@ export const pickContent = (c: Content, ids: Set<string>): Content => ({
   strokes: c.strokes.filter((s) => ids.has(s.id)),
   texts: c.texts.filter((t) => ids.has(t.id)),
   balloons: c.balloons.filter((b) => ids.has(b.id)),
+  panels: c.panels.filter((p) => ids.has(p.id)),
 });

@@ -29,6 +29,7 @@ import {
 import { drawRulers, rulerSession } from './rulerTool';
 import { drawLineSelection, lineHandleCursor, objectSession } from './objectTool';
 import { balloonSession, textSession } from './textTool';
+import { frameSession } from './frameTool';
 import { confirmTransform, drawTransformOverlay, hitHandle, isTransforming, transformCursor, TransformSession } from './transform';
 import type { Modifiers, OverlayView, PointerInfo, ToolSession } from './types';
 
@@ -164,6 +165,8 @@ class Controller {
         return textSession(p);
       case 'balloon':
         return balloonSession(sub, p);
+      case 'frame':
+        return frameSession(sub, p);
       default:
         return null;
     }
