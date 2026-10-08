@@ -1,0 +1,81 @@
+name: MAD Studio Paint · CI
+
+on:
+  push:
+    paths:
+      - 'projects/mad-studio-paint/**'
+      - '.github/workflows/mad-studio-paint-ci.yml'
+  pull_request:
+    paths:
+      - 'projects/mad-studio-paint/**'
+      - '.github/workflows/mad-studio-paint-ci.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: mad-studio-paint-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    working-directory: projects/mad-studio-paint
+
+jobs:
+  test:
+    name: Typecheck · unit · build · e2e · Electron
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Reject file names that collide on case-insensitive file systems (macOS)
+        working-directory: .
+        run: |
+          dupes=$(git ls-files | tr '[:upper:]' '[:lower:]' | sort | uniq -d)
+          if [ -n "$dupes" ]; then
+            echo "These paths differ only in letter case and break checkouts on macOS:"
+            echo "$dupes"
+            exit 1
+          fi
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: projects/mad-studio-paint/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Unit tests
+        run: npm test
+
+      - name: Build
+        run: npm run build
+
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: End-to-end tests
+        run: npx playwright test
+        env:
+          CI: 'true'
+
+      - name: Electron smoke test
+        # GitHub's Ubuntu runners cannot use Chromium's setuid sandbox.
+        run: xvfb-run -a npx electron . --smoke-test --no-sandbox
+        env:
+          ELECTRON_DISABLE_SANDBOX: '1'
+
+      - name: Upload Playwright report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mad-studio-paint-playwright-report
+          path: projects/mad-studio-paint/playwright-report
+          retention-days: 7

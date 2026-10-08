@@ -1,0 +1,98 @@
+{
+  "name": "mad-studio-paint",
+  "productName": "MAD Studio Paint",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Layer-based painting and illustration app for macOS in the style of professional comic and illustration tools.",
+  "author": "MADTreasures",
+  "type": "module",
+  "main": "electron/main.cjs",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview --port 4174 --strictPort",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:e2e": "playwright test",
+    "check": "npm run typecheck && npm run test && npm run build",
+    "app": "npm run build && electron .",
+    "app:dev": "node scripts/electron-dev.mjs",
+    "app:smoke": "electron . --smoke-test",
+    "icon": "node scripts/make-icon.mjs",
+    "dist:mac": "npm run build && electron-builder --mac --publish never",
+    "dist:dir": "npm run build && electron-builder --dir --publish never"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.56.1",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "@vitejs/plugin-react": "6.1.2",
+    "electron": "44.7.0",
+    "electron-builder": "26.15.3",
+    "fflate": "0.8.3",
+    "react": "19.3.0",
+    "react-dom": "19.3.0",
+    "typescript": "7.0.2",
+    "vite": "8.3.3",
+    "vitest": "5.0.3",
+    "zustand": "5.0.15"
+  },
+  "build": {
+    "appId": "io.github.madtreasures.madstudiopaint",
+    "productName": "MAD Studio Paint",
+    "copyright": "Copyright © 2026 MADTreasures",
+    "directories": {
+      "output": "release",
+      "buildResources": "build"
+    },
+    "files": [
+      "dist/**/*",
+      "electron/**/*",
+      "package.json"
+    ],
+    "fileAssociations": [
+      {
+        "ext": "madpaint",
+        "name": "MAD Studio Paint Document",
+        "role": "Editor"
+      }
+    ],
+    "mac": {
+      "category": "public.app-category.graphics-design",
+      "icon": "build/icon.png",
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "arm64",
+            "x64"
+          ]
+        }
+      ],
+      "identity": "-",
+      "hardenedRuntime": false,
+      "gatekeeperAssess": false,
+      "darkModeSupport": true,
+      "extendInfo": {
+        "NSHighResolutionCapable": true
+      }
+    },
+    "dmg": {
+      "title": "MAD Studio Paint ${version}",
+      "artifactName": "MAD-Studio-Paint-${version}-${arch}.${ext}"
+    },
+    "linux": {
+      "target": [
+        "AppImage"
+      ],
+      "category": "Graphics"
+    },
+    "win": {
+      "target": [
+        "nsis"
+      ]
+    },
+    "publish": null
+  }
+}

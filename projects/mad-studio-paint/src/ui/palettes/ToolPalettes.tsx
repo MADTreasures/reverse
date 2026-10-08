@@ -1,0 +1,306 @@
+import { useState } from 'react';
+import { BRUSH_SIZE_PRESETS } from '../../store/actions';
+import * as actions from '../../store/actions';
+import { currentSubTool, useStore } from '../../store/store';
+import { entryForTool, PALETTE_ENTRIES, PALETTE_LAYOUT, subToolsOf, toolInfo, type FillReference, type SubTool, type ToolId } from '../../paint/tools';
+import { Icon } from '../controls/Icons';
+import { PropSlider } from '../controls/PropSlider';
+import { ColorIcons } from './ColorWheel';
+
+/** Last tool used per palette button (for buttons that hold several tools). */
+const lastTool = new Map<string, ToolId>();
+
+/** Column of tool buttons in sections, with the colour icons at the bottom. */
+export function ToolPalette() {
+  const tool = useStore((s) => s.tool);
+  const workspace = useStore((s) => s.workspace);
+  const current = entryForTool(tool);
+  lastTool.set(current.id, tool);
+  return (
+    <div className="tool-palette" role="toolbar" aria-label="Tools" data-testid="tool-palette">
+      {PALETTE_LAYOUT[workspace].map((section, i) => (
+        <div key={i} className="tool-section">
+          {section.map((id) => {
+            const e = PALETTE_ENTRIES.find((x) => x.id === id)!;
+            const active = e.id === current.id;
+            const keys = [...new Set(e.tools.map((t) => toolInfo(t).key))].join(', ');
+            return (
+              <button
+                key={e.id}
+                className={`tool-btn ${active ? 'active' : ''}`}
+                title={`${e.label} (${keys})`}
+                aria-label={e.label}
+                aria-pressed={active}
+                data-tool={e.tools[0]}
+                onClick={() => !active && actions.setTool(lastTool.get(e.id) ?? e.tools[0])}
+              >
+                <Icon name={e.icon} size={20} />
+              </button>
+            );
+          })}
+        </div>
+      ))}
+      <div className="tool-colors">
+        <ColorIcons />
+      </div>
+    </div>
+  );
+}
+
+/** Sub tools of the selected tool, with group buttons on top and a stroke preview per entry. */
+export function SubToolPalette() {
+  const tool = useStore((s) => s.tool);
+  const subTools = useStore((s) => s.subTools);
+  const active = useStore((s) => currentSubTool(s));
+  const entry = entryForTool(tool);
+  const list = subToolsOf(subTools, tool);
+  const groups = [...new Set(list.map((s) => s.group).filter((g): g is string => Boolean(g)))];
+  const group = active.group ?? groups[0];
+  const shown = groups.length > 1 ? list.filter((s) => s.group === group) : list;
+  return (
+    <div className="subtool-palette" data-testid="subtool-palette">
+      <div className="subtool-groups">
+        {entry.tools.length > 1
+          ? entry.tools.map((t) => (
+              <button key={t} className={`group-btn ${t === tool ? 'active' : ''}`} onClick={() => actions.setTool(t)}>
+                <Icon name={t} size={14} />
+                {toolInfo(t).label}
+              </button>
+            ))
+          : (groups.length > 1 ? groups : [toolInfo(tool).label]).map((g) => (
+              <button
+                key={g}
+                className={`group-btn ${g === (groups.length > 1 ? group : g) ? 'active' : ''}`}
+                onClick={() => {
+                  const first = list.find((s) => s.group === g);
+                  if (first) actions.setSubTool(tool, first.id);
+                }}
+              >
+                <Icon name={tool} size={14} />
+                {g}
+              </button>
+            ))}
+      </div>
+      <div className="subtool-list">
+        {shown.map((s) => (
+          <button key={s.id} className={`subtool ${s.id === active.id ? 'active' : ''} ${s.brush ? 'with-stroke' : ''}`} data-subtool={s.id} onClick={() => actions.setSubTool(tool, s.id)}>
+            {s.brush && <StrokePreview sub={s} />}
+            <span className="subtool-name">{s.name}</span>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/** A tapering S-curve drawn with the brush's softness and opacity. */
+function StrokePreview({ sub }: { sub: SubTool }) {
+  const b = sub.brush!;
+  const w = Math.max(1.2, Math.min(9, Math.sqrt(b.size) * 1.6));
+  const soft = b.hardness < 0.5 || b.mode === 'blend';
+  return (
+    <svg className="stroke-preview" viewBox="0 0 160 22" preserveAspectRatio="none" aria-hidden="true">
+      <path
+        d="M6 15 C 40 2, 70 2, 82 11 S 125 21, 154 6"
+        fill="none"
+        stroke="currentColor"
+        strokeLinecap="round"
+        strokeWidth={w}
+        opacity={b.mode === 'erase' ? 0.4 : Math.max(0.4, b.flow * b.opacity)}
+        strokeDasharray={b.scatter > 0 ? '1 3' : b.texture === 'grain' ? '6 1.5' : undefined}
+        style={soft ? { filter: 'blur(1.2px)' } : undefined}
+      />
+    </svg>
+  );
+}
+
+const REFERENCE_LABELS: Record<FillReference, string> = {
+  layer: 'Editing layer only',
+  all: 'All layers',
+  reference: 'Reference layers',
+};
+
+const AA_LEVELS = ['None', 'Weak', 'Medium', 'Strong'];
+
+/** Settings of the selected sub tool. */
+export function ToolProperty() {
+  const sub = useStore((s) => currentSubTool(s));
+  const [more, setMore] = useState(false);
+  const update = (patch: Partial<SubTool>) => actions.updateSubTool(sub.id, patch);
+  const b = sub.brush;
+  const f = sub.fill;
+  return (
+    <div className="tool-property" data-testid="tool-property">
+      <div className="prop-title">
+        <span className="prop-tool-name">{sub.name}</span>
+      </div>
+      {b && (
+        <>
+          <PropSlider
+            testId="prop-size"
+            label="Brush Size"
+            value={b.size}
+            min={0.5}
+            max={2000}
+            log
+            step={0.1}
+            decimals={1}
+            onChange={(v) => actions.setBrushSize(v)}
+            pressure={b.sizePressure}
+            onPressure={() => update({ brush: { ...b, sizePressure: !b.sizePressure } })}
+          />
+          {b.mode !== 'blend' && (
+            <PropSlider
+              testId="prop-opacity"
+              label="Opacity"
+              value={Math.round(b.opacity * 100)}
+              min={0}
+              max={100}
+              onChange={(v) => update({ brush: { ...b, opacity: v / 100 } })}
+            />
+          )}
+          {b.mode !== 'blend' && (
+            <div className="prop-row aa-row">
+              <span className="prop-label">Anti-aliasing</span>
+              <div className="aa-buttons" role="radiogroup" aria-label="Anti-aliasing">
+                {AA_LEVELS.map((label, level) => (
+                  <button
+                    key={label}
+                    role="radio"
+                    aria-checked={b.antiAlias === level}
+                    title={label}
+                    className={`aa-btn level-${level} ${b.antiAlias === level ? 'on' : ''}`}
+                    onClick={() => update({ brush: { ...b, antiAlias: level } })}
+                  >
+                    <span />
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+          {sub.tool !== 'figure' && b.mode !== 'blend' && (
+            <PropSlider testId="prop-stabilization" label="Stabilization" value={b.stabilization} min={0} max={100} onChange={(v) => update({ brush: { ...b, stabilization: v } })} />
+          )}
+          <PropSlider
+            label={b.mode === 'blend' ? 'Strength' : 'Brush density'}
+            value={Math.round(b.flow * 100)}
+            min={1}
+            max={100}
+            onChange={(v) => update({ brush: { ...b, flow: v / 100 } })}
+            pressure={b.opacityPressure}
+            onPressure={() => update({ brush: { ...b, opacityPressure: !b.opacityPressure } })}
+          />
+          {more && (
+            <>
+              {b.sizePressure && <PropSlider label="Min. size (pressure)" value={Math.round(b.minSize * 100)} min={0} max={100} onChange={(v) => update({ brush: { ...b, minSize: v / 100 } })} />}
+              <PropSlider label="Hardness" value={Math.round(b.hardness * 100)} min={0} max={100} onChange={(v) => update({ brush: { ...b, hardness: v / 100 } })} />
+              <PropSlider label="Spacing" value={Math.round(b.spacing * 100)} min={1} max={100} onChange={(v) => update({ brush: { ...b, spacing: v / 100 } })} />
+              {b.mode === 'paint' && sub.tool !== 'figure' && (
+                <div className="prop-row">
+                  <span className="prop-label">Texture</span>
+                  <div className="segmented">
+                    <button className={b.texture === 'none' ? 'on' : ''} onClick={() => update({ brush: { ...b, texture: 'none' } })}>
+                      None
+                    </button>
+                    <button className={b.texture === 'grain' ? 'on' : ''} onClick={() => update({ brush: { ...b, texture: 'grain' } })}>
+                      Grain
+                    </button>
+                  </div>
+                </div>
+              )}
+            </>
+          )}
+        </>
+      )}
+      {f && (
+        <>
+          <div className="prop-row">
+            <span className="prop-label">Multiple referencing</span>
+            <select className="prop-select" value={f.reference} aria-label="Multiple referencing" onChange={(e) => update({ fill: { ...f, reference: e.target.value as FillReference } })}>
+              {(Object.keys(REFERENCE_LABELS) as FillReference[]).map((k) => (
+                <option key={k} value={k}>
+                  {REFERENCE_LABELS[k]}
+                </option>
+              ))}
+            </select>
+          </div>
+          <label className="check prop-check">
+            <input type="checkbox" checked={f.contiguous} onChange={(e) => update({ fill: { ...f, contiguous: e.target.checked } })} />
+            Follow adjacent pixels
+          </label>
+          <PropSlider testId="prop-tolerance" label="Color margin" value={f.tolerance} min={0} max={100} unit="%" onChange={(v) => update({ fill: { ...f, tolerance: v } })} />
+          <PropSlider label="Area scaling" value={f.expand} min={-20} max={20} unit="px" onChange={(v) => update({ fill: { ...f, expand: v } })} />
+          {more && (
+            <label className="check prop-check">
+              <input type="checkbox" checked={f.alphaOnly} onChange={(e) => update({ fill: { ...f, alphaOnly: e.target.checked } })} />
+              Compare transparency only
+            </label>
+          )}
+        </>
+      )}
+      {sub.tool === 'select' && <SelectionModeRow />}
+      {sub.tool === 'gradient' && (
+        <div className="prop-row">
+          <span className="prop-label">Shape</span>
+          <div className="segmented">
+            <button className={sub.gradientShape !== 'radial' ? 'on' : ''} onClick={() => update({ gradientShape: 'linear' })}>
+              Straight line
+            </button>
+            <button className={sub.gradientShape === 'radial' ? 'on' : ''} onClick={() => update({ gradientShape: 'radial' })}>
+              Circle
+            </button>
+          </div>
+        </div>
+      )}
+      {!b && !f && sub.tool !== 'select' && sub.tool !== 'gradient' && <div className="prop-note">{toolInfo(sub.tool).hint}</div>}
+      <div className="prop-footer">
+        <button className="icon-btn" title="Reset to the default settings" aria-label="Reset sub tool" onClick={() => actions.resetSubTool(sub.id)}>
+          <Icon name="resetRotation" size={15} />
+        </button>
+        {(b || f) && (
+          <button className={`icon-btn ${more ? 'on' : ''}`} title="Advanced tool settings" aria-label="Advanced tool settings" aria-pressed={more} onClick={() => setMore((m) => !m)}>
+            <Icon name="wrench" size={15} />
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function SelectionModeRow() {
+  const op = useStore((s) => s.selectionOp);
+  const modes = [
+    ['replace', 'New selection'],
+    ['add', 'Add selection'],
+    ['subtract', 'Delete selection'],
+    ['intersect', 'Select from selection'],
+  ] as const;
+  return (
+    <div className="prop-row column">
+      <span className="prop-label">Selection mode</span>
+      <div className="segmented wrap">
+        {modes.map(([id, label]) => (
+          <button key={id} className={op === id ? 'on' : ''} onClick={() => useStore.setState({ selectionOp: id })}>
+            {label}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/** Preset brush sizes as dots. */
+export function BrushSizePalette() {
+  const sub = useStore((s) => currentSubTool(s));
+  if (!sub.brush) return <div className="prop-note">This tool has no brush size.</div>;
+  return (
+    <div className="brush-sizes" data-testid="brush-sizes">
+      {BRUSH_SIZE_PRESETS.map((v) => (
+        <button key={v} className={`size-btn ${Math.abs(sub.brush!.size - v) < 0.05 ? 'active' : ''}`} title={`${v} px`} onClick={() => actions.setBrushSize(v)}>
+          <span className="dot" style={{ width: Math.max(1.5, Math.min(22, Math.sqrt(v) * 2)), height: Math.max(1.5, Math.min(22, Math.sqrt(v) * 2)) }} />
+          <span className="size-label">{v}</span>
+        </button>
+      ))}
+    </div>
+  );
+}

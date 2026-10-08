@@ -9,6 +9,7 @@ Abhängigkeiten, eigene Tests, eigene CI. Projekte beeinflussen sich gegenseitig
 | Projekt | Ordner | Vorbild | Plattform | Stack | Status |
 | ------- | ------ | ------- | --------- | ----- | ------ |
 | **MAD Studio** – pattern-basierte DAW | [`projects/mad-studio`](projects/mad-studio) | FL Studio (Image-Line) | macOS · Browser | TypeScript · React · Web Audio · Electron | 🟢 v0.1 lauffähig |
+| **MAD Studio Paint** – Mal- und Zeichenprogramm | [`projects/mad-studio-paint`](projects/mad-studio-paint) | Clip Studio Paint (Celsys) | macOS · Browser | TypeScript · React · Canvas 2D · Electron | 🟢 v0.1 lauffähig |
 
 <!-- Neue Projekte hier als Zeile ergänzen. Status: 🔵 Recherche · 🟡 in Arbeit · 🟢 lauffähig · ⚪ pausiert -->
 
@@ -22,7 +23,8 @@ reverse/
 ├── .github/workflows/        ← CI pro Projekt: <projekt>-*.yml, läuft nur bei Änderungen im Projektordner
 ├── templates/project/        ← Vorlage für neue Projekte (README.md + RESEARCH.md)
 └── projects/
-    └── mad-studio/           ← DAW im Stil von FL Studio für macOS
+    ├── mad-studio/           ← DAW im Stil von FL Studio für macOS
+    └── mad-studio-paint/     ← Mal- und Zeichenprogramm im Stil von Clip Studio Paint für macOS
 ```
 
 Konventionen:

@@ -1,0 +1,186 @@
+import { useEffect, useRef, useState } from 'react';
+import * as actions from '../../store/actions';
+import { useStore } from '../../store/store';
+import { closeDialog, toast } from '../overlays';
+
+interface Param {
+  key: string;
+  label: string;
+  min: number;
+  max: number;
+}
+
+/** Shared body of the tonal correction dialogs: sliders with live preview on the current layer. */
+function FilterDialog({ title, params, build, label }: { title: string; params: Param[]; build: (v: Record<string, number>) => string; label: string }) {
+  const [values, setValues] = useState<Record<string, number>>(() => Object.fromEntries(params.map((p) => [p.key, 0])));
+  const preview = useRef<actions.FilterPreview | null>(null);
+  const done = useRef(false);
+
+  useEffect(() => {
+    const p = new actions.FilterPreview();
+    if (!p.ok) {
+      toast(actions.editBlocker() ?? 'Select a raster layer first', 'error');
+      closeDialog();
+      return;
+    }
+    preview.current = p;
+    return () => {
+      // Closing without OK (Esc, click outside) restores the layer.
+      if (!done.current) p.cancel();
+    };
+  }, []);
+
+  useEffect(() => {
+    preview.current?.apply(build(values));
+  }, [values, build]);
+
+  const ok = () => {
+    done.current = true;
+    preview.current?.commit(label);
+    closeDialog();
+  };
+
+  return (
+    <form
+      className="modal"
+      role="dialog"
+      aria-label={title}
+      onSubmit={(e) => {
+        e.preventDefault();
+        ok();
+      }}
+    >
+      <h2>{title}</h2>
+      <div className="form-grid">
+        {params.map((p) => (
+          <FragmentRow key={p.key} param={p} value={values[p.key]} onChange={(v) => setValues((s) => ({ ...s, [p.key]: v }))} />
+        ))}
+      </div>
+      <div className="modal-actions">
+        <button type="button" className="btn" onClick={closeDialog}>
+          Cancel
+        </button>
+        <button type="submit" className="btn primary">
+          OK
+        </button>
+      </div>
+    </form>
+  );
+}
+
+function FragmentRow({ param, value, onChange }: { param: Param; value: number; onChange: (v: number) => void }) {
+  return (
+    <>
+      <label htmlFor={`adj-${param.key}`}>{param.label}</label>
+      <span className="with-unit">
+        <input id={`adj-${param.key}`} type="range" min={param.min} max={param.max} value={value} onChange={(e) => onChange(Number(e.target.value))} />
+        <input type="number" min={param.min} max={param.max} value={value} aria-label={param.label} onChange={(e) => onChange(Math.max(param.min, Math.min(param.max, Number(e.target.value) || 0)))} />
+      </span>
+    </>
+  );
+}
+
+const HSL_PARAMS: Param[] = [
+  { key: 'hue', label: 'Hue', min: -180, max: 180 },
+  { key: 'saturation', label: 'Saturation', min: -100, max: 100 },
+  { key: 'luminosity', label: 'Luminosity', min: -100, max: 100 },
+];
+
+const buildHsl = (v: Record<string, number>) => `hue-rotate(${v.hue}deg) saturate(${1 + v.saturation / 100}) brightness(${1 + v.luminosity / 100})`;
+
+export function HueSaturationDialog() {
+  return <FilterDialog title="Hue/Saturation/Luminosity" params={HSL_PARAMS} build={buildHsl} label="Hue/Saturation/Luminosity" />;
+}
+
+const BC_PARAMS: Param[] = [
+  { key: 'brightness', label: 'Brightness', min: -100, max: 100 },
+  { key: 'contrast', label: 'Contrast', min: -100, max: 100 },
+];
+
+const buildBc = (v: Record<string, number>) => `brightness(${1 + v.brightness / 100}) contrast(${1 + v.contrast / 100})`;
+
+export function BrightnessContrastDialog() {
+  return <FilterDialog title="Brightness/Contrast" params={BC_PARAMS} build={buildBc} label="Brightness/Contrast" />;
+}
+
+const BLUR_PARAMS: Param[] = [{ key: 'radius', label: 'Strength (px)', min: 0, max: 100 }];
+
+const buildBlur = (v: Record<string, number>) => (v.radius > 0 ? `blur(${v.radius / 2}px)` : 'none');
+
+export function GaussianBlurDialog() {
+  return <FilterDialog title="Gaussian blur" params={BLUR_PARAMS} build={buildBlur} label="Gaussian blur" />;
+}
+
+/** Edit > Change canvas size / Change image resolution. */
+export function CanvasSizeDialog({ mode }: { mode: 'canvas' | 'resolution' }) {
+  const doc = useStore((s) => s.doc);
+  const [w, setW] = useState(doc.width);
+  const [h, setH] = useState(doc.height);
+  const [dpi, setDpi] = useState(doc.dpi);
+  const [keep, setKeep] = useState(true);
+  const ratio = doc.width / doc.height;
+  const setWidth = (v: number) => {
+    setW(v);
+    if (keep && mode === 'resolution') setH(Math.max(1, Math.round(v / ratio)));
+  };
+  const setHeight = (v: number) => {
+    setH(v);
+    if (keep && mode === 'resolution') setW(Math.max(1, Math.round(v * ratio)));
+  };
+  const ok = () => {
+    const cw = Math.max(16, Math.min(8000, Math.round(w)));
+    const ch = Math.max(16, Math.min(8000, Math.round(h)));
+    closeDialog();
+    if (mode === 'canvas') actions.changeCanvasSize(cw, ch);
+    else actions.changeImageResolution(cw, ch, Math.max(1, Math.round(dpi)));
+  };
+  return (
+    <form
+      className="modal"
+      role="dialog"
+      aria-label={mode === 'canvas' ? 'Change canvas size' : 'Change image resolution'}
+      onSubmit={(e) => {
+        e.preventDefault();
+        ok();
+      }}
+    >
+      <h2>{mode === 'canvas' ? 'Change canvas size' : 'Change image resolution'}</h2>
+      <div className="form-grid">
+        <label>Width</label>
+        <span className="with-unit">
+          <input type="number" min={16} max={8000} value={w} aria-label="Width" onChange={(e) => setWidth(Number(e.target.value))} /> px
+        </span>
+        <label>Height</label>
+        <span className="with-unit">
+          <input type="number" min={16} max={8000} value={h} aria-label="Height" onChange={(e) => setHeight(Number(e.target.value))} /> px
+        </span>
+        {mode === 'resolution' && (
+          <>
+            <label>Resolution</label>
+            <span className="with-unit">
+              <input type="number" min={1} max={2400} value={dpi} aria-label="Resolution" onChange={(e) => setDpi(Number(e.target.value))} /> dpi
+            </span>
+            <label />
+            <label className="check">
+              <input type="checkbox" checked={keep} onChange={(e) => setKeep(e.target.checked)} /> Keep aspect ratio
+            </label>
+          </>
+        )}
+        {mode === 'canvas' && (
+          <>
+            <label />
+            <span className="muted">The image stays centred; new areas are transparent.</span>
+          </>
+        )}
+      </div>
+      <div className="modal-actions">
+        <button type="button" className="btn" onClick={closeDialog}>
+          Cancel
+        </button>
+        <button type="submit" className="btn primary">
+          OK
+        </button>
+      </div>
+    </form>
+  );
+}

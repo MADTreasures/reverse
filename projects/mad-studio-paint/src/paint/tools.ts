@@ -1,0 +1,370 @@
+/** Tools, sub tools (presets) and their settings. Sub tools are user-editable and persisted. */
+
+export type ToolId =
+  | 'zoom'
+  | 'hand'
+  | 'rotate'
+  | 'move'
+  | 'selectLayer'
+  | 'select'
+  | 'autoSelect'
+  | 'eyedropper'
+  | 'pen'
+  | 'pencil'
+  | 'brush'
+  | 'airbrush'
+  | 'eraser'
+  | 'blend'
+  | 'fill'
+  | 'gradient'
+  | 'figure';
+
+export type BrushMode = 'paint' | 'erase' | 'blend';
+export type TipTexture = 'none' | 'grain';
+export type SelectShape = 'rect' | 'ellipse' | 'lasso' | 'polyline' | 'pen' | 'erase';
+export type FigureShape = 'line' | 'rect' | 'ellipse';
+export type GradientShape = 'linear' | 'radial';
+export type FillReference = 'layer' | 'all' | 'reference';
+
+export interface FillSettings {
+  reference: FillReference;
+  /** 0..100 */
+  tolerance: number;
+  /** Area scaling in px (negative shrinks). */
+  expand: number;
+  alphaOnly: boolean;
+  /** "Apply to connected pixels only". */
+  contiguous: boolean;
+  /** Close gap: step 0 (off) … 5. */
+  closeGap: number;
+}
+
+export interface BrushSettings {
+  /** Diameter in document pixels. */
+  size: number;
+  sizePressure: boolean;
+  /** Size at zero pressure, as fraction of `size`. */
+  minSize: number;
+  /** Stroke opacity 0..1 – does not build up within one stroke. */
+  opacity: number;
+  opacityPressure: boolean;
+  /** Per-dab alpha 0..1 – lower values build up within a stroke (brush/airbrush feel). */
+  flow: number;
+  /** 0 = very soft edge, 1 = hard edge. */
+  hardness: number;
+  /** Dab distance as fraction of the current diameter. */
+  spacing: number;
+  /** Hand-shake correction, 0..30 samples. */
+  stabilization: number;
+  /** 0 = none (hard pixels), 1 = weak, 2 = medium, 3 = strong. */
+  antiAlias: number;
+  texture: TipTexture;
+  /** Random dab offset as fraction of the diameter (spray). */
+  scatter: number;
+  mode: BrushMode;
+  /** Blend tool only: 'blur' softens, 'smudge' drags colour along the stroke. */
+  blendStyle: 'blur' | 'smudge';
+}
+
+export interface SubTool {
+  id: string;
+  tool: ToolId;
+  name: string;
+  /** Sub tool group shown as a button row above the list (e.g. "Pen" / "Marker"). */
+  group?: string;
+  brush?: BrushSettings;
+  selectShape?: SelectShape;
+  figureShape?: FigureShape;
+  gradientShape?: GradientShape;
+  /** Gradient fades from the main colour to transparent instead of to the sub colour. */
+  gradientToTransparent?: boolean;
+  /** Eyedropper: read the current layer instead of the displayed colour. */
+  fromLayer?: boolean;
+  /** Zoom tool: a click zooms out instead of in. */
+  zoomOut?: boolean;
+  fill?: FillSettings;
+
+  /** Rectangle / ellipse start from the centre. */
+  fromCenter?: boolean;
+}
+
+export const DEFAULT_BRUSH: BrushSettings = {
+  size: 12,
+  sizePressure: true,
+  minSize: 0.15,
+  opacity: 1,
+  opacityPressure: false,
+  flow: 1,
+  hardness: 0.92,
+  spacing: 0.08,
+  stabilization: 6,
+  antiAlias: 2,
+  texture: 'none',
+  scatter: 0,
+  mode: 'paint',
+  blendStyle: 'blur',
+};
+
+const brush = (patch: Partial<BrushSettings>): BrushSettings => ({ ...DEFAULT_BRUSH, ...patch });
+
+export interface ToolInfo {
+  id: ToolId;
+  label: string;
+  /** Default shortcut key (cycles through tools sharing a key). */
+  key: string;
+  hint: string;
+}
+
+/** Tool palette order. */
+export const TOOLS: ToolInfo[] = [
+  { id: 'zoom', label: 'Zoom', key: '/', hint: 'Click to zoom in, ⌥-click to zoom out, drag left/right to zoom continuously' },
+  { id: 'hand', label: 'Hand', key: 'H', hint: 'Drag to scroll the canvas (also: hold Space)' },
+  { id: 'rotate', label: 'Rotate', key: 'R', hint: 'Drag to rotate the view, double-click to reset (also: Shift+Space)' },
+  { id: 'selectLayer', label: 'Select layer', key: 'D', hint: 'Click the canvas to select the layer drawn there' },
+  { id: 'move', label: 'Move layer', key: 'K', hint: 'Drag to move the layer or the selected pixels · ⌥ copies · ⇧ fixes the direction' },
+  { id: 'select', label: 'Selection area', key: 'M', hint: 'Drag to select · ⇧ adds · ⌥ subtracts · ⇧⌥ intersects' },
+  { id: 'autoSelect', label: 'Auto select', key: 'W', hint: 'Click to select an area of similar colour · ⇧ adds · ⌥ subtracts' },
+  { id: 'eyedropper', label: 'Eyedropper', key: 'I', hint: 'Click to pick a colour (also: ⌥-click with drawing tools, or right-click)' },
+  { id: 'pen', label: 'Pen', key: 'P', hint: '⇧-drag draws a straight line, ⇧-click connects to the last point' },
+  { id: 'pencil', label: 'Pencil', key: 'P', hint: 'Sketching pencils · ⇧-click connects to the last point' },
+  { id: 'brush', label: 'Brush', key: 'B', hint: 'Painting brushes' },
+  { id: 'airbrush', label: 'Airbrush', key: 'B', hint: 'Soft airbrush and spray' },
+  { id: 'eraser', label: 'Eraser', key: 'E', hint: 'Erase pixels on the current layer' },
+  { id: 'blend', label: 'Blend', key: 'J', hint: 'Blur, blend and smudge colours on the current layer' },
+  { id: 'fill', label: 'Fill', key: 'G', hint: 'Click to fill an area · ⇧-click toggles "refer multiple"' },
+  { id: 'gradient', label: 'Gradient', key: 'G', hint: 'Drag to draw a gradient with the drawing colour' },
+  { id: 'figure', label: 'Figure', key: 'U', hint: 'Drag to draw · ⇧ snaps lines to 45° and makes squares / circles' },
+];
+
+export const toolInfo = (id: ToolId): ToolInfo => TOOLS.find((t) => t.id === id)!;
+
+/** Tools that paint with a brush tip. */
+export const BRUSH_TOOLS: ToolId[] = ['pen', 'pencil', 'brush', 'airbrush', 'eraser', 'blend', 'figure'];
+
+const FILL_LAYER: FillSettings = { reference: 'layer', tolerance: 10, expand: 0, alphaOnly: false, contiguous: true, closeGap: 1 };
+const FILL_OTHERS: FillSettings = { reference: 'all', tolerance: 10, expand: 1, alphaOnly: false, contiguous: true, closeGap: 2 };
+
+/**
+ * Default tools of each group, named after the real-world tools they imitate (the usual names in
+ * comic and illustration software). Values are our own; only the few documented defaults
+ * (G-pen 10 px / stabilization 6, pencil 90 % opacity, straight line 3 px) follow the reference.
+ */
+export const DEFAULT_SUB_TOOLS: SubTool[] = [
+  // Pen
+  { id: 'pen-g', tool: 'pen', group: 'Pen', name: 'G-pen', brush: brush({ size: 10, minSize: 0.1, hardness: 1, stabilization: 6 }) },
+  { id: 'pen-real-g', tool: 'pen', group: 'Pen', name: 'Real G-pen', brush: brush({ size: 10, minSize: 0.05, hardness: 0.95, texture: 'grain', flow: 0.95, stabilization: 6 }) },
+  { id: 'pen-mapping', tool: 'pen', group: 'Pen', name: 'Mapping pen', brush: brush({ size: 5, minSize: 0.05, hardness: 1, stabilization: 8 }) },
+  { id: 'pen-turnip', tool: 'pen', group: 'Pen', name: 'Turnip pen', brush: brush({ size: 15, minSize: 0.35, hardness: 1, stabilization: 6 }) },
+  { id: 'pen-milli', tool: 'pen', group: 'Marker', name: 'Milli pen', brush: brush({ size: 6, sizePressure: false, hardness: 1, stabilization: 4 }) },
+  { id: 'pen-felt', tool: 'pen', group: 'Marker', name: 'Felt pen', brush: brush({ size: 20, sizePressure: false, opacity: 0.85, hardness: 0.85, stabilization: 3 }) },
+  { id: 'pen-dot', tool: 'pen', group: 'Marker', name: 'Dot pen', brush: brush({ size: 1, sizePressure: false, hardness: 1, antiAlias: 0, stabilization: 0, spacing: 0.3 }) },
+  // Pencil
+  {
+    id: 'pencil',
+    tool: 'pencil',
+    name: 'Pencil',
+    brush: brush({ size: 10, minSize: 0.5, opacity: 0.9, opacityPressure: true, flow: 0.85, hardness: 0.6, texture: 'grain', stabilization: 5, spacing: 0.12 }),
+  },
+  {
+    id: 'pencil-mech',
+    tool: 'pencil',
+    name: 'Mechanical pencil',
+    brush: brush({ size: 4, minSize: 0.7, opacityPressure: true, flow: 0.9, hardness: 0.8, texture: 'grain', stabilization: 5, spacing: 0.12 }),
+  },
+  {
+    id: 'pencil-charcoal',
+    tool: 'pencil',
+    name: 'Charcoal',
+    brush: brush({ size: 24, minSize: 0.4, opacityPressure: true, flow: 0.55, hardness: 0.35, texture: 'grain', stabilization: 2, spacing: 0.1 }),
+  },
+  {
+    id: 'pencil-crayon',
+    tool: 'pencil',
+    name: 'Crayon',
+    brush: brush({ size: 18, minSize: 0.6, opacityPressure: true, flow: 0.7, hardness: 0.7, texture: 'grain', stabilization: 2, spacing: 0.08 }),
+  },
+  // Brush
+  {
+    id: 'brush-watercolor',
+    tool: 'brush',
+    group: 'Watercolor',
+    name: 'Round watercolor brush',
+    brush: brush({ size: 40, minSize: 0.3, opacity: 0.8, opacityPressure: true, flow: 0.35, hardness: 0.3, stabilization: 3, spacing: 0.05 }),
+  },
+  { id: 'brush-pen', tool: 'brush', group: 'Watercolor', name: 'Brush pen', brush: brush({ size: 20, minSize: 0.05, hardness: 1, stabilization: 8 }) },
+  {
+    id: 'brush-dry-ink',
+    tool: 'brush',
+    group: 'Watercolor',
+    name: 'Dry ink',
+    brush: brush({ size: 30, minSize: 0.3, flow: 0.8, hardness: 0.8, texture: 'grain', stabilization: 4, spacing: 0.07 }),
+  },
+  {
+    id: 'brush-gouache',
+    tool: 'brush',
+    group: 'Thick paint',
+    name: 'Gouache',
+    brush: brush({ size: 40, minSize: 0.4, opacityPressure: true, flow: 0.7, hardness: 0.8, stabilization: 3, spacing: 0.06 }),
+  },
+  {
+    id: 'brush-soft',
+    tool: 'brush',
+    group: 'Thick paint',
+    name: 'Soft brush',
+    brush: brush({ size: 60, minSize: 0.4, opacity: 0.9, opacityPressure: true, flow: 0.35, hardness: 0.2, stabilization: 2, spacing: 0.05 }),
+  },
+  // Airbrush
+  {
+    id: 'air-soft',
+    tool: 'airbrush',
+    name: 'Soft',
+    brush: brush({ size: 120, sizePressure: false, opacityPressure: true, flow: 0.2, hardness: 0, stabilization: 0, spacing: 0.04 }),
+  },
+  { id: 'air-spray', tool: 'airbrush', name: 'Spray', brush: brush({ size: 3, sizePressure: false, flow: 0.8, hardness: 0.9, scatter: 12, spacing: 0.15, stabilization: 0 }) },
+  { id: 'air-droplet', tool: 'airbrush', name: 'Droplet', brush: brush({ size: 8, sizePressure: false, flow: 0.9, hardness: 0.95, scatter: 6, spacing: 0.5, stabilization: 0 }) },
+  // Eraser
+  { id: 'eraser-hard', tool: 'eraser', name: 'Hard', brush: brush({ size: 30, sizePressure: false, hardness: 1, mode: 'erase', stabilization: 0 }) },
+  {
+    id: 'eraser-soft',
+    tool: 'eraser',
+    name: 'Soft',
+    brush: brush({ size: 80, sizePressure: false, flow: 0.3, opacityPressure: true, hardness: 0.1, mode: 'erase', stabilization: 0, spacing: 0.05 }),
+  },
+  {
+    id: 'eraser-kneaded',
+    tool: 'eraser',
+    name: 'Kneaded eraser',
+    brush: brush({ size: 50, sizePressure: false, flow: 0.15, opacityPressure: true, hardness: 0.3, mode: 'erase', stabilization: 0, spacing: 0.05 }),
+  },
+  {
+    id: 'eraser-rough',
+    tool: 'eraser',
+    name: 'Rough',
+    brush: brush({ size: 30, sizePressure: false, flow: 0.8, hardness: 0.6, texture: 'grain', mode: 'erase', stabilization: 0, spacing: 0.08 }),
+  },
+  // Blend
+  {
+    id: 'blend-blend',
+    tool: 'blend',
+    name: 'Blend',
+    brush: brush({ size: 40, sizePressure: false, flow: 0.5, opacityPressure: true, hardness: 0.4, mode: 'blend', blendStyle: 'smudge', stabilization: 0, spacing: 0.1 }),
+  },
+  { id: 'blend-blur', tool: 'blend', name: 'Blur', brush: brush({ size: 40, sizePressure: false, flow: 0.5, opacityPressure: true, hardness: 0.3, mode: 'blend', stabilization: 0, spacing: 0.12 }) },
+  {
+    id: 'blend-finger',
+    tool: 'blend',
+    name: 'Finger tip',
+    brush: brush({ size: 30, sizePressure: false, flow: 0.85, hardness: 0.5, mode: 'blend', blendStyle: 'smudge', stabilization: 0, spacing: 0.08 }),
+  },
+  // Selection area & auto select
+  { id: 'sel-rect', tool: 'select', name: 'Rectangle', selectShape: 'rect' },
+  { id: 'sel-ellipse', tool: 'select', name: 'Ellipse', selectShape: 'ellipse' },
+  { id: 'sel-lasso', tool: 'select', name: 'Lasso', selectShape: 'lasso' },
+  { id: 'sel-polyline', tool: 'select', name: 'Polyline', selectShape: 'polyline' },
+  { id: 'sel-pen', tool: 'select', name: 'Selection pen', selectShape: 'pen', brush: brush({ size: 30, sizePressure: false, hardness: 1, antiAlias: 1, stabilization: 0 }) },
+  { id: 'sel-erase', tool: 'select', name: 'Erase selection', selectShape: 'erase', brush: brush({ size: 30, sizePressure: false, hardness: 1, antiAlias: 1, stabilization: 0, mode: 'erase' }) },
+  { id: 'auto-layer', tool: 'autoSelect', name: 'Refer to editing layer only', fill: { ...FILL_LAYER, closeGap: 0 } },
+  { id: 'auto-all', tool: 'autoSelect', name: 'Refer to all layers', fill: { ...FILL_OTHERS, expand: 0, closeGap: 0 } },
+  { id: 'auto-reference', tool: 'autoSelect', name: 'Selection for referred layers', fill: { ...FILL_OTHERS, reference: 'reference', expand: 0, closeGap: 0 } },
+  // Fill & gradient
+  { id: 'fill-layer', tool: 'fill', name: 'Refer only to editing layer', fill: { ...FILL_LAYER } },
+  { id: 'fill-others', tool: 'fill', name: 'Refer other layers', fill: { ...FILL_OTHERS } },
+  { id: 'grad-transparent', tool: 'gradient', name: 'Foreground to transparent', gradientShape: 'linear', gradientToTransparent: true },
+  { id: 'grad-background', tool: 'gradient', name: 'Foreground to background', gradientShape: 'linear' },
+  { id: 'grad-circle', tool: 'gradient', name: 'Circle: foreground to background', gradientShape: 'radial' },
+  // Figure
+  { id: 'fig-line', tool: 'figure', name: 'Straight line', figureShape: 'line', brush: brush({ size: 3, sizePressure: false, stabilization: 0 }) },
+  { id: 'fig-rect', tool: 'figure', name: 'Rectangle', figureShape: 'rect', brush: brush({ size: 3, sizePressure: false, stabilization: 0 }) },
+  { id: 'fig-ellipse', tool: 'figure', name: 'Ellipse', figureShape: 'ellipse', brush: brush({ size: 3, sizePressure: false, stabilization: 0 }) },
+  // Operation, view & eyedropper
+  { id: 'select-layer', tool: 'selectLayer', name: 'Select layer' },
+  { id: 'move', tool: 'move', name: 'Move layer' },
+  { id: 'hand', tool: 'hand', name: 'Hand' },
+  { id: 'rotate', tool: 'rotate', name: 'Rotate' },
+  { id: 'zoom', tool: 'zoom', name: 'Zoom in' },
+  { id: 'zoom-out', tool: 'zoom', name: 'Zoom out', zoomOut: true },
+  { id: 'eyedropper', tool: 'eyedropper', name: 'Pick displayed color' },
+  { id: 'eyedropper-layer', tool: 'eyedropper', name: 'Pick color from layer', fromLayer: true },
+];
+
+export const subToolsOf = (subTools: SubTool[], tool: ToolId) => subTools.filter((s) => s.tool === tool);
+
+/** Keeps user edits but adds sub tools introduced by newer versions and drops unknown ones. */
+export function mergeSubTools(saved: unknown): SubTool[] {
+  if (!Array.isArray(saved)) return structuredClone(DEFAULT_SUB_TOOLS);
+  const byId = new Map<string, SubTool>();
+  for (const s of saved) if (s && typeof s === 'object' && typeof (s as SubTool).id === 'string') byId.set((s as SubTool).id, s as SubTool);
+  return DEFAULT_SUB_TOOLS.map((def) => {
+    const s = byId.get(def.id);
+    if (!s) return structuredClone(def);
+    return {
+      ...structuredClone(def),
+      brush: def.brush ? migrateBrush({ ...def.brush, ...(s.brush ?? {}) }) : undefined,
+      fill: def.fill ? { ...def.fill, ...(s.fill ?? {}) } : undefined,
+    };
+  });
+}
+
+/** Older settings stored anti-aliasing as on/off. */
+function migrateBrush(b: BrushSettings): BrushSettings {
+  const aa = b.antiAlias as unknown;
+  if (typeof aa === 'boolean') return { ...b, antiAlias: aa ? 2 : 0 };
+  if (typeof aa !== 'number' || !Number.isFinite(aa)) return { ...b, antiAlias: 2 };
+  return { ...b, antiAlias: Math.max(0, Math.min(3, Math.round(aa))) };
+}
+
+/** Next tool for a shortcut key: cycles through the tools sharing that key. */
+export function toolForKey(key: string, current: ToolId): ToolId | null {
+  const group = TOOLS.filter((t) => t.key.toLowerCase() === key.toLowerCase());
+  if (group.length === 0) return null;
+  const i = group.findIndex((t) => t.id === current);
+  return group[(i + 1) % group.length].id;
+}
+
+/** A button in the tool palette; some buttons hold several tools (switched in the sub tool palette). */
+export interface PaletteEntry {
+  id: string;
+  label: string;
+  icon: string;
+  tools: ToolId[];
+}
+
+export const PALETTE_ENTRIES: PaletteEntry[] = [
+  { id: 'zoom', label: 'Zoom', icon: 'zoom', tools: ['zoom'] },
+  { id: 'navigate', label: 'Move (Hand, Rotate)', icon: 'hand', tools: ['hand', 'rotate'] },
+  { id: 'operation', label: 'Operation (Select layer, Move layer)', icon: 'operation', tools: ['selectLayer', 'move'] },
+  { id: 'select', label: 'Selection area', icon: 'select', tools: ['select'] },
+  { id: 'autoSelect', label: 'Auto select', icon: 'autoSelect', tools: ['autoSelect'] },
+  { id: 'eyedropper', label: 'Eyedropper', icon: 'eyedropper', tools: ['eyedropper'] },
+  { id: 'pen', label: 'Pen', icon: 'pen', tools: ['pen'] },
+  { id: 'pencil', label: 'Pencil', icon: 'pencil', tools: ['pencil'] },
+  { id: 'brush', label: 'Brush', icon: 'brush', tools: ['brush'] },
+  { id: 'airbrush', label: 'Airbrush', icon: 'airbrush', tools: ['airbrush'] },
+  { id: 'eraser', label: 'Eraser', icon: 'eraser', tools: ['eraser'] },
+  { id: 'blend', label: 'Blend', icon: 'blend', tools: ['blend'] },
+  { id: 'fill', label: 'Fill', icon: 'fill', tools: ['fill'] },
+  { id: 'gradient', label: 'Gradient', icon: 'gradient', tools: ['gradient'] },
+  { id: 'figure', label: 'Figure', icon: 'figure', tools: ['figure'] },
+];
+
+export type WorkspaceId = 'default' | 'classic';
+
+/**
+ * Tool palette sections per workspace: the current default layout (drawing tools first) and the
+ * classic layout (view and selection tools first). In the default layout the Zoom tool has no
+ * button; it is reached with "/" or ⌘+Space.
+ */
+export const PALETTE_LAYOUT: Record<WorkspaceId, string[][]> = {
+  default: [
+    ['pen', 'pencil', 'brush', 'eraser', 'airbrush', 'blend'],
+    ['select', 'autoSelect', 'fill', 'gradient'],
+    ['operation', 'figure', 'navigate', 'eyedropper'],
+  ],
+  classic: [
+    ['zoom', 'navigate', 'operation', 'select', 'autoSelect', 'eyedropper'],
+    ['pen', 'pencil', 'brush', 'airbrush', 'eraser', 'blend'],
+    ['fill', 'gradient', 'figure'],
+  ],
+};
+
+export const entryForTool = (tool: ToolId): PaletteEntry => PALETTE_ENTRIES.find((e) => e.tools.includes(tool))!;
