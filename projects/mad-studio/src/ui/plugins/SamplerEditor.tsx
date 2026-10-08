@@ -70,8 +70,8 @@ export function SamplerEditor({ channel }: { channel: SamplerChannel }) {
               />
               <span className="cell-label">Root key</span>
             </div>
-            <KnobCell caption="Fine" value={p.fine} min={-100} max={100} defaultValue={0} bipolar format={(v) => `${Math.round(v)} ct`} onChange={(v, g) => set((d) => void (d.fine = v), g)} />
-            <KnobCell caption="Gain" value={p.gain} min={0} max={1} defaultValue={0.8} format={fmtPercent} onChange={(v, g) => set((d) => void (d.gain = v), g)} />
+            <KnobCell target={`ch:${channel.id}:sampler.fine`} caption="Fine" value={p.fine} min={-100} max={100} defaultValue={0} bipolar format={(v) => `${Math.round(v)} ct`} onChange={(v, g) => set((d) => void (d.fine = v), g)} />
+            <KnobCell target={`ch:${channel.id}:sampler.gain`} caption="Gain" value={p.gain} min={0} max={1} defaultValue={0.8} format={fmtPercent} onChange={(v, g) => set((d) => void (d.gain = v), g)} />
             <div className="knob-cell">
               <DragNumber
                 className="tb-number"
@@ -106,10 +106,10 @@ export function SamplerEditor({ channel }: { channel: SamplerChannel }) {
         <div className="plugin-section grow">
           <div className="section-title">Envelope {p.oneShot && !p.loop ? <span className="faint">(one-shot: attack only)</span> : null}</div>
           <div className="knob-row" style={{ alignItems: 'center' }}>
-            <KnobCell caption="Attack" value={Math.max(0.001, p.ampEnv.attack)} min={0.001} max={5} curve="log" defaultValue={0.001} format={fmtSeconds} onChange={(v, g) => set((d) => void (d.ampEnv.attack = v), g)} />
-            <KnobCell caption="Decay" value={Math.max(0.005, p.ampEnv.decay)} min={0.005} max={8} curve="log" defaultValue={0.3} format={fmtSeconds} onChange={(v, g) => set((d) => void (d.ampEnv.decay = v), g)} />
-            <KnobCell caption="Sustain" value={p.ampEnv.sustain} min={0} max={1} defaultValue={1} format={fmtPercent} onChange={(v, g) => set((d) => void (d.ampEnv.sustain = v), g)} />
-            <KnobCell caption="Release" value={Math.max(0.005, p.ampEnv.release)} min={0.005} max={8} curve="log" defaultValue={0.08} format={fmtSeconds} onChange={(v, g) => set((d) => void (d.ampEnv.release = v), g)} />
+            <KnobCell target={`ch:${channel.id}:sampler.ampEnv.attack`} caption="Attack" value={Math.max(0.001, p.ampEnv.attack)} min={0.001} max={5} curve="log" defaultValue={0.001} format={fmtSeconds} onChange={(v, g) => set((d) => void (d.ampEnv.attack = v), g)} />
+            <KnobCell target={`ch:${channel.id}:sampler.ampEnv.decay`} caption="Decay" value={Math.max(0.005, p.ampEnv.decay)} min={0.005} max={8} curve="log" defaultValue={0.3} format={fmtSeconds} onChange={(v, g) => set((d) => void (d.ampEnv.decay = v), g)} />
+            <KnobCell target={`ch:${channel.id}:sampler.ampEnv.sustain`} caption="Sustain" value={p.ampEnv.sustain} min={0} max={1} defaultValue={1} format={fmtPercent} onChange={(v, g) => set((d) => void (d.ampEnv.sustain = v), g)} />
+            <KnobCell target={`ch:${channel.id}:sampler.ampEnv.release`} caption="Release" value={Math.max(0.005, p.ampEnv.release)} min={0.005} max={8} curve="log" defaultValue={0.08} format={fmtSeconds} onChange={(v, g) => set((d) => void (d.ampEnv.release = v), g)} />
             <EnvelopeGraph env={p.ampEnv} />
           </div>
         </div>

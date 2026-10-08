@@ -40,6 +40,23 @@ export interface PlaylistView {
   tool: ToolId;
 }
 
+/** Channel rack filter (FL Studio's channel group menu). */
+export type RackFilter = 'all' | 'instruments' | 'audio' | 'automation';
+
+/** What the playlist draw tool places (FL Studio's picker panel selection). */
+export interface PlaylistPick {
+  kind: 'pattern' | 'audio' | 'automation';
+  /** Pattern id or channel id. */
+  id: Id;
+}
+
+/** Recording filter (right-click on the record button). */
+export interface RecordFilter {
+  notes: boolean;
+  audio: boolean;
+  automation: boolean;
+}
+
 export interface UiState {
   selectedPatternId: Id;
   selectedChannelId: Id | null;
@@ -55,6 +72,13 @@ export interface UiState {
   typingKeyboard: boolean;
   timeDisplay: 'bars' | 'clock';
   hint: string;
+  rackFilter: RackFilter;
+  /** Picker selection; null = the selected pattern. */
+  playlistPick: PlaylistPick | null;
+  /** Kinds shown in the playlist picker panel. */
+  pickerShow: { pattern: boolean; audio: boolean; automation: boolean };
+  /** Last automatable control the user moved (FL: Tools › Last tweaked). */
+  lastTweaked: string | null;
 }
 
 export interface TransportState {
@@ -64,6 +88,15 @@ export interface TransportState {
   metronome: boolean;
   /** Where song playback starts (ticks). */
   songStart: number;
+  /** Metronome count-in before recording (FL: recording precount, Ctrl+P). */
+  precount: boolean;
+  recordFilter: RecordFilter;
+  /** Input monitoring for armed tracks (FL: Mixer › Disk recording › Monitor external input). */
+  monitoring: 'off' | 'armed' | 'on';
+  /** Remove the device latency from recordings. */
+  latencyCompensation: boolean;
+  /** Unarm all tracks after a recording (FL: Auto-unarm). */
+  autoUnarm: boolean;
 }
 
 export interface AppState {
@@ -119,6 +152,10 @@ export function initialUi(project: Project): UiState {
     typingKeyboard: false,
     timeDisplay: 'bars',
     hint: '',
+    rackFilter: 'all',
+    playlistPick: null,
+    pickerShow: { pattern: true, audio: true, automation: true },
+    lastTweaked: null,
   };
 }
 
@@ -132,7 +169,18 @@ function initialState(): AppState {
     dirty: false,
     fileName: null,
     ui: initialUi(project),
-    transport: { playing: false, mode: 'pattern', recording: false, metronome: false, songStart: 0 },
+    transport: {
+      playing: false,
+      mode: 'pattern',
+      recording: false,
+      metronome: false,
+      songStart: 0,
+      precount: false,
+      recordFilter: { notes: true, audio: true, automation: true },
+      monitoring: 'off',
+      latencyCompensation: true,
+      autoUnarm: false,
+    },
     sampleRevision: 0,
     audioReady: false,
   };

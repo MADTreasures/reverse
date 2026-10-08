@@ -1,10 +1,13 @@
+import { effectTarget } from '../../model/automationTargets';
 import { EFFECT_SPECS, effectParam, formatParamValue } from '../../model/effects';
+import { instanceKeyForSlot } from '../../plugins/pluginStore';
 import { removeEffect, setEffectParam, toggleEffect } from '../../store/actions';
 import { useStore } from '../../store/store';
 import { IconMixer } from '../controls/Icons';
 import { WindowFrame } from '../workspace/WindowFrame';
 import { closeWindow } from '../workspace/windows';
 import { KnobCell } from './common';
+import { PluginWrapper } from './PluginWrapper';
 
 /** Generic editor for one insert effect; knobs are generated from the parameter specs. */
 export function EffectEditor({ windowId }: { windowId: string }) {
@@ -13,7 +16,6 @@ export function EffectEditor({ windowId }: { windowId: string }) {
   const track = useStore((s) => s.project.mixer[trackIndex]);
   const slot = track?.effects.find((e) => e.id === slotId);
   if (!track || !slot) return null;
-  const spec = EFFECT_SPECS[slot.type];
 
   const toolbar = (
     <>
@@ -33,6 +35,17 @@ export function EffectEditor({ windowId }: { windowId: string }) {
     </>
   );
 
+  if (slot.type === 'plugin') {
+    const plugin = slot.plugin;
+    return (
+      <WindowFrame id={windowId} title={`${plugin?.name ?? 'Plugin'} – ${track.name}`} icon={<IconMixer />} toolbar={toolbar} accent={track.color}>
+        <div className="plugin">{plugin && <PluginWrapper instanceKey={instanceKeyForSlot(slot.id)} plugin={plugin} title={`${track.name} – ${plugin.name}`} />}</div>
+      </WindowFrame>
+    );
+  }
+  const type = slot.type;
+  const spec = EFFECT_SPECS[type];
+
   return (
     <WindowFrame id={windowId} title={`${spec.name} – ${track.name}`} icon={<IconMixer />} toolbar={toolbar} accent={track.color}>
       <div className="plugin">
@@ -43,7 +56,7 @@ export function EffectEditor({ windowId }: { windowId: string }) {
                 <div key={p.key} className="knob-cell" style={{ minWidth: 90 }}>
                   <select
                     className="tb-select"
-                    value={Math.round(effectParam(slot.type, slot.params, p.key))}
+                    value={Math.round(effectParam(type, slot.params, p.key))}
                     onChange={(e) => setEffectParam(trackIndex, slot.id, p.key, Number(e.target.value))}
                   >
                     {p.options.map((o, i) => (
@@ -58,7 +71,8 @@ export function EffectEditor({ windowId }: { windowId: string }) {
                 <KnobCell
                   key={p.key}
                   caption={p.label}
-                  value={effectParam(slot.type, slot.params, p.key)}
+                  target={effectTarget(slot.id, p.key)}
+                  value={effectParam(type, slot.params, p.key)}
                   min={p.min}
                   max={p.max}
                   defaultValue={p.default}

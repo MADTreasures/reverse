@@ -2,6 +2,7 @@ import { samplePool } from '../../audio/samplePool';
 import { keyRange, patternLength } from '../../model/patterns';
 import { PPQ, ticksPerBar, ticksToSeconds } from '../../model/timing';
 import type { Clip, Project } from '../../model/types';
+import { drawCurve, type CurveView } from '../automation/curve';
 
 export const TRACK_W = 150;
 export const RULER_H = 24;
@@ -39,6 +40,13 @@ export interface PlaylistScene {
   songEnd: number;
   rubber: { t0: number; t1: number; r0: number; r1: number } | null;
   dropHint: { tick: number; track: number } | null;
+  /** Automation clip under the mouse (points and handles are shown) and the part being edited. */
+  autoFocus: { clipId: string; point: number | null; handle: number | null } | null;
+}
+
+/** Curve area of an automation clip drawn at (x, y) with height h (below the 14 px title). */
+export function automationClipView(v: PlaylistViewport, clip: Clip, x: number, y: number, h: number): CurveView {
+  return { x, y: y + 15, w: clip.length * v.pxPerTick, h: Math.max(4, h - 17), tick0: clip.offset, pxPerTick: v.pxPerTick, visibleTicks: clip.length };
 }
 
 function roundRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number): void {
@@ -106,6 +114,46 @@ function drawAudioClip(ctx: CanvasRenderingContext2D, v: PlaylistViewport, proje
     ctx.fillRect(x + px, mid - hi * amp, 1, Math.max(1, (hi - lo) * amp));
   }
   return name;
+}
+
+function drawAutomationClip(
+  ctx: CanvasRenderingContext2D,
+  v: PlaylistViewport,
+  s: PlaylistScene,
+  clip: Extract<Clip, { kind: 'automation' }>,
+  x: number,
+  y: number,
+  h: number,
+): string {
+  const ch = s.project.channels.find((c) => c.id === clip.channelId);
+  if (!ch || ch.kind !== 'automation') return 'missing automation';
+  // Small curve glyph before the name, like FL Studio's automation icon.
+  const gx = Math.max(x, TRACK_W) + 5;
+  ctx.strokeStyle = '#0d1114';
+  ctx.lineWidth = 1.2;
+  ctx.beginPath();
+  ctx.moveTo(gx, y + 11);
+  ctx.lineTo(gx + 7, y + 4);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.arc(gx, y + 11, 1.6, 0, Math.PI * 2);
+  ctx.arc(gx + 7, y + 4, 1.6, 0, Math.PI * 2);
+  ctx.fillStyle = '#0d1114';
+  ctx.fill();
+  if (h > 20) {
+    const focus = s.autoFocus?.clipId === clip.id ? s.autoFocus : null;
+    const edit = focus !== null || s.selected.has(clip.id);
+    drawCurve(ctx, automationClipView(v, clip, x, y, h), ch.automation, {
+      color: '#fff1f1',
+      fill: 'rgba(255, 255, 255, 0.10)',
+      lineWidth: 1.4,
+      showPoints: edit && v.pxPerTick * clip.length > 30,
+      showHandles: edit && v.pxPerTick * clip.length > 60,
+      activePoint: focus?.point ?? null,
+      activeHandle: focus?.handle ?? null,
+    });
+  }
+  return ch.automation.target ? ch.name : `${ch.name} (unlinked)`;
 }
 
 export function drawPlaylist(ctx: CanvasRenderingContext2D, v: PlaylistViewport, s: PlaylistScene): void {
@@ -181,11 +229,16 @@ export function drawPlaylist(ctx: CanvasRenderingContext2D, v: PlaylistViewport,
     ctx.clip();
     ctx.fillStyle = '#00000038';
     ctx.fillRect(x, y, w, 14);
-    const label = clip.kind === 'pattern' ? drawPatternClip(ctx, v, project, clip, x, y, w, h) : drawAudioClip(ctx, v, project, clip, x, y, w, h);
+    const label =
+      clip.kind === 'pattern'
+        ? drawPatternClip(ctx, v, project, clip, x, y, w, h)
+        : clip.kind === 'audio'
+          ? drawAudioClip(ctx, v, project, clip, x, y, w, h)
+          : drawAutomationClip(ctx, v, s, clip, x, y, h);
     ctx.fillStyle = '#0d1114';
     ctx.font = '600 10px -apple-system, sans-serif';
     ctx.textBaseline = 'middle';
-    ctx.fillText(label, Math.max(x, TRACK_W) + 5, y + 7.5);
+    ctx.fillText(label, Math.max(x, TRACK_W) + (clip.kind === 'automation' ? 16 : 5), y + 7.5);
     ctx.restore();
     ctx.strokeStyle = selected ? '#ffffff' : '#0b0e10';
     ctx.lineWidth = selected ? 1.6 : 1;

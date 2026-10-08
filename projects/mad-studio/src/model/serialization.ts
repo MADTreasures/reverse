@@ -12,9 +12,13 @@ import { EFFECT_SPECS, defaultEffectParams } from './effects';
 import { makeId } from './ids';
 import { defaultSynthParams } from './presets';
 import { MAX_BPM, MIN_BPM, ticksPerBar } from './timing';
+import { CURVE_MODES } from './automation';
 import type {
+  AutomationData,
+  AutomationPoint,
   Channel,
   Clip,
+  CurveMode,
   EffectSlot,
   EffectType,
   Envelope,
@@ -23,10 +27,12 @@ import type {
   OscParams,
   Pattern,
   PlaylistTrack,
+  PluginInstanceData,
   Project,
   SampleInfo,
   SamplerParams,
   SynthParams,
+  TrackInput,
   WaveType,
 } from './types';
 
@@ -165,6 +171,42 @@ function parseSampler(v: unknown, samples: Record<string, SampleInfo>): SamplerP
   };
 }
 
+function parsePluginData(v: unknown): PluginInstanceData | null {
+  if (!isObj(v) || typeof v.uid !== 'string' || typeof v.fileOrIdentifier !== 'string') return null;
+  return {
+    uid: v.uid,
+    name: str(v.name, 'Plugin'),
+    vendor: typeof v.vendor === 'string' ? v.vendor : '',
+    format: str(v.format, 'VST3'),
+    fileOrIdentifier: v.fileOrIdentifier,
+    isInstrument: bool(v.isInstrument, false),
+    state: typeof v.state === 'string' && v.state.length > 0 ? v.state : null,
+  };
+}
+
+const CURVE_IDS = CURVE_MODES.map((m) => m.id);
+
+function parseAutomation(v: unknown): AutomationData {
+  const o = isObj(v) ? v : {};
+  const points: AutomationPoint[] = arr(o.points)
+    .filter(isObj)
+    .map((pt) => ({
+      tick: Math.max(0, Math.round(num(pt.tick, 0))),
+      value: num(pt.value, 0, 0, 1),
+      tension: num(pt.tension, 0, -1, 1),
+      mode: oneOf(pt.mode, CURVE_IDS as readonly CurveMode[], 'single'),
+    }))
+    .sort((a, b) => a.tick - b.tick);
+  if (points.length === 0) points.push({ tick: 0, value: 0.5, tension: 0, mode: 'single' });
+  points[0].tick = 0;
+  const last = points[points.length - 1].tick;
+  return {
+    target: typeof o.target === 'string' && o.target.length > 0 ? o.target : null,
+    points,
+    length: Math.max(1, last, Math.round(num(o.length, last, 1))),
+  };
+}
+
 function parseChannel(v: unknown, i: number, mixerCount: number, samples: Record<string, SampleInfo>): Channel | null {
   if (!isObj(v)) return null;
   const base = {
@@ -182,6 +224,11 @@ function parseChannel(v: unknown, i: number, mixerCount: number, samples: Record
     if (v.audioClip === true) ch.audioClip = true;
     return ch;
   }
+  if (v.kind === 'plugin') {
+    const plugin = parsePluginData(v.plugin);
+    return plugin ? { ...base, kind: 'plugin', plugin } : null;
+  }
+  if (v.kind === 'automation') return { ...base, mixerTrack: 0, kind: 'automation', automation: parseAutomation(v.automation) };
   return null;
 }
 
@@ -220,6 +267,10 @@ function parsePattern(v: unknown, i: number, channelIds: Set<string>, beatsPerBa
 }
 
 function parseEffect(v: unknown): EffectSlot | null {
+  if (isObj(v) && v.type === 'plugin') {
+    const plugin = parsePluginData(v.plugin);
+    return plugin ? { id: str(v.id, makeId('fx')), type: 'plugin', enabled: bool(v.enabled, true), params: {}, plugin } : null;
+  }
   if (!isObj(v) || typeof v.type !== 'string' || !(v.type in EFFECT_SPECS)) return null;
   const type = v.type as EffectType;
   const params = defaultEffectParams(type);
@@ -240,8 +291,16 @@ function parseMixerTrack(v: unknown, i: number): MixerTrack {
     pan: num(v.pan, 0, -1, 1),
     muted: bool(v.muted, false),
     solo: i > 0 && bool(v.solo, false),
-    effects: arr(v.effects).map(parseEffect).filter((e): e is EffectSlot => e !== null).slice(0, 8),
+    effects: arr(v.effects).map(parseEffect).filter((e): e is EffectSlot => e !== null).slice(0, 10),
+    input: parseTrackInput(v.input),
+    armed: i > 0 && bool(v.armed, false),
   };
+}
+
+export function parseTrackInput(v: unknown): TrackInput | null {
+  if (typeof v !== 'string') return null;
+  const m = /^(stereo|mono):(\d{1,2})$/.exec(v);
+  return m ? (`${m[1]}:${Number(m[2])}` as TrackInput) : null;
 }
 
 function parseSamples(v: unknown): Record<string, SampleInfo> {
@@ -254,6 +313,7 @@ function parseSamples(v: unknown): Record<string, SampleInfo> {
       id,
       name: str(info.name, id),
       source,
+      ...(info.recorded === true ? { recorded: true } : {}),
       ...(typeof info.factoryKey === 'string' ? { factoryKey: info.factoryKey } : {}),
       ...(typeof info.fileName === 'string' ? { fileName: info.fileName } : {}),
     };
@@ -275,6 +335,7 @@ export function parseProject(raw: unknown): Project {
     .map((c, i) => parseChannel(c, i, mixer.length, samples))
     .filter((c): c is Channel => c !== null);
   const channelIds = new Set(channels.map((c) => c.id));
+  const automationIds = new Set(channels.filter((c) => c.kind === 'automation').map((c) => c.id));
 
   let patterns = arr(raw.patterns)
     .map((p, i) => parsePattern(p, i, channelIds, beatsPerBar))
@@ -302,12 +363,14 @@ export function parseProject(raw: unknown): Project {
       clips.push({ ...base, kind: 'pattern', patternId: c.patternId });
     } else if (c.kind === 'audio' && typeof c.channelId === 'string' && channelIds.has(c.channelId)) {
       clips.push({ ...base, kind: 'audio', channelId: c.channelId });
+    } else if (c.kind === 'automation' && typeof c.channelId === 'string' && automationIds.has(c.channelId)) {
+      clips.push({ ...base, kind: 'automation', channelId: c.channelId });
     }
   }
 
   return {
     format: 'mad-studio',
-    version: 1,
+    version: 2,
     name: str(raw.name, 'Untitled'),
     bpm: num(raw.bpm, DEFAULT_BPM, MIN_BPM, MAX_BPM),
     beatsPerBar,

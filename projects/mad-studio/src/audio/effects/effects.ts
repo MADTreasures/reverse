@@ -1,5 +1,5 @@
 import { DELAY_DIVISION_BEATS, effectParam } from '../../model/effects';
-import type { EffectType } from '../../model/types';
+import type { SlotType } from '../../model/types';
 
 export interface EffectEnv {
   bpm: number;
@@ -7,7 +7,7 @@ export interface EffectEnv {
 
 /** A mixer insert effect: audio flows input → … → output. */
 export interface EffectNode {
-  readonly type: EffectType;
+  readonly type: SlotType;
   readonly input: AudioNode;
   readonly output: AudioNode;
   setParams(params: Record<string, number>, env: EffectEnv): void;
@@ -531,8 +531,29 @@ class LimiterEffect implements EffectNode {
   }
 }
 
-export function createEffect(ctx: BaseAudioContext, type: EffectType): EffectNode {
+/**
+ * Placeholder for third-party plugins: they only run in the native engine (desktop app), the browser
+ * engine passes the audio through unchanged.
+ */
+class PassthroughEffect implements EffectNode {
+  readonly type = 'plugin' as const;
+  readonly input: GainNode;
+  constructor(ctx: BaseAudioContext) {
+    this.input = ctx.createGain();
+  }
+  get output() {
+    return this.input;
+  }
+  setParams(): void {}
+  dispose(): void {
+    this.input.disconnect();
+  }
+}
+
+export function createEffect(ctx: BaseAudioContext, type: SlotType): EffectNode {
   switch (type) {
+    case 'plugin':
+      return new PassthroughEffect(ctx);
     case 'eq':
       return new EqEffect(ctx);
     case 'filter':

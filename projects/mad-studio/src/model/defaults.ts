@@ -4,10 +4,14 @@ import { factorySampleId, factorySampleInfo, findFactorySample } from './factory
 import { makeId } from './ids';
 import { defaultSynthParams } from './presets';
 import { ticksPerBar } from './timing';
+import { flatAutomation } from './automation';
 import type {
+  AutomationChannel,
   MixerTrack,
   Pattern,
   PlaylistTrack,
+  PluginChannel,
+  PluginInstanceData,
   Project,
   SamplerChannel,
   SamplerParams,
@@ -21,6 +25,8 @@ export const DEFAULT_VELOCITY = 100 / 127;
 export const DEFAULT_INSERTS = 16;
 export const DEFAULT_TRACKS = 24;
 export const MAX_INSERTS = 64;
+/** Colour of automation clip channels (a muted red, as automation is shown in FL Studio). */
+export const AUTOMATION_COLOR = '#c46a6a';
 
 export function defaultSamplerParams(sampleId: string | null, rootKey = 60): SamplerParams {
   return {
@@ -81,6 +87,34 @@ export function createSamplerChannel(opts: {
   return channel;
 }
 
+export function createPluginChannel(plugin: PluginInstanceData, opts: { color?: string; mixerTrack?: number } = {}): PluginChannel {
+  return {
+    id: makeId('ch'),
+    kind: 'plugin',
+    name: plugin.name,
+    color: opts.color ?? paletteColor(4),
+    volume: 0.8,
+    pan: 0,
+    muted: false,
+    mixerTrack: opts.mixerTrack ?? 0,
+    plugin: structuredClone(plugin),
+  };
+}
+
+export function createAutomationChannel(opts: { name: string; target: string | null; value: number; length: number; color?: string }): AutomationChannel {
+  return {
+    id: makeId('ch'),
+    kind: 'automation',
+    name: opts.name,
+    color: opts.color ?? AUTOMATION_COLOR,
+    volume: 0.8,
+    pan: 0,
+    muted: false,
+    mixerTrack: 0,
+    automation: { target: opts.target, points: flatAutomation(opts.value, opts.length), length: Math.max(1, Math.round(opts.length)) },
+  };
+}
+
 /** Sampler channel preconfigured for one of the built-in sounds. */
 export function createFactoryChannel(key: string, opts: { color?: string; mixerTrack?: number } = {}): SamplerChannel {
   const def = findFactorySample(key);
@@ -115,6 +149,8 @@ export function createMixerTrack(index: number): MixerTrack {
     muted: false,
     solo: false,
     effects: [],
+    input: null,
+    armed: false,
   };
 }
 
@@ -143,7 +179,7 @@ export function createEmptyProject(): Project {
   mixer[0].effects.push({ id: makeId('fx'), type: 'limiter', enabled: true, params: defaultEffectParams('limiter') });
   return {
     format: 'mad-studio',
-    version: 1,
+    version: 2,
     name: 'Untitled',
     bpm: DEFAULT_BPM,
     beatsPerBar: DEFAULT_BEATS_PER_BAR,

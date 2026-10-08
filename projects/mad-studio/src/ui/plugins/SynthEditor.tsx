@@ -62,12 +62,12 @@ export function SynthEditor({ channel }: { channel: SynthChannel }) {
                 </button>
               ))}
             </div>
-            <KnobCell caption="Level" value={o.level} min={0} max={1} defaultValue={i === 0 ? 0.7 : 0} format={fmtPercent} onChange={(v, g) => set((d) => void (d.osc[i].level = v), g)} />
-            <KnobCell caption="Coarse" value={o.coarse} min={-36} max={36} defaultValue={0} integer bipolar format={(v) => `${v > 0 ? '+' : ''}${v} st`} onChange={(v, g) => set((d) => void (d.osc[i].coarse = v), g)} />
-            <KnobCell caption="Fine" value={o.fine} min={-100} max={100} defaultValue={0} bipolar format={(v) => `${Math.round(v)} ct`} onChange={(v, g) => set((d) => void (d.osc[i].fine = v), g)} />
-            <KnobCell caption="Unison" value={o.unison} min={1} max={7} defaultValue={1} integer format={(v) => `${v}×`} onChange={(v, g) => set((d) => void (d.osc[i].unison = v), g)} />
-            <KnobCell caption="Detune" value={o.detune} min={0} max={100} defaultValue={0} format={(v) => `${Math.round(v)} ct`} onChange={(v, g) => set((d) => void (d.osc[i].detune = v), g)} />
-            <KnobCell caption="Pan" value={o.pan} min={-1} max={1} defaultValue={0} bipolar format={fmtSigned} onChange={(v, g) => set((d) => void (d.osc[i].pan = v), g)} />
+            <KnobCell target={`ch:${channel.id}:synth.osc.${i}.level`} caption="Level" value={o.level} min={0} max={1} defaultValue={i === 0 ? 0.7 : 0} format={fmtPercent} onChange={(v, g) => set((d) => void (d.osc[i].level = v), g)} />
+            <KnobCell target={`ch:${channel.id}:synth.osc.${i}.coarse`} caption="Coarse" value={o.coarse} min={-36} max={36} defaultValue={0} integer bipolar format={(v) => `${v > 0 ? '+' : ''}${v} st`} onChange={(v, g) => set((d) => void (d.osc[i].coarse = v), g)} />
+            <KnobCell target={`ch:${channel.id}:synth.osc.${i}.fine`} caption="Fine" value={o.fine} min={-100} max={100} defaultValue={0} bipolar format={(v) => `${Math.round(v)} ct`} onChange={(v, g) => set((d) => void (d.osc[i].fine = v), g)} />
+            <KnobCell target={`ch:${channel.id}:synth.osc.${i}.unison`} caption="Unison" value={o.unison} min={1} max={7} defaultValue={1} integer format={(v) => `${v}×`} onChange={(v, g) => set((d) => void (d.osc[i].unison = v), g)} />
+            <KnobCell target={`ch:${channel.id}:synth.osc.${i}.detune`} caption="Detune" value={o.detune} min={0} max={100} defaultValue={0} format={(v) => `${Math.round(v)} ct`} onChange={(v, g) => set((d) => void (d.osc[i].detune = v), g)} />
+            <KnobCell target={`ch:${channel.id}:synth.osc.${i}.pan`} caption="Pan" value={o.pan} min={-1} max={1} defaultValue={0} bipolar format={fmtSigned} onChange={(v, g) => set((d) => void (d.osc[i].pan = v), g)} />
           </div>
         ))}
       </div>
@@ -87,10 +87,10 @@ export function SynthEditor({ channel }: { channel: SynthChannel }) {
             </select>
           </div>
           <div className="knob-row">
-            <KnobCell caption="Cutoff" value={p.filter.cutoff} min={20} max={20000} curve="log" defaultValue={3200} format={fmtHz} onChange={(v, g) => set((d) => void (d.filter.cutoff = v), g)} />
-            <KnobCell caption="Reso" value={p.filter.resonance} min={0.1} max={20} curve="log" defaultValue={1} format={(v) => v.toFixed(1)} onChange={(v, g) => set((d) => void (d.filter.resonance = v), g)} />
-            <KnobCell caption="Env amt" value={p.filter.envAmount} min={-1} max={1} defaultValue={0.25} bipolar format={fmtSigned} onChange={(v, g) => set((d) => void (d.filter.envAmount = v), g)} />
-            <KnobCell caption="Key trk" value={p.filter.keyTrack} min={0} max={1} defaultValue={0.3} format={fmtPercent} onChange={(v, g) => set((d) => void (d.filter.keyTrack = v), g)} />
+            <KnobCell target={`ch:${channel.id}:synth.filter.cutoff`} caption="Cutoff" value={p.filter.cutoff} min={20} max={20000} curve="log" defaultValue={3200} format={fmtHz} onChange={(v, g) => set((d) => void (d.filter.cutoff = v), g)} />
+            <KnobCell target={`ch:${channel.id}:synth.filter.resonance`} caption="Reso" value={p.filter.resonance} min={0.1} max={20} curve="log" defaultValue={1} format={(v) => v.toFixed(1)} onChange={(v, g) => set((d) => void (d.filter.resonance = v), g)} />
+            <KnobCell target={`ch:${channel.id}:synth.filter.envAmount`} caption="Env amt" value={p.filter.envAmount} min={-1} max={1} defaultValue={0.25} bipolar format={fmtSigned} onChange={(v, g) => set((d) => void (d.filter.envAmount = v), g)} />
+            <KnobCell target={`ch:${channel.id}:synth.filter.keyTrack`} caption="Key trk" value={p.filter.keyTrack} min={0} max={1} defaultValue={0.3} format={fmtPercent} onChange={(v, g) => set((d) => void (d.filter.keyTrack = v), g)} />
           </div>
         </div>
         <div className="plugin-section">
@@ -105,8 +105,8 @@ export function SynthEditor({ channel }: { channel: SynthChannel }) {
               </select>
               <span className="cell-label">Target</span>
             </div>
-            <KnobCell caption="Rate" value={p.lfo.rate} min={0.05} max={20} curve="log" defaultValue={5} format={(v) => `${v.toFixed(2)} Hz`} onChange={(v, g) => set((d) => void (d.lfo.rate = v), g)} />
-            <KnobCell caption="Depth" value={p.lfo.depth} min={0} max={1} defaultValue={0.2} format={fmtPercent} onChange={(v, g) => set((d) => void (d.lfo.depth = v), g)} />
+            <KnobCell target={`ch:${channel.id}:synth.lfo.rate`} caption="Rate" value={p.lfo.rate} min={0.05} max={20} curve="log" defaultValue={5} format={(v) => `${v.toFixed(2)} Hz`} onChange={(v, g) => set((d) => void (d.lfo.rate = v), g)} />
+            <KnobCell target={`ch:${channel.id}:synth.lfo.depth`} caption="Depth" value={p.lfo.depth} min={0} max={1} defaultValue={0.2} format={fmtPercent} onChange={(v, g) => set((d) => void (d.lfo.depth = v), g)} />
           </div>
         </div>
       </div>
@@ -116,17 +116,17 @@ export function SynthEditor({ channel }: { channel: SynthChannel }) {
           <div key={key} className="plugin-section grow">
             <div className="section-title">{key === 'ampEnv' ? 'Volume envelope' : 'Filter envelope'}</div>
             <div className="knob-row" style={{ alignItems: 'center' }}>
-              <KnobCell caption="Attack" value={Math.max(0.001, p[key].attack)} min={0.001} max={5} curve="log" defaultValue={0.005} format={fmtSeconds} onChange={(v, g) => set((d) => void (d[key].attack = v), g)} />
-              <KnobCell caption="Decay" value={Math.max(0.005, p[key].decay)} min={0.005} max={8} curve="log" defaultValue={0.3} format={fmtSeconds} onChange={(v, g) => set((d) => void (d[key].decay = v), g)} />
-              <KnobCell caption="Sustain" value={p[key].sustain} min={0} max={1} defaultValue={0.7} format={fmtPercent} onChange={(v, g) => set((d) => void (d[key].sustain = v), g)} />
-              <KnobCell caption="Release" value={Math.max(0.005, p[key].release)} min={0.005} max={8} curve="log" defaultValue={0.25} format={fmtSeconds} onChange={(v, g) => set((d) => void (d[key].release = v), g)} />
+              <KnobCell target={`ch:${channel.id}:synth.${key}.attack`} caption="Attack" value={Math.max(0.001, p[key].attack)} min={0.001} max={5} curve="log" defaultValue={0.005} format={fmtSeconds} onChange={(v, g) => set((d) => void (d[key].attack = v), g)} />
+              <KnobCell target={`ch:${channel.id}:synth.${key}.decay`} caption="Decay" value={Math.max(0.005, p[key].decay)} min={0.005} max={8} curve="log" defaultValue={0.3} format={fmtSeconds} onChange={(v, g) => set((d) => void (d[key].decay = v), g)} />
+              <KnobCell target={`ch:${channel.id}:synth.${key}.sustain`} caption="Sustain" value={p[key].sustain} min={0} max={1} defaultValue={0.7} format={fmtPercent} onChange={(v, g) => set((d) => void (d[key].sustain = v), g)} />
+              <KnobCell target={`ch:${channel.id}:synth.${key}.release`} caption="Release" value={Math.max(0.005, p[key].release)} min={0.005} max={8} curve="log" defaultValue={0.25} format={fmtSeconds} onChange={(v, g) => set((d) => void (d[key].release = v), g)} />
               <EnvelopeGraph env={p[key]} color={key === 'ampEnv' ? '#ff9b3d' : '#5cb4ff'} />
             </div>
           </div>
         ))}
         <div className="plugin-section">
           <div className="section-title">Output</div>
-          <KnobCell caption="Gain" value={p.gain} min={0} max={1} defaultValue={0.5} format={fmtPercent} onChange={(v, g) => set((d) => void (d.gain = v), g)} />
+          <KnobCell target={`ch:${channel.id}:synth.gain`} caption="Gain" value={p.gain} min={0} max={1} defaultValue={0.5} format={fmtPercent} onChange={(v, g) => set((d) => void (d.gain = v), g)} />
         </div>
       </div>
     </>

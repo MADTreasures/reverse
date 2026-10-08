@@ -161,7 +161,7 @@ export function createDemoProject(): Project {
   const usedFactory = ['kick_punch', 'clap', 'hat_closed', 'hat_open', 'rim', 'fx_riser', 'crash'];
   return {
     format: 'mad-studio',
-    version: 1,
+    version: 2,
     name: 'MAD Groove (Demo)',
     bpm: 124,
     beatsPerBar: 4,

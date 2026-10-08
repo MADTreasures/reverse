@@ -15,12 +15,15 @@ import {
   fillSteps,
   firstFreeInsert,
   moveChannel,
+  rotateSteps,
   setChannelProps,
   soloChannel,
 } from '../../store/actions';
 import { useStore } from '../../store/store';
-import { confirmDialog, promptDialog, type MenuItem } from '../overlays';
+import { createAutomationChannel } from '../../model/defaults';
+import { confirmDialog, openDialog, promptDialog, type MenuItem } from '../overlays';
 import { openChannelEditor, openPianoRoll } from '../workspace/windows';
+import { instrumentPluginItems } from './pluginMenus';
 
 function groupBy<T>(items: T[], key: (t: T) => string): [string, T[]][] {
   const map = new Map<string, T[]>();
@@ -33,6 +36,17 @@ function groupBy<T>(items: T[], key: (t: T) => string): [string, T[]][] {
 
 export function addChannelMenu(): MenuItem[] {
   return [
+    { label: 'More plugins…', onClick: () => openDialog('plugins') },
+    { separator: true },
+    { label: 'Plugins (VST3 / AU)', submenu: instrumentPluginItems() },
+    {
+      label: 'Automation clip',
+      onClick: () => {
+        const id = addChannel(createAutomationChannel({ name: 'Automation', target: null, value: 0.5, length: 384 }), { autoMixer: false });
+        openChannelEditor(id);
+      },
+    },
+    { separator: true },
     {
       label: 'Synth',
       submenu: [
@@ -67,8 +81,32 @@ export function channelContextMenu(channel: Channel): MenuItem[] {
   const patternId = s.ui.selectedPatternId;
   const pattern = findPattern(s.project, patternId);
   const steps = pattern ? patternSteps(pattern, s.project.beatsPerBar) : 16;
+  if (channel.kind === 'automation') {
+    return [
+      { label: channel.name, header: true },
+      { label: 'Edit automation…', onClick: () => openChannelEditor(channel.id) },
+      {
+        label: 'Rename…',
+        onClick: async () => {
+          const name = await promptDialog('Rename automation clip', channel.name);
+          if (name) setChannelProps(channel.id, { name });
+        },
+      },
+      { label: 'Color', submenu: PALETTE.map((c, i) => ({ label: PALETTE_NAMES[i], swatch: c, onClick: () => setChannelProps(channel.id, { color: c }) })) },
+      { label: 'Clone', onClick: () => cloneChannel(channel.id) },
+      { separator: true },
+      {
+        label: 'Delete…',
+        danger: true,
+        onClick: async () => {
+          if (await confirmDialog('Delete automation clip', `Delete "${channel.name}" and all its clips?`, 'Delete', true)) deleteChannel(channel.id);
+        },
+      },
+    ];
+  }
   return [
-    { label: 'Edit instrument…', onClick: () => openChannelEditor(channel.id) },
+    { label: channel.name, header: true },
+    { label: channel.kind === 'plugin' ? 'Plugin settings…' : 'Edit instrument…', onClick: () => openChannelEditor(channel.id) },
     { label: 'Piano roll', shortcut: 'F7', onClick: () => openPianoRoll(channel.id) },
     { separator: true },
     {
@@ -92,6 +130,8 @@ export function channelContextMenu(channel: Channel): MenuItem[] {
     { label: 'Fill each 2 steps', onClick: () => fillSteps(patternId, channel.id, 2, steps) },
     { label: 'Fill each 4 steps', onClick: () => fillSteps(patternId, channel.id, 4, steps) },
     { label: 'Fill each 8 steps', onClick: () => fillSteps(patternId, channel.id, 8, steps) },
+    { label: 'Rotate left', shortcut: 'Shift+Ctrl+←', onClick: () => rotateSteps(patternId, channel.id, -1) },
+    { label: 'Rotate right', shortcut: 'Shift+Ctrl+→', onClick: () => rotateSteps(patternId, channel.id, 1) },
     { label: 'Clear notes in pattern', onClick: () => clearChannelNotes(patternId, channel.id) },
     { separator: true },
     {

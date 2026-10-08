@@ -31,7 +31,7 @@ function sortEvents(events: SequencedEvent[]): SequencedEvent[] {
 export function patternTimeline(project: Project, patternId: Id | null): Timeline {
   const pattern = findPattern(project, patternId);
   if (!pattern) return { events: [], start: 0, end: ticksPerBar(project.beatsPerBar) };
-  const channelIds = new Set(project.channels.map((c) => c.id));
+  const channelIds = new Set(project.channels.filter((c) => c.kind !== 'automation').map((c) => c.id));
   const events: SequencedEvent[] = [];
   for (const [channelId, notes] of Object.entries(pattern.notes)) {
     if (!channelIds.has(channelId)) continue;
@@ -46,11 +46,12 @@ export function patternTimeline(project: Project, patternId: Id | null): Timelin
 export function songTimeline(project: Project): Timeline {
   const mutedTracks = new Set(project.tracks.filter((t) => t.muted).map((t) => t.id));
   const trackIds = new Set(project.tracks.map((t) => t.id));
-  const channels = new Map(project.channels.map((c) => [c.id, c]));
+  const channels = new Map(project.channels.filter((c) => c.kind !== 'automation').map((c) => [c.id, c]));
   const events: SequencedEvent[] = [];
 
   for (const clip of project.clips) {
     if (!trackIds.has(clip.trackId) || mutedTracks.has(clip.trackId) || clip.length <= 0) continue;
+    if (clip.kind === 'automation') continue; // evaluated separately (automation.ts)
     const clipEnd = clip.start + clip.length;
 
     if (clip.kind === 'audio') {

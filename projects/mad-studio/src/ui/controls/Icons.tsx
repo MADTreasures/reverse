@@ -167,3 +167,29 @@ export const IconGhost = (p: IconProps) => (
     <path d="M3.5 14V7a4.5 4.5 0 019 0v7l-1.5-1.2L9.5 14 8 12.8 6.5 14 5 12.8z" />
   </Svg>
 );
+/** Automation clip: two points joined by a rising line (our own glyph). */
+export const IconCurve = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M3 12.5 C6 12.5 7 4 13 3.5" />
+    <circle cx="3" cy="12.5" r="1.6" fill="currentColor" stroke="none" />
+    <circle cx="13" cy="3.5" r="1.6" fill="currentColor" stroke="none" />
+  </Svg>
+);
+export const IconMic = (p: IconProps) => (
+  <Svg {...p}>
+    <rect x="6" y="2" width="4" height="8" rx="2" />
+    <path d="M3.5 8a4.5 4.5 0 0 0 9 0M8 12.5V14" />
+  </Svg>
+);
+export const IconPlug = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M6 2v3M10 2v3M4.5 5h7v2.5a3.5 3.5 0 0 1-7 0zM8 11v3" />
+  </Svg>
+);
+/** Recording precount: a small counting-down metronome tick. */
+export const IconPrecount = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M2.5 12h2M7 12h2M11.5 12h2" strokeWidth={2.2} />
+    <path d="M8 3v5l2.5 1.5" />
+  </Svg>
+);

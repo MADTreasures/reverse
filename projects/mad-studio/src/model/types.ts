@@ -108,8 +108,88 @@ export interface SamplerChannel extends ChannelBase {
   audioClip?: boolean;
 }
 
-export type Channel = SynthChannel | SamplerChannel;
+/** Third-party plugin (VST3/AU) as reported by the native engine's plugin scan. */
+export interface PluginDescription {
+  /** Stable id across scans (format, name, file and unique id). */
+  uid: string;
+  name: string;
+  vendor: string;
+  /** 'VST3', 'AudioUnit', 'LV2', … */
+  format: string;
+  category: string;
+  version: string;
+  fileOrIdentifier: string;
+  isInstrument: boolean;
+  numInputs: number;
+  numOutputs: number;
+}
+
+/** A plugin instance stored in the project (channel instrument or mixer effect). */
+export interface PluginInstanceData {
+  uid: string;
+  name: string;
+  vendor: string;
+  format: string;
+  fileOrIdentifier: string;
+  isInstrument: boolean;
+  /** Opaque plugin state (base64), captured from the engine when the project is saved. */
+  state: string | null;
+}
+
+export interface PluginChannel extends ChannelBase {
+  kind: 'plugin';
+  plugin: PluginInstanceData;
+}
+
+/**
+ * Segment shapes of automation clips (named after the point that ends the segment, like FL Studio's
+ * "curve type" of the right-hand point).
+ */
+export type CurveMode =
+  | 'single'
+  | 'single2'
+  | 'single3'
+  | 'double'
+  | 'double2'
+  | 'double3'
+  | 'hold'
+  | 'stairs'
+  | 'smoothStairs'
+  | 'pulse'
+  | 'wave'
+  | 'halfSine'
+  | 'smooth';
+
+export interface AutomationPoint {
+  /** Ticks from the start of the automation data. */
+  tick: number;
+  /** Normalized value 0..1 (mapped onto the target's range). */
+  value: number;
+  /** -1..1, bends the segment that ends at this point (or sets its frequency for stairs/pulse/wave). */
+  tension: number;
+  /** Shape of the segment that ends at this point. */
+  mode: CurveMode;
+}
+
+export interface AutomationData {
+  /** Automated parameter (see automationTargets.ts), e.g. `ch:<id>:volume`; null when unlinked. */
+  target: string | null;
+  /** Sorted by tick; the first point sits at tick 0. */
+  points: AutomationPoint[];
+  /** Length of the automation data in ticks (at least the last point's tick). */
+  length: number;
+}
+
+/** Automation clip "channel": like in FL Studio it lives in the channel rack and is placed in the playlist. */
+export interface AutomationChannel extends ChannelBase {
+  kind: 'automation';
+  automation: AutomationData;
+}
+
+export type Channel = SynthChannel | SamplerChannel | PluginChannel | AutomationChannel;
 export type ChannelKind = Channel['kind'];
+/** Channels that produce sound. */
+export type AudioChannel = SynthChannel | SamplerChannel | PluginChannel;
 
 export interface Note {
   id: Id;
@@ -161,7 +241,13 @@ export interface AudioClip extends ClipBase {
   channelId: Id;
 }
 
-export type Clip = PatternClip | AudioClip;
+export interface AutomationClip extends ClipBase {
+  kind: 'automation';
+  /** Automation channel whose data the clip plays. */
+  channelId: Id;
+}
+
+export type Clip = PatternClip | AudioClip | AutomationClip;
 
 export type EffectType =
   | 'eq'
@@ -175,10 +261,21 @@ export type EffectType =
 
 export interface EffectSlot {
   id: Id;
-  type: EffectType;
+  /** Built-in effect type, or 'plugin' for a third-party plugin hosted by the native engine. */
+  type: EffectType | 'plugin';
   enabled: boolean;
   params: Record<string, number>;
+  /** Set when type === 'plugin'. */
+  plugin?: PluginInstanceData;
 }
+
+export type SlotType = EffectSlot['type'];
+
+/**
+ * Audio input of a mixer track (FL Studio's mixer "Input" menu): `stereo:N` records device inputs N and
+ * N+1 (0-based, "In 1 - In 2" is `stereo:0`), `mono:N` a single input.
+ */
+export type TrackInput = `stereo:${number}` | `mono:${number}`;
 
 export interface MixerTrack {
   id: Id;
@@ -191,12 +288,18 @@ export interface MixerTrack {
   muted: boolean;
   solo: boolean;
   effects: EffectSlot[];
+  /** Audio input recorded / monitored on this track. */
+  input: TrackInput | null;
+  /** Armed for audio recording (FL Studio's red record dot under each track). */
+  armed: boolean;
 }
 
 export interface SampleInfo {
   id: Id;
   name: string;
   source: 'factory' | 'user';
+  /** Set for audio recorded in MAD Studio (shown in the browser's "Recorded" folder). */
+  recorded?: boolean;
   /** Key into the factory sample generator. */
   factoryKey?: string;
   /** Original file name for user samples. */
@@ -205,7 +308,8 @@ export interface SampleInfo {
 
 export interface Project {
   format: 'mad-studio';
-  version: 1;
+  /** 2 added plugins, automation clips and recording fields. Version 1 files load unchanged. */
+  version: 2;
   name: string;
   bpm: number;
   beatsPerBar: number;

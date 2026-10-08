@@ -7,6 +7,7 @@ import {
   createMixerTrack,
   createPattern,
   createPlaylistTrack,
+  createPluginChannel,
   createSynthChannel,
 } from '../model/defaults';
 import { defaultEffectParams } from '../model/effects';
@@ -23,10 +24,12 @@ import type {
   MixerTrack,
   Note,
   Pattern,
+  PluginInstanceData,
   Project,
   SampleInfo,
   SamplerParams,
   SynthParams,
+  TrackInput,
 } from '../model/types';
 import { MAX_UNDO, initialUi, useStore, type AppState, type PlayMode, type TransportState, type UiState } from './store';
 
@@ -112,6 +115,8 @@ function reconcileUi(ui: UiState, project: Project): UiState {
     if (!hasChannel(d.selectedChannelId)) d.selectedChannelId = project.channels[0]?.id ?? null;
     if (!hasChannel(d.pianoRollChannelId)) d.pianoRollChannelId = d.selectedChannelId;
     if (d.selectedMixerTrack >= project.mixer.length) d.selectedMixerTrack = 0;
+    const pick = d.playlistPick;
+    if (pick && (pick.kind === 'pattern' ? !project.patterns.some((p) => p.id === pick.id) : !hasChannel(pick.id))) d.playlistPick = null;
     for (const key of Object.keys(d.windows)) {
       if (key.startsWith('channel:') && !hasChannel(key.slice(8))) delete d.windows[key];
       if (key.startsWith('effect:')) {
@@ -271,7 +276,7 @@ export function deleteChannel(id: Id): void {
   edit((d) => {
     d.channels = d.channels.filter((c) => c.id !== id);
     for (const p of d.patterns) delete p.notes[id];
-    d.clips = d.clips.filter((c) => !(c.kind === 'audio' && c.channelId === id));
+    d.clips = d.clips.filter((c) => !((c.kind === 'audio' || c.kind === 'automation') && c.channelId === id));
   });
   const s = useStore.getState();
   useStore.setState({ ui: reconcileUi(s.ui, s.project) });
@@ -425,6 +430,20 @@ export function fillSteps(patternId: Id, channelId: Id, every: number, stepCount
     kept.sort((a, b) => a.start - b.start || a.key - b.key);
     const p = patternOf(d, patternId);
     if (p) p.notes[channelId] = kept;
+  });
+}
+
+/** Shifts all notes of a channel by whole steps, wrapping around the pattern (FL: Rotate left/right). */
+export function rotateSteps(patternId: Id, channelId: Id, delta: number): void {
+  const project = useStore.getState().project;
+  const pattern = findPattern(project, patternId);
+  if (!pattern) return;
+  const len = patternLength(pattern, project.beatsPerBar);
+  edit((d) => {
+    const notes = notesOf(d, patternId, channelId);
+    if (!notes) return;
+    for (const n of notes) n.start = (((n.start + delta * TICKS_PER_STEP) % len) + len) % len;
+    notes.sort((a, b) => a.start - b.start || a.key - b.key);
   });
 }
 
@@ -653,7 +672,8 @@ export function addMixerTrack(): number {
   return index;
 }
 
-export const MAX_EFFECT_SLOTS = 8;
+/** FL Studio has ten effect slots per mixer track. */
+export const MAX_EFFECT_SLOTS = 10;
 
 export function addEffect(trackIndex: number, type: EffectType): Id | null {
   const track = useStore.getState().project.mixer[trackIndex];
@@ -671,7 +691,82 @@ export function replaceEffect(trackIndex: number, slotId: Id, type: EffectType):
     if (slot && slot.type !== type) {
       slot.type = type;
       slot.params = defaultEffectParams(type);
+      delete slot.plugin;
     }
+  });
+}
+
+/** Adds a third-party effect plugin (hosted by the native engine) to a mixer track. */
+export function addPluginEffect(trackIndex: number, plugin: PluginInstanceData): Id | null {
+  const track = useStore.getState().project.mixer[trackIndex];
+  if (!track || track.effects.length >= MAX_EFFECT_SLOTS) return null;
+  const id = makeId('fx');
+  edit((d) => {
+    d.mixer[trackIndex].effects.push({ id, type: 'plugin', enabled: true, params: {}, plugin: structuredClone(plugin) });
+  });
+  return id;
+}
+
+export function replaceEffectWithPlugin(trackIndex: number, slotId: Id, plugin: PluginInstanceData): void {
+  edit((d) => {
+    const slot = d.mixer[trackIndex]?.effects.find((e) => e.id === slotId);
+    if (!slot) return;
+    slot.type = 'plugin';
+    slot.params = {};
+    slot.plugin = structuredClone(plugin);
+  });
+}
+
+/** Adds a plugin instrument as a new channel (routed to a free mixer track). */
+export function addPluginChannel(plugin: PluginInstanceData): Id {
+  const project = useStore.getState().project;
+  return addChannel(createPluginChannel(plugin, { color: paletteColor(project.channels.length + 4) }));
+}
+
+/**
+ * Stores plugin states captured from the engine. Not an undoable edit: it only refreshes opaque
+ * data right before saving.
+ */
+export function storePluginStates(states: Record<string, string>): void {
+  const s = useStore.getState();
+  const next = produce(s.project, (d) => {
+    for (const ch of d.channels) {
+      const st = states[`ch:${ch.id}`];
+      if (ch.kind === 'plugin' && st !== undefined) ch.plugin.state = st;
+    }
+    for (const t of d.mixer) {
+      for (const slot of t.effects) {
+        const st = states[`fx:${slot.id}`];
+        if (slot.plugin && st !== undefined) slot.plugin.state = st;
+      }
+    }
+  });
+  if (next !== s.project) useStore.setState({ project: next });
+}
+
+// ---------------------------------------------------------------------------
+// Recording inputs (FL Studio: mixer track "Input" menu and the record-arm dot)
+
+/** Sets a track's audio input; choosing an input arms the track, like in FL Studio. */
+export function setTrackInput(index: number, input: TrackInput | null): void {
+  edit((d) => {
+    const t = d.mixer[index];
+    if (!t || index === 0) return;
+    t.input = input;
+    t.armed = input !== null;
+  });
+}
+
+export function setTrackArmed(index: number, armed: boolean): void {
+  edit((d) => {
+    const t = d.mixer[index];
+    if (t && index > 0) t.armed = armed;
+  });
+}
+
+export function disarmAllTracks(): void {
+  edit((d) => {
+    for (const t of d.mixer) t.armed = false;
   });
 }
 

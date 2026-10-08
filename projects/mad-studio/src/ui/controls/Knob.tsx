@@ -1,6 +1,10 @@
 import { useRef, type PointerEvent as ReactPointerEvent, type WheelEvent as ReactWheelEvent } from 'react';
+import { useAutomationOverlay } from '../../audio/automationRuntime';
 import { endCoalesce, gestureKey } from '../../store/actions';
+import { noteTweaked } from '../../store/automationActions';
 import { setHint } from '../hint';
+import { controlMenu } from '../menus/controlMenu';
+import { showMenu } from '../overlays';
 
 export interface KnobProps {
   value: number;
@@ -18,6 +22,8 @@ export interface KnobProps {
   color?: string;
   className?: string;
   showLabel?: boolean;
+  /** Automation target key (enables "Create automation clip" in the right-click menu). */
+  target?: string;
 }
 
 export function toNormalized(v: number, min: number, max: number, curve: 'linear' | 'log' = 'linear'): number {
@@ -47,7 +53,15 @@ function arc(cx: number, cy: number, r: number, from: number, to: number): strin
   return `M ${x1} ${y1} A ${r} ${r} 0 ${b - a > 180 ? 1 : 0} 1 ${x2} ${y2}`;
 }
 
-/** Rotary control: drag vertically (Shift = fine), wheel, double-click to reset. */
+/** Value an automation clip currently drives for `target`, if any. */
+export function useAutomatedValue(target: string | undefined): number | undefined {
+  return useAutomationOverlay((s) => (target ? s.values[target] : undefined));
+}
+
+/**
+ * Rotary control like FL Studio's: drag vertically (Shift = fine), wheel, double-click to reset,
+ * right-click for the control menu (reset, automation, copy/paste/type value).
+ */
 export function Knob({
   value,
   min,
@@ -63,15 +77,19 @@ export function Knob({
   color = 'var(--accent)',
   className = '',
   showLabel = false,
+  target,
 }: KnobProps) {
   const drag = useRef<{ startY: number; startN: number; key: string } | null>(null);
-  const n = Math.min(1, Math.max(0, toNormalized(value, min, max, curve)));
+  const automated = useAutomatedValue(target);
+  const shown = automated ?? value;
+  const n = Math.min(1, Math.max(0, toNormalized(shown, min, max, curve)));
   const describe = (v: number) => `${label ? `${label}: ` : ''}${format(v)}`;
 
   const emit = (norm: number, key: string) => {
     let v = fromNormalized(norm, min, max, curve);
     if (integer) v = Math.round(v);
     if (v !== value) onChange(v, key);
+    if (target) noteTweaked(target);
     setHint(describe(v));
   };
 
@@ -105,7 +123,7 @@ export function Knob({
 
   return (
     <div
-      className={`knob ${className}`}
+      className={`knob ${automated !== undefined ? 'automated' : ''} ${className}`}
       style={{ width: size, height: showLabel ? size + 12 : size }}
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
@@ -117,12 +135,17 @@ export function Knob({
         setHint(describe(defaultValue));
       }}
       onWheel={onWheel}
-      onMouseEnter={() => setHint(describe(value))}
+      onMouseEnter={() => setHint(describe(shown))}
+      onContextMenu={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        showMenu(e, controlMenu({ label: label ?? 'Value', value, min, max, curve, integer, defaultValue, onChange, target, format }));
+      }}
       role="slider"
       aria-label={label}
       aria-valuemin={min}
       aria-valuemax={max}
-      aria-valuenow={value}
+      aria-valuenow={shown}
     >
       <svg width={size} height={size}>
         <circle cx={c} cy={c} r={r} className="knob-body" />

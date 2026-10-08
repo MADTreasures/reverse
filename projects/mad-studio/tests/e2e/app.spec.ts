@@ -98,7 +98,7 @@ test('mixer: add an insert effect from the UI', async ({ page }) => {
   await page.locator('.strip').nth(3).click({ position: { x: 30, y: 10 } });
   const index = (await state(page)).ui.selectedMixerTrack;
   const before = (await state(page)).project.mixer[index].effects.length;
-  await page.locator('.fx-add').click();
+  await page.locator('.fx-slot.empty:not([disabled])').first().click();
   await page.getByRole('menuitem', { name: 'Reverb' }).click();
   const after = (await state(page)).project.mixer[index].effects;
   expect(after.length).toBe(before + 1);
@@ -193,4 +193,64 @@ test('project bundle round-trips through save and open', async ({ page }) => {
   });
   expect(JSON.parse(result.after)).toEqual(JSON.parse(result.before));
   expect(result.dirty).toBe(false);
+});
+
+test('automation: right-click a knob creates an automation clip, right-click in the clip adds a point', async ({ page }) => {
+  const errors = await boot(page);
+  const volume = page.locator('.rack-row').first().locator('.knob').nth(1);
+  await volume.click({ button: 'right' });
+  await expect(page.locator('.menu-header', { hasText: 'Automation' })).toBeVisible();
+  await page.getByRole('menuitem', { name: 'Create automation clip' }).click();
+  let s = await state(page);
+  const auto = s.project.channels.find((c: any) => c.kind === 'automation');
+  expect(auto.name).toBe('Kick - Channel volume');
+  expect(auto.automation.target).toBe(`ch:${s.project.channels[0].id}:volume`);
+  expect(s.ui.rackFilter).toBe('automation');
+  await expect(page.locator('.rack-row')).toHaveCount(1);
+  const clip = s.project.clips.find((c: any) => c.kind === 'automation');
+  expect(clip.length).toBeGreaterThan(0);
+  await expect(page.locator('.picker-item.automation.selected')).toBeVisible();
+
+  // Right-click inside the clip body (away from the tension handle) adds a point.
+  await page.keyboard.press('F6');
+  const box = await page.evaluate((clipId) => {
+    const st = window.__madStudio.useStore.getState();
+    const c = st.project.clips.find((x: any) => x.id === clipId);
+    const ti = st.project.tracks.findIndex((t: any) => t.id === c.trackId);
+    const r = document.querySelector('.with-picker canvas')!.getBoundingClientRect();
+    const v = st.ui.playlist;
+    return { x: r.left + 150 + (c.start - v.scrollTick) * v.pxPerTick + c.length * v.pxPerTick * 0.3, y: r.top + 24 + ti * v.trackHeight - v.scrollY + v.trackHeight - 6 };
+  }, clip.id);
+  await page.mouse.click(box.x, box.y, { button: 'right' });
+  s = await state(page);
+  const pts = s.project.channels.find((c: any) => c.kind === 'automation').automation.points;
+  expect(pts).toHaveLength(3);
+  expect(pts[1].value).toBeLessThan(0.3);
+  expect(errors).toEqual([]);
+});
+
+test('automation clips drive the control during song playback', async ({ page }) => {
+  await boot(page);
+  const value = await page.evaluate(async () => {
+    const m = window.__madStudio;
+    const st = m.useStore.getState();
+    const target = `mx:0:volume`;
+    m.createAutomationClip(target);
+    // Turn the flat line into a ramp down to zero over the first bar.
+    const ch = m.useStore.getState().project.channels.find((c: any) => c.kind === 'automation');
+    m.updateAutomation(ch.id, (a: any) => {
+      a.points = [
+        { tick: 0, value: 0.8, tension: 0, mode: 'single' },
+        { tick: 384, value: 0, tension: 0, mode: 'single' },
+      ];
+    });
+    m.useStore.setState({ transport: { ...st.transport, mode: 'song', songStart: 0 } });
+    await m.engine.play();
+    await new Promise((r) => setTimeout(r, 1300));
+    const v = m.engine.automation.value(target);
+    m.engine.stop();
+    return v;
+  });
+  expect(value).toBeGreaterThanOrEqual(0);
+  expect(value).toBeLessThan(0.8);
 });

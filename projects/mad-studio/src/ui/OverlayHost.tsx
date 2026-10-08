@@ -121,6 +121,10 @@ function ContextMenu({ x, y, items, root = false }: { x: number; y: number; item
         {items.map((item, i) =>
           item.separator ? (
             <div key={i} className="menu-sep" />
+          ) : item.header ? (
+            <div key={i} className="menu-header">
+              {item.label}
+            </div>
           ) : (
             <button
               key={i}
@@ -139,7 +143,7 @@ function ContextMenu({ x, y, items, root = false }: { x: number; y: number; item
                 item.onClick?.();
               }}
             >
-              <span className="menu-check">{item.checked ? '✓' : ''}</span>
+              <span className={`menu-check ${item.radio ? 'radio' : ''}`}>{item.checked ? (item.radio ? '●' : '✓') : item.radio ? '○' : ''}</span>
               {item.swatch && <span className="menu-swatch" style={{ background: item.swatch }} />}
               <span className="menu-label">{item.label}</span>
               {item.shortcut && <span className="menu-shortcut">{item.shortcut}</span>}

@@ -1,8 +1,10 @@
 import { memo, useEffect, useMemo, useRef, type DragEvent, type PointerEvent as ReactPointerEvent, type WheelEvent as ReactWheelEvent } from 'react';
 import { engine } from '../../audio/engine';
 import { findPattern, patternLength, patternSteps, stepKey, stepView } from '../../model/patterns';
+import { evaluateAutomation } from '../../model/automation';
+import { channelTarget } from '../../model/automationTargets';
 import { TICKS_PER_STEP, formatPan, formatPosition } from '../../model/timing';
-import type { Channel, Note } from '../../model/types';
+import type { AutomationChannel, Channel, Note } from '../../model/types';
 import { addSamplerChannelFor, assignSampleToChannel, importAudioFiles } from '../../project/projectIO';
 import {
   addSynthChannel,
@@ -14,14 +16,15 @@ import {
   setPatternBars,
   setStep,
   setSwing,
+  setUi,
   soloChannel,
   toggleChannelMute,
   updateNotes,
 } from '../../store/actions';
-import { useStore } from '../../store/store';
+import { useStore, type RackFilter } from '../../store/store';
 import { prepareCanvas, useFrame } from '../animation';
 import { DragNumber } from '../controls/DragNumber';
-import { IconPlus, IconRack } from '../controls/Icons';
+import { IconCurve, IconPlug, IconPlus, IconRack } from '../controls/Icons';
 import { Knob } from '../controls/Knob';
 import { audioFilesFromDrop, getDragItem, hasDragItem, hasFiles, sampleInfoFor } from '../dnd';
 import { setHint } from '../hint';
@@ -45,8 +48,30 @@ function stepsWidth(count: number): number {
 /** Shared registry so one animation loop can light activity LEDs and step markers. */
 const activityLeds = new Map<string, HTMLElement>();
 
+const FILTERS: { id: RackFilter; label: string }[] = [
+  { id: 'all', label: 'All' },
+  { id: 'instruments', label: 'Instruments' },
+  { id: 'audio', label: 'Audio clips' },
+  { id: 'automation', label: 'Automation' },
+];
+
+function matchesFilter(c: Channel, f: RackFilter): boolean {
+  switch (f) {
+    case 'all':
+      return true;
+    case 'instruments':
+      return c.kind === 'synth' || c.kind === 'plugin' || (c.kind === 'sampler' && !c.audioClip);
+    case 'audio':
+      return c.kind === 'sampler' && !!c.audioClip;
+    case 'automation':
+      return c.kind === 'automation';
+  }
+}
+
 export function ChannelRack() {
-  const channels = useStore((s) => s.project.channels);
+  const allChannels = useStore((s) => s.project.channels);
+  const filter = useStore((s) => s.ui.rackFilter);
+  const channels = useMemo(() => allChannels.filter((c) => matchesFilter(c, filter)), [allChannels, filter]);
   const patternId = useStore((s) => s.ui.selectedPatternId);
   const pattern = useStore((s) => findPattern(s.project, s.ui.selectedPatternId));
   const beatsPerBar = useStore((s) => s.project.beatsPerBar);
@@ -94,15 +119,28 @@ export function ChannelRack() {
 
   const toolbar = (
     <>
+      <select
+        className="tb-select rack-filter"
+        value={filter}
+        data-hint="Channel filter (FL Studio: channel groups)"
+        onChange={(e) => setUi((u) => void (u.rackFilter = e.target.value as RackFilter))}
+      >
+        {FILTERS.map((f) => (
+          <option key={f.id} value={f.id}>
+            {f.label}
+          </option>
+        ))}
+      </select>
       <div className="tb-group" data-hint="Swing: delays every second 16th step">
         <Knob
           size={20}
-          label="Swing"
+          label="Main swing"
           value={swing}
           min={0}
           max={1}
           defaultValue={0}
           format={(v) => `${Math.round(v * 100)}%`}
+          target="proj:swing"
           onChange={(v, g) => setSwing(v, { coalesce: g })}
         />
         <span className="label">Swing</span>
@@ -148,7 +186,10 @@ export function ChannelRack() {
           <button className="btn" data-hint="Add a channel (synth, drum sound, sampler)" onClick={(e) => showMenu(e, addChannelMenu())}>
             <IconPlus size={12} /> Add channel
           </button>
-          <span className="faint">{channels.length} channels · {stepCount} steps · {formatPosition(pattern ? patternLength(pattern, beatsPerBar) : 0, beatsPerBar)}</span>
+          <span className="faint">
+            {channels.length}
+            {filter === 'all' ? '' : ` of ${allChannels.length}`} channels · {stepCount} steps · {formatPosition(pattern ? patternLength(pattern, beatsPerBar) : 0, beatsPerBar)}
+          </span>
         </div>
       </div>
     </WindowFrame>
@@ -220,6 +261,7 @@ const ChannelRow = memo(function ChannelRow({ channel, patternId, stepCount }: R
           defaultValue={0}
           bipolar
           format={formatPan}
+          target={channel.kind === 'automation' ? undefined : channelTarget(channel.id, 'pan')}
           onChange={(v, g) => setChannelProps(channel.id, { pan: v }, { coalesce: g })}
         />
         <Knob
@@ -230,20 +272,27 @@ const ChannelRow = memo(function ChannelRow({ channel, patternId, stepCount }: R
           max={1}
           defaultValue={0.8}
           format={(v) => `${Math.round(v * 100)}%`}
+          target={channel.kind === 'automation' ? undefined : channelTarget(channel.id, 'volume')}
           onChange={(v, g) => setChannelProps(channel.id, { volume: v }, { coalesce: g })}
         />
-        <DragNumber
-          className="mixer-num"
-          value={channel.mixerTrack}
-          min={0}
-          max={mixerCount - 1}
-          step={0.15}
-          hint={`Mixer track (${mixerName})`}
-          format={(v) => (v === 0 ? 'M' : String(v))}
-          onChange={(v, g) => setChannelProps(channel.id, { mixerTrack: v }, { coalesce: g })}
-        />
+        {channel.kind === 'automation' ? (
+          <span className="mixer-num automation-icon" data-hint="Automation clip">
+            <IconCurve size={13} />
+          </span>
+        ) : (
+          <DragNumber
+            className="mixer-num"
+            value={channel.mixerTrack}
+            min={0}
+            max={mixerCount - 1}
+            step={0.15}
+            hint={`Mixer track (${mixerName})`}
+            format={(v) => (v === 0 ? 'M' : String(v))}
+            onChange={(v, g) => setChannelProps(channel.id, { mixerTrack: v }, { coalesce: g })}
+          />
+        )}
         <button
-          className="channel-name"
+          className={`channel-name ${channel.kind}`}
           style={{ ['--ch' as string]: channel.color }}
           data-hint={`${channel.name} – click: instrument, right-click: options`}
           onClick={() => {
@@ -257,14 +306,52 @@ const ChannelRow = memo(function ChannelRow({ channel, patternId, stepCount }: R
           }}
         >
           <span className="activity-led" ref={ledRef} />
+          {channel.kind === 'plugin' && <IconPlug size={11} />}
           <span className="channel-name-text">{channel.name}</span>
         </button>
         <button className={`select-ind ${selected ? 'on' : ''}`} data-hint="Select channel (target of piano roll and keyboard)" onClick={() => selectChannel(channel.id)} />
       </div>
-      <StepArea channel={channel} patternId={patternId} notes={notes} stepCount={stepCount} />
+      {channel.kind === 'automation' ? (
+        <AutomationPreview channel={channel} stepCount={stepCount} />
+      ) : (
+        <StepArea channel={channel} patternId={patternId} notes={notes} stepCount={stepCount} />
+      )}
     </div>
   );
 });
+
+/** Automation channels show their curve where other channels have steps. */
+function AutomationPreview({ channel, stepCount }: { channel: AutomationChannel; stepCount: number }) {
+  const ref = useRef<HTMLCanvasElement>(null);
+  const width = stepsWidth(stepCount);
+  const height = 24;
+  useEffect(() => {
+    const canvas = ref.current;
+    if (!canvas) return;
+    const ctx = prepareCanvas(canvas, width, height);
+    if (!ctx) return;
+    ctx.clearRect(0, 0, width, height);
+    ctx.fillStyle = '#161b20';
+    ctx.fillRect(0, 0, width, height);
+    const data = channel.automation;
+    const len = Math.max(1, data.length);
+    ctx.beginPath();
+    for (let x = 0; x <= width; x++) {
+      const v = evaluateAutomation(data, (x / width) * len);
+      const y = height - 3 - v * (height - 6);
+      if (x === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    }
+    ctx.strokeStyle = channel.color;
+    ctx.lineWidth = 1.4;
+    ctx.stroke();
+  }, [channel.automation, channel.color, width]);
+  return (
+    <div className="rack-steps-area miniroll" style={{ width }} data-hint="Automation clip – click to edit" onClick={() => openChannelEditor(channel.id)}>
+      <canvas ref={ref} />
+    </div>
+  );
+}
 
 interface StepAreaProps {
   channel: Channel;

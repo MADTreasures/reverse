@@ -11,9 +11,13 @@ export interface MenuItem {
   /** Colour swatch shown before the label. */
   swatch?: string;
   submenu?: MenuItem[];
+  /** Section title (FL Studio style grey band), not clickable. */
+  header?: boolean;
+  /** Radio-style mark instead of a check mark. */
+  radio?: boolean;
 }
 
-export type CustomDialogId = 'export' | 'about' | 'shortcuts' | 'project';
+export type CustomDialogId = 'export' | 'about' | 'shortcuts' | 'project' | 'plugins' | 'audio';
 
 type DialogSpec =
   | { kind: 'prompt'; title: string; value: string; resolve: (v: string | null) => void }

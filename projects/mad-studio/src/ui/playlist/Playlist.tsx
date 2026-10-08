@@ -1,25 +1,32 @@
 import { useEffect, useMemo, useRef, useState, type DragEvent, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type WheelEvent as ReactWheelEvent } from 'react';
 import { engine } from '../../audio/engine';
+import { segmentMidValue } from '../../model/automation';
+import { describeTarget, fromNorm } from '../../model/automationTargets';
 import { songLength } from '../../model/patterns';
-import { SNAP_OPTIONS, snapFloor, snapRound, snapTicks, ticksPerBar, type SnapId } from '../../model/timing';
+import { SNAP_OPTIONS, formatPosition, snapFloor, snapRound, snapTicks, ticksPerBar, type SnapId } from '../../model/timing';
 import { makeId } from '../../model/ids';
-import type { Clip } from '../../model/types';
+import type { AutomationChannel, Clip, Id, Project } from '../../model/types';
 import { createAudioClip, importAudioFiles } from '../../project/projectIO';
 import {
+  addClip,
   addTracks,
   deleteClips,
   endCoalesce,
   gestureKey,
   placePatternClip,
   renameTrack,
+  selectChannel,
   selectPattern,
   setTransport,
   setUi,
   toggleTrackMute,
   updateClips,
 } from '../../store/actions';
-import { useStore, type ToolId } from '../../store/store';
+import { addAutomationPoint, moveAutomationPoint, placeAutomationClip, setPointTension } from '../../store/automationActions';
+import { useStore, type PlaylistPick, type ToolId } from '../../store/store';
 import { prepareCanvas, useElementSize, useFrame } from '../animation';
+import { hitTestCurve, tensionFromDrag, xToTick, yToValue, type CurveView } from '../automation/curve';
+import { pointMenu } from '../automation/pointMenu';
 import { IconEraser, IconPencil, IconPlaylist, IconSelect, IconBrush } from '../controls/Icons';
 import { audioFilesFromDrop, getDragItem, hasDragItem, hasFiles, sampleInfoFor } from '../dnd';
 import { setHint } from '../hint';
@@ -27,7 +34,8 @@ import { registerWindowKeys } from '../keyboard';
 import { promptDialog, showMenu } from '../overlays';
 import { WindowFrame } from '../workspace/WindowFrame';
 import { focusWindow, openChannelEditor, openWindow } from '../workspace/windows';
-import { RULER_H, TRACK_W, drawPlaylist, tickAtX, trackAtY, xOfTick, type PlaylistViewport } from './draw';
+import { RULER_H, TRACK_W, automationClipView, drawPlaylist, tickAtX, trackAtY, xOfTick, yOfTrack, type PlaylistViewport } from './draw';
+import { PlaylistPicker, usePick } from './PlaylistPicker';
 
 const EDGE = 7;
 
@@ -38,16 +46,33 @@ type Drag =
   | { kind: 'rubber'; t0: number; r0: number; t1: number; r1: number; base: Set<string> }
   | { kind: 'paint'; key: string; track: number; last: number }
   | { kind: 'seek' }
-  | { kind: 'pan'; x: number; y: number; scrollTick: number; scrollY: number };
+  | { kind: 'pan'; x: number; y: number; scrollTick: number; scrollY: number }
+  | { kind: 'autoPoint'; key: string; channelId: Id; clipId: Id; index: number; view: CurveView }
+  | { kind: 'autoTension'; key: string; channelId: Id; index: number; startY: number; startTension: number };
 
 let clipboard: Clip[] = [];
+
+/** Places the picker's current item (pattern, audio clip or automation clip) – FL's draw tool. */
+function placePick(project: Project, pick: PlaylistPick, trackId: Id, start: number, key: string): Id | null {
+  if (pick.kind === 'pattern') return placePatternClip(pick.id, trackId, start, { coalesce: key });
+  if (pick.kind === 'automation') return placeAutomationClip(pick.id, trackId, start, { coalesce: key });
+  const existing = project.clips.find((c) => c.kind === 'audio' && c.channelId === pick.id);
+  if (!existing) return null;
+  return addClip({ kind: 'audio', channelId: pick.id, trackId, start, length: existing.length + existing.offset, offset: 0 }, { coalesce: key });
+}
+
+function pickName(project: Project, pick: PlaylistPick): string {
+  if (pick.kind === 'pattern') return project.patterns.find((p) => p.id === pick.id)?.name ?? '';
+  return project.channels.find((c) => c.id === pick.id)?.name ?? '';
+}
 
 export function Playlist() {
   const project = useStore((s) => s.project);
   const view = useStore((s) => s.ui.playlist);
   const songStart = useStore((s) => s.transport.songStart);
-  const selectedPatternId = useStore((s) => s.ui.selectedPatternId);
+  const pick = usePick();
   const [selected, setSelected] = useState<Set<string>>(() => new Set());
+  const autoFocus = useRef<{ clipId: string; point: number | null; handle: number | null } | null>(null);
   const [wrapRef, size] = useElementSize<HTMLDivElement>();
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const drag = useRef<Drag | null>(null);
@@ -88,6 +113,7 @@ export function Playlist() {
       songEnd: sc.songEnd,
       rubber: d?.kind === 'rubber' ? { t0: d.t0, t1: d.t1, r0: d.r0, r1: d.r1 } : null,
       dropHint: dropHint.current,
+      autoFocus: autoFocus.current,
     });
   });
 
@@ -118,6 +144,26 @@ export function Playlist() {
       return { clip: c, edge: wide && right - x <= EDGE ? 'right' : wide && x - left <= EDGE ? 'left' : null };
     }
     return null;
+  };
+
+  /** Curve hit-test inside an automation clip's body (below its title). */
+  const automationAt = (clip: Clip, x: number, y: number) => {
+    if (clip.kind !== 'automation') return null;
+    const ch = project.channels.find((c): c is AutomationChannel => c.id === clip.channelId && c.kind === 'automation');
+    const ti = project.tracks.findIndex((t) => t.id === clip.trackId);
+    if (!ch || ti < 0) return null;
+    const cy = yOfTrack(vp, ti) + 1;
+    if (y < cy + 15 || view.trackHeight < 24) return null;
+    const cv = automationClipView(vp, clip, xOfTick(vp, clip.start), cy, view.trackHeight - 3);
+    const hit = hitTestCurve(cv, ch.automation, x, y, vp.pxPerTick * clip.length > 60);
+    return hit ? { ch, cv, hit } : null;
+  };
+
+  const setAutoFocus = (next: { clipId: string; point: number | null; handle: number | null } | null) => {
+    const cur = autoFocus.current;
+    if (cur?.clipId === next?.clipId && cur?.point === next?.point && cur?.handle === next?.handle) return;
+    autoFocus.current = next;
+    dirty.current = true;
   };
 
   const seekTo = (x: number) => {
@@ -162,6 +208,41 @@ export function Playlist() {
     const g = e.altKey ? 1 : grid;
     lastClick.current = { tick: snapFloor(Math.max(0, tick), g), track: ti };
     const hit = clipAt(x, y);
+    const auto = hit && !hit.edge ? automationAt(hit.clip, x, y) : null;
+    if (auto && hit && view.tool !== 'delete') {
+      const { ch, cv } = auto;
+      const key = gestureKey('automation');
+      const pts = ch.automation.points;
+      if (e.button === 2) {
+        // FL Studio: right-click on a point opens its menu, on a handle resets the tension,
+        // anywhere else in the clip adds a point (and keeps dragging it).
+        if (auto.hit.kind === 'point') {
+          showMenu(e, pointMenu(ch.id, ch.automation, auto.hit.index));
+          return;
+        }
+        if (auto.hit.kind === 'tension') {
+          setPointTension(ch.id, auto.hit.index, 0);
+          return;
+        }
+        const t = snapRound(xToTick(cv, x), g);
+        const index = addAutomationPoint(ch.id, t, yToValue(cv, y), { coalesce: key });
+        if (index >= 0) {
+          drag.current = { kind: 'autoPoint', key, channelId: ch.id, clipId: hit.clip.id, index, view: cv };
+          setAutoFocus({ clipId: hit.clip.id, point: index, handle: null });
+        }
+        return;
+      }
+      if (auto.hit.kind === 'point') {
+        selectChannel(ch.id);
+        setUi((u) => void (u.playlistPick = { kind: 'automation', id: ch.id }));
+        drag.current = { kind: 'autoPoint', key, channelId: ch.id, clipId: hit.clip.id, index: auto.hit.index, view: cv };
+        return;
+      }
+      if (auto.hit.kind === 'tension') {
+        drag.current = { kind: 'autoTension', key, channelId: ch.id, index: auto.hit.index, startY: e.clientY, startTension: pts[auto.hit.index].tension };
+        return;
+      }
+    }
     const tool: ToolId = e.button === 2 ? 'delete' : view.tool;
 
     if (tool === 'delete') {
@@ -177,7 +258,15 @@ export function Playlist() {
       return;
     }
     if (hit) {
-      if (hit.clip.kind === 'pattern') selectPattern(hit.clip.patternId);
+      if (hit.clip.kind === 'pattern') {
+        selectPattern(hit.clip.patternId);
+        setUi((u) => void (u.playlistPick = null));
+      } else {
+        const channelId = hit.clip.channelId;
+        const kind = hit.clip.kind;
+        setUi((u) => void (u.playlistPick = { kind, id: channelId }));
+        if (kind === 'automation') selectChannel(channelId);
+      }
       let sel = selected;
       if (e.metaKey || e.ctrlKey) {
         sel = new Set(selected);
@@ -208,10 +297,10 @@ export function Playlist() {
       drag.current = { kind: 'move', key, originTick: tick, originTrack: ti, orig, anchor };
       return;
     }
-    // Empty space: place the current pattern and keep dragging it.
+    // Empty space: place the picker's current item and keep dragging it.
     const key = gestureKey('place');
     const start = snapFloor(Math.max(0, tick), g);
-    const id = placePatternClip(selectedPatternId, track.id, start, { coalesce: key });
+    const id = placePick(project, pick, track.id, start, key);
     if (!id) return;
     if (tool === 'paint') {
       drag.current = { kind: 'paint', key, track: ti, last: start };
@@ -236,11 +325,39 @@ export function Playlist() {
         return;
       }
       const hit = clipAt(x, y);
+      const auto = hit && !hit.edge ? automationAt(hit.clip, x, y) : null;
+      if (auto && hit) {
+        const { ch, cv } = auto;
+        const pts = ch.automation.points;
+        const info = ch.automation.target ? describeTarget(project, ch.automation.target) : null;
+        const fmt = (n: number) => (info ? info.format(fromNorm(info, n)) : `${Math.round(n * 100)}%`);
+        if (auto.hit.kind === 'point') {
+          const p = pts[auto.hit.index];
+          e.currentTarget.style.cursor = 'grab';
+          setHint(`Point ${auto.hit.index + 1}/${pts.length}  ${fmt(p.value)} – drag: move, right-click: options`);
+          setAutoFocus({ clipId: hit.clip.id, point: auto.hit.index, handle: null });
+        } else if (auto.hit.kind === 'tension') {
+          const p = pts[auto.hit.index];
+          e.currentTarget.style.cursor = 'ns-resize';
+          setHint(`Point ${auto.hit.index} to ${auto.hit.index + 1} tension ${Math.round(p.tension * 100)}% – drag: bend, right-click: reset`);
+          setAutoFocus({ clipId: hit.clip.id, point: null, handle: auto.hit.index });
+        } else {
+          e.currentTarget.style.cursor = 'crosshair';
+          const t = xToTick(cv, x);
+          setHint(`${formatPosition(hit.clip.start - hit.clip.offset + t, project.beatsPerBar)}  ${fmt(yToValue(cv, y))} – right-click: add point, drag title: move clip`);
+          setAutoFocus({ clipId: hit.clip.id, point: null, handle: null });
+        }
+        return;
+      }
+      setAutoFocus(hit?.clip.kind === 'automation' ? { clipId: hit.clip.id, point: null, handle: null } : null);
       e.currentTarget.style.cursor = hit?.edge ? 'ew-resize' : hit ? 'move' : view.tool === 'delete' ? 'not-allowed' : 'copy';
       if (hit) {
-        const label = hit.clip.kind === 'pattern' ? project.patterns.find((p) => p.id === (hit.clip as Extract<Clip, { kind: 'pattern' }>).patternId)?.name : 'Audio clip';
+        const label =
+          hit.clip.kind === 'pattern'
+            ? project.patterns.find((p) => p.id === (hit.clip as Extract<Clip, { kind: 'pattern' }>).patternId)?.name
+            : (project.channels.find((c) => c.id === (hit.clip as Extract<Clip, { kind: 'audio' | 'automation' }>).channelId)?.name ?? 'Clip');
         setHint(`${label} – drag: move, edges: resize, Shift+drag: duplicate, right-click: delete`);
-      } else setHint(`Click to place “${project.patterns.find((p) => p.id === selectedPatternId)?.name ?? ''}”`);
+      } else setHint(`Click to place “${pickName(project, pick)}”`);
       return;
     }
     const g = e.altKey ? 1 : grid;
@@ -278,8 +395,34 @@ export function Playlist() {
         const covered = project.clips.some((c) => c.trackId === track?.id && start >= c.start && start < c.start + c.length);
         if (track && start > d.last && !covered) {
           d.last = start;
-          placePatternClip(selectedPatternId, track.id, start, { coalesce: d.key });
+          placePick(project, pick, track.id, start, d.key);
         }
+        break;
+      }
+      case 'autoPoint': {
+        const t = Math.max(0, snapRound(xToTick(d.view, x), g));
+        moveAutomationPoint(d.channelId, d.index, t, yToValue(d.view, y), { coalesce: d.key });
+        // Dragging the last point past the clip end stretches the clip (FL Studio).
+        const clip = useStore.getState().project.clips.find((c) => c.id === d.clipId);
+        const ch = useStore.getState().project.channels.find((c) => c.id === d.channelId);
+        if (clip && ch?.kind === 'automation' && d.index === ch.automation.points.length - 1 && t > clip.offset + clip.length) {
+          updateClips(
+            (list) => {
+              const c = list.find((x) => x.id === d.clipId);
+              if (c) c.length = t - c.offset;
+            },
+            { coalesce: d.key },
+          );
+        }
+        setAutoFocus({ clipId: d.clipId, point: d.index, handle: null });
+        break;
+      }
+      case 'autoTension': {
+        const ch = project.channels.find((c) => c.id === d.channelId);
+        if (ch?.kind !== 'automation') break;
+        const tension = tensionFromDrag(ch.automation.points, d.index, d.startTension, d.startY - e.clientY);
+        setPointTension(d.channelId, d.index, tension, { coalesce: d.key });
+        setHint(`Tension ${Math.round(tension * 100)}% · mid value ${Math.round(segmentMidValue(ch.automation.points, d.index) * 100)}%`);
         break;
       }
       case 'move': {
@@ -392,6 +535,10 @@ export function Playlist() {
       e.preventDefault();
       e.stopPropagation();
       createAudioClip(sampleInfoFor(item).info, track.id, pos.tick);
+    } else if (item?.type === 'pick') {
+      e.preventDefault();
+      e.stopPropagation();
+      placePick(project, { kind: item.kind, id: item.id }, track.id, pos.tick, gestureKey('drop'));
     } else if (hasFiles(e)) {
       e.preventDefault();
       e.stopPropagation();
@@ -467,10 +614,10 @@ export function Playlist() {
   const toolbar = (
     <>
       <div className="seg">
-        {toolButton('draw', <IconPencil size={12} />, 'Draw: click to place the current pattern, drag to move')}
-        {toolButton('paint', <IconBrush size={12} />, 'Paint: drag to place several clips')}
-        {toolButton('delete', <IconEraser size={12} />, 'Delete (right mouse button works in every tool)')}
-        {toolButton('select', <IconSelect size={12} />, 'Select: drag a rectangle')}
+        {toolButton('draw', <IconPencil size={12} />, 'Draw (P): click to place the picked pattern or clip, drag to move')}
+        {toolButton('paint', <IconBrush size={12} />, 'Paint (B): drag to place several clips')}
+        {toolButton('delete', <IconEraser size={12} />, 'Delete (D) – the right mouse button deletes in every tool')}
+        {toolButton('select', <IconSelect size={12} />, 'Select (E): drag a rectangle')}
       </div>
       <select className="tb-select" value={view.snap} data-hint="Snap to grid" onChange={(e) => setView({ snap: e.target.value as SnapId })}>
         {SNAP_OPTIONS.map((s) => (
@@ -479,13 +626,14 @@ export function Playlist() {
           </option>
         ))}
       </select>
-      <span className="faint">Drag samples from the browser to create audio clips</span>
+      <span className="faint">Right-click in an automation clip to add points</span>
     </>
   );
 
   return (
-    <WindowFrame id="playlist" title="Playlist" icon={<IconPlaylist />} toolbar={toolbar}>
-      <div className="editor" onDragOver={onDragOver} onDragLeave={() => (dropHint.current = null)} onDrop={onDrop}>
+    <WindowFrame id="playlist" title={`Playlist - Arrangement › ${pickName(project, pick)}`} icon={<IconPlaylist />} toolbar={toolbar}>
+      <div className="editor with-picker" onDragOver={onDragOver} onDragLeave={() => (dropHint.current = null)} onDrop={onDrop}>
+        <PlaylistPicker />
         <div className="editor-canvas-wrap" ref={wrapRef}>
           <canvas
             ref={canvasRef}

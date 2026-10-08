@@ -1,7 +1,11 @@
 import { useRef, type PointerEvent as ReactPointerEvent } from 'react';
 import { formatDb, volumeToGain } from '../../model/timing';
 import { endCoalesce, gestureKey } from '../../store/actions';
+import { noteTweaked } from '../../store/automationActions';
 import { setHint } from '../hint';
+import { controlMenu } from '../menus/controlMenu';
+import { showMenu } from '../overlays';
+import { useAutomatedValue } from './Knob';
 
 interface FaderProps {
   value: number;
@@ -9,17 +13,22 @@ interface FaderProps {
   label?: string;
   height?: number;
   defaultValue?: number;
+  /** Automation target key. */
+  target?: string;
 }
 
 /** Vertical volume fader (0..1 position, 0.8 = 0 dB). */
-export function Fader({ value, onChange, label = 'Volume', height = 120, defaultValue = 0.8 }: FaderProps) {
+export function Fader({ value, onChange, label = 'Volume', height = 120, defaultValue = 0.8, target }: FaderProps) {
   const drag = useRef<{ startY: number; startV: number; key: string } | null>(null);
+  const automated = useAutomatedValue(target);
+  const shown = automated ?? value;
   const travel = height - 18;
   const describe = (v: number) => `${label}: ${formatDb(volumeToGain(v))}`;
 
   const set = (v: number, key: string) => {
     const c = Math.min(1, Math.max(0, v));
     onChange(c, key);
+    if (target) noteTweaked(target);
     setHint(describe(c));
   };
 
@@ -62,14 +71,19 @@ export function Fader({ value, onChange, label = 'Volume', height = 120, default
         endCoalesce();
       }}
       onWheel={(e) => set(value + (e.deltaY < 0 ? 0.01 : -0.01) * (e.shiftKey ? 0.25 : 1), `wheel:${label}`)}
-      onMouseEnter={() => setHint(describe(value))}
+      onMouseEnter={() => setHint(describe(shown))}
+      onContextMenu={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        showMenu(e, controlMenu({ label, value, min: 0, max: 1, defaultValue, onChange, target, format: (v) => formatDb(volumeToGain(v)) }));
+      }}
       role="slider"
       aria-label={label}
-      aria-valuenow={value}
+      aria-valuenow={shown}
     >
       <div className="fader-slot" />
       <div className="fader-unity" style={{ top: 9 + 0.2 * travel }} />
-      <div className="fader-cap" style={{ top: (1 - value) * travel }} />
+      <div className={`fader-cap ${automated !== undefined ? 'automated' : ''}`} style={{ top: (1 - shown) * travel }} />
     </div>
   );
 }

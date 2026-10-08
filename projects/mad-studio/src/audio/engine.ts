@@ -6,6 +6,7 @@ import { snapRound, snapTicks } from '../model/timing';
 import type { Id, SynthChannel } from '../model/types';
 import { addNotes, endCoalesce, setTransport } from '../store/actions';
 import { useStore, type AppState } from '../store/store';
+import { AutomationRuntime } from './automationRuntime';
 import { ProjectGraph } from './graph';
 import { SynthInstrument } from './instruments/synth';
 import type { Voice } from './instruments/voice';
@@ -35,20 +36,35 @@ export class AudioEngine {
   private nextHandle = 1;
   private take = 0;
   private initPromise: Promise<void> | null = null;
+  /** Playlist automation clips (song mode). */
+  readonly automation = new AutomationRuntime();
 
   constructor() {
     this.scheduler = new Scheduler({
       now: () => this.ctx?.currentTime ?? 0,
       timeline: () => this.currentTimeline(),
-      bpm: () => useStore.getState().project.bpm,
-      swing: () => useStore.getState().project.swing,
+      bpm: () => this.automation.value('proj:bpm') ?? useStore.getState().project.bpm,
+      swing: () => this.automation.value('proj:swing') ?? useStore.getState().project.swing,
       beatsPerBar: () => useStore.getState().project.beatsPerBar,
       onEvent: (ev, time, spt) => this.graph?.trigger(ev, time, spt),
       onBeat: (_beat, barStart, time) => {
         if (useStore.getState().transport.metronome) this.graph?.metronomeClick(time, barStart);
       },
     });
-    this.ticker = new Ticker(() => this.scheduler.pump());
+    this.ticker = new Ticker(() => {
+      this.pumpAutomation();
+      this.scheduler.pump();
+    });
+  }
+
+  /** Song mode: evaluates automation clips at the position being rendered now and updates the graph. */
+  private pumpAutomation(): void {
+    const ctx = this.ctx;
+    const s = useStore.getState();
+    if (!ctx || !this.scheduler.playing || s.transport.mode !== 'song') return;
+    const tick = this.scheduler.positionAt(ctx.currentTime);
+    if (tick === null) return;
+    if (this.automation.update(s.project, tick)) this.graph?.sync(this.automation.apply(s.project));
   }
 
   /** Creates the AudioContext and graph (idempotent). */
@@ -62,7 +78,7 @@ export class AudioEngine {
     this.ctx = ctx;
     samplePool.ensureFactorySamples(ctx.sampleRate);
     const graph = new ProjectGraph(ctx, samplePool, { meters: true });
-    graph.sync(useStore.getState().project);
+    graph.sync(this.automation.apply(useStore.getState().project));
     this.graph = graph;
     useStore.subscribe((state, prev) => this.onStoreChange(state, prev));
     samplePool.subscribe(() => useStore.setState((s) => ({ sampleRevision: s.sampleRevision + 1 })));
@@ -71,7 +87,8 @@ export class AudioEngine {
 
   private onStoreChange(state: AppState, prev: AppState): void {
     if (state.project !== prev.project) {
-      this.graph?.sync(state.project);
+      this.automation.reconcile(state.project);
+      this.graph?.sync(this.automation.apply(state.project));
       this.timeline = null;
     }
     if (state.ui.selectedPatternId !== prev.ui.selectedPatternId) this.timeline = null;
@@ -114,6 +131,7 @@ export class AudioEngine {
     this.timeline = null;
     this.take += 1;
     const from = s.transport.mode === 'song' ? s.transport.songStart : 0;
+    if (s.transport.mode === 'song' && this.automation.update(s.project, from)) this.graph?.sync(this.automation.apply(s.project));
     this.scheduler.start(from, ctx.currentTime + 0.05);
     this.ticker.start();
     setTransport({ playing: true });
@@ -269,6 +287,12 @@ export class AudioEngine {
   get sampleRate(): number {
     return this.ctx?.sampleRate ?? 44100;
   }
+
+  // Plugins only exist in the native engine (desktop app); the browser engine ignores these.
+  readonly isNative: boolean = false;
+  openPluginEditor(_key: string, _title: string): void {}
+  setPluginParam(_key: string, _index: number, _value: number): void {}
+  requestPluginParams(_key: string): void {}
 
   async renderWav(opts: RenderOptions & { bitDepth: WavBitDepth }): Promise<{ wav: Uint8Array; buffer: AudioBuffer }> {
     const buffer = await renderProject(useStore.getState().project, opts);

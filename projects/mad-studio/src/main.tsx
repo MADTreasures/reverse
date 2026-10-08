@@ -8,6 +8,7 @@ import { signalStats } from './audio/wav';
 import { native, isElectron, isMac } from './platform/platform';
 import { buildProjectBundle, listenForNativeOpen, openProjectBytes, restoreSession, startAutosave } from './project/projectIO';
 import * as actions from './store/actions';
+import { createAutomationClip, updateAutomation } from './store/automationActions';
 import { defaultWindows, useStore, type UiState } from './store/store';
 import { runCommand, type CommandId } from './ui/commands';
 import { enableMidi, installKeyboard } from './ui/keyboard';
@@ -101,7 +102,20 @@ async function boot(): Promise<void> {
 
   // Automation hooks for tests and power users.
   Object.assign(window, {
-    __madStudio: { useStore, actions, engine, samplePool, renderProject, bufferChannels, signalStats, buildProjectBundle, openProjectBytes, runCommand },
+    __madStudio: {
+      useStore,
+      actions,
+      engine,
+      samplePool,
+      renderProject,
+      bufferChannels,
+      signalStats,
+      buildProjectBundle,
+      openProjectBytes,
+      runCommand,
+      createAutomationClip,
+      updateAutomation,
+    },
   });
   native?.ready();
 }

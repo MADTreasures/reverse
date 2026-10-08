@@ -1,6 +1,6 @@
 import type { SequencedEvent } from '../model/timeline';
 import { volumeToGain } from '../model/timing';
-import type { Channel, EffectSlot, EffectType, MixerTrack, Project } from '../model/types';
+import type { AudioChannel, Channel, EffectSlot, MixerTrack, Project, SlotType } from '../model/types';
 import { createEffect, type EffectEnv, type EffectNode } from './effects/effects';
 import { SamplerInstrument } from './instruments/sampler';
 import { SynthInstrument } from './instruments/synth';
@@ -13,7 +13,7 @@ function smooth(param: AudioParam, value: number, ctx: BaseAudioContext): void {
 
 interface ActiveEffect {
   slotId: string;
-  type: EffectType;
+  type: SlotType;
   node: EffectNode;
   slot: EffectSlot | null;
 }
@@ -131,6 +131,13 @@ export class MixerTrackNode {
 
 type AnyInstrument = SynthInstrument | SamplerInstrument;
 
+/** Channels the browser engine can play (plugins need the native engine, automation makes no sound). */
+type WebChannel = Extract<AudioChannel, { kind: 'synth' | 'sampler' }>;
+
+function isWebChannel(c: Channel): c is WebChannel {
+  return c.kind === 'synth' || c.kind === 'sampler';
+}
+
 /** Instrument plus channel volume, pan and mute, routed to a mixer track. */
 class ChannelStrip {
   private instrument: AnyInstrument;
@@ -138,11 +145,11 @@ class ChannelStrip {
   private readonly panner: StereoPannerNode;
   private readonly mute: GainNode;
   private target: AudioNode | null = null;
-  channel: Channel;
+  channel: WebChannel;
 
   constructor(
     private readonly ctx: BaseAudioContext,
-    channel: Channel,
+    channel: WebChannel,
     private readonly pool: SamplePool,
     private readonly chokes: ChokeManager,
   ) {
@@ -157,19 +164,19 @@ class ChannelStrip {
     this.applyStrip(channel);
   }
 
-  private createInstrument(channel: Channel): AnyInstrument {
+  private createInstrument(channel: WebChannel): AnyInstrument {
     return channel.kind === 'synth'
       ? new SynthInstrument(this.ctx, channel)
       : new SamplerInstrument(this.ctx, channel.id, channel, this.pool, this.chokes);
   }
 
-  private applyStrip(channel: Channel): void {
+  private applyStrip(channel: WebChannel): void {
     smooth(this.volume.gain, volumeToGain(channel.volume), this.ctx);
     smooth(this.panner.pan, channel.pan, this.ctx);
     smooth(this.mute.gain, channel.muted ? 0 : 1, this.ctx);
   }
 
-  update(channel: Channel): void {
+  update(channel: WebChannel): void {
     if (channel === this.channel) return;
     const prev = this.channel;
     this.channel = channel;
@@ -258,14 +265,15 @@ export class ProjectGraph {
     const anySolo = project.mixer.some((t, i) => i > 0 && t.solo);
     project.mixer.forEach((t, i) => this.tracks[i].update(t, i === 0 || !anySolo || t.solo, env, force));
 
-    const ids = new Set(project.channels.map((c) => c.id));
+    const playable = project.channels.filter(isWebChannel);
+    const ids = new Set(playable.map((c) => c.id));
     for (const [id, strip] of this.strips) {
       if (!ids.has(id)) {
         strip.dispose();
         this.strips.delete(id);
       }
     }
-    for (const ch of project.channels) {
+    for (const ch of playable) {
       let strip = this.strips.get(ch.id);
       if (!strip) {
         strip = new ChannelStrip(this.ctx, ch, this.pool, this.chokes);

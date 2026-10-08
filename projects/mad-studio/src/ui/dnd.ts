@@ -9,7 +9,11 @@ export const DND_MIME = 'application/x-mad-studio';
 
 export type DragItem =
   | { type: 'sample'; sampleId: string; name: string; factoryKey?: string }
-  | { type: 'preset'; presetId: string; name: string };
+  | { type: 'preset'; presetId: string; name: string }
+  /** Playlist picker item (pattern, audio clip or automation clip). */
+  | { type: 'pick'; kind: 'pattern' | 'audio' | 'automation'; id: string; name: string }
+  /** Plugin from the plugin database. */
+  | { type: 'plugin'; uid: string; name: string };
 
 export function setDragItem(e: ReactDragEvent, item: DragItem): void {
   e.dataTransfer.setData(DND_MIME, JSON.stringify(item));
