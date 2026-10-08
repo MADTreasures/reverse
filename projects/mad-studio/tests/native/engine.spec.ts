@@ -146,12 +146,12 @@ test('desktop app drives the native engine: playback, VST3 plugins, render, plug
 
     // Plugin delay compensation (FL Studio: automatic PDC, the mixer's delay panel, wrapper latency).
     // MAD Test Delay on insert 2 reports 1000 samples; insert 1 (MAD Test Gain) waits for it.
-    const delayKey = await page.evaluate(() => {
+    const delayKey: string = await page.evaluate(() => {
       const m = window.__madStudio;
       const delay = m.usePlugins.getState().plugins.find((p: any) => p.name === 'MAD Test Delay');
-      return delay ? `fx:${m.actions.addPluginEffect(2, m.pluginInstanceFrom(delay))}` : null;
+      if (!delay) throw new Error('the scan did not find MAD Test Delay');
+      return `fx:${m.actions.addPluginEffect(2, m.pluginInstanceFrom(delay))}`;
     });
-    expect(delayKey).not.toBeNull();
     await expect.poll(() => page.evaluate((k) => window.__madStudio.usePlugins.getState().instances[k]?.state, delayKey)).toBe('ready');
     const latency = () =>
       page.evaluate(() => {
