@@ -6,7 +6,8 @@ import * as actions from '../store/actions';
 import { copy, cut, hasClip, pasteImage } from '../store/clipboard';
 import { getState, setState } from '../store/store';
 import { cancelTransform, confirmTransform, isTransforming, startTransform } from '../tools/transform';
-import { openDialog, promptDialog } from './overlays';
+import { CORRECTIONS, correctionLabel, defaultCorrection, type CorrectionType } from '../paint/tonal';
+import { openDialog, openTonalDialog, promptDialog } from './overlays';
 import { formatShortcut, normalizeShortcut } from './shortcuts';
 
 export interface Command {
@@ -36,6 +37,29 @@ async function renameCanvas(): Promise<void> {
   if (v !== null) actions.renameDocument(v);
 }
 
+/** Default shortcuts of Edit > Tonal correction (the reference has two). */
+const TONAL_KEYS: Partial<Record<CorrectionType, string[]>> = { hsl: ['Mod+u'], reverse: ['Mod+i'] };
+
+/** Edit > Tonal correction ▸ (the current layer's pixels) and Layer > New correction layer ▸. */
+const tonalCommands = (): Command[] =>
+  CORRECTIONS.flatMap(({ type }) => {
+    const dots = type === 'reverse' ? '' : '…';
+    return [
+      {
+        id: `tonal-${type}`,
+        label: `${correctionLabel(type)}${dots}`,
+        keys: TONAL_KEYS[type],
+        run: () => (type === 'reverse' ? actions.applyCorrectionNow(defaultCorrection('reverse')) : openTonalDialog({ kind: 'pixels', type })),
+        enabled: canEdit,
+      },
+      {
+        id: `correction-${type}`,
+        label: `${correctionLabel(type)}${dots}`,
+        run: () => (type === 'reverse' ? void actions.addCorrectionLayer(defaultCorrection('reverse')) : openTonalDialog({ kind: 'newLayer', type })),
+      },
+    ];
+  });
+
 const layerFlag = (key: 'clip' | 'reference' | 'draft' | 'locked', label: string): Pick<Command, 'run' | 'checked' | 'enabled'> => ({
   run: () => {
     const l = actions.activeLayer();
@@ -64,13 +88,10 @@ export const COMMANDS: Command[] = [
   { id: 'clear', label: 'Delete', keys: ['backspace', 'delete', 'Mod+backspace'], run: () => actions.clearLayer(), enabled: canEdit },
   { id: 'clearOutside', label: 'Delete outside selected area', keys: ['Shift+backspace', 'Shift+delete'], run: () => actions.clearOutsideSelection(), enabled: () => canEdit() && hasSelection() },
   { id: 'fill', label: 'Fill', keys: ['Alt+backspace', 'Alt+delete'], run: () => actions.fillWithColor(), enabled: canEdit },
-  { id: 'negative', label: 'Tonal correction: Reverse gradient', keys: ['Mod+i'], run: () => actions.applyFilterNow('invert(1)', 'Reverse gradient'), enabled: canEdit },
   { id: 'transform', label: 'Transform: Scale up/Scale down/Rotate', keys: ['Mod+t'], run: () => void startTransform('scaleRotate'), enabled: () => canEdit() && notTransforming() },
   { id: 'freeTransform', label: 'Transform: Free transform', keys: ['Mod+Shift+t'], run: () => void startTransform('free'), enabled: () => canEdit() && notTransforming() },
   { id: 'confirmTransform', label: 'Confirm transform', keys: ['enter'], run: () => confirmTransform(), enabled: () => isTransforming() },
   { id: 'cancelTransform', label: 'Cancel transform', keys: ['escape'], run: () => cancelTransform(), enabled: () => isTransforming() },
-  { id: 'hsl', label: 'Tonal correction: Hue/Saturation/Luminosity…', keys: ['Mod+u'], run: () => openDialog('hsl'), enabled: canEdit },
-  { id: 'brightnessContrast', label: 'Tonal correction: Brightness/Contrast…', run: () => openDialog('brightnessContrast'), enabled: canEdit },
   { id: 'canvasSize', label: 'Change canvas size…', run: () => openDialog('canvasSize'), enabled: notTransforming },
   { id: 'imageResolution', label: 'Change image resolution…', run: () => openDialog('imageResolution'), enabled: notTransforming },
   { id: 'flipLayerH', label: 'Flip layer horizontal', run: () => actions.flipLayer(true), enabled: canEdit },
@@ -87,6 +108,19 @@ export const COMMANDS: Command[] = [
     enabled: () => actions.activeLayer()?.kind === 'folder',
   },
   { id: 'duplicateLayer', label: 'Duplicate layer', run: () => actions.duplicateLayer() },
+  ...tonalCommands(),
+  {
+    id: 'correctionSettings',
+    label: 'Correction layer settings…',
+    run: () => {
+      const l = actions.activeLayer();
+      if (l?.kind === 'correction' && l.correction.type !== 'reverse') openTonalDialog({ kind: 'layer', layerId: l.id });
+    },
+    enabled: () => {
+      const l = actions.activeLayer();
+      return l?.kind === 'correction' && l.correction.type !== 'reverse';
+    },
+  },
   // Layer > Layer mask
   { id: 'maskOutside', label: 'Mask outside selection', run: () => actions.maskLayer(true), enabled: hasLayer },
   { id: 'maskSelection', label: 'Mask selection', run: () => actions.maskLayer(false), enabled: hasLayer },

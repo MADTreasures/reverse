@@ -141,8 +141,11 @@ Status: ✅ gleich · 🟡 ähnlich/vereinfacht · ❌ fehlt (noch)
 | Neue Ebene | direkt über der aktiven, bzw. oben in einem gewählten Ordner [BO, FOL] | gleich | ✅ | `folders: …` |
 | Vereinen | Mit unterer: verweigert bei gesperrten, ausgeblendeten, Entwurfsebenen; behält Name/Modus der unteren. Sichtbare vereinen: Ausgeblendete und Entwürfe bleiben [T582] | gleich | ✅ | `merging is refused …` |
 | Auf untere Ebene übertragen | Pixel nach unten, obere bleibt leer [JB] | gleich | ✅ | – |
+| Korrekturebenen | Layer > New Correction Layer: Brightness/Contrast, Level correction, Tone curve, Hue/Saturation/Luminosity, Color balance, Reverse gradient, Posterization, Binarization, Gradient map; wirken auf alle Ebenen darunter (im Ordner; bei „Through“ auch ausserhalb); mit gepaarter Maske (Auswahl = Wirkungsbereich); Einstellungen per Tipp aufs Miniaturbild, Reverse gradient ohne Einstellungen [TC, TCE] | gleich; beschneidbar auf die Ebene darunter; Formeln eigene Standardmodelle (im Handbuch nicht angegeben) | 🟡 | `correction layer: …`, `correction layers see the paper …`, Unit: `tonal corrections` |
+| Tonwertkorrektur (Bearbeiten) | dieselben 9 Korrekturen direkt auf die Ebene, mit Vorschau, nur in der Auswahl; ⌘U = Farbton/Sättigung/Helligkeit, ⌘I = Umkehren [TC, TCE, MENU] | gleich; Verlaufsumsetzung mit eigenen Vorlagen statt der mitgelieferten Materialien | 🟡 | `Edit > Tonal correction …` |
+| Papier | unterste Ebene des Stapels: Ebenenmodi und Korrekturebenen darüber wirken auf sie [LP] | gleich (Export mit transparentem Hintergrund ohne Papier) | ✅ | `correction layers see the paper …` |
 | Masken-Darstellung „Mask Expression“ (Verläufe ja/nein, Schwelle) | in den Ebeneneigenschaften [LPROP] | Masken wirken immer stufenlos | ❌ | – |
-| Vektor-, Text-, Füll-, Ton-, Korrekturebenen | vorhanden [WAL] | fehlen | ❌ | – |
+| Vektor-, Text-, Füll-, Tonebenen | vorhanden [WAL] | fehlen | ❌ | – |
 
 ### Ansicht, Undo, Dateien
 
@@ -228,6 +231,7 @@ Präfix `M/` = `https://help.clip-studio.com/en-us/manual_en/` (Handbuch Ver. 5.
 | NAV, CANVAS | `M/270_canvas/Navigating_the_canvas.htm`, `…/Canvas_window.htm` |
 | LP, BO, OLS, REF, DR, FOL, BL | `M/180_layers/Using_layers.htm`, `…/Basic_operations.htm`, `…/Other_layer_settings.htm`, `…/Reference_layers.htm`, `…/Draft_layers.htm`, `…/Layer_folders.htm`, `…/Blending_modes.htm` |
 | MASK, LPROP | `M/180_layers/Layer_masks.htm`, `…/Layer_properties.htm` |
+| TC, TCE, GD | `M/390_filters/Tonal_Correction.htm`, `…/Tonal_Correction_Effects.htm`, `M/810_subtools/G.htm` (Gradient dialog) |
 | JB, JS | `https://help.clip-studio.com/ja-jp/manual_jp/180_layers/` (Grundoperationen, nützliche Einstellungen) |
 | FILL, GRAD | `M/420_fill/Fill_Tool.htm`, `…/Gradient_Tool.htm` |
 | SEL (Auswahl), AUTO, LCH | `M/330_selection/Selection_area.htm`, `…/Auto_select_tool.htm`, `…/Selection_Launcher.htm` |

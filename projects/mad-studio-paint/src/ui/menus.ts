@@ -7,6 +7,9 @@ export interface MenuSpec {
 
 export type MenuItem = string | MenuSpec;
 
+/** Tonal corrections in the reference's menu order (see paint/tonal.ts). */
+const TONAL = ['brightnessContrast', 'levels', 'toneCurve', 'hsl', 'colorBalance', 'reverse', 'posterize', 'binarize', 'gradientMap'];
+
 export const MENUS: MenuSpec[] = [
   { label: 'File', items: ['new', 'open', '-', 'save', 'saveAs', '-', 'importImage', 'export', '-', 'renameCanvas', '-', 'preferences'] },
   {
@@ -22,9 +25,7 @@ export const MENUS: MenuSpec[] = [
       'clearOutside',
       '-',
       'fill',
-      'hsl',
-      'brightnessContrast',
-      'negative',
+      { label: 'Tonal correction', items: TONAL.map((t) => `tonal-${t}`) },
       '-',
       'transform',
       'freeTransform',
@@ -40,6 +41,8 @@ export const MENUS: MenuSpec[] = [
     items: [
       'newRasterLayer',
       'newFolder',
+      { label: 'New correction layer', items: TONAL.map((t) => `correction-${t}`) },
+      'correctionSettings',
       'groupLayer',
       'ungroupLayer',
       '-',

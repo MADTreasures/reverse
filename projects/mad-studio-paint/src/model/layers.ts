@@ -1,5 +1,6 @@
 import { uid } from './ids';
-import type { FolderLayer, Id, Layer, LayerMask, PaintDocument, RasterLayer } from './types';
+import type { Correction } from '../paint/tonal';
+import type { CorrectionLayer, FolderLayer, Id, Layer, LayerMask, PaintDocument, RasterLayer } from './types';
 
 export function createRasterLayer(name: string, patch: Partial<RasterLayer> = {}): RasterLayer {
   return {
@@ -32,6 +33,23 @@ export function createFolder(name: string, children: Layer[] = [], patch: Partia
     draft: false,
     expanded: true,
     children,
+    ...patch,
+  };
+}
+
+export function createCorrectionLayer(name: string, correction: Correction, patch: Partial<CorrectionLayer> = {}): CorrectionLayer {
+  return {
+    id: uid('c'),
+    kind: 'correction',
+    name,
+    visible: true,
+    opacity: 1,
+    blend: 'normal',
+    clip: false,
+    locked: false,
+    reference: false,
+    draft: false,
+    correction,
     ...patch,
   };
 }
@@ -189,8 +207,8 @@ export function clipGroups(siblings: Layer[]): ClipGroup[] {
   const groups: ClipGroup[] = [];
   for (const layer of bottomUp) {
     const current = groups[groups.length - 1];
-    // Nothing can clip to a "Through" folder: such layers are drawn as normal layers.
-    const canClip = current && !(current.base.kind === 'folder' && current.base.blend === 'pass-through');
+    // Nothing can clip to a "Through" folder or a correction layer: such layers are drawn as normal layers.
+    const canClip = current && current.base.kind !== 'correction' && !(current.base.kind === 'folder' && current.base.blend === 'pass-through');
     if (layer.clip && canClip) current.clipped.push(layer);
     else groups.push({ base: layer, clipped: [] });
   }
@@ -206,7 +224,7 @@ export function cloneLayer(layer: Layer, idMap: Map<Id, Id> = new Map()): { copy
     return { ...m, id };
   };
   const copyOne = (l: Layer): Layer => {
-    const id = uid(l.kind === 'folder' ? 'f' : 'l');
+    const id = uid(l.kind === 'folder' ? 'f' : l.kind === 'correction' ? 'c' : 'l');
     idMap.set(l.id, id);
     const mask = copyMask(l.mask);
     if (l.kind === 'folder') return { ...l, id, mask, children: l.children.map(copyOne) };

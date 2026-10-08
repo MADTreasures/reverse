@@ -31,14 +31,9 @@ export async function confirmDiscard(): Promise<boolean> {
 export function renderMerged(opts: { paper: boolean; skipDraft: boolean; scale?: number } = { paper: true, skipDraft: true }): HTMLCanvasElement {
   const { doc } = getState();
   const full = createCanvas(doc.width, doc.height);
-  const ctx = ctx2d(full);
-  const layers = createCanvas(doc.width, doc.height);
-  engine.compositor.compose(doc, ctx2d(layers), { x: 0, y: 0, w: doc.width, h: doc.height }, { skipDraft: opts.skipDraft });
-  if (opts.paper && doc.paper.visible) {
-    ctx.fillStyle = doc.paper.color;
-    ctx.fillRect(0, 0, doc.width, doc.height);
-  }
-  ctx.drawImage(layers, 0, 0);
+  // The paper is part of the stack (blend modes and correction layers see it), unless left out.
+  const paper = opts.paper && doc.paper.visible ? doc.paper.color : null;
+  engine.compositor.compose(doc, ctx2d(full), { x: 0, y: 0, w: doc.width, h: doc.height }, { skipDraft: opts.skipDraft, paper });
   const scale = opts.scale ?? 1;
   if (scale === 1) return full;
   const out = createCanvas(Math.max(1, Math.round(doc.width * scale)), Math.max(1, Math.round(doc.height * scale)));

@@ -9,10 +9,11 @@ import { strFromU8, strToU8, unzipSync, zipSync } from 'fflate';
 import { isBlendMode } from '../model/blend';
 import { clampCanvasSide } from '../model/document';
 import { createRasterLayer } from '../model/layers';
-import type { FolderLayer, Id, Layer, LayerMask, PaintDocument, RasterLayer } from '../model/types';
+import type { CorrectionLayer, FolderLayer, Id, Layer, LayerMask, PaintDocument, RasterLayer } from '../model/types';
+import { sanitizeCorrection } from '../paint/tonal';
 
 export const FORMAT = 'mad-studio-paint';
-/** 2: layer masks. Version 1 files open unchanged. */
+/** 2: layer masks and correction layers. Version 1 files open unchanged. */
 export const FORMAT_VERSION = 2;
 export const EXTENSION = 'madpaint';
 
@@ -70,6 +71,15 @@ function sanitizeLayer(raw: unknown, seen: Set<string>, depth: number): Layer | 
       children,
     };
     return folder;
+  }
+  if (r.kind === 'correction') {
+    const correction: CorrectionLayer = {
+      ...common,
+      kind: 'correction',
+      blend: isBlendMode(r.blend) ? r.blend : 'normal',
+      correction: sanitizeCorrection(r.correction),
+    };
+    return correction;
   }
   const raster: RasterLayer = {
     ...common,

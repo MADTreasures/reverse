@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { BrightnessContrastDialog, CanvasSizeDialog, GaussianBlurDialog, HueSaturationDialog } from './dialogs/AdjustDialogs';
+import { CanvasSizeDialog, GaussianBlurDialog } from './dialogs/AdjustDialogs';
+import { TonalDialog } from './dialogs/TonalDialog';
 import { PreferencesDialog } from './dialogs/PreferencesDialog';
 import { ExportDialog } from './dialogs/ExportDialog';
 import { AboutDialog, ShortcutsDialog } from './dialogs/InfoDialogs';
@@ -48,8 +49,7 @@ export function OverlayHost() {
           {dialog.kind === 'custom' && dialog.id === 'export' && <ExportDialog />}
           {dialog.kind === 'custom' && dialog.id === 'about' && <AboutDialog />}
           {dialog.kind === 'custom' && dialog.id === 'shortcuts' && <ShortcutsDialog />}
-          {dialog.kind === 'custom' && dialog.id === 'hsl' && <HueSaturationDialog />}
-          {dialog.kind === 'custom' && dialog.id === 'brightnessContrast' && <BrightnessContrastDialog />}
+          {dialog.kind === 'tonal' && <TonalDialog target={dialog.target} />}
           {dialog.kind === 'custom' && dialog.id === 'gaussianBlur' && <GaussianBlurDialog />}
           {dialog.kind === 'custom' && dialog.id === 'preferences' && <PreferencesDialog />}
           {dialog.kind === 'custom' && dialog.id === 'canvasSize' && <CanvasSizeDialog mode="canvas" />}

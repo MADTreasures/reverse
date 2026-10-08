@@ -597,3 +597,120 @@ test('Through folders with opacity or a mask mix their result with the backdrop'
   expect(px.left.slice(0, 3)).toEqual([255, 0, 0]);
   expect(px.right.slice(0, 3)).toEqual([0, 0, 0]);
 });
+
+const openMenu = async (page: Page, menu: string, sub: string, command: string) => {
+  await page.getByRole('navigation', { name: 'Main menu' }).getByRole('button', { name: menu, exact: true }).dispatchEvent('pointerdown');
+  await page.locator('.menu-sub', { hasText: sub }).first().hover();
+  await page.locator(`[data-command=${command}]`).click();
+};
+
+test('correction layer: dialog preview, OK is one undo step, settings reopen from the icon', async ({ page }) => {
+  await boot(page);
+  await page.evaluate(() => {
+    const a = window.__madPaint.actions;
+    a.setDrawingColor('#808080');
+    a.fillWithColor();
+  });
+  await openMenu(page, 'Layer', 'New correction layer', 'correction-brightnessContrast');
+  const dialog = page.getByRole('dialog', { name: 'Brightness/Contrast' });
+  await expect(dialog).toBeVisible();
+  await dialog.getByRole('spinbutton', { name: 'Brightness' }).fill('50');
+  // The preview shows on the canvas while the dialog is open.
+  await expect.poll(() => shown(page, 10, 10)).toBeGreaterThan(160);
+  await dialog.getByRole('button', { name: 'OK' }).click();
+  const after = await state(page);
+  expect(after.layers[0]).toMatchObject({ kind: 'correction', name: 'Brightness/Contrast 1', correction: { type: 'brightnessContrast', brightness: 50 } });
+  expect(after.layers[0].mask).toBeTruthy();
+  // The pixels below are untouched.
+  expect(await page.evaluate(() => window.__madPaint.engine.sampleLayer(window.__madPaint.useStore.getState().doc.layers[1].id, 10, 10)[0])).toBe(128);
+  // Clicking the layer icon reopens the settings; Cancel restores them.
+  await page.locator('[data-testid=correction-icon]').click();
+  await expect(dialog.getByRole('spinbutton', { name: 'Brightness' })).toHaveValue('50');
+  await dialog.getByRole('spinbutton', { name: 'Brightness' }).fill('-50');
+  await expect.poll(() => shown(page, 10, 10)).toBeLessThan(100);
+  await dialog.getByRole('button', { name: 'Cancel' }).click();
+  await expect.poll(() => shown(page, 10, 10)).toBeGreaterThan(160);
+  // One undo removes the whole new layer.
+  await page.keyboard.press('ControlOrMeta+z');
+  expect((await state(page)).layers).toHaveLength(1);
+  expect(await shown(page, 10, 10)).toBe(128);
+});
+
+test('correction layers see the paper, can be clipped, and are limited by the selection', async ({ page }) => {
+  await boot(page);
+  const r = await page.evaluate(() => {
+    const m = window.__madPaint;
+    const a = m.actions;
+    // A red square on the left.
+    a.setDrawingColor('#ff0000');
+    a.setSelection({ width: 400, height: 300, data: new Uint8Array(400 * 300).map((_: number, i: number) => (i % 400 < 100 ? 255 : 0)) });
+    a.fillWithColor();
+    a.deselect();
+    a.addCorrectionLayer({ type: 'reverse' });
+    const root = { paper: m.engine.sampleDisplayed(300, 10, '#ffffff'), red: m.engine.sampleDisplayed(50, 10, '#ffffff') };
+    a.undo();
+    // Clipped onto the red layer, only the red pixels are inverted.
+    const id = a.addCorrectionLayer({ type: 'reverse' });
+    a.setLayerProps(id, { clip: true }, 'Clip to layer below');
+    const clipped = { paper: m.engine.sampleDisplayed(300, 10, '#ffffff'), red: m.engine.sampleDisplayed(50, 10, '#ffffff') };
+    a.undo();
+    a.undo();
+    // With a selection, the paired mask limits the effect to it.
+    a.setSelection({ width: 400, height: 300, data: new Uint8Array(400 * 300).map((_: number, i: number) => (i % 400 >= 200 ? 255 : 0)) });
+    a.addCorrectionLayer({ type: 'reverse' });
+    const masked = { left: m.engine.sampleDisplayed(150, 10, '#ffffff'), right: m.engine.sampleDisplayed(300, 10, '#ffffff') };
+    return { root, clipped, masked };
+  });
+  // Like the reference's paper layer, the paper is part of the stack.
+  expect(r.root.paper.slice(0, 3)).toEqual([0, 0, 0]);
+  expect(r.root.red.slice(0, 3)).toEqual([0, 255, 255]);
+  expect(r.clipped.paper.slice(0, 3)).toEqual([255, 255, 255]);
+  expect(r.clipped.red.slice(0, 3)).toEqual([0, 255, 255]);
+  expect(r.masked.left.slice(0, 3)).toEqual([255, 255, 255]);
+  expect(r.masked.right.slice(0, 3)).toEqual([0, 0, 0]);
+});
+
+test('Edit > Tonal correction changes pixels; tone curve points are added by clicking', async ({ page }) => {
+  await boot(page);
+  await page.evaluate(() => {
+    const a = window.__madPaint.actions;
+    a.setDrawingColor('#646464');
+    a.fillWithColor();
+  });
+  await openMenu(page, 'Edit', 'Tonal correction', 'tonal-posterize');
+  const posterize = page.getByRole('dialog', { name: 'Posterization' });
+  await posterize.getByRole('spinbutton', { name: 'Levels' }).fill('2');
+  await posterize.getByRole('button', { name: 'OK' }).click();
+  expect(await page.evaluate(() => window.__madPaint.engine.sampleLayer(window.__madPaint.useStore.getState().activeLayerId, 5, 5)[0])).toBe(0);
+  await page.keyboard.press('ControlOrMeta+z');
+  await openMenu(page, 'Edit', 'Tonal correction', 'tonal-toneCurve');
+  const curve = page.getByRole('dialog', { name: 'Tone curve' });
+  const box = (await curve.getByTestId('tone-curve').boundingBox())!;
+  // Drag the middle of the line up: brighter midtones.
+  await page.mouse.move(box.x + box.width * 0.4, box.y + box.height * 0.6);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width * 0.4, box.y + box.height * 0.3, { steps: 4 });
+  await page.mouse.up();
+  await curve.getByRole('button', { name: 'OK' }).click();
+  expect(await page.evaluate(() => window.__madPaint.engine.sampleLayer(window.__madPaint.useStore.getState().activeLayerId, 5, 5)[0])).toBeGreaterThan(140);
+  // ⌘I: Reverse gradient on the pixels.
+  await page.keyboard.press('ControlOrMeta+z');
+  await page.keyboard.press('ControlOrMeta+i');
+  expect(await page.evaluate(() => window.__madPaint.engine.sampleLayer(window.__madPaint.useStore.getState().activeLayerId, 5, 5)[0])).toBe(155);
+});
+
+test('gradient map correction layers are saved and reopened', async ({ page }) => {
+  await boot(page);
+  const px = await page.evaluate(async () => {
+    const m = window.__madPaint;
+    const a = m.actions;
+    a.setDrawingColor('#000000');
+    a.fillWithColor();
+    a.addCorrectionLayer({ type: 'gradientMap', stops: [{ pos: 0, color: '#ff0000', opacity: 1 }, { pos: 1, color: '#0000ff', opacity: 1 }] });
+    const bytes = await m.buildDocumentBytes();
+    await m.openFileBytes({ name: 'map.madpaint', data: bytes });
+    return m.engine.sampleDisplayed(5, 5, '#ffffff');
+  });
+  expect(px.slice(0, 3)).toEqual([255, 0, 0]);
+  await expect(page.locator('[data-testid=correction-icon]')).toHaveCount(1);
+});

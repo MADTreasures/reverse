@@ -80,29 +80,6 @@ function FragmentRow({ param, value, onChange }: { param: Param; value: number; 
   );
 }
 
-const HSL_PARAMS: Param[] = [
-  { key: 'hue', label: 'Hue', min: -180, max: 180 },
-  { key: 'saturation', label: 'Saturation', min: -100, max: 100 },
-  { key: 'luminosity', label: 'Luminosity', min: -100, max: 100 },
-];
-
-const buildHsl = (v: Record<string, number>) => `hue-rotate(${v.hue}deg) saturate(${1 + v.saturation / 100}) brightness(${1 + v.luminosity / 100})`;
-
-export function HueSaturationDialog() {
-  return <FilterDialog title="Hue/Saturation/Luminosity" params={HSL_PARAMS} build={buildHsl} label="Hue/Saturation/Luminosity" />;
-}
-
-const BC_PARAMS: Param[] = [
-  { key: 'brightness', label: 'Brightness', min: -100, max: 100 },
-  { key: 'contrast', label: 'Contrast', min: -100, max: 100 },
-];
-
-const buildBc = (v: Record<string, number>) => `brightness(${1 + v.brightness / 100}) contrast(${1 + v.contrast / 100})`;
-
-export function BrightnessContrastDialog() {
-  return <FilterDialog title="Brightness/Contrast" params={BC_PARAMS} build={buildBc} label="Brightness/Contrast" />;
-}
-
 const BLUR_PARAMS: Param[] = [{ key: 'radius', label: 'Strength (px)', min: 0, max: 100 }];
 
 const buildBlur = (v: Record<string, number>) => (v.radius > 0 ? `blur(${v.radius / 2}px)` : 'none');

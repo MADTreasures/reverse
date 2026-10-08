@@ -1,4 +1,5 @@
 /** Document model of MAD Studio Paint. Pixel data lives in surfaces (see engine/surfaces.ts), keyed by layer id. */
+import type { Correction } from '../paint/tonal';
 
 export type Id = string;
 
@@ -76,7 +77,14 @@ export interface FolderLayer extends LayerBase {
   children: Layer[];
 }
 
-export type Layer = RasterLayer | FolderLayer;
+/** Layer > New correction layer: corrects everything below it (in its folder) without changing pixels. */
+export interface CorrectionLayer extends LayerBase {
+  kind: 'correction';
+  blend: BlendMode;
+  correction: Correction;
+}
+
+export type Layer = RasterLayer | FolderLayer | CorrectionLayer;
 
 export interface PaperSettings {
   visible: boolean;

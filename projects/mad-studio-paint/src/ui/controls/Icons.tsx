@@ -208,6 +208,12 @@ const paths: Record<string, ReactNode> = {
       <path d="M2.5 4 6.4 7.5M17.5 4l-3.9 3.5M2.5 16l3.9-3.5M17.5 16l-3.9-3.5" />
     </>
   ),
+  correction: (
+    <>
+      <circle cx="10" cy="10" r="6.5" />
+      <path d="M10 3.5a6.5 6.5 0 0 1 0 13z" fill="currentColor" />
+    </>
+  ),
   check: <path d="m5 10.5 3.2 3.2L15 7" />,
   link: <path d="M8.5 11.5a3 3 0 0 0 4.2 0l2.6-2.6a3 3 0 0 0-4.2-4.2l-.8.8M11.5 8.5a3 3 0 0 0-4.2 0l-2.6 2.6a3 3 0 0 0 4.2 4.2l.8-.8" />,
   trash: (

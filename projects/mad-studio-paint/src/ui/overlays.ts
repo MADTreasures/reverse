@@ -1,4 +1,6 @@
 import { create } from 'zustand';
+import type { Id } from '../model/types';
+import type { CorrectionType } from '../paint/tonal';
 
 export interface MenuItem {
   label?: string;
@@ -10,12 +12,22 @@ export interface MenuItem {
   submenu?: MenuItem[];
 }
 
-export type CustomDialogId = 'newCanvas' | 'export' | 'canvasSize' | 'imageResolution' | 'hsl' | 'brightnessContrast' | 'gaussianBlur' | 'preferences' | 'about' | 'shortcuts';
+export type CustomDialogId = 'newCanvas' | 'export' | 'canvasSize' | 'imageResolution' | 'gaussianBlur' | 'preferences' | 'about' | 'shortcuts';
+
+/** What a tonal correction dialog changes. */
+export type TonalTarget =
+  /** Edit > Tonal correction: the current layer's pixels. */
+  | { kind: 'pixels'; type: CorrectionType }
+  /** Layer > New correction layer. */
+  | { kind: 'newLayer'; type: CorrectionType }
+  /** The settings of an existing correction layer. */
+  | { kind: 'layer'; layerId: Id };
 
 type DialogSpec =
   | { kind: 'prompt'; title: string; value: string; resolve: (v: string | null) => void }
   | { kind: 'confirm'; title: string; message: string; okLabel: string; danger: boolean; resolve: (v: boolean) => void }
-  | { kind: 'custom'; id: CustomDialogId };
+  | { kind: 'custom'; id: CustomDialogId }
+  | { kind: 'tonal'; target: TonalTarget };
 
 interface Toast {
   id: number;
@@ -75,6 +87,10 @@ export function confirmDialog(title: string, message: string, okLabel = 'OK', da
 
 export function openDialog(id: CustomDialogId): void {
   useOverlays.setState({ dialog: { kind: 'custom', id }, menu: null });
+}
+
+export function openTonalDialog(target: TonalTarget): void {
+  useOverlays.setState({ dialog: { kind: 'tonal', target }, menu: null });
 }
 
 export function closeDialog(): void {

@@ -3,6 +3,7 @@ import { pushHistory } from '../model/color';
 import { createDocument } from '../model/document';
 import {
   cloneLayer,
+  createCorrectionLayer,
   createFolder,
   createLayerMask,
   createRasterLayer,
@@ -22,6 +23,7 @@ import {
   type DropPosition,
 } from '../model/layers';
 import type { FolderLayer, Id, Layer, LayerMask, PaintDocument, RasterLayer } from '../model/types';
+import { applyCorrection, correctionLabel, type Correction } from '../paint/tonal';
 import { combine, createMask, expandMask, invertMask, isMaskEmpty, maskBounds, rectMask, type Mask, type SelectionOp } from '../paint/mask';
 import { mergeSubTools, type SubTool, type ToolId } from '../paint/tools';
 import { normalizeAngle, rotatePan } from '../paint/viewMath';
@@ -522,6 +524,78 @@ export function soloLayer(id: Id): void {
   });
 }
 
+// ------------------------------------------------------------------ dialog previews
+
+/** A document change shown live while a dialog is open; OK records it as one undo step. */
+export interface DocPreview {
+  before: DocState;
+}
+
+export function beginDocPreview(): DocPreview {
+  return { before: docState() };
+}
+
+/** Changes the document without an undo entry (the preview's commit records it). */
+export function previewDoc(fn: (doc: PaintDocument) => Id | void): void {
+  const s = getState();
+  const doc = structuredClone(s.doc);
+  const active = fn(doc) ?? s.activeLayerId;
+  setState({ doc, activeLayerId: findLayer(doc.layers, active) ? active : s.activeLayerId });
+}
+
+export function commitDocPreview(p: DocPreview, label: string): void {
+  const after = docState();
+  if (after.doc !== p.before.doc) commit({ label, before: p.before, after, patches: [] });
+}
+
+export function cancelDocPreview(p: DocPreview): void {
+  setActiveDoc(p.before);
+}
+
+// ------------------------------------------------------------------ correction layers
+
+/** A mask surface that shows everything, or only the selection when there is one. */
+function maskFromSelection(): LayerMask {
+  const { width, height } = getState().doc;
+  const mask = createLayerMask();
+  const ctx = ctx2d(ensureSurface(mask.id, width, height));
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, width, height);
+  const sel = engine.selectionCanvas();
+  if (sel) {
+    ctx.globalCompositeOperation = 'destination-in';
+    ctx.drawImage(sel, 0, 0);
+    ctx.globalCompositeOperation = 'source-over';
+  }
+  touch(mask.id);
+  return mask;
+}
+
+/**
+ * Layer > New correction layer: added above the current layer with its paired mask (limited to the
+ * selection, if any). With `preview` the change is not recorded yet (the settings dialog is open).
+ */
+export function addCorrectionLayer(correction: Correction, preview = false): Id {
+  const s = getState();
+  const layer = createCorrectionLayer(nextLayerName(s.doc, correctionLabel(correction.type)), correction, { mask: maskFromSelection() });
+  const insert = (doc: PaintDocument) => {
+    insertNew(doc, layer, s.activeLayerId);
+    return layer.id;
+  };
+  if (preview) previewDoc(insert);
+  else changeDoc('New correction layer', insert);
+  setState({ maskEditing: false });
+  return layer.id;
+}
+
+/** Changes a correction layer's settings without an undo entry (dialog preview). */
+export function previewCorrection(id: Id, correction: Correction): void {
+  previewDoc((doc) => {
+    const l = findLayer(doc.layers, id);
+    if (l?.kind === 'correction') l.correction = correction;
+  });
+}
+
 // ------------------------------------------------------------------ layer masks
 
 function maskedLayer(id: Id): Layer | null {
@@ -606,6 +680,10 @@ export function deleteMask(id: Id = getState().activeLayerId): void {
 export function applyMaskToLayer(id: Id = getState().activeLayerId): void {
   const l = maskedLayer(id);
   if (!l?.mask) return;
+  if (l.kind === 'correction') {
+    setState({ hint: 'The mask of a correction layer limits its effect; it cannot be applied' });
+    return;
+  }
   const s = getState();
   const maskSurface = getSurface(l.mask.id);
   if (!maskSurface) return;
@@ -700,8 +778,41 @@ export class FilterPreview {
     return this.edit !== null;
   }
 
-  /** Renders the layer with the filter applied (inside the selection only, if there is one). */
+  /** Renders the layer with a CSS filter applied (inside the selection only, if there is one). */
   apply(filter: string): void {
+    this.render((ctx, lifted) => {
+      ctx.filter = filter || 'none';
+      ctx.drawImage(lifted, 0, 0);
+      ctx.filter = 'none';
+    });
+  }
+
+  /** Renders the layer with a tonal correction applied (exact pixel maths, see paint/tonal.ts). */
+  applyCorrection(c: Correction | null): void {
+    this.render((ctx, lifted) => {
+      if (!c) {
+        ctx.drawImage(lifted, 0, 0);
+        return;
+      }
+      this.original ??= ctx2d(lifted, true).getImageData(0, 0, lifted.width, lifted.height);
+      const img = new ImageData(new Uint8ClampedArray(this.original.data), lifted.width, lifted.height);
+      applyCorrection(img.data, c);
+      const tmp = createCanvas(lifted.width, lifted.height);
+      ctx2d(tmp).putImageData(img, 0, 0);
+      ctx.drawImage(tmp, 0, 0);
+    });
+  }
+
+  /** The layer's pixels before the preview (for histograms). */
+  get pixels(): ImageData | null {
+    if (!this.lifted) return null;
+    this.original ??= ctx2d(this.lifted, true).getImageData(0, 0, this.lifted.width, this.lifted.height);
+    return this.original;
+  }
+
+  private original: ImageData | null = null;
+
+  private render(draw: (ctx: CanvasRenderingContext2D, lifted: HTMLCanvasElement) => void): void {
     const edit = this.edit;
     if (!edit || !this.lifted) return;
     const { width, height } = this.lifted;
@@ -711,9 +822,7 @@ export class FilterPreview {
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.globalCompositeOperation = 'copy';
     ctx.globalAlpha = 1;
-    ctx.filter = filter || 'none';
-    ctx.drawImage(this.lifted, 0, 0);
-    ctx.filter = 'none';
+    draw(ctx, this.lifted);
     if (sel) {
       // Outside the selection the original pixels stay.
       ctx.globalCompositeOperation = 'destination-in';
@@ -742,15 +851,15 @@ export class FilterPreview {
   }
 }
 
-/** Applies a CSS filter to the current layer in one step (e.g. Reverse gradient = invert). */
-export function applyFilterNow(filter: string, label: string): void {
+/** Applies a tonal correction to the current layer in one step (e.g. Reverse gradient). */
+export function applyCorrectionNow(c: Correction): void {
   const p = new FilterPreview();
   if (!p.ok) {
     setState({ hint: editBlocker() ?? '' });
     return;
   }
-  p.apply(filter);
-  p.commit(label);
+  p.applyCorrection(c);
+  p.commit(correctionLabel(c.type));
 }
 
 /** Resizes the canvas, keeping the image anchored at the centre (Edit > Change canvas size). */

@@ -1320,6 +1320,19 @@
   position: relative;
 }
 
+.correction-icon {
+  flex: none;
+  width: 40px;
+  height: 30px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text);
+  border: 1px solid #111;
+  background: var(--bg-3, #2a2a2a);
+  cursor: pointer;
+}
+
 .layer-thumb {
   border: 1px solid #111;
   background: conic-gradient(#cfcfcf 0 25%, #fff 0 50%, #cfcfcf 0 75%, #fff 0) 0 0 / 8px 8px;
@@ -1327,6 +1340,7 @@
 
 /* The selected thumbnail (layer pixels or mask) is the drawing target. */
 .thumb-wrap.target .layer-thumb,
+.correction-icon.target,
 .folder-icon.target {
   outline: 2px solid var(--accent);
   outline-offset: 0;
@@ -1561,4 +1575,114 @@
   font-size: 16px;
   pointer-events: none;
   z-index: 90;
+}
+
+/* ------------------------------------------------------------------ tonal correction dialog */
+
+.modal.tonal {
+  width: 480px;
+}
+
+.modal.tonal .form-grid {
+  grid-template-columns: 120px 1fr;
+}
+
+.preview-toggle {
+  margin-right: auto;
+}
+
+.histogram {
+  display: block;
+  width: 256px;
+  height: 96px;
+  background: var(--bg-0, #262626);
+  border: 1px solid var(--line);
+}
+
+.curve-box {
+  position: relative;
+  width: 256px;
+  height: 256px;
+}
+
+.curve-box .histogram {
+  position: absolute;
+  inset: 0;
+  width: 256px;
+  height: 256px;
+  opacity: 0.45;
+}
+
+.curve {
+  position: absolute;
+  inset: 0;
+  width: 256px;
+  height: 256px;
+  cursor: crosshair;
+  touch-action: none;
+}
+
+.curve .diagonal {
+  stroke: var(--line);
+  stroke-dasharray: 3 3;
+  fill: none;
+}
+
+.curve .line {
+  stroke: var(--text);
+  stroke-width: 1.5;
+  fill: none;
+}
+
+.curve circle {
+  fill: var(--bg-1);
+  stroke: var(--text);
+  stroke-width: 1.5;
+}
+
+.gradient-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.gradient-bar {
+  height: 22px;
+  border: 1px solid var(--line);
+  background-size: 100% 100%, 10px 10px;
+}
+
+.gradient-nodes {
+  position: relative;
+  height: 16px;
+  cursor: copy;
+}
+
+.gradient-node {
+  position: absolute;
+  top: 0;
+  width: 11px;
+  height: 14px;
+  margin-left: -6px;
+  border: 1px solid #111;
+  outline: 1px solid #fff;
+  clip-path: polygon(50% 0, 100% 35%, 100% 100%, 0 100%, 0 35%);
+  cursor: ew-resize;
+}
+
+.gradient-node.on {
+  outline: 2px solid var(--accent);
+  height: 16px;
+}
+
+.gradient-node-props {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin-top: 4px;
+}
+
+.gradient-node-props input[type='number'] {
+  width: 54px;
 }

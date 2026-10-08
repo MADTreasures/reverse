@@ -1,17 +1,23 @@
 /**
  * Composites the layer tree into one document-sized canvas.
- * Supports blend modes, opacity, layer masks, folders (isolated or pass-through) and clipping groups.
- * Only the dirty region is recomposed, so painting stays fast on large canvases.
+ * Supports blend modes, opacity, layer masks, folders (isolated or pass-through), clipping groups and
+ * correction layers. Only the dirty region is recomposed, so painting stays fast on large canvases.
  */
 import { nativeOp } from '../model/blend';
 import { clipGroups } from '../model/layers';
-import type { BlendMode, FolderBlendMode, Layer, PaintDocument } from '../model/types';
+import type { BlendMode, CorrectionLayer, FolderBlendMode, Layer, PaintDocument } from '../model/types';
 import { intersect, union, type Rect } from '../paint/rect';
+import { applyCorrection } from '../paint/tonal';
 import { blendInto } from './blendPixels';
 import { clearRect, createCanvas, ctx2d, type Ctx } from './canvas';
 import { getSurface } from './surfaces';
 
 export interface ComposeOptions {
+  /**
+   * Paper colour under all layers. Like the reference's paper layer it is part of the stack: blend
+   * modes and correction layers at the top level see it. Left out for transparent exports and fills.
+   */
+  paper?: string | null;
   /** Skip draft layers (exports). */
   skipDraft?: boolean;
   /** Only layers for which this returns true are drawn (e.g. reference layers for fill). */
@@ -104,7 +110,7 @@ export class Compositor {
     const r = this.dirty;
     if (!r) return null;
     this.dirty = null;
-    this.compose(doc, this.ctx, r, {});
+    this.compose(doc, this.ctx, r, { paper: doc.paper.visible ? doc.paper.color : null });
     return r;
   }
 
@@ -115,6 +121,10 @@ export class Compositor {
     target.rect(r.x, r.y, r.w, r.h);
     target.clip();
     clearRect(target, r);
+    if (opts.paper) {
+      target.fillStyle = opts.paper;
+      target.fillRect(r.x, r.y, r.w, r.h);
+    }
     this.composeList(doc.layers, target, r, opts);
     target.restore();
   }
@@ -130,7 +140,7 @@ export class Compositor {
       const base = group.base;
       if (!this.shown(base, opts)) continue;
       // A filtered-out base hides its whole clipping group.
-      if (opts.filter && base.kind === 'raster' && !opts.filter(base)) continue;
+      if (opts.filter && base.kind !== 'folder' && !opts.filter(base)) continue;
       const clipped = group.clipped.filter((l) => this.shown(l, opts) && (!opts.filter || l.kind === 'folder' || opts.filter(l)));
       if (clipped.length === 0) {
         this.drawLayer(base, target, r, opts);
@@ -142,6 +152,11 @@ export class Compositor {
       const baseAlpha = this.pool.acquire(r);
       baseAlpha.drawImage(group$.canvas, 0, 0);
       for (const layer of clipped) {
+        if (layer.kind === 'correction') {
+          // A clipped correction layer corrects only its clipping group.
+          this.drawCorrection(layer, group$, r);
+          continue;
+        }
         const tmp = this.pool.acquire(r);
         this.drawContent(layer, tmp, r, opts);
         tmp.globalCompositeOperation = 'destination-in';
@@ -156,8 +171,34 @@ export class Compositor {
     }
   }
 
+  /**
+   * Corrects what is already in `target` (everything below the layer in this stack) and mixes the
+   * result in with the layer's blending mode, opacity and mask.
+   */
+  private drawCorrection(layer: CorrectionLayer, target: Ctx, r: Rect): void {
+    const result = this.pool.acquire(r);
+    result.drawImage(target.canvas, 0, 0);
+    const img = result.getImageData(r.x, r.y, r.w, r.h);
+    applyCorrection(img.data, layer.correction);
+    result.putImageData(img, r.x, r.y);
+    let mixed = result;
+    if (layer.blend !== 'normal') {
+      // Other modes blend the corrected image onto the backdrop like a layer.
+      mixed = this.pool.acquire(r);
+      mixed.drawImage(target.canvas, 0, 0);
+      paint(mixed, result.canvas, r, 1, layer.blend);
+      this.pool.release(result);
+    }
+    mixInto(target, mixed, r, layer.opacity, maskOf(layer));
+    this.pool.release(mixed);
+  }
+
   /** Draws a layer with its own opacity and blend mode. */
   private drawLayer(layer: Layer, target: Ctx, r: Rect, opts: ComposeOptions): void {
+    if (layer.kind === 'correction') {
+      this.drawCorrection(layer, target, r);
+      return;
+    }
     if (layer.kind === 'raster') {
       const s = getSurface(layer.id);
       if (!s) return;
@@ -203,7 +244,7 @@ export class Compositor {
     if (layer.kind === 'raster') {
       const s = getSurface(layer.id);
       if (s) target.drawImage(s, 0, 0);
-    } else this.composeList(layer.children, target, r, opts);
+    } else if (layer.kind === 'folder') this.composeList(layer.children, target, r, opts);
     const mask = maskOf(layer);
     if (mask) applyMask(target, mask);
   }
@@ -226,6 +267,13 @@ function applyMask(ctx: Ctx, mask: HTMLCanvasElement): void {
  * premultiplied, so 'lighter' (a plain sum) adds the two weighted parts exactly.
  */
 function mixInto(target: Ctx, result: Ctx, r: Rect, opacity: number, mask: HTMLCanvasElement | null): void {
+  if (opacity >= 1 && !mask) {
+    // Within the clip, 'copy' replaces the target with the result.
+    target.globalCompositeOperation = 'copy';
+    target.drawImage(result.canvas, 0, 0);
+    target.globalCompositeOperation = 'source-over';
+    return;
+  }
   const weigh = (ctx: Ctx, op: GlobalCompositeOperation) => {
     ctx.globalCompositeOperation = op;
     ctx.globalAlpha = opacity;

@@ -6,7 +6,7 @@ import { isMac } from '../../platform/platform';
 import * as actions from '../../store/actions';
 import { getState, useStore } from '../../store/store';
 import { Icon } from '../controls/Icons';
-import { showMenu } from '../overlays';
+import { openTonalDialog, showMenu } from '../overlays';
 import { LayerThumb } from './LayerThumb';
 
 const blendLabel = (mode: FolderBlendMode) => FOLDER_BLEND_MODES.find((m) => m.id === mode)?.label ?? mode;
@@ -199,6 +199,9 @@ function LayerRow({ layer, depth, drag, setDrag, drop, setDrop }: RowsProps & { 
       { label: 'Merge with layer below', disabled: !actions.canMergeDown(), onClick: () => actions.mergeDown() },
       { separator: true },
       { label: 'Rename…', onClick: () => setEditing(true) },
+      ...(layer.kind === 'correction' && layer.correction.type !== 'reverse'
+        ? [{ label: 'Correction layer settings…', onClick: () => openTonalDialog({ kind: 'layer', layerId: layer.id }) }]
+        : []),
       ...(layer.kind === 'raster' ? [{ label: 'Select layer opacity area', onClick: () => actions.selectLayerOpacity(layer.id) }] : []),
       { separator: true },
       { label: 'Clip to layer below', checked: layer.clip, onClick: () => actions.setLayerProps(layer.id, { clip: !layer.clip }, 'Clip to layer below') },
@@ -298,6 +301,16 @@ function LayerRow({ layer, depth, drag, setDrag, drop, setDrop }: RowsProps & { 
             <Icon name="folder" size={22} />
           </span>
         </>
+      ) : layer.kind === 'correction' ? (
+        <span
+          className={`correction-icon ${active && layer.mask && !maskTarget ? 'target' : ''}`}
+          title={layer.correction.type === 'reverse' ? 'Correction layer' : 'Correction layer: click to change the settings'}
+          data-testid="correction-icon"
+          onPointerDown={pickTarget(false)}
+          onClick={() => layer.correction.type !== 'reverse' && openTonalDialog({ kind: 'layer', layerId: layer.id })}
+        >
+          <Icon name="correction" size={22} />
+        </span>
       ) : (
         <span
           className={`thumb-wrap ${active && layer.mask && !maskTarget ? 'target' : ''}`}
