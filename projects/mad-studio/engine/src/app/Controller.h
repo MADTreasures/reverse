@@ -1,6 +1,7 @@
 #pragma once
 
 #include "app/CommandLine.h"
+#include "core/Cadence.h"
 #include "core/Protocol.h"
 #include "engine/AudioEngine.h"
 #include "engine/GraphBuilder.h"
@@ -22,7 +23,7 @@ namespace mad
 
 /** The --stdio mode: owns the live engine, device, plugins and recorder, and executes the
     protocol commands on the message thread. */
-class Controller : private juce::Timer, private juce::AsyncUpdater
+class Controller : private juce::AsyncUpdater
 {
 public:
     explicit Controller (const CommandLine& args);
@@ -38,7 +39,7 @@ private:
     class RenderJob;
 
     void handleAsyncUpdate() override;
-    void timerCallback() override;
+    void tick();
     void dispatch (const protocol::Incoming& in);
     void handle (const juce::String& type, const juce::var& msg, const juce::var& requestId);
 
@@ -74,6 +75,9 @@ private:
     bool quitting = false;
 
     std::unique_ptr<RenderJob> render;
+
+    // Status and meter updates, 30 per second.
+    Cadence cadence { [this] { tick(); } };
 };
 
 } // namespace mad

@@ -123,7 +123,7 @@ Controller::Controller (const CommandLine& a) : args (a)
 Controller::~Controller()
 {
     quitting = true;
-    stopTimer();
+    cadence.stop();
     cancelPendingUpdate();
     render.reset();
     device.close();
@@ -152,7 +152,7 @@ void Controller::start()
         triggerAsyncUpdate();
     });
 
-    startTimerHz (30);
+    cadence.start (30);
 }
 
 void Controller::prepareForDevice (double sampleRate, int blockSize)
@@ -741,7 +741,7 @@ void Controller::sendMeters()
     protocol::writeLine (w.str());
 }
 
-void Controller::timerCallback()
+void Controller::tick()
 {
     if (quitting)
         return;

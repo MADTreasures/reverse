@@ -89,6 +89,8 @@ target_sources(MadEngine PRIVATE
     src/app/Controller.h
     src/app/CommandLine.cpp
     src/app/CommandLine.h
+    src/core/Cadence.cpp
+    src/core/Cadence.h
     src/core/Json.cpp
     src/core/Json.h
     src/core/Protocol.cpp
