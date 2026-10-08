@@ -2014,13 +2014,25 @@
 /* timeline palette */
 
 .timeline-palette {
+  position: relative;
   display: flex;
   flex-direction: column;
-  height: 168px;
+  height: 190px;
   min-height: 0;
   background: var(--bg-1);
   border-top: 1px solid var(--line);
   user-select: none;
+}
+
+/* the palette's top edge: drag to resize */
+.tl-resize {
+  position: absolute;
+  z-index: 6;
+  top: -3px;
+  left: 0;
+  right: 0;
+  height: 6px;
+  cursor: ns-resize;
 }
 
 .timeline-bar {

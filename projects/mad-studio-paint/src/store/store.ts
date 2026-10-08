@@ -111,6 +111,8 @@ export interface PaintState {
   onion: OnionSkin;
   /** Window > Timeline (also opened when a canvas gets a timeline). */
   timelineShown: boolean;
+  /** Height of the Timeline palette (px; dragged at its top edge). */
+  timelineHeight: number;
   /** Clips selected in the Timeline palette: their track and first frame. */
   clipSelection: ClipRef[];
   /** Keyframes selected in the Timeline palette: their track and frame. */
@@ -193,6 +195,7 @@ function initialState(): PaintState {
     onionSkin: false,
     onion: { ...DEFAULT_ONION },
     timelineShown: false,
+    timelineHeight: 190,
     clipSelection: [],
     keySelection: [],
     keyInterp: 'linear',

@@ -48,13 +48,14 @@ function persistPreferences(): void {
       ...(typeof p.showSelectionLauncher === 'boolean' ? { showSelectionLauncher: p.showSelectionLauncher } : {}),
       ...(typeof p.loop === 'boolean' ? { loop: p.loop } : {}),
       ...(typeof p.timelineShown === 'boolean' ? { timelineShown: p.timelineShown } : {}),
+      ...(typeof p.timelineHeight === 'number' && Number.isFinite(p.timelineHeight) ? { timelineHeight: Math.min(700, Math.max(110, p.timelineHeight)) } : {}),
       ...(p.onion ? { onion: sanitizeOnion(p.onion) } : {}),
     });
   } catch {
     // Ignore.
   }
   useStore.subscribe((s, prev) => {
-    const keys = ['workspace', 'showSelectionLauncher', 'loop', 'timelineShown', 'onion'] as const;
+    const keys = ['workspace', 'showSelectionLauncher', 'loop', 'timelineShown', 'timelineHeight', 'onion'] as const;
     if (keys.every((k) => s[k] === prev[k])) return;
     try {
       localStorage.setItem(PREFS_KEY, JSON.stringify(Object.fromEntries(keys.map((k) => [k, s[k]]))));

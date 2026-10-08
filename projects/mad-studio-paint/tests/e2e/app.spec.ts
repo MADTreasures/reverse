@@ -2036,6 +2036,14 @@ test('animation clips: trim, first and last displayed frame, merge, split, move,
   expect(await shown(page, 200, 100)).toBeLessThan(60);
   await ruler(8);
   expect(await shown(page, 200, 200)).toBeLessThan(60);
+  // The palette's top edge resizes it.
+  const edge = (await page.getByRole('separator', { name: 'Resize the Timeline palette' }).boundingBox())!;
+  const h0 = await page.evaluate(() => window.__madPaint.useStore.getState().timelineHeight);
+  await page.mouse.move(edge.x + 200, edge.y + 3);
+  await page.mouse.down();
+  await page.mouse.move(edge.x + 200, edge.y - 77, { steps: 4 });
+  await page.mouse.up();
+  expect(await page.evaluate(() => window.__madPaint.useStore.getState().timelineHeight)).toBe(h0 + 80);
   // Undo takes the paste back; clips are saved with the document.
   await page.evaluate(() => window.__madPaint.actions.undo());
   expect(await clips()).toEqual([

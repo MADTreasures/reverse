@@ -363,8 +363,8 @@ const findTrack = (id: Id) => timelineTracks(getState().doc.layers).find((r) => 
 export function TimelinePalette() {
   const timeline = useStore((s) => s.doc.timeline);
   const layers = useStore((s) => s.doc.layers);
-  const { frame, playing, loop, onionSkin, clipSelection } = useStore(
-    useShallow((s) => ({ frame: s.frame, playing: s.playing, loop: s.loop, onionSkin: s.onionSkin, clipSelection: s.clipSelection })),
+  const { frame, playing, loop, onionSkin, clipSelection, height } = useStore(
+    useShallow((s) => ({ frame: s.frame, playing: s.playing, loop: s.loop, onionSkin: s.onionSkin, clipSelection: s.clipSelection, height: s.timelineHeight })),
   );
   const activeId = useStore((s) => anim.currentTrackId(s));
   const soundDoc = useStore((s) => s.doc.sound);
@@ -523,8 +523,24 @@ export function TimelinePalette() {
       .map((c) => c.start + (drag?.kind === 'move' ? anim.clipMoveDelta(drag.delta) : 0))
       .join(',');
 
+  // Dragging the top edge makes the palette taller or lower.
+  const resize = (e: React.PointerEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    const y0 = e.clientY;
+    const h0 = getState().timelineHeight;
+    const max = Math.max(160, window.innerHeight - 260);
+    const move = (ev: PointerEvent) => setState({ timelineHeight: Math.round(Math.min(max, Math.max(110, h0 + y0 - ev.clientY))) });
+    const up = () => {
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+    };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+  };
+
   return (
-    <section className="timeline-palette" data-testid="timeline" aria-label="Timeline">
+    <section className="timeline-palette" data-testid="timeline" aria-label="Timeline" style={{ height }}>
+      <div className="tl-resize" role="separator" aria-orientation="horizontal" aria-label="Resize the Timeline palette" onPointerDown={resize} />
       <div className="timeline-bar">
         <span className="palette-title">Timeline</span>
         <Button icon="frameFirst" label="Go to start" disabled={!enabled} onClick={anim.firstFrame} />
