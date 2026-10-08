@@ -13,6 +13,7 @@ import { linesBounds, strokeBounds, type VectorStroke } from '../paint/vector';
 import { renderVectorStroke } from './brushEngine';
 import { renderTextLayer } from './textRender';
 import { createCanvas, ctx2d, maskToCanvas } from './canvas';
+import type { OnionSkin } from '../paint/animation';
 import { Compositor } from './compositor';
 import { patchBytes, type PixelPatch } from './edit';
 import { deleteSurface, ensureSurface, getSurface, resizeSurfaces, setSurface, surfaceIds, touch } from './surfaces';
@@ -233,6 +234,22 @@ class PaintEngine {
 
   get doc(): PaintDocument {
     return this.currentDoc!;
+  }
+
+  // ------------------------------------------------------------ animation
+
+  /** Shows another frame of the timeline (1 = first). */
+  setFrame(frame: number): void {
+    if (!this.compositor || this.compositor.frame === frame) return;
+    this.compositor.frame = frame;
+    this.invalidate();
+  }
+
+  /** Onion skin on the display (null: off). */
+  setOnion(onion: OnionSkin | null): void {
+    if (!this.compositor) return;
+    this.compositor.onion = onion;
+    this.invalidate();
   }
 
   // ------------------------------------------------------------ rendering

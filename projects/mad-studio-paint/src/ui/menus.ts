@@ -23,6 +23,7 @@ export const MENUS: MenuSpec[] = [
       '-',
       'importImage',
       'export',
+      { label: 'Export animation', items: ['exportSequence', 'exportGif', 'exportApng'] },
       '-',
       'renameCanvas',
       '-',
@@ -52,6 +53,22 @@ export const MENUS: MenuSpec[] = [
       '-',
       'imageResolution',
       'canvasSize',
+    ],
+  },
+  {
+    label: 'Animation',
+    items: [
+      { label: 'New animation layer', items: ['newAnimationFolder'] },
+      'newAnimationCel',
+      '-',
+      { label: 'Edit track', items: ['assignCel', 'removeAssignedCel', '-', 'selectPrevCel', 'selectNextCel'] },
+      { label: 'Timeline', items: ['newTimeline', 'timelineSettings', 'enableTimeline', '-', 'insertFrame', 'deleteFrame'] },
+      { label: 'Move frame', items: ['firstFrame', 'prevFrame', 'nextFrame', 'lastFrame'] },
+      '-',
+      { label: 'Show animation cels', items: ['onionSkin', 'onionSkinSettings'] },
+      '-',
+      'playStop',
+      { label: 'Playback settings', items: ['loopPlay'] },
     ],
   },
   {
@@ -120,7 +137,7 @@ export const MENUS: MenuSpec[] = [
     ],
   },
   { label: 'Filter', items: ['gaussianBlur'] },
-  { label: 'Window', items: ['workspaceDefault', 'workspaceClassic', '-', 'togglePalettes', 'toggleMenuBar'] },
+  { label: 'Window', items: ['workspaceDefault', 'workspaceClassic', '-', 'toggleTimeline', '-', 'togglePalettes', 'toggleMenuBar'] },
   { label: 'Help', items: ['shortcuts', 'about'] },
 ];
 

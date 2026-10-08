@@ -148,6 +148,22 @@ describe('PSD documents', () => {
     expect(group.mask).toMatchObject({ defaultColor: 0, left: 4, top: 4, right: 30, bottom: 25 });
   });
 
+  it('writes the cels of other frames hidden', () => {
+    const doc = createDocument('Anim', W, H);
+    const [c1, c2] = [createRasterLayer('1'), createRasterLayer('2')];
+    doc.layers = [createFolder('A', [c2, c1], { animation: { cels: [{ frame: 1, cel: c1.id }, { frame: 2, cel: c2.id }] } })];
+    doc.timeline = { enabled: true, fps: 8, frames: 2 };
+    const read = (frame: number) => readPsd(encodePsd({ ...source(doc, new Map()), frame }), { useImageData: true }).children![1].children!.map((l) => [l.name, Boolean(l.hidden)]);
+    expect(read(1)).toEqual([
+      ['1', false],
+      ['2', true],
+    ]);
+    expect(read(2)).toEqual([
+      ['1', true],
+      ['2', false],
+    ]);
+  });
+
   it('opens a flat document as one layer and refuses huge canvases', () => {
     const flat = writePsdUint8Array({ width: W, height: H, imageData: image(() => [10, 200, 30, 255]) });
     const { doc, pixels } = open(flat);

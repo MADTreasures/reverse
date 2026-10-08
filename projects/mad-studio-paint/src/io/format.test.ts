@@ -2,6 +2,7 @@ import { strFromU8, unzipSync } from 'fflate';
 import { describe, expect, it } from 'vitest';
 import { createDocument } from '../model/document';
 import { cloneDocument, createFolder, createLayerMask, createRasterLayer, createVectorLayer, flatten } from '../model/layers';
+import type { FolderLayer } from '../model/types';
 import { DEFAULT_BRUSH } from '../paint/tools';
 import { isDocumentFileName, isImageFileName, mimeForName, packDocument, sanitizeDocument, unpackDocument } from './format';
 
@@ -16,6 +17,21 @@ describe('.madpaint format', () => {
     expect(back.doc).toEqual(doc);
     expect(back.activeLayerId).toBe(ink.id);
     expect([...back.layers.get(ink.id)!]).toEqual([...png]);
+  });
+
+  it('keeps the timeline and animation tracks; assignments need a cel of the folder', () => {
+    const doc = createDocument('Anim', 200, 100, 72);
+    const [c1, c2] = [createRasterLayer('1'), createRasterLayer('2')];
+    doc.layers = [createFolder('A', [c2, c1], { animation: { cels: [{ frame: 1, cel: c1.id }, { frame: 3, cel: c2.id }, { frame: 5, cel: null }] } })];
+    doc.timeline = { enabled: true, fps: 12, frames: 24 };
+    const back = unpackDocument(packDocument({ doc, activeLayerId: null, layers: new Map() }));
+    expect(back.doc).toEqual(doc);
+    const odd = sanitizeDocument({
+      timeline: { fps: 0, frames: 5 },
+      layers: [{ id: 'f', kind: 'folder', animation: { cels: [{ frame: 2, cel: 'x' }, { frame: 1, cel: 'c' }] }, children: [{ id: 'c', kind: 'raster' }] }],
+    });
+    expect(odd.timeline).toEqual({ enabled: true, fps: 1, frames: 5 });
+    expect((odd.layers[0] as FolderLayer).animation).toEqual({ cels: [{ frame: 1, cel: 'c' }] });
   });
 
   it('keeps layer masks and drops masks that would share pixels', () => {

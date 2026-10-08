@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { CANVAS_PRESETS, MAX_CANVAS_SIDE, clampCanvasSide } from '../../model/document';
 import { newCanvas } from '../../io/documentIO';
+import { DEFAULT_TIMELINE, MAX_FPS, MAX_FRAMES } from '../../paint/animation';
 import { closeDialog } from '../overlays';
 
 export function NewCanvasDialog() {
@@ -10,6 +11,9 @@ export function NewCanvasDialog() {
   const [height, setHeight] = useState(CANVAS_PRESETS[0].height);
   const [dpi, setDpi] = useState(CANVAS_PRESETS[0].dpi);
   const [paper, setPaper] = useState('#ffffff');
+  const [animated, setAnimated] = useState(false);
+  const [cels, setCels] = useState(DEFAULT_TIMELINE.frames);
+  const [fps, setFps] = useState(DEFAULT_TIMELINE.fps);
 
   const choose = (id: string) => {
     const p = CANVAS_PRESETS.find((x) => x.id === id);
@@ -23,7 +27,7 @@ export function NewCanvasDialog() {
 
   const ok = () => {
     closeDialog();
-    void newCanvas(name.trim() || 'Untitled', clampCanvasSide(width), clampCanvasSide(height), Math.max(1, Math.round(dpi)), paper);
+    void newCanvas(name.trim() || 'Untitled', clampCanvasSide(width), clampCanvasSide(height), Math.max(1, Math.round(dpi)), paper, animated ? { cels, fps } : undefined);
   };
 
   return (
@@ -63,6 +67,22 @@ export function NewCanvasDialog() {
         </span>
         <label>Paper color</label>
         <input type="color" value={paper} onChange={(e) => setPaper(e.target.value)} aria-label="Paper color" />
+        <label />
+        <label className="check">
+          <input type="checkbox" checked={animated} onChange={(e) => setAnimated(e.target.checked)} /> Create animated illustration
+        </label>
+        {animated && (
+          <>
+            <label htmlFor="new-cels">Number of cels</label>
+            <input id="new-cels" type="number" min={1} max={MAX_FRAMES} value={cels} onChange={(e) => setCels(Math.max(1, Math.min(MAX_FRAMES, Math.round(Number(e.target.value)) || 1)))} />
+            <label htmlFor="new-fps">Frame rate</label>
+            <span className="with-unit">
+              <input id="new-fps" type="number" min={1} max={MAX_FPS} value={fps} onChange={(e) => setFps(Math.max(1, Math.min(MAX_FPS, Math.round(Number(e.target.value)) || 1)))} /> fps
+            </span>
+            <label>Playback time</label>
+            <span>{(cels / fps).toFixed(2)} s</span>
+          </>
+        )}
       </div>
       <div className="modal-actions">
         <button type="button" className="btn" onClick={closeDialog}>

@@ -8,6 +8,7 @@ import { createCanvas, ctx2d } from '../../engine/canvas';
 import { engine } from '../../engine/engine';
 import { getSurface, revisionOf } from '../../engine/surfaces';
 import { isMac } from '../../platform/platform';
+import { stop as stopPlayback } from '../../store/animationActions';
 import * as actions from '../../store/actions';
 import { getState, useStore } from '../../store/store';
 import { commitTextEdit } from '../../store/textActions';
@@ -184,6 +185,8 @@ export function CanvasView() {
       if (controller.busy) return;
       if (e.button !== 0 && e.button !== 1 && e.button !== 2) return;
       e.preventDefault();
+      // Working on the canvas stops playback (the cel shown becomes the one edited).
+      if (getState().playing) stopPlayback();
       // A click outside the text being typed confirms it (and does nothing else).
       if (getState().textEdit && e.button === 0 && !controller.mods.space) {
         commitTextEdit();

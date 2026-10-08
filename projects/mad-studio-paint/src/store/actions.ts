@@ -1,4 +1,6 @@
 /** Document operations. Every change that should be undoable goes through `commit`. */
+import { celBlocker, celOf, isAnimationFolder, nearestFrameOf, pruneTracks } from '../model/animation';
+import { celAt } from '../paint/animation';
 import { pushHistory } from '../model/color';
 import { createDocument } from '../model/document';
 import {
@@ -95,6 +97,8 @@ export function changeDoc(label: string, fn: (doc: PaintDocument, s: PaintState)
   const before = docState(s);
   const doc = cloneDocument(s.doc);
   const active = fn(doc, s) ?? s.activeLayerId;
+  // Cels that left their animation folder leave its track too.
+  pruneTracks(doc);
   const activeLayerId = findLayer(doc.layers, active) ? active : flatten(doc.layers)[0]?.id ?? '';
   setState({ doc, activeLayerId, ...(activeLayerId !== s.activeLayerId ? { maskEditing: false, selectedObjects: [] } : {}) });
   commit({ label, before, after: { doc, activeLayerId }, patches: opts.patches ?? [], key: opts.key });
@@ -151,13 +155,25 @@ export function loadDocument(doc: PaintDocument, images: Map<Id, HTMLCanvasEleme
     dirty: false,
     fileName,
     transforming: false,
+    frame: 1,
+    playing: false,
+    ...(doc.timeline ? { timelineShown: true } : {}),
   });
   fitToWindow();
 }
 
-export function newDocument(name: string, width: number, height: number, dpi: number, paperColor = '#ffffff'): void {
+/**
+ * File > New. An animated illustration gets a timeline (number of cels = frames, frame rate) and an
+ * animation folder "A" with cel "1" on the first frame.
+ */
+export function newDocument(name: string, width: number, height: number, dpi: number, paperColor = '#ffffff', animation?: { cels: number; fps: number }): void {
   const doc = createDocument(name, width, height, dpi);
   doc.paper.color = paperColor;
+  if (animation) {
+    const cel = createRasterLayer('1');
+    doc.layers = [createFolder('A', [cel], { animation: { cels: [{ frame: 1, cel: cel.id }] } })];
+    doc.timeline = { enabled: true, fps: animation.fps, frames: animation.cels };
+  }
   loadDocument(doc, new Map(), null);
 }
 
@@ -226,11 +242,12 @@ export function editBlocker(s: PaintState = getState()): string | null {
   if (!l) return 'No layer selected';
   if (!editTarget(s)) {
     if (l.kind === 'text' || l.kind === 'gradient') return `${l.kind === 'text' ? 'Text' : 'Gradient'} layers cannot be drawn on (Layer > Rasterize converts the layer)`;
+    if (isAnimationFolder(l)) return 'Select a cel to draw on, or make one with New animation cel';
     return 'Select a raster layer to draw on (folders cannot be drawn on)';
   }
   if (isEffectivelyLocked(s.doc.layers, l.id)) return 'The layer is locked';
   if (!l.visible) return 'The layer is hidden';
-  return null;
+  return celBlocker(s.doc, l.id, s.frame);
 }
 
 /** Why the active layer cannot be moved, flipped or transformed, or null. Text layers can be, although they cannot be drawn on. */
@@ -243,7 +260,14 @@ export function transformBlocker(s: PaintState = getState()): string | null {
 export function selectLayer(id: Id, mask = false): void {
   const s = getState();
   const l = findLayer(s.doc.layers, id);
-  if (l) setState({ activeLayerId: id, maskEditing: mask && Boolean(l.mask), ...(id !== s.activeLayerId ? { selectedObjects: [] } : {}) });
+  if (!l) return;
+  setState({ activeLayerId: id, maskEditing: mask && Boolean(l.mask), ...(id !== s.activeLayerId ? { selectedObjects: [] } : {}) });
+  // A cel that is not shown at the current frame: go to the nearest frame that shows it.
+  const c = s.doc.timeline?.enabled && !s.playing ? celOf(s.doc.layers, id) : null;
+  if (c && celAt(c.folder.animation, s.frame) !== c.cel.id) {
+    const frame = nearestFrameOf(c.folder, c.cel.id, s.frame);
+    if (frame !== null) setState({ frame });
+  }
 }
 
 /**

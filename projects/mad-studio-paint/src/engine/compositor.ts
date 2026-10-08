@@ -4,8 +4,10 @@
  * correction layers. Only the dirty region is recomposed, so painting stays fast on large canvases.
  */
 import { nativeOp } from '../model/blend';
+import { hexToRgb } from '../model/color';
+import { celAt, onionCels, onionOpacity, tintOnion, type OnionSkin } from '../paint/animation';
 import { clipGroups, flatten } from '../model/layers';
-import type { BlendMode, CorrectionLayer, FolderBlendMode, FolderLayer, GradientLayer, Layer, PaintDocument, RasterLayer, TextLayer, VectorLayer } from '../model/types';
+import type { BlendMode, CorrectionLayer, FolderBlendMode, FolderLayer, GradientLayer, Id, Layer, PaintDocument, RasterLayer, TextLayer, VectorLayer } from '../model/types';
 import { applyEdge, applyLayerColor, applyWatercolorEdge, effectReach } from '../paint/effects';
 import { inflate, intersect, union, type Rect } from '../paint/rect';
 import { applyCorrection } from '../paint/tonal';
@@ -25,6 +27,10 @@ export interface ComposeOptions {
   skipDraft?: boolean;
   /** Only layers for which this returns true are drawn (e.g. reference layers for fill). */
   filter?: (layer: Layer) => boolean;
+  /** Frame of the timeline to show (default: the current frame). */
+  frame?: number;
+  /** Onion skins around the current cels (only the display shows them). */
+  onion?: OnionSkin | null;
 }
 
 /**
@@ -86,6 +92,11 @@ export class Compositor {
   readonly framePreview = new Map<string, FramePanel[]>();
   /** Resolution of the document being composed (screentone frequencies are per inch). */
   private dpi = 72;
+  /** Current frame of the timeline (1 = first), and the onion skin the display shows (or null). */
+  frame = 1;
+  onion: OnionSkin | null = null;
+  /** What the composition under way shows: the frame (null: no timeline, every cel) and onion skins. */
+  private anim: { frame: number | null; onion: OnionSkin | null } = { frame: null, onion: null };
 
   constructor(width: number, height: number) {
     this.canvas = createCanvas(width, height);
@@ -124,13 +135,14 @@ export class Compositor {
     // Border effects reach beyond the changed pixels.
     const reach = flatten(doc.layers).reduce((n, l) => n + (l.visible ? effectReach(l.effects) : 0), 0);
     if (reach) r = intersect(inflate(r, reach), this.bounds) ?? r;
-    this.compose(doc, this.ctx, r, { paper: doc.paper.visible ? doc.paper.color : null });
+    this.compose(doc, this.ctx, r, { paper: doc.paper.visible ? doc.paper.color : null, onion: this.onion });
     return r;
   }
 
   /** Composes the document into `target` within `r`. Used for exports and colour sampling too. */
   compose(doc: PaintDocument, target: Ctx, r: Rect, opts: ComposeOptions): void {
     this.dpi = doc.dpi;
+    this.anim = doc.timeline?.enabled ? { frame: opts.frame ?? this.frame, onion: opts.onion ?? null } : { frame: null, onion: null };
     target.save();
     target.beginPath();
     target.rect(r.x, r.y, r.w, r.h);
@@ -150,6 +162,7 @@ export class Compositor {
    */
   layerImage(doc: PaintDocument, layer: Layer, opts: ComposeOptions = {}): HTMLCanvasElement {
     this.dpi = doc.dpi;
+    this.anim = { frame: doc.timeline?.enabled ? (opts.frame ?? this.frame) : null, onion: null };
     const out = createCanvas(this.canvas.width, this.canvas.height);
     this.drawContent(layer, ctx2d(out), this.bounds, opts);
     return out;
@@ -238,17 +251,18 @@ export class Compositor {
       return;
     }
     const mask = maskOf(layer);
-    // Frame border folders are always isolated (their panels clip the result).
-    if (layer.blend === 'pass-through' && !layer.frame) {
+    // Frame border folders are always isolated (their panels clip the result), and so are
+    // animation folders showing onion skins.
+    if (layer.blend === 'pass-through' && !layer.frame && !this.skinned(layer)) {
       if (layer.opacity >= 1 && !mask) {
-        this.composeList(layer.children, target, r, opts);
+        this.composeList(this.childrenShown(layer), target, r, opts);
         return;
       }
       // The children blend straight into (a copy of) the backdrop; opacity and mask then mix that
       // result with the untouched backdrop.
       const tmp = this.pool.acquire(r);
       tmp.drawImage(target.canvas, 0, 0);
-      this.composeList(layer.children, tmp, r, opts);
+      this.composeList(this.childrenShown(layer), tmp, r, opts);
       mixInto(target, tmp, r, layer.opacity, mask);
       this.pool.release(tmp);
       return;
@@ -269,7 +283,10 @@ export class Compositor {
     if (layer.kind !== 'folder') {
       const s = getSurface(layer.id);
       if (s) ctx.drawImage(s, 0, 0);
-    } else this.composeList(layer.children, ctx, rr, opts);
+    } else {
+      if (this.skinned(layer)) this.drawOnionSkins(layer, ctx, rr, opts);
+      this.composeList(this.childrenShown(layer), ctx, rr, opts);
+    }
     const mask = maskOf(layer);
     if (mask) applyMask(ctx, mask);
     if (layer.kind === 'folder' && layer.frame) this.drawFrame(ctx, layer.id, layer.frame);
@@ -286,6 +303,46 @@ export class Compositor {
       ctx.putImageData(new ImageData(data, rr.w, rr.h), rr.x, rr.y);
     }
     return ctx;
+  }
+
+  /** The layers of a folder that show: for an animation folder, the cel of the frame. */
+  private childrenShown(folder: FolderLayer): Layer[] {
+    if (!folder.animation || this.anim.frame === null) return folder.children;
+    const id = celAt(folder.animation, this.anim.frame);
+    const cel = id ? folder.children.find((c) => c.id === id) : undefined;
+    return cel ? [cel] : [];
+  }
+
+  private skinned(layer: Layer): boolean {
+    return layer.kind === 'folder' && Boolean(layer.animation) && this.anim.frame !== null && this.anim.onion !== null;
+  }
+
+  /** Onion skin: the cels before and after the current one, tinted and faded, under it. */
+  private drawOnionSkins(folder: FolderLayer, ctx: Ctx, r: Rect, opts: ComposeOptions): void {
+    const o = this.anim.onion!;
+    const { prev, next } = onionCels(folder.animation!, this.anim.frame!, o.before, o.after);
+    const skin = (id: Id, color: string, n: number) => {
+      const cel = folder.children.find((c) => c.id === id);
+      if (!cel || !this.shown(cel, opts)) return;
+      const tmp = this.pool.acquire(r);
+      this.drawContent(cel, tmp, r, opts);
+      if (o.mode !== 'color') {
+        const img = tmp.getImageData(r.x, r.y, r.w, r.h);
+        tintOnion(img.data, o.mode, hexToRgb(color) ?? { r: 0, g: 0, b: 0 });
+        tmp.putImageData(img, r.x, r.y);
+      }
+      ctx.globalAlpha = onionOpacity(o, n);
+      ctx.drawImage(tmp.canvas, 0, 0);
+      ctx.globalAlpha = 1;
+      this.pool.release(tmp);
+    };
+    // Further skins first, so the nearest lie on top.
+    for (const [ids, color] of [
+      [prev, o.prevColor],
+      [next, o.nextColor],
+    ] as const) {
+      for (let n = ids.length - 1; n >= 0; n--) skin(ids[n], color, n);
+    }
   }
 
   /** Frame border folder: keeps the content inside the panels and draws their border on top. */

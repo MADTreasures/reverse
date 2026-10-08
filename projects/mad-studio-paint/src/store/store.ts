@@ -5,6 +5,7 @@ import type { Mask, SelectionOp } from '../paint/mask';
 import { LINEAR, type CurvePoint } from '../paint/curve';
 import { DEFAULT_SUB_TOOLS, type SubTool, type ToolId, type WorkspaceId } from '../paint/tools';
 import type { TextBox } from '../paint/text';
+import { DEFAULT_ONION, type OnionSkin } from '../paint/animation';
 
 export interface ViewState {
   /** Screen pixels per document pixel. */
@@ -99,6 +100,16 @@ export interface PaintState {
   selectedObjects: string[];
   textEdit: TextEdit | null;
   prefs: Preferences;
+  /** Animation: the current frame of the timeline (1 = first). */
+  frame: number;
+  /** The timeline is playing; Loop play starts again at the end. */
+  playing: boolean;
+  loop: boolean;
+  /** Enable onion skin, and its settings (Animation > Show animation cels > Onion skin settings). */
+  onionSkin: boolean;
+  onion: OnionSkin;
+  /** Window > Timeline (also opened when a canvas gets a timeline). */
+  timelineShown: boolean;
 }
 
 export const initialView: ViewState = { zoom: 1, rotation: 0, flipH: false, flipV: false, panX: 0, panY: 0 };
@@ -139,6 +150,12 @@ function initialState(): PaintState {
     selectedObjects: [],
     textEdit: null,
     prefs: { ...DEFAULT_PREFS },
+    frame: 1,
+    playing: false,
+    loop: true,
+    onionSkin: false,
+    onion: { ...DEFAULT_ONION },
+    timelineShown: false,
   };
 }
 

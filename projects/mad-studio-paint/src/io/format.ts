@@ -20,10 +20,14 @@ import { sanitizeBrush, type BrushSettings } from '../paint/tools';
 import { packStroke, unpackStroke, type VectorStroke } from '../paint/vector';
 import { sanitizeBalloon, sanitizeTextBox, type Balloon, type TextBox } from '../paint/text';
 import { sanitizeFrame } from '../paint/frames';
+import { pruneTrack, sanitizeTimeline, sanitizeTrack } from '../paint/animation';
 
 export const FORMAT = 'mad-studio-paint';
-/** 2: layer masks, correction layers, effects, rulers. 3: vector and text layers, comic frames. Older files open unchanged. */
-export const FORMAT_VERSION = 3;
+/**
+ * 2: layer masks, correction layers, effects, rulers. 3: vector and text layers, comic frames.
+ * 4: animation (timeline, animation folders). Older files open unchanged.
+ */
+export const FORMAT_VERSION = 4;
 export const EXTENSION = 'madpaint';
 
 export interface DocumentFile {
@@ -97,6 +101,9 @@ function sanitizeLayer(raw: unknown, seen: Set<string>, depth: number): Layer | 
       // Frame border folders are isolated.
       if (folder.blend === 'pass-through') folder.blend = 'normal';
     }
+    const track = sanitizeTrack(r.animation);
+    // Cels are the folder's own layers.
+    if (track && !frame) folder.animation = pruneTrack(track, new Set(children.map((c) => c.id)));
     return folder;
   }
   if (r.kind === 'correction') {
@@ -150,6 +157,7 @@ export function sanitizeDocument(raw: unknown): PaintDocument {
   const seen = new Set<string>();
   const layers = Array.isArray(r.layers) ? r.layers.map((l) => sanitizeLayer(l, seen, 0)).filter((l): l is Layer => l !== null) : [];
   const paper = (r.paper && typeof r.paper === 'object' ? r.paper : {}) as Record<string, unknown>;
+  const timeline = sanitizeTimeline(r.timeline);
   return {
     id: str(r.id, 'd-imported', 64),
     name: str(r.name, 'Untitled', 120),
@@ -158,6 +166,7 @@ export function sanitizeDocument(raw: unknown): PaintDocument {
     dpi: Math.round(num(r.dpi, 72, 1, 2400)),
     paper: { visible: bool(paper.visible, true), color: color(paper.color, '#ffffff') },
     layers: layers.length ? layers : [createRasterLayer('Layer 1')],
+    ...(timeline ? { timeline } : {}),
   };
 }
 

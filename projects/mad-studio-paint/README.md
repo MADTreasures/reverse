@@ -27,6 +27,7 @@ App-Symbol. Wie das Vorbild untersucht und verglichen wurde, steht in
 | **Ebenen** | Rasterebenen, **Vektorebenen** und Ordner (Normal oder „Through“), **alle 28 Ebenenmodi** des Vorbilds (11 davon pixelweise berechnet), Deckkraft, **Ebeneneigenschaften** (Randeffekt: Kante oder Aquarellkante, **Rasterfolie/Ton**: Rasterweite in lpi, Dichte aus Farbe/Helligkeit/fester Wert, Deckkraft als Punktgrösse, Posterisierung, Punktformen Kreis/Quadrat/Raute/Linie/Kreuz/Ellipse/Rauschen, Winkel, Position; Ebenenfarbe mit Unterfarbe), **Rasterfolien-Ebenen** (*Layer → New tone layer* / Auswahl-Starter „New tone“: Dichte, Typ, Winkel, Maske aus der Auswahl, benannt wie „Circle 60.0 line 10%“), **Korrekturebenen** (die neun Tonwertkorrekturen als Ebene, mit eigener Maske, beschneidbar, Einstellungen per Klick aufs Symbol), **Ebenenmasken** (Ausserhalb der Auswahl / Auswahl maskieren, auf der Maske zeichnen: Farbe zeigt, Radierer verbirgt, Löschen = nichts maskiert, aktivieren, Maskenbereich anzeigen, mit der Ebene verknüpfen, auf die Ebene anwenden, ⌘-Klick = Auswahl), Auf untere Ebene beschneiden, Referenz-, Entwurfsebene, Sperren, Transparente Pixel schützen, Auf untere Ebene übertragen, Mit unterer / sichtbare Ebenen vereinen, Auf eine Ebene reduzieren, Ordner erstellen/auflösen, Duplizieren (auch ⌥-Ziehen), ⌥-Klick aufs Auge = nur diese Ebene, ⌘-Klick aufs Miniaturbild = Auswahl, Papier-Ebene (wie im Vorbild Teil des Stapels: Ebenenmodi und Korrekturebenen wirken auf sie) |
 | **Text & Sprechblasen** | **Text-Werkzeug** (T): klicken und tippen oder einen Rahmen aufziehen (Umbruch am Rahmen, Überstehendes verborgen), direkt auf der Leinwand mit Zoom und Drehung (auch Eingabemethoden für Japanisch usw.), Text-Starter mit OK/Abbrechen, ⌘Enter bestätigt, Esc bricht ab; Text anklicken = bearbeiten. Schrift (beliebige installierte), Grösse in pt, fett/kursiv/unterstrichen/durchgestrichen, Ausrichtung, **vertikaler Text** (Spalten von rechts nach links, lateinische Zeichen gedreht), Zeilen- und Zeichenabstand, Textrand. Textebenen heissen nach ihrem Text. **Sprechblasen** (T): Ellipse, abgerundet, Rechteck, Gedankenblase (Wolke); Linie in Haupt-, Füllung in Unterfarbe; **Sprechblasenschwanz** (gebogen) und Gedankenschwanz (Bläschen) von innen nach aussen ziehen; Blasen über Text nehmen ihn auf und zentrieren ihn, überlappende Blasen verschmelzen. Objekt-Werkzeug: Text/Blasen wählen, verschieben (Text in der Blase geht mit), skalieren, drehen, Doppelklick = Text bearbeiten, Linien- und Füllfarbe |
 | **Comic-Rahmen** | **Rahmenordner** (*Layer → New frame border folder*: ein Rahmen innerhalb der Seitenränder, Linienbreite, „Draw border“): der Inhalt des Ordners ist nur im Rahmen sichtbar, die Rahmenlinie liegt darüber. Werkzeug **Frame border** (U): Rechteckrahmen (rastet an Leinwand und anderen Rahmen ein), Polylinienrahmen, **Rahmen teilen** (über einen Rahmen ziehen, Stege oben/unten und links/rechts in mm, neuer Rahmenordner je Teil), *Layer → Ruler/Frame → Divide frame border equally* (Spalten × Zeilen). Objekt-Werkzeug: Rahmen an der Linie greifen, verschieben, skalieren, drehen, Linienbreite/-farbe, Entf löscht den Rahmen (der Ordner bleibt). Rahmenkanten wirken als Lineal (⌘1) |
+| **Animation** | *File → New* mit „Create animated illustration“ (Anzahl Zellen, Bildrate) oder *Animation → New animation layer → Animation folder*: **Animationsordner** (A, B, C …) mit nummerierten **Zellen** (1, 2, 3 …; eine Zelle kann auch ein Ordner mit mehreren Ebenen sein). **Zeitleisten-Palette** unter der Leinwand: eine Spur je Animationsordner, Bildleiste zum Anklicken und Ziehen (Scrubben), Zelle auf einen Frame legen per Rechts- oder Doppelklick (Zelle, leer, löschen, neue Zelle), eine Zelle gilt bis zur nächsten Zuweisung. Neue Animationszelle (auf dem gewählten Frame bzw. dem nächsten), Zugewiesene Zelle löschen, Vorige/nächste Zelle, Frame einfügen/löschen, Bildrate und Länge (*Timeline → Change settings*), Zeitleiste ein/aus. **Abspielen** mit Bildrate, Schleife, Esc stoppt. **Zwiebelschicht** (vorige/nächste Zellen, Anzahl, Farbe/Halbfarbe/Monochrom, Anzeigefarben, Deckkraft und Abstufung). Wer eine Zelle wählt, springt zu einem Frame, der sie zeigt; Zellen anderer Frames sind gesperrt. *File → Export animation*: **animiertes GIF** (Grösse, Bereich, Bildrate, Wiederholungen, Dithering, Transparenz), **APNG**, **Einzelbildfolge** (PNG/JPEG mit Präfix und Startnummer, als ZIP) |
 | **Vektorebenen** | Jeder Strich (Pinsel, Figur, auch mit Symmetrie) wird als Linie mit Breite und Dichte je Punkt gespeichert und daraus gezeichnet: Verschieben, ⌘T, Spiegeln, Bildauflösung und Leinwandgrösse verlieren nichts. **Vektorradierer** (berührten Bereich, **bis zum Schnittpunkt** – auf Wunsch mit allen Ebenen –, ganze Linie), normale Radierer radieren den berührten Teil, Transparentfarbe zeichnet radierende Linien; *Select → Select overlapping vectors / Select vectors within area*; Füllen, Verlauf und Mischen sind wie im Vorbild gesperrt; *Layer → Rasterize*; Vektorebenen lassen sich in Vektorebenen vereinen |
 | **Auswahl** | Hinzufügen (⇧) / Abziehen (⌥) / Schnittmenge (⇧⌥), Quadrat/Kreis (⇧ beim Aufziehen), Alles, Aufheben, Erneut, Umkehren, Vergrössern/Verkleinern, laufende Ameisen und **Auswahl-Starter** (Aufheben, Zuschneiden, Umkehren, Vergrössern, Verkleinern, Löschen, Ausserhalb löschen, Ausschneiden/Kopieren & Einfügen, Transformieren, Füllen) |
 | **Bearbeiten** | Undo/Redo (200 Schritte, History-Palette), Ausschneiden/Kopieren/Einfügen (auch Bilder aus der Zwischenablage), Löschen, Füllen, Skalieren/Drehen (⌘T) und Freies Transformieren (⇧⌘T), Spiegeln, **Tonwertkorrektur** mit Vorschau – alle neun des Vorbilds: Helligkeit/Kontrast, Tonwertkorrektur mit Histogramm, Gradationskurve, Farbton/Sättigung/Helligkeit (⌘U), Farbbalance, Umkehren (⌘I), Posterisieren, Binarisieren, Verlaufsumsetzung, Gaussian blur, Bildauflösung, Leinwandgrösse |
@@ -90,7 +91,8 @@ Die Bedienung folgt dem öffentlichen Handbuch des Vorbilds (Ver. 5). Die wichti
 | Vektorebenen: Vektorradierer, Objekt-Werkzeug | gleich (Linienkorrektur-Werkzeuge noch nicht) |
 | Text-Werkzeug und Sprechblasen (T) | gleich (ohne Rubi, Kreistext, Zeichenformat pro Buchstabe) |
 | Comic-Rahmen (Rahmenordner, Rahmen teilen) | gleich (ohne Vorlagen, Kontrollpunkte, Rahmen verbinden) |
-| 3D, Animation | noch nicht (siehe unten) |
+| Animation: Animationsordner, Zeitleiste, Zwiebelschicht, GIF-Export | gleich (ohne Keyframes, Kamera, Clips, Leuchttisch, Ton, Film-Export) |
+| 3D | noch nicht (siehe unten) |
 
 ### Tastenkürzel
 
@@ -120,7 +122,7 @@ Wie im Handbuch des Vorbilds (macOS: Ctrl → ⌘, Alt → ⌥):
 ## Dokumente
 
 - `.madpaint` ist ein ZIP-Archiv mit `document.json` (Ebenenbaum, Modi, Deckkraft, Flags,
-  Papierfarbe, Vektorlinien, Text und Sprechblasen – lesbares JSON) und `layers/<id>.png` (eine verlustfreie PNG-Datei
+  Papierfarbe, Vektorlinien, Text und Sprechblasen, Zeitleiste und Zellen-Zuweisungen – lesbares JSON) und `layers/<id>.png` (eine verlustfreie PNG-Datei
   pro Rasterebene und pro Ebenenmaske, die Maske im Alphakanal) sowie `preview.png`. Fremde
   Programme können die Ebenen so direkt öffnen. Vektorebenen speichern ihre Linien (Punkte mit
   Breite und Dichte, eine Pinseltabelle je Ebene), Textebenen ihre Textrahmen und Sprechblasen;
@@ -197,7 +199,8 @@ Was im Vergleich zum Vorbild noch fehlt, steht Punkt für Punkt in
 [RESEARCH.md](RESEARCH.md#vergleich-clip-studio-paint-laut-handbuch--mad-studio-paint). Die grössten Lücken:
 
 - Linienkorrektur auf Vektorebenen (Kontrollpunkte, Linien ziehen/vereinfachen/verbinden),
-  Kurven- und Figur-Lineale, Raster, Animation/Zeitleiste und 3D; bei Rasterfolien die
+  Kurven- und Figur-Lineale, Raster und 3D; bei der Animation Keyframes, 2D-Kamera, Clips,
+  Leuchttisch, Ton, mehrere Zeitleisten und Film-Export (MP4/MOV); bei Rasterfolien die
   Bildmotiv-Punkte (Stern, Herz …), das Werkzeug „Rasterpunkte verschieben“ und „Tonbereich
   anzeigen“; beim
   Text: Formatierung einzelner Buchstaben, Rubi (Lesehilfe), Kreistext; bei Rahmen: Vorlagen,
@@ -216,6 +219,6 @@ Paint verwendet. Das Programm wurde weder heruntergeladen noch installiert, deko
 mit REA analysiert – das verbietet die Lizenzvereinbarung (§5.2/§5.3). Grundlage war die
 öffentliche Dokumentation; Details in [RESEARCH.md](RESEARCH.md).
 
-Mitgelieferte Open-Source-Bibliotheken (React, zustand, fflate, ag-psd mit pako und base64-js)
+Mitgelieferte Open-Source-Bibliotheken (React, zustand, fflate, ag-psd mit pako und base64-js, gifenc)
 stehen unter MIT- bzw. Zlib-Lizenz. Ihre Lizenztexte schreibt der Build nach
 `dist/THIRD_PARTY_LICENSES.txt`, das mit der App ausgeliefert wird.

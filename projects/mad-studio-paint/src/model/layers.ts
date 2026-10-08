@@ -2,6 +2,7 @@ import { uid } from './ids';
 import type { Correction } from '../paint/tonal';
 import type { CorrectionLayer, FolderLayer, GradientLayer, Id, Layer, LayerMask, PaintDocument, RasterLayer, TextLayer, VectorLayer } from './types';
 import type { GradientFill } from '../paint/gradient';
+import { remapTrack } from '../paint/animation';
 
 export function createRasterLayer(name: string, patch: Partial<RasterLayer> = {}): RasterLayer {
   return {
@@ -309,7 +310,11 @@ export function cloneLayer(layer: Layer, idMap: Map<Id, Id> = new Map()): { copy
     const id = uid(l.kind === 'folder' ? 'f' : l.kind === 'correction' ? 'c' : l.kind === 'vector' ? 'v' : l.kind === 'text' ? 't' : l.kind === 'gradient' ? 'g' : 'l');
     idMap.set(l.id, id);
     const mask = copyMask(l.mask);
-    if (l.kind === 'folder') return { ...l, id, mask, children: l.children.map(copyOne) };
+    if (l.kind === 'folder') {
+      const children = l.children.map(copyOne);
+      // A copied animation folder keeps its timing with the copied cels.
+      return { ...l, id, mask, children, ...(l.animation ? { animation: remapTrack(l.animation, idMap) } : {}) };
+    }
     // Lines are never changed in place, so the copy can share them.
     if (l.kind === 'vector') return { ...l, id, mask, strokes: [...l.strokes], rev: nextRev() };
     if (l.kind === 'text') return { ...l, id, mask, texts: [...l.texts], balloons: [...l.balloons], rev: nextRev() };

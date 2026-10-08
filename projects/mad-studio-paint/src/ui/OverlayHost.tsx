@@ -7,6 +7,7 @@ import { GradientDialog } from './dialogs/GradientDialog';
 import { TonalDialog } from './dialogs/TonalDialog';
 import { PreferencesDialog } from './dialogs/PreferencesDialog';
 import { ExportDialog, PsdExportDialog } from './dialogs/ExportDialog';
+import { AnimationExportDialog, OnionSkinDialog, TimelineSettingsDialog } from './dialogs/AnimationDialogs';
 import { AboutDialog, ShortcutsDialog } from './dialogs/InfoDialogs';
 import { NewCanvasDialog } from './dialogs/NewCanvasDialog';
 import { closeDialog, closeMenu, useOverlays, type MenuItem } from './overlays';
@@ -52,6 +53,11 @@ export function OverlayHost() {
           {dialog.kind === 'custom' && dialog.id === 'newCanvas' && <NewCanvasDialog />}
           {dialog.kind === 'custom' && dialog.id === 'export' && <ExportDialog />}
           {dialog.kind === 'custom' && dialog.id === 'exportPsd' && <PsdExportDialog />}
+          {dialog.kind === 'custom' && dialog.id === 'timelineSettings' && <TimelineSettingsDialog />}
+          {dialog.kind === 'custom' && dialog.id === 'onionSkin' && <OnionSkinDialog />}
+          {dialog.kind === 'custom' && dialog.id === 'exportGif' && <AnimationExportDialog format="gif" />}
+          {dialog.kind === 'custom' && dialog.id === 'exportApng' && <AnimationExportDialog format="apng" />}
+          {dialog.kind === 'custom' && dialog.id === 'exportSequence' && <AnimationExportDialog format="sequence" />}
           {dialog.kind === 'custom' && dialog.id === 'about' && <AboutDialog />}
           {dialog.kind === 'custom' && dialog.id === 'shortcuts' && <ShortcutsDialog />}
           {dialog.kind === 'tonal' && <TonalDialog target={dialog.target} />}

@@ -17,6 +17,7 @@ import { Navigator } from './ui/palettes/Navigator';
 import { ToolSliders } from './ui/palettes/ToolSliders';
 import { BrushSizePalette, SubToolPalette, ToolPalette, ToolProperty } from './ui/palettes/ToolPalettes';
 import { StatusBar } from './ui/StatusBar';
+import { TimelinePalette } from './ui/palettes/TimelinePalette';
 
 function LayerPaletteBody() {
   return (
@@ -112,6 +113,7 @@ export function App() {
   const workspace = useStore((s) => s.workspace);
   const name = useStore((s) => s.doc.name);
   const dirty = useStore((s) => s.dirty);
+  const timelineShown = useStore((s) => s.timelineShown);
   const [dragOver, setDragOver] = useState(false);
 
   useEffect(() => {
@@ -155,6 +157,7 @@ export function App() {
             </span>
           </div>
           <CanvasView />
+          {timelineShown && !hidden && <TimelinePalette />}
           <StatusBar />
         </main>
         {!hidden && <RightDock />}

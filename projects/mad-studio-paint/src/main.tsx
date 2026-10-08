@@ -4,6 +4,7 @@ import { App } from './App';
 import { engine } from './engine/engine';
 import { buildDocumentBytes, listenForNativeOpen, openFileBytes, restoreAutosave, startAutosave } from './io/documentIO';
 import { native, isElectron, isMac } from './platform/platform';
+import { sanitizeOnion } from './paint/animation';
 import * as actions from './store/actions';
 import { getState, useStore } from './store/store';
 import { controller } from './tools/controller';
@@ -43,14 +44,18 @@ function persistPreferences(): void {
     useStore.setState({
       ...(p.workspace === 'default' || p.workspace === 'classic' ? { workspace: p.workspace } : {}),
       ...(typeof p.showSelectionLauncher === 'boolean' ? { showSelectionLauncher: p.showSelectionLauncher } : {}),
+      ...(typeof p.loop === 'boolean' ? { loop: p.loop } : {}),
+      ...(typeof p.timelineShown === 'boolean' ? { timelineShown: p.timelineShown } : {}),
+      ...(p.onion ? { onion: sanitizeOnion(p.onion) } : {}),
     });
   } catch {
     // Ignore.
   }
   useStore.subscribe((s, prev) => {
-    if (s.workspace === prev.workspace && s.showSelectionLauncher === prev.showSelectionLauncher) return;
+    const keys = ['workspace', 'showSelectionLauncher', 'loop', 'timelineShown', 'onion'] as const;
+    if (keys.every((k) => s[k] === prev[k])) return;
     try {
-      localStorage.setItem(PREFS_KEY, JSON.stringify({ workspace: s.workspace, showSelectionLauncher: s.showSelectionLauncher }));
+      localStorage.setItem(PREFS_KEY, JSON.stringify(Object.fromEntries(keys.map((k) => [k, s[k]]))));
     } catch {
       // Ignore.
     }
@@ -62,6 +67,8 @@ function connectEngine(): void {
   useStore.subscribe((s, prev) => {
     if (s.doc !== prev.doc) engine.setDocument(s.doc);
     if (s.selection !== prev.selection) engine.setSelection(s.selection);
+    if (s.frame !== prev.frame) engine.setFrame(s.frame);
+    if (s.onionSkin !== prev.onionSkin || s.onion !== prev.onion) engine.setOnion(s.onionSkin ? s.onion : null);
   });
 }
 

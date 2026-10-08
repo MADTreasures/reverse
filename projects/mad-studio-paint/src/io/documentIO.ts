@@ -32,13 +32,13 @@ export async function confirmDiscard(): Promise<boolean> {
 
 // ------------------------------------------------------------------ saving
 
-/** Merged image of the document (optionally on paper, without draft layers). */
-export function renderMerged(opts: { paper: boolean; skipDraft: boolean; scale?: number } = { paper: true, skipDraft: true }): HTMLCanvasElement {
+/** Merged image of the document (optionally on paper, without draft layers; a frame of the timeline). */
+export function renderMerged(opts: { paper: boolean; skipDraft: boolean; scale?: number; frame?: number } = { paper: true, skipDraft: true }): HTMLCanvasElement {
   const { doc } = getState();
   const full = createCanvas(doc.width, doc.height);
   // The paper is part of the stack (blend modes and correction layers see it), unless left out.
   const paper = opts.paper && doc.paper.visible ? doc.paper.color : null;
-  engine.compositor.compose(doc, ctx2d(full), { x: 0, y: 0, w: doc.width, h: doc.height }, { skipDraft: opts.skipDraft, paper });
+  engine.compositor.compose(doc, ctx2d(full), { x: 0, y: 0, w: doc.width, h: doc.height }, { skipDraft: opts.skipDraft, paper, frame: opts.frame });
   const scale = opts.scale ?? 1;
   if (scale === 1) return full;
   const out = createCanvas(Math.max(1, Math.round(doc.width * scale)), Math.max(1, Math.round(doc.height * scale)));
@@ -272,6 +272,7 @@ export async function exportPsd(opts: { skipDraft: boolean }): Promise<boolean> 
     };
     const bytes = encodePsd({
       doc,
+      frame: getState().frame,
       composite: pixelsOf(renderMerged({ paper: true, skipDraft: opts.skipDraft })),
       skipDraft: opts.skipDraft,
       layerPixels: (l) => surface(l.id),
@@ -284,6 +285,98 @@ export async function exportPsd(opts: { skipDraft: boolean }): Promise<boolean> 
     return Boolean(saved);
   } catch (err) {
     toast(`Could not save: ${(err as Error).message}`, 'error');
+    return false;
+  }
+}
+
+// ------------------------------------------------------------------ animation
+
+export type AnimationFormat = 'gif' | 'apng' | 'sequence';
+
+export interface AnimationExportOptions {
+  format: AnimationFormat;
+  width: number;
+  height: number;
+  /** Timeline frames to export and the frame rate of the result. */
+  start: number;
+  end: number;
+  fps: number;
+  /** Times the animation plays (0: endlessly). */
+  plays: number;
+  dither: boolean;
+  transparent: boolean;
+  drafts: boolean;
+  /** Image sequence: file names and type. */
+  sequence: { prefix: string; suffix: string; separator: string; startNumber: number; type: 'png' | 'jpeg' };
+}
+
+/** A canvas on white (formats without transparency, with the paper hidden). */
+function onWhite(canvas: HTMLCanvasElement): HTMLCanvasElement {
+  const flat = createCanvas(canvas.width, canvas.height);
+  const f = ctx2d(flat);
+  f.fillStyle = '#ffffff';
+  f.fillRect(0, 0, flat.width, flat.height);
+  f.drawImage(canvas, 0, 0);
+  return flat;
+}
+
+/** File > Export animation: animated GIF, animated PNG (APNG) or an image sequence (ZIP). */
+export async function exportAnimation(o: AnimationExportOptions): Promise<boolean> {
+  const { doc } = getState();
+  const t = doc.timeline;
+  if (!t) {
+    toast('The canvas has no timeline', 'error');
+    return false;
+  }
+  try {
+    const { encodeApng, encodeGif, exportFrames, frameDelays, sequenceNames, zipSequence } = await import('./animationExport');
+    const frames = exportFrames(o.start, o.end, t.fps, o.fps);
+    const transparent = o.transparent && !(o.format === 'sequence' && o.sequence.type === 'jpeg');
+    const scale = o.width / doc.width;
+    // Each timeline frame is drawn once, even when it is shown several times.
+    const drawn = new Map<number, HTMLCanvasElement>();
+    const draw = (f: number) => {
+      let c = drawn.get(f);
+      if (!c) {
+        c = renderMerged({ paper: !transparent, skipDraft: !o.drafts, scale, frame: f });
+        if (!transparent && !doc.paper.visible) c = onWhite(c);
+        drawn.set(f, c);
+      }
+      return c;
+    };
+    let bytes: Uint8Array;
+    let name: string;
+    let filter: { name: string; extensions: string[] };
+    let mime: string;
+    const base = doc.name || 'Untitled';
+    if (o.format === 'sequence') {
+      const ext = o.sequence.type === 'jpeg' ? 'jpg' : 'png';
+      const names = sequenceNames(frames.length, { ...o.sequence, start: o.sequence.startNumber, ext });
+      const files = [];
+      for (let i = 0; i < frames.length; i++) files.push({ name: names[i], data: await canvasToBytes(draw(frames[i]), o.sequence.type === 'jpeg' ? 'image/jpeg' : 'image/png', 0.92) });
+      bytes = zipSequence(files);
+      name = `${base}.zip`;
+      filter = { name: 'Image sequence (ZIP)', extensions: ['zip'] };
+      mime = 'application/zip';
+    } else {
+      const pixels = frames.map((f) => pixelsOf(draw(f)));
+      if (o.format === 'gif') {
+        bytes = encodeGif(pixels, { delays: frameDelays(pixels.length, o.fps, 10), plays: o.plays, transparent, dither: o.dither });
+        name = `${base}.gif`;
+        filter = { name: 'Animated GIF', extensions: ['gif'] };
+        mime = 'image/gif';
+      } else {
+        bytes = encodeApng(pixels, frameDelays(pixels.length, o.fps, 1), o.plays);
+        name = `${base}.png`;
+        filter = { name: 'Animated PNG', extensions: ['png', 'apng'] };
+        mime = 'image/apng';
+      }
+    }
+    const saved = await saveFile(bytes, name, [filter], null, mime);
+    if (saved) toast(`Exported ${saved.name}`);
+    return Boolean(saved);
+  } catch (err) {
+    toast(`Export failed: ${(err as Error).message}`, 'error');
     return false;
   }
 }
@@ -333,9 +426,9 @@ export async function restoreAutosave(): Promise<boolean> {
   }
 }
 
-export async function newCanvas(name: string, width: number, height: number, dpi: number, paper: string): Promise<void> {
+export async function newCanvas(name: string, width: number, height: number, dpi: number, paper: string, animation?: { cels: number; fps: number }): Promise<void> {
   if (!(await confirmDiscard())) return;
-  actions.newDocument(name, width, height, dpi, paper);
+  actions.newDocument(name, width, height, dpi, paper, animation);
   currentFile = null;
   void idbDelete(AUTOSAVE_KEY);
 }

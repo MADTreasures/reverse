@@ -1,4 +1,5 @@
 /** Document model of MAD Studio Paint. Pixel data lives in surfaces (see engine/surfaces.ts), keyed by layer id. */
+import type { AnimationTrack, Timeline } from '../paint/animation';
 import type { LayerEffects } from '../paint/effects';
 import type { Ruler } from '../paint/rulers';
 import type { Correction } from '../paint/tonal';
@@ -95,6 +96,11 @@ export interface FolderLayer extends LayerBase {
   children: Layer[];
   /** Frame border folder: the content shows only inside the panels, whose border is drawn on top. */
   frame?: FrameBorder;
+  /**
+   * Animation folder: its layers and layer folders are cels, shown frame by frame as the track
+   * assigns them (while the timeline is enabled).
+   */
+  animation?: AnimationTrack;
 }
 
 /** Layer > New correction layer: corrects everything below it (in its folder) without changing pixels. */
@@ -152,4 +158,6 @@ export interface PaintDocument {
   paper: PaperSettings;
   /** Top-most layer first, like the layer panel. */
   layers: Layer[];
+  /** Animation: frame rate and length; animation folders hold the tracks. */
+  timeline?: Timeline;
 }

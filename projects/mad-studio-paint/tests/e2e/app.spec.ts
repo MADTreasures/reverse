@@ -1433,3 +1433,95 @@ test('Photoshop documents: Save duplicate as .psd keeps the layers, File > Open 
   expect(opened).toEqual({ names: ['Background'], centre: 0 });
   expect(errors).toEqual([]);
 });
+
+const frameNow = (page: Page) => page.evaluate(() => window.__madPaint.useStore.getState().frame);
+const activeName = (page: Page) =>
+  page.evaluate(() => {
+    const s = window.__madPaint.useStore.getState();
+    const find = (ls: any[]): any => ls.map((l) => (l.id === s.activeLayerId ? l : l.children ? find(l.children) : null)).find(Boolean);
+    return find(s.doc.layers)?.name;
+  });
+
+test('animation: animated illustration, a cel per frame, onion skin, playback, GIF export, saved', async ({ page }) => {
+  const errors = await boot(page);
+  await page.evaluate(() => delete (window as any).showSaveFilePicker);
+  // File > New with "Create animated illustration": 4 cels at 4 fps.
+  await page.evaluate(() => void window.__madPaint.runCommand('new'));
+  const dlg = page.getByRole('dialog', { name: 'New canvas' });
+  await dlg.getByLabel('Width').fill('400');
+  await dlg.getByLabel('Height').fill('300');
+  await dlg.getByText('Create animated illustration').click();
+  await dlg.getByLabel('Number of cels').fill('4');
+  await dlg.getByLabel('Frame rate').fill('4');
+  await dlg.getByRole('button', { name: 'OK' }).click();
+  await expect(page.getByTestId('timeline')).toBeVisible();
+  await expect(page.getByTestId('animation-icon')).toHaveCount(1);
+  expect((await state(page)).layers.map((l: any) => [l.name, l.children.map((c: any) => c.name)])).toEqual([['A', ['1']]]);
+  expect(await activeName(page)).toBe('1');
+  // Cel 1: a line at y = 100. New animation cel: cel 2 on frame 2, a line at y = 200.
+  await thinPen(page);
+  await drag(page, [50, 100], [350, 100]);
+  await page.getByRole('button', { name: 'New animation cel' }).click();
+  expect(await frameNow(page)).toBe(2);
+  expect(await activeName(page)).toBe('2');
+  await drag(page, [50, 200], [350, 200]);
+  // Frame 2 shows cel 2 only; frames 3 and 4 hold it.
+  expect(await shown(page, 200, 100)).toBe(255);
+  expect(await shown(page, 200, 200)).toBeLessThan(60);
+  // Onion skin: cel 1 shows faintly (tinted) under cel 2.
+  await page.getByRole('button', { name: 'Enable onion skin' }).click();
+  const skin = await shown(page, 200, 100);
+  expect(skin).toBeGreaterThan(60);
+  expect(skin).toBeLessThan(250);
+  await page.getByRole('button', { name: 'Enable onion skin' }).click();
+  // Clicking frame 1 on the ruler shows cel 1, which becomes the layer being edited.
+  await page.getByTestId('timeline-ruler').locator('.tl-cell').nth(0).click();
+  expect(await frameNow(page)).toBe(1);
+  expect(await activeName(page)).toBe('1');
+  expect(await shown(page, 200, 100)).toBeLessThan(60);
+  // Selecting cel 2 in the Layer palette goes to a frame that shows it.
+  await page.locator('.layer-row', { hasText: /^.*2$/ }).first().click();
+  expect(await frameNow(page)).toBe(2);
+  // Frame 4: assign cel 1 from the frame's menu; frame 3 still holds cel 2.
+  await page.locator('[data-testid=timeline-track] .tl-cell[data-frame="4"]').click({ button: 'right' });
+  await page.getByRole('menuitem', { name: '1', exact: true }).click();
+  expect(await frameNow(page)).toBe(4);
+  expect(await shown(page, 200, 100)).toBeLessThan(60);
+  await page.getByTestId('timeline-ruler').locator('.tl-cell').nth(2).click();
+  expect(await shown(page, 200, 200)).toBeLessThan(60);
+  // A cel that is not shown at the current frame cannot be drawn on.
+  await page.evaluate(() => {
+    const s = window.__madPaint.useStore.getState();
+    const cel1 = s.doc.layers[0].children.find((c: any) => c.name === '1');
+    window.__madPaint.useStore.setState({ activeLayerId: cel1.id });
+  });
+  await drag(page, [50, 250], [350, 250]);
+  expect(await page.evaluate(() => window.__madPaint.useStore.getState().hint)).toMatch(/not shown at the current frame/);
+  // Play: frames advance at 4 fps (looping); Esc stops.
+  await page.getByRole('button', { name: 'Play', exact: true }).click();
+  await page.waitForTimeout(700);
+  expect(await page.evaluate(() => window.__madPaint.useStore.getState().playing)).toBe(true);
+  await page.keyboard.press('Escape');
+  expect(await page.evaluate(() => window.__madPaint.useStore.getState().playing)).toBe(false);
+  // File > Export animation > Animated GIF: one image per frame.
+  await page.evaluate(() => window.__madPaint.runCommand('exportGif'));
+  const ex = page.getByRole('dialog', { name: 'Animated GIF export settings' });
+  await expect(ex.getByTestId('export-playback')).toHaveText('1.00 s · 4 images');
+  const [gif] = await Promise.all([page.waitForEvent('download'), ex.getByRole('button', { name: 'OK' }).click()]);
+  expect(gif.suggestedFilename()).toBe('Illustration.gif');
+  const bytes = readFileSync((await gif.path())!);
+  expect(bytes.subarray(0, 6).toString('latin1')).toBe('GIF89a');
+  let images = 0;
+  for (let i = 0; i + 2 < bytes.length; i++) if (bytes[i] === 0x21 && bytes[i + 1] === 0xf9 && bytes[i + 2] === 0x04) images++;
+  expect(images).toBe(4);
+  // Saved and opened again: timeline and assignments are kept.
+  const back = await page.evaluate(async () => {
+    const m = window.__madPaint;
+    await m.openFileBytes({ name: 'anim.madpaint', data: await m.buildDocumentBytes() });
+    const s = m.useStore.getState();
+    const a = s.doc.layers[0];
+    return { timeline: s.doc.timeline, cels: a.animation.cels.map((x: any) => [x.frame, a.children.find((c: any) => c.id === x.cel)?.name]) };
+  });
+  expect(back).toEqual({ timeline: { enabled: true, fps: 4, frames: 4 }, cels: [[1, '1'], [2, '2'], [4, '1']] });
+  expect(errors).toEqual([]);
+});

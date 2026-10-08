@@ -305,10 +305,10 @@ function LayerRow({ layer, depth, drag, setDrag, drop, setDrop }: RowsProps & { 
           <span
             className={`folder-icon ${active && layer.mask && !maskTarget ? 'target' : ''}`}
             onPointerDown={pickTarget(false)}
-            title={layer.frame ? 'Frame border folder' : undefined}
-            data-testid={layer.frame ? 'frame-icon' : undefined}
+            title={layer.frame ? 'Frame border folder' : layer.animation ? 'Animation folder' : undefined}
+            data-testid={layer.frame ? 'frame-icon' : layer.animation ? 'animation-icon' : undefined}
           >
-            <Icon name={layer.frame ? 'frame' : 'folder'} size={22} />
+            <Icon name={layer.frame ? 'frame' : layer.animation ? 'animFolder' : 'folder'} size={22} />
           </span>
         </>
       ) : layer.kind === 'correction' ? (

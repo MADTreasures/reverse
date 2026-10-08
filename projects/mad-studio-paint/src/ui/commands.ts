@@ -4,11 +4,13 @@ import { isMac } from '../platform/platform';
 import { importImages, openDocument, saveDocument, saveDuplicate } from '../io/documentIO';
 import * as actions from '../store/actions';
 import { activeFrameFolder } from '../store/frameActions';
+import * as anim from '../store/animationActions';
 import { copy, cut, hasClip, pasteImage } from '../store/clipboard';
 import { getState, setState } from '../store/store';
 import { cancelTransform, confirmTransform, isTransforming, startTransform } from '../tools/transform';
 import { CORRECTIONS, correctionLabel, defaultCorrection, type CorrectionType } from '../paint/tonal';
 import { openDialog, openTonalDialog, promptDialog } from './overlays';
+import { openAssignMenu } from './palettes/TimelinePalette';
 import { formatShortcut, normalizeShortcut } from './shortcuts';
 
 export interface Command {
@@ -71,6 +73,8 @@ const layerFlag = (key: 'clip' | 'reference' | 'draft' | 'locked', label: string
   checked: () => Boolean(actions.activeLayer()?.[key]),
   enabled: () => actions.activeLayer() !== null,
 });
+
+const hasTimeline = () => Boolean(getState().doc.timeline?.enabled);
 
 export const COMMANDS: Command[] = [
   // File
@@ -268,6 +272,30 @@ export const COMMANDS: Command[] = [
   { id: 'referMultiple', label: 'Switch "Refer multiple"', keys: ['0'], run: () => actions.toggleReferMultiple() },
   { id: 'prevTool', label: 'Previous tool in the group', keys: [','], run: () => actions.cycleSubTool(-1) },
   { id: 'nextTool', label: 'Next tool in the group', keys: ['.'], run: () => actions.cycleSubTool(1) },
+  // Animation
+  { id: 'newAnimationFolder', label: 'Animation folder', run: () => void anim.newAnimationFolder() },
+  { id: 'newAnimationCel', label: 'New animation cel', run: () => void anim.newAnimationCel() },
+  { id: 'assignCel', label: 'Assign cel to frame…', run: () => openAssignMenu(), enabled: () => anim.activeTrack() !== null && hasTimeline() },
+  { id: 'removeAssignedCel', label: 'Delete assigned cel', run: () => anim.removeAssignedCel(), enabled: () => anim.activeTrack() !== null },
+  { id: 'selectPrevCel', label: 'Select previous cel', run: () => anim.selectNeighbourCel(-1), enabled: () => anim.activeTrack() !== null },
+  { id: 'selectNextCel', label: 'Select next cel', run: () => anim.selectNeighbourCel(1), enabled: () => anim.activeTrack() !== null },
+  { id: 'newTimeline', label: 'New timeline…', run: () => openDialog('timelineSettings'), enabled: () => !getState().doc.timeline },
+  { id: 'timelineSettings', label: 'Change settings…', run: () => openDialog('timelineSettings'), enabled: () => Boolean(getState().doc.timeline) },
+  { id: 'enableTimeline', label: 'Enable timeline', run: () => anim.toggleTimeline(), checked: () => Boolean(getState().doc.timeline?.enabled), enabled: () => Boolean(getState().doc.timeline) },
+  { id: 'insertFrame', label: 'Insert frame', run: () => anim.insertFrame(), enabled: hasTimeline },
+  { id: 'deleteFrame', label: 'Delete frame', run: () => anim.deleteFrame(), enabled: () => (getState().doc.timeline?.frames ?? 0) > 1 },
+  { id: 'firstFrame', label: 'Go to start', run: () => anim.firstFrame(), enabled: hasTimeline },
+  { id: 'prevFrame', label: 'Go to previous frame', run: () => anim.previousFrame(), enabled: hasTimeline },
+  { id: 'nextFrame', label: 'Go to next frame', run: () => anim.nextFrame(), enabled: hasTimeline },
+  { id: 'lastFrame', label: 'Go to end', run: () => anim.lastFrame(), enabled: hasTimeline },
+  { id: 'playStop', label: 'Play/Stop', run: () => anim.togglePlay(), enabled: hasTimeline, checked: () => getState().playing },
+  { id: 'loopPlay', label: 'Loop play', run: () => anim.toggleLoop(), checked: () => getState().loop },
+  { id: 'onionSkin', label: 'Enable onion skin', run: () => anim.toggleOnionSkin(), checked: () => getState().onionSkin, enabled: hasTimeline },
+  { id: 'onionSkinSettings', label: 'Onion skin settings…', run: () => openDialog('onionSkin') },
+  { id: 'exportSequence', label: 'Image sequence…', run: () => openDialog('exportSequence'), enabled: hasTimeline },
+  { id: 'exportGif', label: 'Animated GIF…', run: () => openDialog('exportGif'), enabled: hasTimeline },
+  { id: 'exportApng', label: 'Animated sticker (APNG)…', run: () => openDialog('exportApng'), enabled: hasTimeline },
+  { id: 'toggleTimeline', label: 'Timeline', run: () => anim.toggleTimelinePalette(), checked: () => getState().timelineShown },
   // Filter
   { id: 'gaussianBlur', label: 'Blur: Gaussian blur…', run: () => openDialog('gaussianBlur'), enabled: canEdit },
   // Help

@@ -2,6 +2,7 @@
 import { isMac } from '../platform/platform';
 import { toolForKey, type ToolId } from '../paint/tools';
 import * as actions from '../store/actions';
+import { stop as stopPlayback } from '../store/animationActions';
 import { getState } from '../store/store';
 import { pasteImage, copy, cut } from '../store/clipboard';
 import { controller } from '../tools/controller';
@@ -57,6 +58,12 @@ export function installKeyboard(): void {
       if (isTransforming() && e.key === 'Escape') {
         e.preventDefault();
         cancelTransform();
+        return;
+      }
+      // Esc stops playback, like the reference.
+      if (getState().playing && e.key === 'Escape') {
+        e.preventDefault();
+        stopPlayback();
         return;
       }
       // Polyline selection in progress: Enter closes, Esc cancels, Backspace removes the last corner.

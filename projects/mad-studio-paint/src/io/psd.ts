@@ -19,6 +19,7 @@ import { createDocument, MAX_CANVAS_SIDE } from '../model/document';
 import { clipGroups, createCorrectionLayer, createFolder, createLayerMask, createRasterLayer } from '../model/layers';
 import type { BlendMode, FolderBlendMode, FolderLayer, Id, Layer, LayerMask, PaintDocument } from '../model/types';
 import { sanitizeCorrection, type Channel, type Correction, type Levels } from '../paint/tonal';
+import { celAt } from '../paint/animation';
 
 /** Straight RGBA pixels. */
 export interface Pixels {
@@ -271,6 +272,8 @@ export const PAPER_LAYER_NAME = 'Paper';
 
 export interface PsdSource {
   doc: PaintDocument;
+  /** Frame of the timeline: in animation folders only its cels are visible. */
+  frame?: number;
   /** The merged image (with the paper when it is shown). */
   composite: Pixels;
   /** Leave out draft layers (the reference's default). */
@@ -317,7 +320,7 @@ function exportLayer(l: Layer, src: PsdSource): PsdLayer {
     return out;
   }
   if (l.kind !== 'folder') return withMask({ ...common(l), ...trimmed(src.layerPixels(l)) }, l, src);
-  const children = exportList(l.children, src);
+  const children = exportList(l.children, src, l);
   if (!l.frame) return withMask({ ...common(l), opened: l.expanded, children }, l, src);
   // Frame border folder: content masked by the panels; the border on top, inside the group.
   const shapes = src.frameShapes(l);
@@ -330,12 +333,20 @@ function exportLayer(l: Layer, src: PsdSource): PsdLayer {
  * Our layers (top first) as Photoshop layers (bottom first). Leaving out a base leaves out its
  * clipping group; a layer that clips to nothing here (see clipGroups) is written as unclipped.
  */
-function exportList(layers: Layer[], src: PsdSource): PsdLayer[] {
+function exportList(layers: Layer[], src: PsdSource, parent?: FolderLayer): PsdLayer[] {
+  // An animation folder shows the cel of the current frame; the other cels are written hidden.
+  const shown = parent?.animation && src.doc.timeline?.enabled ? celAt(parent.animation, src.frame ?? 1) : undefined;
+  const one = (l: Layer, clipping?: boolean): PsdLayer => {
+    const out = exportLayer(l, src);
+    if (clipping !== undefined) out.clipping = clipping;
+    if (shown !== undefined && l.id !== shown) out.hidden = true;
+    return out;
+  };
   const out: PsdLayer[] = [];
   for (const group of clipGroups(layers)) {
     if (src.skipDraft && group.base.draft) continue;
-    out.push({ ...exportLayer(group.base, src), clipping: false });
-    for (const l of group.clipped) if (!(src.skipDraft && l.draft)) out.push(exportLayer(l, src));
+    out.push(one(group.base, false));
+    for (const l of group.clipped) if (!(src.skipDraft && l.draft)) out.push(one(l));
   }
   return out;
 }

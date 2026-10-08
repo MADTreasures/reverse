@@ -175,6 +175,20 @@ Status: ✅ gleich · 🟡 ähnlich/vereinfacht · ❌ fehlt (noch)
 | Photoshop-Dokumente | *Open*: `.psd`/`.psb`, CMYK wird zu RGB [OPN]; *Save Duplicate* → `.psd`/`.psb`, um Ebenen für andere Programme zu behalten, mit Export-Dialog (Output image: u. a. Entwürfe – standardmässig aus; Expression color Graustufen/RGB/CMYK; ICC-Profil) [SAV, DRF] | *Open*: `.psd`/`.psb` (RGB, CMYK, Graustufen, 8/16/32 Bit) mit Ordnern, Masken, Schnittmasken, Modi, Deckkraft, Sperren; Einstellungsebenen → Korrekturebenen (alle neun Arten); Text/Form/Smartobjekt als Pixel; „Paper“ → Papier. *Save duplicate → .psd*: Ebenen, Papier als Ebene „Paper“, Entwürfe wählbar (aus), Vektor/Text/Verlauf gerastert, Korrekturebenen → Einstellungsebenen, Rahmenordner → Gruppe mit Rahmenmaske; nur RGB, kein ICC-Profil, kein `.psb` schreiben (Leinwand ≤ 8000 px passt in PSD) | 🟡 | `Photoshop documents: …`, Unit: `PSD documents` |
 | Bild ablegen | auf der Leinwand → neue Leinwand, auf der Ebenen-Palette → Ebene [IMP, PC] | gleich | ✅ | – |
 
+### Animation
+
+| Bereich | Clip Studio Paint (Doku) | MAD Studio Paint | Status | Test |
+| ------- | ------------------------ | ---------------- | ------ | ---- |
+| Neue Animation | *New* → „Create animated illustration“: Anzahl Zellen, Wiedergabezeit, Bildrate; Projekt „Animation“ mit Zeitleiste, Animationsordner mit einer Ebene [NEW, ANI] | „Create animated illustration“ mit Anzahl Zellen (= Frames), Bildrate, Wiedergabezeit; Animationsordner „A“ mit Zelle „1“ auf Frame 1; kein eigenes Projekt „Animation“ | 🟡 | `animation: …` |
+| Animationsordner und Zellen | Ebenen und Ordner im Animationsordner sind Zellen; Ordner heissen A, B …, Zellen 1, 2 … (zwischen 1 und 2: 1a); nicht in einem anderen Animationsordner; ohne Zeitleiste normale Ordner [AFC] | gleich, ausser „1a“ (neue Zellen bekommen die nächste Nummer) und Vorlagen für Zellen | 🟡 | Unit: `animation names` |
+| Zeitleiste | Spuren je Animationsordner, Frames, Start/Ende, Bildrate, mehrere Zeitleisten, Clips, Keyframes, Graph-Editor, Beschriftungen, Ton; Frame einfügen/löschen [TLP, CLP, KEY, FRA] | eine Zeitleiste: Spuren, Frames 1…n, Bildrate, ein/aus; Frame einfügen/löschen; keine Clips, Keyframes, Beschriftungen, Ton | 🟡 | Unit: `animation tracks` |
+| Zellen zuweisen | Rechtsklick auf einen Frame → Zelle wählen; Zelle gilt bis zur nächsten; ersetzen, verschieben, kopieren, löschen (die vorige Zelle läuft weiter); mehrere Zellen zuweisen; umbenennen nach Reihenfolge [ACT] | Rechts- oder Doppelklick → Zelle, leer, löschen, neue Zelle; Zelle gilt bis zur nächsten; gelöschte/verschobene Zellen verlassen die Spur; kein Ziehen/Kopieren von Zuweisungen, kein „Assign multiple cels“ | 🟡 | `animation: …` |
+| Bearbeiten | Zeichnen auf der Zelle des gewählten Frames; Zellen ohne Zuweisung sind gesperrt [AFC] | gleich; zusätzlich springt die Wahl einer Zelle zu einem Frame, der sie zeigt (eigene Wahl), Zellen anderer Frames sind gesperrt | ✅ | `animation: …` |
+| Abspielen | Play/Stop, Esc oder Klick auf eine andere Palette stoppt, Schleife, Echtzeit oder alle Frames [CHK] | Play/Stop in Echtzeit nach Bildrate, Schleife, Esc oder Klick auf die Leinwand stoppt | 🟡 | `animation: …` |
+| Zwiebelschicht | vorige/nächste Zellen auf der Zeitleiste, Anzahl, Farbe/Halbfarbe/Monochrom, Anzeigefarben, Deckkraft mit Abstufung [ONI] | gleich (Standardwerte eigene Wahl: je 1, Halbfarbe, blau/grün, 50 %, −15 % je Stufe) | ✅ | `animation: …`, Unit: `onion skin` |
+| Leuchttisch, Animationszellen-Palette | vorhanden [LTB, ACP] | fehlen | ❌ | – |
+| Export | Einzelbildfolge (BMP, JPEG, PNG, WebP, TIFF, TGA) in einen Ordner, animiertes GIF (Grösse, Bereich, Bildrate, Wiederholungen, Dithering, Transparenz), APNG, animiertes WebP, Film (MP4/MOV) [EXA] | Einzelbildfolge PNG/JPEG als ZIP (Präfix, Startnummer), animiertes GIF mit denselben Optionen, APNG; kein WebP, kein Film | 🟡 | `animation: …`, Unit: `animated GIF`, `animated PNG` |
+
 ## REA im Projekt
 
 REA (`rea-agents@5.0.0`) wurde ausschliesslich auf das **eigene** Programm angewendet.
@@ -226,7 +240,14 @@ vergleichen. Abweichungen bitte als Issue oder Nachricht melden – mit dem Punk
 - **Glow dodge / Add (Glow):** offiziell nur „stärker bei halbtransparenten Pixeln“; Formel nach
   einem Community-Modell (niedrige Konfidenz).
 - **Pinsel:** Materialspitzen, Texturen, Doppelpinsel, Tempo-Dynamik und „Smear“ fehlen.
-- **Animation und 3D** sind nicht umgesetzt; bei den Linealen fehlen die Kurven-Arten.
+- **3D** ist nicht umgesetzt; bei den Linealen fehlen die Kurven-Arten.
+- **Animation:** Standardwerte (Bildrate und Zellen bei „Create animated illustration“,
+  Zwiebelschicht-Farben und -Deckkraft, Name des ersten Animationsordners) sind nicht
+  dokumentiert; gewählt: 8 Zellen bei 8 fps, Ordner „A“, je eine vorige/nächste Zelle in
+  Halbfarbe (blau/grün) mit 50 %. Ob die Wahl einer Zelle in der Ebenen-Palette den Frame
+  wechselt, sagt das Handbuch nicht (umgesetzt: Sprung zum nächstgelegenen Frame mit dieser
+  Zelle). Die GIF-Wiederholungen zählen die Durchläufe insgesamt (NETSCAPE-Block = Anzahl − 1).
+  Die Einzelbildfolge kommt im Browser als ZIP statt in einen Ordner.
 - **Comic-Rahmen:** Standardwerte (Linienbreite, Stegbreiten) und ob „Divide folder“ beim
   Werkzeug standardmässig an ist, sind nicht dokumentiert; gewählt: 5 px, 4 mm / 2 mm, an.
   Welche Stegbreite („vertical gutter“ / „horizontal gutter“) zu welcher Schnittrichtung gehört,
@@ -289,6 +310,9 @@ Präfix `M/` = `https://help.clip-studio.com/en-us/manual_en/` (Handbuch Ver. 5.
 | MOD, OPT, TS, MENU | `M/780_shortcuts/Shortcuts_usable_during_operation.htm`, `…/Optional_Shortcuts.htm`, `…/Tool_Shortcuts.htm`, `…/Menu_Shortcuts.htm` |
 | PRF, UND, EXP, IMP, PC | `M/720_preferences/Preferences.htm`, `M/270_canvas/Undo__47_Redo.htm`, `M/210_file/Exporting_files.htm`, `…/Import_image_file_to_canvas.htm`, `M/060_pc/Saving__44__exporting__44__and_importing_files.htm` |
 | OPN, SAV, DRF | `M/210_file/Open_file.htm`, `M/210_file/Save_file.htm`, `M/180_layers/Draft_layers.htm` |
+| ANI, AFC, TLP, ACT | `M/600_animation/Animating_in_Clip_Studio_Paint.htm`, `…/Animation_folders_and_cels.htm`, `…/Timeline_Palette.htm`, `…/Assigning_cels_to_the_timeline.htm` |
+| CLP, KEY, FRA, CHK | `…/Using_clips.htm`, `…/Using_keyframes.htm`, `…/Using_frames.htm`, `…/Checking_your_animation.htm` |
+| ONI, LTB, ACP, EXA | `…/Onion_skin.htm`, `…/Using_light_table_layers.htm`, `…/Animation_Cels_palette.htm`, `…/Export_animation.htm` |
 | GL-x | `M/810_subtools/x.htm` (Glossar der Einstellungen) |
 | T563, T582, T656, T684, T868, T1250, T4846 | `https://tips.clip-studio.com/en-us/articles/<Nr>` (ClipStudioOfficial) |
 | TIPS | `https://tips.clip-studio.com/en-us/articles/1248` |

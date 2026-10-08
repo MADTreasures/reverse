@@ -407,6 +407,38 @@ const paths: Record<string, ReactNode> = {
       <path d="M3 17h14" />
     </>
   ),
+  play: <path d="M6.5 4.5 15.5 10l-9 5.5z" />,
+  stop: <rect x="5.5" y="5.5" width="9" height="9" rx="1" />,
+  frameFirst: <path d="M5 5v10M15 5l-7 5 7 5z" />,
+  framePrev: <path d="M13.5 5 6.5 10l7 5z" />,
+  frameNext: <path d="M6.5 5l7 5-7 5z" />,
+  frameLast: <path d="M15 5v10M5 5l7 5-7 5z" />,
+  loop: (
+    <>
+      <path d="M15.5 8.5A5.5 5.5 0 0 0 5.2 7M4.5 11.5A5.5 5.5 0 0 0 14.8 13" />
+      <path d="M5 3.8V7h3.2M15 16.2V13h-3.2" />
+    </>
+  ),
+  onion: (
+    <>
+      <circle cx="12" cy="10" r="5" />
+      <path d="M7.5 5.6a5 5 0 0 0 0 8.8" strokeDasharray="1.6 1.4" />
+    </>
+  ),
+  animFolder: (
+    <>
+      <rect x="2.5" y="4.5" width="15" height="11" rx="1" />
+      <path d="M2.5 7.5h15M2.5 12.5h15M6 4.5v3M10 4.5v3M14 4.5v3M6 12.5v3M10 12.5v3M14 12.5v3" />
+    </>
+  ),
+  newAnimFolder: (
+    <>
+      <rect x="2.5" y="4.5" width="15" height="11" rx="1" />
+      <path d="M6 4.5v2M10 4.5v2M14 4.5v2M6 13.5v2M10 13.5v2M14 13.5v2M10 8v4M8 10h4" />
+    </>
+  ),
+  newCel: <path d="M5.5 2.5h6l3 3v12h-9zM10 8.5v6M7 11.5h6" />,
+  removeCel: <path d="M5.5 2.5h6l3 3v12h-9zM7.8 9.3l4.4 4.4M12.2 9.3l-4.4 4.4" />,
 };
 
 export function Icon({ name, size = 18 }: { name: string; size?: number }) {
