@@ -54,6 +54,10 @@ Konventionen:
   (unverändert aus dem npm-Paket, MIT-Lizenz, siehe `SOURCE.md`).
 - **Statische JavaScript/Electron-Analyse** braucht keine Zusatzsoftware:
   `npx -y rea-agents@5.0.0 analyze-javascript-application /pfad/zur/app.asar --json`
+- **Beispiel:** REA hat das ausgelieferte Paket von MAD Studio auf Electron-Sicherheit geprüft –
+  Ergebnisse und Evidence-IDs in [`projects/mad-studio/RESEARCH.md`](projects/mad-studio/RESEARCH.md).
+- **Grosse Ziele:** Der MCP-Aufruf hat in Claude Code ein 60-s-Limit. Für grosse Bundles die CLI
+  verwenden (siehe Beispiel oben) oder gezielt einen Teil des Pakets analysieren.
 - **Native Binärdateien** (Mach-O, PE, ELF) brauchen Hopper, Ghidra oder IDA:
   `npx -y rea-agents@5.0.0 doctor` zeigt, was fehlt; `npx -y rea-agents@5.0.0 setup`
   richtet REA für deine Agents ein (mit Vorschau vor jeder Änderung).

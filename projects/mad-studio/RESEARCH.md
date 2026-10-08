@@ -60,6 +60,32 @@ Bewusst **eigene** Lösungen (keine Übernahme aus dem Vorbild): Name, Farbschem
 App-Icon, Synth-Architektur und -Presets, prozedural synthetisierte Drums, Dateiformat
 (`.madstudio` = ZIP + JSON).
 
+## REA-Prüfung des eigenen App-Pakets
+
+REA wurde auf das **ausgelieferte** `app.asar` von MAD Studio angewendet (statische Analyse,
+nichts ausgeführt) – als unabhängige Sicherheitsprüfung der Electron-Hülle.
+
+| Prüfpunkt | Beobachtung (REA) | Evidence |
+| --------- | ----------------- | -------- |
+| Fenster-Sicherheit | 1 BrowserWindow: `contextIsolation: true`, `nodeIntegration: false`, `sandbox: true`, Preload gesetzt (AST, exakt) | `ev_24e6bd59…`, `ev_22dc38d0…` |
+| Preload-Brücke | genau 1 API `madNative` mit 8 Mitgliedern (`saveFile`, `openFile`, `onMenu`, `onOpenFile`, `setDocumentEdited`, `setTitle`, `ready`, `platform`) | beide |
+| IPC | 6 Handler im Hauptprozess, alle 6 Renderer-Sendungen gepaart, keine ungepaarten | beide |
+| Dynamische Kanäle | 1. Lauf: 1 nicht auflösbarer Listener (generischer `subscribe(channel, …)`-Helfer) → Preload auf literale Kanäle umgestellt; 2. Lauf: 0 dynamische, `menu:action` und `file:opened` erkannt | `ev_24e6bd59…` → `ev_22dc38d0…` |
+| Absender-Prüfung | von REA **nicht beobachtet** (0) – der Code prüft jeden Aufruf über `isTrustedSender()`, diese Helfer-Form erkennt die statische Analyse aber nicht. Status: unbekannt, nicht „fehlt“ | beide |
+
+Daraus abgeleitete Härtung (Schlussfolgerung, eigene Designentscheidung):
+
+- `file:save` schreibt ohne Dialog nur noch an Pfade, die der Nutzer selbst gewählt oder im
+  Finder geöffnet hat. Vorher hätte ein kompromittierter Renderer an beliebige Orte schreiben können.
+- Preload-Kanäle literal statt über einen generischen Helfer – die IPC-Oberfläche bleibt prüfbar.
+
+Grenzen dieser Prüfung: Analysiert wurde die Electron-Hülle (`package.json`, `electron/`,
+`index.html`) aus dem echten Paket. Beim kompletten `app.asar` brach REA 5.0.0 nach der Analyse
+beim Ausgeben des Ergebnisses ab (`RangeError: Invalid string length` – das Ergebnis-JSON für das
+430-KB-React-Bundle sprengt die maximale String-Länge). Der MCP-Aufruf aus Claude Code läuft
+zudem nach 60 s in ein Timeout; für grosse Ziele die CLI verwenden:
+`npx -y rea-agents@5.0.0 analyze-javascript-application <pfad> --json`.
+
 ## Unbekanntes / offene Fragen
 
 - `.flp`-Import: Das Format ist von Open-Source-Projekten dokumentiert (Event-basiertes

@@ -21,6 +21,9 @@ let mainWindow = null;
 let documentEdited = false;
 let rendererReadyForFiles = false;
 const pendingFiles = [];
+// Files the user picked in a dialog or opened from Finder. The renderer may only
+// re-save to these paths without a dialog, never to arbitrary locations.
+const userChosenPaths = new Set();
 
 // ---------------------------------------------------------------- window state
 
@@ -57,6 +60,7 @@ function send(action) {
 
 async function readFileForRenderer(filePath) {
   const data = await fs.readFile(filePath);
+  userChosenPaths.add(path.resolve(filePath));
   return { name: path.basename(filePath), path: filePath, data: new Uint8Array(data) };
 }
 
@@ -174,15 +178,17 @@ function buildMenu() {
 
 function registerIpc() {
   ipcMain.handle('file:save', async (event, opts) => {
-    if (!isTrustedSender(event)) return null;
-    let target = typeof opts?.path === 'string' && opts.path ? opts.path : null;
+    if (!isTrustedSender(event) || !(opts?.data instanceof Uint8Array)) return null;
+    const requested = typeof opts.path === 'string' && opts.path ? path.resolve(opts.path) : null;
+    let target = requested && userChosenPaths.has(requested) ? requested : null;
     if (!target) {
       const res = await dialog.showSaveDialog(mainWindow, {
-        defaultPath: opts?.suggestedName || 'Untitled',
-        filters: Array.isArray(opts?.filters) ? opts.filters : [],
+        defaultPath: typeof opts.suggestedName === 'string' ? opts.suggestedName : 'Untitled',
+        filters: Array.isArray(opts.filters) ? opts.filters : [],
       });
       if (res.canceled || !res.filePath) return null;
-      target = res.filePath;
+      target = path.resolve(res.filePath);
+      userChosenPaths.add(target);
     }
     await fs.writeFile(target, Buffer.from(opts.data));
     if (isMac) app.addRecentDocument(target);

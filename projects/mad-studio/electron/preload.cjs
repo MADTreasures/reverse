@@ -1,21 +1,22 @@
 // Minimal, typed bridge between the sandboxed renderer and the main process.
 const { contextBridge, ipcRenderer } = require('electron');
 
-function subscribe(channel, cb) {
-  const handler = (_event, payload) => cb(payload);
-  ipcRenderer.on(channel, handler);
-  return () => ipcRenderer.removeListener(channel, handler);
-}
-
+// Channels are spelled out literally (no generic subscribe helper) so the IPC surface
+// stays auditable, e.g. with REA's static Electron analysis.
 contextBridge.exposeInMainWorld('madNative', {
   platform: process.platform,
   saveFile: (opts) => ipcRenderer.invoke('file:save', opts),
   openFile: (opts) => ipcRenderer.invoke('file:open', opts),
-  onMenu: (cb) => subscribe('menu:action', cb),
+  onMenu: (cb) => {
+    const handler = (_event, action) => cb(action);
+    ipcRenderer.on('menu:action', handler);
+    return () => ipcRenderer.removeListener('menu:action', handler);
+  },
   onOpenFile: (cb) => {
-    const off = subscribe('file:opened', cb);
+    const handler = (_event, file) => cb(file);
+    ipcRenderer.on('file:opened', handler);
     ipcRenderer.send('file:ready-for-open');
-    return off;
+    return () => ipcRenderer.removeListener('file:opened', handler);
   },
   setDocumentEdited: (edited) => ipcRenderer.send('window:set-edited', Boolean(edited)),
   setTitle: (title) => ipcRenderer.send('window:set-title', String(title)),
