@@ -61,7 +61,10 @@ export const MENUS: MenuSpec[] = [
       { label: 'New animation layer', items: ['newAnimationFolder'] },
       'newAnimationCel',
       '-',
-      { label: 'Edit track', items: ['assignCel', 'removeAssignedCel', '-', 'selectPrevCel', 'selectNextCel'] },
+      {
+        label: 'Edit track',
+        items: ['assignCel', 'removeAssignedCel', '-', 'setFirstDisplayed', 'setLastDisplayed', 'splitClip', 'mergeClips', 'deleteClip', '-', 'copyClip', 'pasteClip', '-', 'selectPrevCel', 'selectNextCel'],
+      },
       { label: 'Timeline', items: ['newTimeline', 'timelineSettings', 'enableTimeline', '-', 'insertFrame', 'deleteFrame'] },
       { label: 'Move frame', items: ['firstFrame', 'prevFrame', 'nextFrame', 'lastFrame'] },
       '-',

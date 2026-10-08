@@ -451,6 +451,7 @@ const paths: Record<string, ReactNode> = {
     </>
   ),
   newCel: <path d="M5.5 2.5h6l3 3v12h-9zM10 8.5v6M7 11.5h6" />,
+  layer: <path d="M3 7.5l7-4 7 4-7 4zM3 12.5l7 4 7-4" />,
   removeCel: <path d="M5.5 2.5h6l3 3v12h-9zM7.8 9.3l4.4 4.4M12.2 9.3l-4.4 4.4" />,
 };
 

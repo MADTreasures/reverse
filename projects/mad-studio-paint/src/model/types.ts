@@ -1,5 +1,6 @@
 /** Document model of MAD Studio Paint. Pixel data lives in surfaces (see engine/surfaces.ts), keyed by layer id. */
 import type { AnimationTrack, Timeline } from '../paint/animation';
+import type { Clip } from '../paint/clips';
 import type { LayerEffects } from '../paint/effects';
 import type { Ruler } from '../paint/rulers';
 import type { Correction } from '../paint/tonal';
@@ -79,6 +80,11 @@ interface LayerBase {
   /** Layer Property palette: border effect, layer colour. */
   effects?: LayerEffects;
   rulers?: LayerRulers;
+  /**
+   * Timeline: the clips of the layer's track, where it shows (none set: the whole timeline). Cels
+   * of animation folders are not tracks: the folder's track shows them.
+   */
+  clips?: Clip[];
 }
 
 export interface RasterLayer extends LayerBase {

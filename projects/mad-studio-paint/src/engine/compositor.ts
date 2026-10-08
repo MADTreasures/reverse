@@ -6,6 +6,7 @@
 import { nativeOp } from '../model/blend';
 import { hexToRgb } from '../model/color';
 import { celAt, onionCels, onionOpacity, tintOnion, type OnionSkin } from '../paint/animation';
+import { inClips } from '../paint/clips';
 import { clipGroups, flatten } from '../model/layers';
 import type { BlendMode, CorrectionLayer, FolderBlendMode, FolderLayer, GradientLayer, Id, Layer, PaintDocument, RasterLayer, TextLayer, VectorLayer } from '../model/types';
 import { anyEffect, applyEdge, applyLayerColor, applyWatercolorEdge, effectReach } from '../paint/effects';
@@ -98,6 +99,8 @@ export class Compositor {
   onion: OnionSkin | null = null;
   /** What the composition under way shows: the frame (null: no timeline, every cel) and onion skins. */
   private anim: { frame: number | null; onion: OnionSkin | null } = { frame: null, onion: null };
+  /** How many animation folders the layers being composed lie in (cels are not tracks: no clips). */
+  private inCel = 0;
 
   constructor(width: number, height: number) {
     this.canvas = createCanvas(width, height);
@@ -143,6 +146,7 @@ export class Compositor {
   /** Composes the document into `target` within `r`. Used for exports and colour sampling too. */
   compose(doc: PaintDocument, target: Ctx, r: Rect, opts: ComposeOptions): void {
     this.dpi = doc.dpi;
+    this.inCel = 0;
     this.anim = doc.timeline?.enabled ? { frame: opts.frame ?? this.frame, onion: opts.onion ?? null } : { frame: null, onion: null };
     target.save();
     target.beginPath();
@@ -163,6 +167,7 @@ export class Compositor {
    */
   layerImage(doc: PaintDocument, layer: Layer, opts: ComposeOptions = {}): HTMLCanvasElement {
     this.dpi = doc.dpi;
+    this.inCel = 0;
     this.anim = { frame: doc.timeline?.enabled ? (opts.frame ?? this.frame) : null, onion: null };
     const out = createCanvas(this.canvas.width, this.canvas.height);
     this.drawContent(layer, ctx2d(out), this.bounds, opts);
@@ -172,7 +177,20 @@ export class Compositor {
   private shown(layer: Layer, opts: ComposeOptions): boolean {
     if (!layer.visible || layer.opacity <= 0) return false;
     if (opts.skipDraft && layer.draft) return false;
+    // A track shows only where it has a clip.
+    if (this.anim.frame !== null && this.inCel === 0 && !inClips(layer.clips, this.anim.frame)) return false;
     return true;
+  }
+
+  /** Composes a folder's children (an animation folder's: the cel shown at the frame). */
+  private composeChildren(folder: FolderLayer, target: Ctx, r: Rect, opts: ComposeOptions): void {
+    const cel = Boolean(folder.animation) && this.anim.frame !== null;
+    if (cel) this.inCel++;
+    try {
+      this.composeList(this.childrenShown(folder), target, r, opts);
+    } finally {
+      if (cel) this.inCel--;
+    }
   }
 
   private composeList(layers: Layer[], target: Ctx, r: Rect, opts: ComposeOptions): void {
@@ -256,14 +274,14 @@ export class Compositor {
     // animation folders showing onion skins.
     if (layer.blend === 'pass-through' && !layer.frame && !this.skinned(layer)) {
       if (layer.opacity >= 1 && !mask) {
-        this.composeList(this.childrenShown(layer), target, r, opts);
+        this.composeChildren(layer, target, r, opts);
         return;
       }
       // The children blend straight into (a copy of) the backdrop; opacity and mask then mix that
       // result with the untouched backdrop.
       const tmp = this.pool.acquire(r);
       tmp.drawImage(target.canvas, 0, 0);
-      this.composeList(this.childrenShown(layer), tmp, r, opts);
+      this.composeChildren(layer, tmp, r, opts);
       mixInto(target, tmp, r, layer.opacity, mask);
       this.pool.release(tmp);
       return;
@@ -286,7 +304,7 @@ export class Compositor {
       if (s) ctx.drawImage(s, 0, 0);
     } else {
       if (this.skinned(layer)) this.drawOnionSkins(layer, ctx, rr, opts);
-      this.composeList(this.childrenShown(layer), ctx, rr, opts);
+      this.composeChildren(layer, ctx, rr, opts);
     }
     const mask = maskOf(layer);
     if (mask) applyMask(ctx, mask);
@@ -329,9 +347,14 @@ export class Compositor {
     const { prev, next } = onionCels(folder.animation!, this.anim.frame!, o.before, o.after);
     const skin = (id: Id, color: string, n: number) => {
       const cel = folder.children.find((c) => c.id === id);
-      if (!cel || !this.shown(cel, opts)) return;
+      if (!cel) return;
+      this.inCel++;
       const tmp = this.pool.acquire(r);
-      this.drawContent(cel, tmp, r, opts);
+      try {
+        if (this.shown(cel, opts)) this.drawContent(cel, tmp, r, opts);
+      } finally {
+        this.inCel--;
+      }
       if (o.mode !== 'color') {
         const img = tmp.getImageData(r.x, r.y, r.w, r.h);
         tintOnion(img.data, o.mode, hexToRgb(color) ?? { r: 0, g: 0, b: 0 });

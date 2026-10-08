@@ -158,6 +158,7 @@ export function loadDocument(doc: PaintDocument, images: Map<Id, HTMLCanvasEleme
     transforming: false,
     frame: 1,
     playing: false,
+    clipSelection: [],
     ...(doc.timeline ? { timelineShown: true } : {}),
   });
   fitToWindow();

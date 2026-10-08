@@ -2067,20 +2067,43 @@
 }
 
 .timeline-body {
+  --name-w: 170px;
   flex: 1;
   min-height: 0;
   overflow: auto;
 }
 
-.timeline-body.disabled .tl-cells {
+.timeline-body.disabled .tl-lane,
+.timeline-body.disabled .tl-ruler {
   opacity: 0.45;
+}
+
+.timeline-body.dragging {
+  cursor: grabbing;
+}
+
+.tl-rows {
+  position: relative;
+  width: max-content;
+  min-width: 100%;
+}
+
+/* the current frame, over every track */
+.tl-now {
+  position: absolute;
+  top: 20px;
+  bottom: 0;
+  width: var(--cell);
+  background: var(--accent-soft);
+  box-shadow: inset 1px 0 var(--accent-strong), inset -1px 0 var(--accent-strong);
+  pointer-events: none;
 }
 
 .tl-row {
   display: flex;
   width: max-content;
   min-width: 100%;
-  height: 26px;
+  height: 32px;
   border-bottom: 1px solid var(--line);
 }
 
@@ -2091,7 +2114,7 @@
 .tl-head {
   position: sticky;
   top: 0;
-  z-index: 2;
+  z-index: 4;
   height: 20px;
   background: var(--bg-2);
 }
@@ -2099,9 +2122,9 @@
 .tl-name {
   position: sticky;
   left: 0;
-  z-index: 1;
+  z-index: 3;
   display: flex;
-  flex: 0 0 150px;
+  flex: 0 0 var(--name-w);
   align-items: center;
   gap: 4px;
   padding-right: 6px;
@@ -2119,6 +2142,14 @@
   width: 22px;
   border-right: none;
   opacity: 0.4;
+}
+
+.tl-twisty {
+  display: inline-flex;
+  flex: 0 0 14px;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-dim);
 }
 
 .tl-name .eye.on {
@@ -2141,6 +2172,77 @@
 
 .tl-cells {
   display: flex;
+}
+
+/* a track's frames: its clips, and an animation folder's cels */
+.tl-lane {
+  position: relative;
+  z-index: 0;
+  flex: 0 0 calc(var(--frames) * var(--cell));
+  overflow: hidden;
+  background-image: repeating-linear-gradient(to right, transparent 0 calc(var(--cell) - 1px), var(--line) calc(var(--cell) - 1px) var(--cell));
+}
+
+.tl-lane > .tl-cells {
+  position: relative;
+  z-index: 1;
+  height: calc(100% - 9px);
+  margin-top: 9px;
+}
+
+.tl-lane .tl-cell {
+  border-right: none;
+  line-height: 22px;
+}
+
+.tl-clip {
+  position: absolute;
+  top: 1px;
+  bottom: 2px;
+  border: 1px solid color-mix(in srgb, var(--accent) 60%, transparent);
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--accent) 20%, transparent);
+}
+
+.tl-clip.selected {
+  border-color: var(--accent-strong);
+  box-shadow: 0 0 0 1px var(--accent-strong);
+}
+
+/* the strip at a clip's top: select and move it, trim at its ends */
+.tl-clip-grip {
+  position: absolute;
+  z-index: 2;
+  top: -1px;
+  left: -1px;
+  right: -1px;
+  height: 8px;
+  border-radius: 3px 3px 0 0;
+  background: color-mix(in srgb, var(--accent) 45%, transparent);
+  cursor: grab;
+}
+
+.tl-clip-grip::before,
+.tl-clip-grip::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 5px;
+  cursor: ew-resize;
+}
+
+.tl-clip-grip::before {
+  left: 0;
+}
+
+.tl-clip-grip::after {
+  right: 0;
+}
+
+.tl-clip.selected .tl-clip-grip,
+.tl-clip-grip:hover {
+  background: var(--accent-strong);
 }
 
 .tl-cell {
@@ -2177,7 +2279,7 @@
   background-image: linear-gradient(var(--bg-4), var(--bg-4));
   background-repeat: no-repeat;
   background-position: center;
-  background-size: 100% 16px;
+  background-size: 100% 14px;
 }
 
 .tl-cell.start {
@@ -2188,6 +2290,10 @@
 }
 
 .tl-cell.blank {
+  color: var(--text-faint);
+}
+
+.tl-cell.off {
   color: var(--text-faint);
 }
 

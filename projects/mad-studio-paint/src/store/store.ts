@@ -110,6 +110,14 @@ export interface PaintState {
   onion: OnionSkin;
   /** Window > Timeline (also opened when a canvas gets a timeline). */
   timelineShown: boolean;
+  /** Clips selected in the Timeline palette: their track and first frame. */
+  clipSelection: ClipRef[];
+}
+
+/** A clip in the Timeline palette: the track (layer) and the clip's first frame. */
+export interface ClipRef {
+  track: Id;
+  start: number;
 }
 
 export const initialView: ViewState = { zoom: 1, rotation: 0, flipH: false, flipV: false, panX: 0, panY: 0 };
@@ -156,6 +164,7 @@ function initialState(): PaintState {
     onionSkin: false,
     onion: { ...DEFAULT_ONION },
     timelineShown: false,
+    clipSelection: [],
   };
 }
 

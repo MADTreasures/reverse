@@ -1,5 +1,9 @@
-/** Animation folders and their cels in the layer tree (see paint/animation.ts for the tracks). */
+/**
+ * Animation folders and their cels in the layer tree, and the timeline's tracks: every layer that is
+ * not a cel (or inside one) is a track with clips (see paint/animation.ts and paint/clips.ts).
+ */
 import { celAt, framesOf, pruneTrack, type AnimationTrack } from '../paint/animation';
+import { clipsOf, inClips, type TrackContent } from '../paint/clips';
 import { findLayer, flatten, locate } from './layers';
 import type { FolderLayer, Id, Layer, PaintDocument } from './types';
 
@@ -33,12 +37,63 @@ export function pruneTracks(doc: PaintDocument): void {
   }
 }
 
+/** A layer and the folders around it, innermost first. */
+function chainOf(layers: Layer[], id: Id): Layer[] {
+  const chain: Layer[] = [];
+  let loc = locate(layers, id);
+  while (loc) {
+    chain.push(loc.layer);
+    loc = loc.parent ? locate(layers, loc.parent.id) : null;
+  }
+  return chain;
+}
+
+/** The tracks a layer belongs to: itself and its folders, or for a cel its animation folder and the folders around that. */
+export function tracksOf(layers: Layer[], id: Id): Layer[] {
+  const chain = chainOf(layers, id);
+  const top = chain.findLastIndex(isAnimationFolder);
+  return top >= 0 ? chain.slice(top) : chain;
+}
+
+/** Whether a layer is a track of the timeline (not a cel or inside one). */
+export const isTrack = (layers: Layer[], id: Id): boolean => tracksOf(layers, id)[0]?.id === id;
+
+/** Whether the clips of a layer's tracks show it at `frame`. */
+export const clipShown = (layers: Layer[], id: Id, frame: number): boolean => tracksOf(layers, id).every((l) => inClips(l.clips, frame));
+
+/** A row of the Timeline palette: a track and how deep it lies in folders. */
+export interface TrackRow {
+  layer: Layer;
+  depth: number;
+}
+
+/** The Timeline palette's tracks, top first: every layer but cels; closed folders hide theirs. */
+export function timelineTracks(layers: Layer[], depth = 0, out: TrackRow[] = []): TrackRow[] {
+  for (const layer of layers) {
+    out.push({ layer, depth });
+    if (layer.kind === 'folder' && !layer.animation && layer.expanded) timelineTracks(layer.children, depth + 1, out);
+  }
+  return out;
+}
+
+/** What a track holds: its clips (made explicit) and, for an animation folder, its cel assignments. */
+export function trackContent(layer: Layer, frames: number): TrackContent {
+  return { clips: clipsOf(layer.clips, frames), ...(isAnimationFolder(layer) ? { cels: layer.animation.cels } : {}) };
+}
+
+/** Stores a track's changed content in its layer (which is mutated). */
+export function setTrackContent(layer: Layer, t: TrackContent): void {
+  layer.clips = t.clips;
+  if (layer.kind === 'folder' && layer.animation && t.cels) layer.animation = { cels: t.cels };
+}
+
 /**
  * Why a layer cannot be edited at `frame` because of the timeline, or null: a cel that is not shown
- * there (the layers of other folders always can be).
+ * there, or a layer whose track has no clip there (the layers of other folders always can be).
  */
 export function celBlocker(doc: PaintDocument, id: Id, frame: number): string | null {
   if (!doc.timeline?.enabled) return null;
+  if (!clipShown(doc.layers, id, frame)) return 'This layer has no clip at the current frame (Timeline palette)';
   const c = celOf(doc.layers, id);
   if (!c || celAt(c.folder.animation, frame) === c.cel.id) return null;
   return framesOf(c.folder.animation, c.cel.id).length

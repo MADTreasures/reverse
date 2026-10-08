@@ -34,6 +34,19 @@ describe('.madpaint format', () => {
     expect((odd.layers[0] as FolderLayer).animation).toEqual({ cels: [{ frame: 1, cel: 'c' }] });
   });
 
+  it('keeps the clips of tracks', () => {
+    const doc = createDocument('Clips', 200, 100, 72);
+    doc.layers[0].clips = [
+      { start: 2, end: 4 },
+      { start: 7, end: 9 },
+    ];
+    doc.timeline = { enabled: true, fps: 12, frames: 12 };
+    const back = unpackDocument(packDocument({ doc, activeLayerId: null, layers: new Map() }));
+    expect(back.doc.layers[0].clips).toEqual(doc.layers[0].clips);
+    const odd = sanitizeDocument({ layers: [{ id: 'a', kind: 'raster', clips: [{ start: 3, end: 1 }, { start: 5, end: 'x' }, { start: 4, end: 6, offset: 2 }] }] });
+    expect(odd.layers[0].clips).toEqual([{ start: 4, end: 6, offset: 2 }]);
+  });
+
   it('keeps layer masks and drops masks that would share pixels', () => {
     const doc = createDocument('Masks', 100, 100, 72);
     doc.layers[0].mask = { ...createLayerMask(), enabled: false };

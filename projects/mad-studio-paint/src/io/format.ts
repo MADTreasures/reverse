@@ -21,13 +21,14 @@ import { packStroke, unpackStroke, type VectorStroke } from '../paint/vector';
 import { sanitizeBalloon, sanitizeTextBox, type Balloon, type TextBox } from '../paint/text';
 import { sanitizeFrame } from '../paint/frames';
 import { pruneTrack, sanitizeTimeline, sanitizeTrack } from '../paint/animation';
+import { sanitizeClips } from '../paint/clips';
 
 export const FORMAT = 'mad-studio-paint';
 /**
  * 2: layer masks, correction layers, effects, rulers. 3: vector and text layers, comic frames.
- * 4: animation (timeline, animation folders). Older files open unchanged.
+ * 4: animation (timeline, animation folders). 5: clips. Older files open unchanged.
  */
-export const FORMAT_VERSION = 4;
+export const FORMAT_VERSION = 5;
 export const EXTENSION = 'madpaint';
 
 export interface DocumentFile {
@@ -73,6 +74,7 @@ function sanitizeLayer(raw: unknown, seen: Set<string>, depth: number): Layer | 
   const mask = sanitizeMask(r.mask, seen);
   const effects = sanitizeEffects(r.effects);
   const rulers = sanitizeRulers(r.rulers);
+  const clips = sanitizeClips(r.clips);
   const common = {
     id,
     name: str(r.name, 'Layer', 120),
@@ -85,6 +87,7 @@ function sanitizeLayer(raw: unknown, seen: Set<string>, depth: number): Layer | 
     ...(mask ? { mask } : {}),
     ...(effects ? { effects } : {}),
     ...(rulers ? { rulers } : {}),
+    ...(clips ? { clips } : {}),
   };
   if (r.kind === 'folder') {
     const children = Array.isArray(r.children) ? r.children.map((c) => sanitizeLayer(c, seen, depth + 1)).filter((c): c is Layer => c !== null) : [];

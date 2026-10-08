@@ -2,27 +2,33 @@
  * Animation (Timeline palette and Animation menu): the timeline, animation folders and cels,
  * assigning cels to frames, moving between frames, playback and onion skin.
  */
-import { animationFolders, celOf, isAnimationFolder, trackFolderOf, type AnimationFolder } from '../model/animation';
+import { animationFolders, celOf, isAnimationFolder, setTrackContent, trackContent, trackFolderOf, tracksOf, type AnimationFolder } from '../model/animation';
 import { createFolder, createRasterLayer, findLayer, flatten, locate } from '../model/layers';
 import type { Id, Layer, PaintDocument } from '../model/types';
+import { assignAt, celAt, DEFAULT_TIMELINE, emptyTrack, entryAt, MAX_FRAMES, nextCelName, nextTrackName, removeAt, type OnionSkin, type Timeline } from '../paint/animation';
 import {
-  assignAt,
-  celAt,
-  deleteFrames,
-  DEFAULT_TIMELINE,
-  emptyTrack,
-  entryAt,
-  insertFrames,
-  MAX_FRAMES,
-  nextCelName,
-  nextTrackName,
-  removeAt,
-  type OnionSkin,
-  type Timeline,
-} from '../paint/animation';
+  clipIndexAt,
+  copyClip as copyClipContent,
+  deleteClipFrames,
+  deleteClips,
+  ensureClipAt,
+  insertClipFrames,
+  mergeClips,
+  moveClips,
+  nearestMove,
+  pasteClip as pasteClipContent,
+  setFirstDisplayed,
+  setLastDisplayed,
+  splitClip,
+  stretchClip,
+  trimClip,
+  type ClipCopy,
+  type ClipEdge,
+  type TrackContent,
+} from '../paint/clips';
 import { ensureSurface } from '../engine/surfaces';
 import * as actions from './actions';
-import { getState, setState, type PaintState } from './store';
+import { getState, setState, type ClipRef, type PaintState } from './store';
 
 export const timelineOf = (s: PaintState = getState()): Timeline | null => s.doc.timeline ?? null;
 
@@ -64,13 +70,19 @@ export const previousFrame = () => setFrame(getState().frame - 1);
 export const firstFrame = () => setFrame(1);
 export const lastFrame = () => setFrame(timelineOf()?.frames ?? 1);
 
-/** Clicking a frame of a track: that track and frame are selected (and the cel shown there). */
-export function selectTrackFrame(folderId: Id, frame: number): void {
+/** Clicking a frame of a track: that track and frame are selected (for an animation folder, the cel shown there). */
+export function selectTrackFrame(trackId: Id, frame: number): void {
   const s = getState();
-  const folder = findLayer(s.doc.layers, folderId);
-  if (!isAnimationFolder(folder)) return;
+  const track = findLayer(s.doc.layers, trackId);
+  if (!track) return;
   const f = clampFrame(frame, timelineOf(s));
-  setState({ frame: f, activeLayerId: editTargetAt(folder, f, s.activeLayerId, s.doc.layers), maskEditing: false, selectedObjects: [] });
+  const target = isAnimationFolder(track) ? editTargetAt(track, f, s.activeLayerId, s.doc.layers) : track.id;
+  setState({ frame: f, activeLayerId: target, ...(target !== s.activeLayerId ? { maskEditing: false, selectedObjects: [] } : {}) });
+}
+
+/** The track of the layer being edited: the layer itself, or the animation folder of a cel. */
+export function currentTrack(s: PaintState = getState()): Layer | null {
+  return tracksOf(s.doc.layers, s.activeLayerId)[0] ?? null;
 }
 
 // ------------------------------------------------------------------ timeline
@@ -96,14 +108,37 @@ export function toggleTimeline(): void {
   setTimeline({ enabled: !t.enabled }, t.enabled ? 'Disable timeline' : 'Enable timeline');
 }
 
+/** Every track of the timeline (cels are not tracks). */
+function allTracks(layers: Layer[], out: Layer[] = []): Layer[] {
+  for (const l of layers) {
+    out.push(l);
+    if (l.kind === 'folder' && !l.animation) allTracks(l.children, out);
+  }
+  return out;
+}
+
+/** Applies a track operation to every track: those with clips of their own, and animation folders. */
+function everyTrack(doc: PaintDocument, op: (t: TrackContent) => TrackContent): void {
+  const frames = doc.timeline?.frames ?? 1;
+  for (const l of allTracks(doc.layers)) {
+    if (!l.clips && !isAnimationFolder(l)) continue;
+    // A track that shows over the whole timeline still does afterwards.
+    const whole = !l.clips;
+    const t = trackContent(l, frames);
+    setTrackContent(l, op(whole ? { ...t, clips: [{ start: 1, end: MAX_FRAMES }] } : t));
+    if (whole) delete l.clips;
+  }
+}
+
 /** Animation > Timeline > Insert frame / Delete frame at the current frame, on every track. */
 export function insertFrame(count = 1): void {
   const { frame } = getState();
   actions.changeDoc('Insert frame', (doc) => {
     if (!doc.timeline) return;
-    for (const f of animationFolders(doc.layers)) f.animation = insertFrames(f.animation, frame, count);
+    everyTrack(doc, (t) => insertClipFrames(t, frame, count));
     doc.timeline = { ...doc.timeline, frames: Math.min(MAX_FRAMES, doc.timeline.frames + count) };
   });
+  setState({ clipSelection: [] });
 }
 
 export function deleteFrame(count = 1): void {
@@ -112,9 +147,10 @@ export function deleteFrame(count = 1): void {
   if (!t || t.frames <= 1) return;
   const n = Math.min(count, t.frames - s.frame + 1, t.frames - 1);
   actions.changeDoc('Delete frame', (doc) => {
-    for (const f of animationFolders(doc.layers)) f.animation = deleteFrames(f.animation, s.frame, n);
+    everyTrack(doc, (c) => deleteClipFrames(c, s.frame, n, t.fps));
     doc.timeline = { ...t, frames: t.frames - n };
   });
+  setState({ clipSelection: [] });
   setFrame(Math.min(s.frame, t.frames - n));
 }
 
@@ -181,9 +217,10 @@ export function newAnimationCel(): Id | null {
     const at = shown?.folder.id === folderId ? f.children.findIndex((c) => c.id === shown.cel.id) : 0;
     f.children.splice(Math.max(0, at), 0, cel);
     f.expanded = true;
+    doc.timeline = { ...(doc.timeline ?? t), frames: Math.max((doc.timeline ?? t).frames, frame) };
+    withClipAt(f, frame, doc.timeline.frames);
     f.animation = assignAt(f.animation, frame, cel.id);
     ensureSurface(cel.id, doc.width, doc.height);
-    doc.timeline = { ...(doc.timeline ?? t), frames: Math.max((doc.timeline ?? t).frames, frame) };
     return cel.id;
   });
   setState({ frame });
@@ -195,8 +232,9 @@ export function assignCel(folderId: Id, frame: number, celId: Id | null): void {
   actions.changeDoc(celId ? 'Assign cel to frame' : 'Assign blank to frame', (doc) => {
     const f = findLayer(doc.layers, folderId);
     if (!isAnimationFolder(f)) return;
-    f.animation = assignAt(f.animation, frame, celId);
     if (doc.timeline && frame > doc.timeline.frames) doc.timeline = { ...doc.timeline, frames: Math.min(MAX_FRAMES, frame) };
+    withClipAt(f, frame, doc.timeline?.frames ?? frame);
+    f.animation = assignAt(f.animation, frame, celId);
   });
   selectTrackFrame(folderId, frame);
 }
@@ -226,6 +264,250 @@ export function selectNeighbourCel(dir: -1 | 1): void {
   const target = dir > 0 ? starts.find((f) => f > current) : starts.findLast((f) => f < current);
   if (target !== undefined) selectTrackFrame(folder.id, target);
 }
+
+// ------------------------------------------------------------------ clips
+
+/** Selects a clip in the Timeline palette (`add`: Ctrl/⌘-click adds it to the selection or takes it out). */
+export function selectClip(track: Id, start: number, add = false): void {
+  const s = getState();
+  const has = s.clipSelection.some((c) => c.track === track && c.start === start);
+  if (!add) setState({ clipSelection: [{ track, start }] });
+  else setState({ clipSelection: has ? s.clipSelection.filter((c) => !(c.track === track && c.start === start)) : [...s.clipSelection, { track, start }] });
+}
+
+export const clearClipSelection = () => {
+  if (getState().clipSelection.length) setState({ clipSelection: [] });
+};
+
+/** The selected clips by track, as indices into each track's clips. */
+function selectedByTrack(s: PaintState): { layer: Layer; indices: number[] }[] {
+  const frames = s.doc.timeline?.frames ?? 1;
+  const out = new Map<Id, { layer: Layer; indices: number[] }>();
+  for (const ref of s.clipSelection) {
+    const layer = findLayer(s.doc.layers, ref.track);
+    if (!layer) continue;
+    const i = trackContent(layer, frames).clips.findIndex((c) => c.start === ref.start);
+    if (i < 0) continue;
+    const entry = out.get(layer.id) ?? { layer, indices: [] };
+    entry.indices.push(i);
+    out.set(layer.id, entry);
+  }
+  return [...out.values()];
+}
+
+/** The clip a command works on: a selected clip of the current track, else the one at the current frame. */
+function commandClip(s: PaintState): { layer: Layer; index: number } | null {
+  const track = currentTrack(s);
+  const frames = s.doc.timeline?.frames ?? 1;
+  const selected = selectedByTrack(s);
+  const own = selected.find((x) => x.layer.id === track?.id) ?? selected[0];
+  if (own) return { layer: own.layer, index: Math.min(...own.indices) };
+  if (!track) return null;
+  const index = clipIndexAt(trackContent(track, frames).clips, s.frame);
+  return index >= 0 ? { layer: track, index } : null;
+}
+
+/**
+ * Changes tracks in one undo step: `op` gets each track's content (clips made explicit) and returns
+ * the new content, or null to leave it.
+ */
+function editTracks(label: string, ids: Id[], op: (t: TrackContent, layer: Layer, timeline: Timeline) => TrackContent | null, key?: string): boolean {
+  const s = getState();
+  const t = s.doc.timeline;
+  if (!t) return false;
+  const results = new Map<Id, TrackContent>();
+  for (const id of ids) {
+    const layer = findLayer(s.doc.layers, id);
+    if (!layer) continue;
+    const next = op(trackContent(layer, t.frames), layer, t);
+    if (next) results.set(id, next);
+  }
+  if (results.size === 0) return false;
+  actions.changeDoc(
+    label,
+    (doc) => {
+      for (const [id, content] of results) {
+        const l = findLayer(doc.layers, id);
+        if (l) setTrackContent(l, content);
+      }
+    },
+    key ? { key } : {},
+  );
+  return true;
+}
+
+const NO_CLIP = 'Select a track with clips, and a frame or clip on it, in the Timeline palette';
+
+/**
+ * Animation > Edit track > Set as first displayed frame: on a frame without a clip, a clip starts
+ * there (after a clip: showing its last cel; before the first one: that clip starts there).
+ */
+export function setFirstDisplayedFrame(): void {
+  const s = getState();
+  const track = currentTrack(s);
+  if (!track || !editTracks('Set as first displayed frame', [track.id], (t, _l, tl) => setFirstDisplayed(t, s.frame, tl.frames, tl.fps)))
+    setState({ hint: 'Set as first displayed frame needs a frame without a clip, on a track with clips' });
+  else setState({ clipSelection: [] });
+}
+
+/** Animation > Edit track > Set as last displayed frame: the clip ends before the selected frame. */
+export function setLastDisplayedFrame(): void {
+  const s = getState();
+  const track = currentTrack(s);
+  if (!track || !editTracks('Set as last displayed frame', [track.id], (t) => setLastDisplayed(t, s.frame))) setState({ hint: NO_CLIP });
+  else setState({ clipSelection: [] });
+}
+
+/** Animation > Edit track > Split clip: at the current frame of the current track. */
+export function splitClipAtFrame(): void {
+  const s = getState();
+  const track = currentTrack(s);
+  if (!track || !editTracks('Split clip', [track.id], (t, _l, tl) => splitClip(t, s.frame, tl.fps))) setState({ hint: 'Select a frame inside a clip (not its first frame) to split it there' });
+  else setState({ clipSelection: [{ track: track.id, start: s.frame }] });
+}
+
+/** Animation > Edit track > Merge clips: the selected clips of a track (one selected: with the next). */
+export function mergeSelectedClips(): void {
+  const s = getState();
+  const sel = selectedByTrack(s);
+  const target = sel[0] ?? (() => {
+    const c = commandClip(s);
+    return c ? { layer: c.layer, indices: [c.index] } : null;
+  })();
+  if (!target || !editTracks('Merge clips', [target.layer.id], (t) => mergeClips(t, target.indices))) {
+    setState({ hint: 'Select two clips of one track (or a clip followed by another) to merge them' });
+    return;
+  }
+  const start = trackContent(target.layer, s.doc.timeline?.frames ?? 1).clips[Math.min(...target.indices)]?.start;
+  setState({ clipSelection: start !== undefined ? [{ track: target.layer.id, start }] : [] });
+}
+
+/** Animation > Edit track > Delete clip: the selected clips (or the one at the current frame) and what lies in them. */
+export function deleteSelectedClips(): void {
+  const s = getState();
+  let sel = selectedByTrack(s);
+  if (sel.length === 0) {
+    const c = commandClip(s);
+    sel = c ? [{ layer: c.layer, indices: [c.index] }] : [];
+  }
+  if (sel.length === 0 || !editTracks('Delete clip', sel.map((x) => x.layer.id), (t, layer) => deleteClips(t, sel.find((x) => x.layer.id === layer.id)!.indices))) {
+    setState({ hint: NO_CLIP });
+    return;
+  }
+  setState({ clipSelection: [] });
+}
+
+/** What Copy (clip) put on the clipboard: the clip and the names of its cels (for other animation folders). */
+let clipboard: { track: Id; copy: ClipCopy; names: Map<Id, string> } | null = null;
+
+export const hasCopiedClip = () => clipboard !== null;
+
+/** Copy (clip): the selected clip, or the one at the current frame. */
+export function copySelectedClip(): void {
+  const s = getState();
+  const c = commandClip(s);
+  const copy = c ? copyClipContent(trackContent(c.layer, s.doc.timeline?.frames ?? 1), c.index) : null;
+  if (!c || !copy) {
+    setState({ hint: NO_CLIP });
+    return;
+  }
+  const names = new Map<Id, string>();
+  if (c.layer.kind === 'folder') for (const cel of c.layer.children) names.set(cel.id, cel.name);
+  clipboard = { track: c.layer.id, copy, names };
+  setState({ hint: 'Clip copied: select a frame and use Paste clip' });
+}
+
+/**
+ * Paste (clip) at the current frame of the current track. In another animation folder, its cels
+ * of the same names are assigned; missing ones are made (empty), like Create all supported cels.
+ */
+export function pasteCopiedClip(): void {
+  const s = getState();
+  const track = currentTrack(s);
+  if (!clipboard || !track) {
+    setState({ hint: clipboard ? NO_CLIP : 'Copy a clip first' });
+    return;
+  }
+  const { copy, names } = clipboard;
+  const sameTrack = clipboard.track === track.id;
+  if (Boolean(copy.cels) !== isAnimationFolder(track)) {
+    setState({ hint: 'Clips can only be pasted on tracks of the same kind' });
+    return;
+  }
+  const frame = s.frame;
+  actions.changeDoc('Paste clip', (doc) => {
+    const l = findLayer(doc.layers, track.id);
+    if (!l || !doc.timeline) return;
+    let pasted = copy;
+    if (isAnimationFolder(l) && copy.cels && !sameTrack) {
+      // Cels by name; missing ones are made.
+      const byName = new Map(l.children.map((c) => [c.name, c.id]));
+      const map = new Map<Id, Id>();
+      for (const a of copy.cels) {
+        if (a.cel === null || map.has(a.cel)) continue;
+        const name = names.get(a.cel) ?? nextCelName(l.children.map((c) => c.name));
+        let id = byName.get(name);
+        if (!id) {
+          const cel = createRasterLayer(name);
+          l.children.unshift(cel);
+          ensureSurface(cel.id, doc.width, doc.height);
+          byName.set(name, cel.id);
+          id = cel.id;
+        }
+        map.set(a.cel, id);
+      }
+      pasted = { ...copy, cels: copy.cels.map((a) => ({ ...a, cel: a.cel === null ? null : (map.get(a.cel) ?? null) })) };
+    }
+    setTrackContent(l, pasteClipContent(trackContent(l, doc.timeline.frames), pasted, frame, doc.timeline.fps));
+  });
+  setState({ clipSelection: [{ track: track.id, start: frame }] });
+}
+
+/** Dragging selected clips: the move every selected track allows nearest to `delta`. */
+export function clipMoveDelta(delta: number, s: PaintState = getState()): number {
+  const frames = s.doc.timeline?.frames ?? 1;
+  return nearestMove(
+    selectedByTrack(s).map((x) => ({ clips: trackContent(x.layer, frames).clips, indices: x.indices })),
+    delta,
+  );
+}
+
+/** Moves the selected clips (with their cels and keys) by `delta` frames. */
+export function moveSelectedClips(delta: number): void {
+  const s = getState();
+  const d = clipMoveDelta(delta, s);
+  if (!d) return;
+  const sel = selectedByTrack(s);
+  editTracks('Move clip', sel.map((x) => x.layer.id), (t, layer) => moveClips(t, sel.find((x) => x.layer.id === layer.id)!.indices, d));
+  setState({ clipSelection: s.clipSelection.map((c) => ({ ...c, start: c.start + d })) });
+}
+
+/** What a track looks like with a clip's edge dragged to `frame` (Alt: time stretch), for previews and commits. */
+export function draggedEdge(t: TrackContent, index: number, edge: ClipEdge, frame: number, stretch: boolean, fps: number): TrackContent {
+  return stretch ? stretchClip(t, index, edge, frame, fps) : trimClip(t, index, edge, frame, fps);
+}
+
+/** Trim (or with Alt, stretch) a clip by dragging its edge to `frame`. */
+export function dragClipEdge(trackId: Id, start: number, edge: ClipEdge, frame: number, stretch: boolean): void {
+  let newStart = start;
+  const ok = editTracks(stretch ? 'Stretch clip' : 'Trim clip', [trackId], (t, _l, tl) => {
+    const i = t.clips.findIndex((c) => c.start === start);
+    if (i < 0) return null;
+    const next = draggedEdge(t, i, edge, frame, stretch, tl.fps);
+    if (next === t) return null;
+    newStart = edge === 'start' ? (next.clips.find((c) => c.end === t.clips[i].end)?.start ?? start) : start;
+    return next;
+  });
+  if (ok) setState({ clipSelection: [{ track: trackId, start: newStart }] });
+}
+
+/** Makes sure a clip shows a frame of a track before something is assigned there. */
+function withClipAt(l: Layer, frame: number, frames: number): void {
+  if (!l.clips) return;
+  setTrackContent(l, ensureClipAt(trackContent(l, frames), frame, frames));
+}
+
+export type { ClipRef };
 
 // ------------------------------------------------------------------ playback
 

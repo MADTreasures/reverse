@@ -1931,6 +1931,129 @@ test('animation: animated illustration, a cel per frame, onion skin, playback, G
   expect(errors).toEqual([]);
 });
 
+test('animation clips: trim, first and last displayed frame, merge, split, move, delete, copy and paste', async ({ page }) => {
+  const errors = await boot(page);
+  await page.evaluate(() => void window.__madPaint.runCommand('new'));
+  const dlg = page.getByRole('dialog', { name: 'New canvas' });
+  await dlg.getByLabel('Width').fill('400');
+  await dlg.getByLabel('Height').fill('300');
+  await dlg.getByText('Create animated illustration').click();
+  await dlg.getByLabel('Number of cels').fill('8');
+  await dlg.getByLabel('Frame rate').fill('8');
+  await dlg.getByRole('button', { name: 'OK' }).click();
+  const ruler = (f: number) => page.getByTestId('timeline-ruler').locator('.tl-cell').nth(f - 1).click();
+  const clips = () => page.evaluate(() => window.__madPaint.useStore.getState().doc.layers[0].clips?.map((c: any) => [c.start, c.end]) ?? null);
+  // Cel 1 (a line at y = 100) on frame 1, cel 2 (y = 200) on frame 4.
+  await thinPen(page);
+  await drag(page, [50, 100], [350, 100]);
+  await ruler(4);
+  await page.getByRole('button', { name: 'New animation cel' }).click();
+  expect(await frameNow(page)).toBe(4);
+  await drag(page, [50, 200], [350, 200]);
+  const track = page.locator('[data-testid=timeline-track][data-track="A"]');
+  const clip = (n: number) => track.getByTestId('timeline-clip').nth(n).locator('.tl-clip-grip');
+  // One clip over the whole timeline.
+  await expect(track.getByTestId('timeline-clip')).toHaveCount(1);
+  expect(await clips()).toBeNull();
+  // Trim: the clip's end dragged from frame 8 to frame 6; frame 7 shows nothing and cannot be drawn on.
+  const box = (await clip(0).boundingBox())!;
+  await page.mouse.move(box.x + box.width - 2, box.y + 3);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width - 50, box.y + 3, { steps: 4 });
+  await page.mouse.up();
+  expect(await clips()).toEqual([[1, 6]]);
+  await ruler(7);
+  expect(await shown(page, 200, 200)).toBe(255);
+  await drag(page, [50, 250], [350, 250]);
+  expect(await page.evaluate(() => window.__madPaint.useStore.getState().hint)).toMatch(/no clip at the current frame/);
+  // Set as first displayed frame on frame 8: a new clip shows the last cel.
+  await ruler(8);
+  await page.evaluate(() => window.__madPaint.runCommand('setFirstDisplayed'));
+  expect(await clips()).toEqual([
+    [1, 6],
+    [8, 8],
+  ]);
+  expect(await shown(page, 200, 200)).toBeLessThan(60);
+  // Set as last displayed frame on frame 3: the clip ends at 2 and goes on from cel 2.
+  await ruler(3);
+  await page.evaluate(() => window.__madPaint.runCommand('setLastDisplayed'));
+  expect(await clips()).toEqual([
+    [1, 2],
+    [4, 6],
+    [8, 8],
+  ]);
+  expect(await shown(page, 200, 100)).toBe(255);
+  // Merge the first two (Ctrl/⌘-click selects both; the frame's pop-up menu merges): frame 3 shows cel 1 again.
+  await clip(0).click();
+  await clip(1).click({ modifiers: ['ControlOrMeta'] });
+  expect(await page.evaluate(() => window.__madPaint.useStore.getState().clipSelection.length)).toBe(2);
+  await track.locator('.tl-cell[data-frame="3"]').click({ button: 'right' });
+  await page.getByRole('menuitem', { name: 'Merge clips' }).click();
+  expect(await clips()).toEqual([
+    [1, 6],
+    [8, 8],
+  ]);
+  await ruler(3);
+  expect(await shown(page, 200, 100)).toBeLessThan(60);
+  // Split at frame 5, then drag the second part one frame to the right.
+  await ruler(5);
+  await page.evaluate(() => window.__madPaint.runCommand('splitClip'));
+  expect(await clips()).toEqual([
+    [1, 4],
+    [5, 6],
+    [8, 8],
+  ]);
+  const part = (await clip(1).boundingBox())!;
+  await page.mouse.move(part.x + part.width / 2, part.y + 3);
+  await page.mouse.down();
+  await page.mouse.move(part.x + part.width / 2 + 26, part.y + 3, { steps: 4 });
+  await page.mouse.up();
+  expect(await clips()).toEqual([
+    [1, 4],
+    [6, 7],
+    [8, 8],
+  ]);
+  await ruler(5);
+  expect(await shown(page, 200, 200)).toBe(255);
+  await ruler(7);
+  expect(await shown(page, 200, 200)).toBeLessThan(60);
+  // Delete the last clip; copy the first and paste it on frame 5 (over the moved one).
+  await clip(2).click();
+  await page.evaluate(() => window.__madPaint.runCommand('deleteClip'));
+  expect(await clips()).toEqual([
+    [1, 4],
+    [6, 7],
+  ]);
+  await clip(0).click();
+  await page.evaluate(() => window.__madPaint.runCommand('copyClip'));
+  await ruler(5);
+  await page.evaluate(() => window.__madPaint.runCommand('pasteClip'));
+  expect(await clips()).toEqual([
+    [1, 4],
+    [5, 8],
+  ]);
+  await ruler(6);
+  expect(await shown(page, 200, 100)).toBeLessThan(60);
+  await ruler(8);
+  expect(await shown(page, 200, 200)).toBeLessThan(60);
+  // Undo takes the paste back; clips are saved with the document.
+  await page.evaluate(() => window.__madPaint.actions.undo());
+  expect(await clips()).toEqual([
+    [1, 4],
+    [6, 7],
+  ]);
+  const back = await page.evaluate(async () => {
+    const m = window.__madPaint;
+    await m.openFileBytes({ name: 'clips.madpaint', data: await m.buildDocumentBytes() });
+    return m.useStore.getState().doc.layers[0].clips.map((c: any) => [c.start, c.end]);
+  });
+  expect(back).toEqual([
+    [1, 4],
+    [6, 7],
+  ]);
+  expect(errors).toEqual([]);
+});
+
 test('frame borders snap strokes that start near them, not along their extension', async ({ page }) => {
   await boot(page);
   await page.evaluate(() => window.__madPaint.runCommand('newFrameFolder'));
