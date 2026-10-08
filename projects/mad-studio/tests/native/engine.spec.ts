@@ -21,7 +21,7 @@ const pluginDir = path.join(release, 'plugins');
 
 test.skip(!existsSync(enginePath), `native engine not built (${enginePath})`);
 
-test('desktop app drives the native engine: playback, VST3 plugins, render, plugin state', async () => {
+test('desktop app drives the native engine: playback, VST3 plugins, render, plugin state, delay compensation', async () => {
   // A fresh profile: no restored session, no plugin cache, no "save changes?" prompt on close.
   const profile = mkdtempSync(path.join(tmpdir(), 'mad-studio-native-'));
   const app = await electron.launch({
@@ -143,6 +143,71 @@ test('desktop app drives the native engine: playback, VST3 plugins, render, plug
     expect(states).toEqual(['string', true, true]);
     expect(errors).toEqual([]);
     step('plugin states ok');
+
+    // Plugin delay compensation (FL Studio: automatic PDC, the mixer's delay panel, wrapper latency).
+    // MAD Test Delay on insert 2 reports 1000 samples; insert 1 (MAD Test Gain) waits for it.
+    const delayKey = await page.evaluate(() => {
+      const m = window.__madStudio;
+      const delay = m.usePlugins.getState().plugins.find((p: any) => p.name === 'MAD Test Delay');
+      return delay ? `fx:${m.actions.addPluginEffect(2, m.pluginInstanceFrom(delay))}` : null;
+    });
+    expect(delayKey).not.toBeNull();
+    await expect.poll(() => page.evaluate((k) => window.__madStudio.usePlugins.getState().instances[k]?.state, delayKey)).toBe('ready');
+    const latency = () =>
+      page.evaluate(() => {
+        const l = window.__madStudio.usePlugins.getState().latency;
+        return l ? { automatic: l.automatic, total: l.total, rate: l.sampleRate, latency2: l.tracks[2]?.latency, delay1: l.tracks[1]?.delay } : null;
+      });
+    await expect.poll(async () => (await latency())?.total).toBe(1000);
+    const report = await latency();
+    expect([report?.latency2, report?.delay1]).toEqual([1000, 1000]);
+    const rate = report!.rate;
+
+    await page.evaluate(() => {
+      const m = window.__madStudio;
+      if (!m.useStore.getState().ui.windows.mixer?.open) m.runCommand('window:mixer');
+    });
+    const panel = page.locator('.strip').nth(2).locator('.pdc');
+    await expect(panel).toHaveClass(/latent/);
+    await expect(panel).toHaveAttribute('data-hint', /1000 samples/);
+    await expect(page.locator('.strip').nth(1).locator('.pdc')).toHaveAttribute('data-hint', /delayed/);
+
+    // Manual offset through the delay panel: Set in samples…, then the mouse wheel (+10 ms).
+    await panel.click();
+    await page.locator('.context-menu .menu-label', { hasText: 'Set in samples' }).click();
+    await page.locator('.modal input').fill('480');
+    await page.keyboard.press('Enter');
+    const offset = () => page.evaluate(() => window.__madStudio.useStore.getState().project.mixer[2].latencyOffset);
+    await expect.poll(offset).toBeCloseTo((480 * 1000) / rate, 6);
+    await expect.poll(async () => (await latency())?.total).toBe(520);
+    await expect(panel).toHaveClass(/manual/);
+    await panel.hover();
+    await page.mouse.wheel(0, -100);
+    await expect.poll(offset).toBeCloseTo((480 * 1000) / rate + 10, 6);
+
+    // Mixer menu › Plugin delay compensation › Automatic off: only the manual offset applies.
+    await page.locator('button[data-hint="Mixer menu"]').click();
+    await page.locator('.context-menu .menu-label', { hasText: 'Plugin delay compensation' }).hover();
+    await page.locator('.context-menu .menu-label', { hasText: /^Automatic$/ }).click();
+    await expect.poll(() => page.evaluate(() => window.__madStudio.useStore.getState().project.pdc)).toBe(false);
+    await expect.poll(async () => {
+      const l = await latency();
+      return l && [l.automatic, l.total];
+    }).toEqual([false, 0]);
+
+    // The plugin wrapper shows the reported latency and takes an offset for misreporting plugins.
+    await page.locator('.strip').nth(2).locator('.strip-num').click();
+    await page.locator('.mixer-fx .fx-name', { hasText: 'MAD Test Delay' }).click();
+    await expect(page.locator('.plugin-latency')).toContainText('1000 samples');
+    await page.locator('.plugin-latency .drag-number').dblclick();
+    await page.locator('.plugin-latency input').fill('200');
+    await page.keyboard.press('Enter');
+    await expect
+      .poll(() => page.evaluate((k) => window.__madStudio.usePlugins.getState().latency?.plugins[k], delayKey))
+      .toEqual({ reported: 1000, offset: 200 });
+    await expect(page.locator('.plugin-latency')).toContainText('compensated as');
+    expect(errors).toEqual([]);
+    step('plugin delay compensation ok');
   } finally {
     await app.close();
     rmSync(profile, { recursive: true, force: true });

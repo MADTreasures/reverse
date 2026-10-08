@@ -75,7 +75,8 @@ struct ProjectModel
 {
     double bpm = 130.0, swing = 0.0;
     int beatsPerBar = 4;
-    bool pdc = true; // automatic plugin delay compensation
+    bool pdc = true;           // automatic plugin delay compensation
+    bool pdcAutomation = true; // compensate automation (lanes behind latent plugins are read earlier)
     std::vector<ChannelModel> channels;
     std::vector<MixerTrackModel> mixer;
 

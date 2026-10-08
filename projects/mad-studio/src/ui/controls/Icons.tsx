@@ -206,3 +206,10 @@ export const IconPrecount = (p: IconProps) => (
     <path d="M8 3v5l2.5 1.5" />
   </Svg>
 );
+/** Plugin delay compensation (FL Studio's mixer delay panel): a clock. */
+export const IconClock = (p: IconProps) => (
+  <Svg {...p}>
+    <circle cx="8" cy="8" r="5.75" />
+    <path d="M8 4.75V8l2.25 1.5" />
+  </Svg>
+);

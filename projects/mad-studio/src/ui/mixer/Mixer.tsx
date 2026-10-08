@@ -27,6 +27,7 @@ import { effectSlotMenu } from '../menus/pluginMenus';
 import { openDialog, promptDialog, showMenu, type MenuItem } from '../overlays';
 import { WindowFrame } from '../workspace/WindowFrame';
 import { openEffectEditor } from '../workspace/windows';
+import { LatencyPanel, pdcMenu, trackLatencyMenu } from './Latency';
 
 const FADER_H = 150;
 
@@ -77,6 +78,7 @@ function mixerMenu(): MenuItem[] {
         { label: 'On', radio: true, checked: t.monitoring === 'on', onClick: () => setTransport({ monitoring: 'on' }) },
       ],
     },
+    { label: 'Plugin delay compensation', submenu: pdcMenu() },
     { label: 'Audio settings…', onClick: () => openDialog('audio') },
     { label: `Mixer track (${track?.name ?? ''})`, header: true },
     {
@@ -140,6 +142,7 @@ function trackMenu(track: MixerTrack, index: number): MenuItem[] {
           { label: track.armed ? 'Disarm' : 'Arm for recording', onClick: () => setTrackArmed(index, !track.armed) },
         ]
       : []),
+    ...(usePlugins.getState().nativeEngine ? [{ label: 'Delay compensation', submenu: trackLatencyMenu(index) }] : []),
     { separator: true },
     { label: 'Add effect', submenu: effectSlotMenu(index, null) },
   ];
@@ -147,6 +150,7 @@ function trackMenu(track: MixerTrack, index: number): MenuItem[] {
 
 const Strip = memo(function Strip({ track, index, selected }: { track: MixerTrack; index: number; selected: boolean }) {
   const isMaster = index === 0;
+  const native = usePlugins((s) => s.nativeEngine);
   const activeFx = track.effects.filter((e) => e.enabled).length;
   return (
     <div
@@ -206,6 +210,7 @@ const Strip = memo(function Strip({ track, index, selected }: { track: MixerTrac
         <Meter trackIndex={index} width={10} height={FADER_H} />
       </div>
       <span className="strip-db">{formatDb(volumeToGain(track.volume)).replace(' dB', '')}</span>
+      {native && <LatencyPanel index={index} variant="strip" />}
       {isMaster ? (
         <span className="arm-dot placeholder" />
       ) : (
@@ -231,6 +236,7 @@ function TrackInspector({ index }: { index: number }) {
   const track = useStore((s) => s.project.mixer[index]);
   const channels = useStore((s) => s.project.channels);
   const device = usePlugins((s) => s.device);
+  const native = usePlugins((s) => s.nativeEngine);
   if (!track) return null;
   const routed = channels.filter((c) => c.kind !== 'automation' && c.mixerTrack === index).map((c) => c.name);
   const slots = Array.from({ length: MAX_EFFECT_SLOTS }, (_, i) => track.effects[i] ?? null);
@@ -298,6 +304,7 @@ function TrackInspector({ index }: { index: number }) {
         <span className="io-icon">⇤</span>
         <span className="io-label">{index === 0 ? (device ? device.outputChannels.slice(0, 2).join(' - ') || 'Out 1 - Out 2' : 'Out 1 - Out 2') : 'Master'}</span>
       </div>
+      {native && <LatencyPanel index={index} variant="inspector" />}
       <div className="routed-list">
         {index === 0 ? 'All insert tracks feed the master.' : routed.length ? `Channels: ${routed.join(', ')}` : 'No channels routed here yet.'}
       </div>

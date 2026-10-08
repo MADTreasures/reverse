@@ -217,6 +217,8 @@ path by the difference and everything meets in time.
   channel's instrument latency. Instrument parameters and `proj:*` are not shifted. Right after
   a loop wrap a shifted lane reads the end of the loop (that audio is still playing).
 * Project fields: `"pdc": false` turns automatic compensation off (manual offsets still apply);
+  `"pdcAutomation": false` keeps automation at the transport position (FL Studio's *Compensate
+  automations* switched off);
   `mixer[i].latencyOffset` (ms, ±1000) shifts a track: > 0 delays it, < 0 delays all the others;
   `plugin.latencyOffset` (samples) is added to what a plugin reports (for plugins that misreport
   their latency). Every path is compensated by at most 524288 samples.
@@ -224,7 +226,7 @@ path by the difference and everything meets in time.
   announcing a new latency, a plugin finishing loading, a new sample rate):
 
   ```json
-  {"type":"latency","automatic":true,"total":1000,"sampleRate":48000,
+  {"type":"latency","automatic":true,"automations":true,"total":1000,"sampleRate":48000,
    "tracks":[{"latency":1000,"delay":0},{"latency":1000,"delay":0},{"latency":0,"delay":1000}],
    "plugins":{"fx:fx_7":{"reported":1000,"offset":0}}}
   ```
@@ -232,6 +234,7 @@ path by the difference and everything meets in time.
   `tracks[i].latency` – latency the track has detected (aligned input plus its inserts; master:
   the total); `tracks[i].delay` – compensation delay after the track's fader (master: 0).
   `plugins` – every loaded instance by key with its reported latency and manual offset (samples).
+  `automations` – whether automation is compensated (`pdc` and `pdcAutomation`).
 
 ## Project JSON (what `project.sync` contains)
 
@@ -239,7 +242,7 @@ Only these fields matter to the engine (others such as `patterns`, `tracks`, `cl
 
 ```jsonc
 {
-  "bpm": 130, "beatsPerBar": 4, "swing": 0.0, "pdc": true,
+  "bpm": 130, "beatsPerBar": 4, "swing": 0.0, "pdc": true, "pdcAutomation": true,
   "channels": [
     {"id":"ch_1","kind":"synth","volume":0.8,"pan":0,"muted":false,"mixerTrack":1,
      "synth":{"osc":[{"wave":"sawtooth","level":0.8,"coarse":0,"fine":0,"unison":3,"detune":18,"pan":0}, {…}, {…}],

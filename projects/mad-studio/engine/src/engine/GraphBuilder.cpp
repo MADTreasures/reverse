@@ -394,7 +394,7 @@ std::vector<GraphBuilder::PluginLatency> GraphBuilder::pluginLatencies() const
 
 int GraphBuilder::automationOffsetFor (const juce::String& target) const
 {
-    if (! planInput.automatic)
+    if (! planInput.automatic || ! model.pdcAutomation)
         return 0;
     juce::StringArray parts;
     parts.addTokens (target, ":", "");
@@ -468,7 +468,7 @@ void GraphBuilder::publish()
                 key << pointerKey (it->second.effect.get()) << ",";
         }
     }
-    key << "|pdc" << (planInput.automatic ? 1 : 0) << ":";
+    key << "|pdc" << (planInput.automatic ? 1 : 0) << (model.pdcAutomation ? "a" : "") << ":";
     for (const auto& c : planInput.channels)
         key << c.latency << ",";
     for (const auto& t : planInput.tracks)

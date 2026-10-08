@@ -13,6 +13,7 @@ import { makeId } from './ids';
 import { defaultSynthParams } from './presets';
 import { MAX_BPM, MIN_BPM, ticksPerBar } from './timing';
 import { CURVE_MODES } from './automation';
+import { MAX_PLUGIN_LATENCY_OFFSET, MAX_TRACK_LATENCY_OFFSET_MS } from './latency';
 import type {
   AutomationData,
   AutomationPoint,
@@ -181,6 +182,9 @@ function parsePluginData(v: unknown): PluginInstanceData | null {
     fileOrIdentifier: v.fileOrIdentifier,
     isInstrument: bool(v.isInstrument, false),
     state: typeof v.state === 'string' && v.state.length > 0 ? v.state : null,
+    ...(typeof v.latencyOffset === 'number' && Math.round(v.latencyOffset) !== 0
+      ? { latencyOffset: Math.round(num(v.latencyOffset, 0, -MAX_PLUGIN_LATENCY_OFFSET, MAX_PLUGIN_LATENCY_OFFSET)) }
+      : {}),
   };
 }
 
@@ -294,6 +298,7 @@ function parseMixerTrack(v: unknown, i: number): MixerTrack {
     effects: arr(v.effects).map(parseEffect).filter((e): e is EffectSlot => e !== null).slice(0, 10),
     input: parseTrackInput(v.input),
     armed: i > 0 && bool(v.armed, false),
+    latencyOffset: num(v.latencyOffset, 0, -MAX_TRACK_LATENCY_OFFSET_MS, MAX_TRACK_LATENCY_OFFSET_MS),
   };
 }
 
@@ -382,5 +387,7 @@ export function parseProject(raw: unknown): Project {
     clips,
     mixer,
     samples,
+    pdc: bool(raw.pdc, true),
+    pdcAutomation: bool(raw.pdcAutomation, true),
   };
 }

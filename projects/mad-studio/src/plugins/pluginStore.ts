@@ -40,6 +40,21 @@ export interface AudioDeviceInfo {
   null: boolean;
 }
 
+/** What the native engine's plugin delay compensation does (its `latency` event). */
+export interface LatencyReport {
+  /** Automatic PDC is on (project.pdc). */
+  automatic: boolean;
+  /** Automation is compensated too (project.pdcAutomation). */
+  automations: boolean;
+  /** How far the output lags behind the transport (samples). */
+  total: number;
+  sampleRate: number;
+  /** Per mixer track: latency it has detected (inputs + inserts) and its compensation delay (samples). */
+  tracks: { latency: number; delay: number }[];
+  /** Per plugin instance key: the latency it reports and the manual offset (samples). */
+  plugins: Record<string, { reported: number; offset: number }>;
+}
+
 interface PluginState {
   /** True when the native engine runs (desktop app); plugins and native recording need it. */
   nativeEngine: boolean;
@@ -59,6 +74,8 @@ interface PluginState {
   paths: Record<string, string[]>;
   /** Extra folders the user added (kept in localStorage). */
   extraPaths: Record<string, string[]>;
+  /** Plugin delay compensation of the running engine (null without the native engine). */
+  latency: LatencyReport | null;
 }
 
 export const usePlugins = create<PluginState>(() => ({
@@ -76,6 +93,7 @@ export const usePlugins = create<PluginState>(() => ({
   bufferSizes: [],
   paths: {},
   extraPaths: loadExtraPaths(),
+  latency: null,
 }));
 
 const EXTRA_KEY = 'mad-studio:plugin-paths';
@@ -110,6 +128,23 @@ export function scanPaths(): Record<string, string[]> {
 export function inputChannelNames(): string[] {
   const dev = usePlugins.getState().device;
   return dev && dev.inputChannels.length ? dev.inputChannels : ['In 1', 'In 2'];
+}
+
+/** Parses the engine's `latency` event (engine/PROTOCOL.md). */
+export function parseLatencyReport(m: Record<string, unknown>): LatencyReport {
+  const n = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : 0);
+  const plugins: LatencyReport['plugins'] = {};
+  if (m.plugins && typeof m.plugins === 'object') {
+    for (const [key, v] of Object.entries(m.plugins as Record<string, Record<string, unknown>>)) plugins[key] = { reported: n(v?.reported), offset: n(v?.offset) };
+  }
+  return {
+    automatic: m.automatic !== false,
+    automations: m.automations !== false,
+    total: n(m.total),
+    sampleRate: n(m.sampleRate) || 48000,
+    tracks: Array.isArray(m.tracks) ? (m.tracks as Record<string, unknown>[]).map((t) => ({ latency: n(t?.latency), delay: n(t?.delay) })) : [],
+    plugins,
+  };
 }
 
 export const instanceKeyForChannel = (channelId: string) => `ch:${channelId}`;

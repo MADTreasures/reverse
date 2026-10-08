@@ -11,6 +11,12 @@ import {
   deletePattern,
   endCoalesce,
   isStepOn,
+  resetTrackLatencies,
+  setMixerTrackProps,
+  setPdc,
+  setPluginLatencyOffset,
+  addPluginChannel,
+  addPluginEffect,
   placePatternClip,
   redo,
   setBpm,
@@ -152,5 +158,45 @@ describe('mixer', () => {
     const effects = state().project.mixer[1].effects;
     expect(effects[effects.length - 1].id).toBe(id);
     expect(effects[effects.length - 1].params.decay).toBeGreaterThan(0);
+  });
+});
+
+describe('plugin delay compensation settings', () => {
+  const plugin = (isInstrument: boolean) => ({ uid: 'VST3-x', name: 'Lat', vendor: 'V', format: 'VST3', fileOrIdentifier: '/x.vst3', isInstrument, state: null });
+
+  it('toggles automatic PDC and automation compensation (undoable)', () => {
+    setPdc({ pdc: false });
+    expect(state().project.pdc).toBe(false);
+    setPdc({ pdcAutomation: false });
+    expect(state().project.pdcAutomation).toBe(false);
+    undo();
+    undo();
+    expect(state().project.pdc).toBe(true);
+    expect(state().project.pdcAutomation).toBe(true);
+  });
+
+  it('sets, clamps and resets manual track offsets', () => {
+    setMixerTrackProps(1, { latencyOffset: 12.5 });
+    setMixerTrackProps(2, { latencyOffset: -5000 });
+    expect(state().project.mixer[1].latencyOffset).toBe(12.5);
+    expect(state().project.mixer[2].latencyOffset).toBe(-1000);
+    resetTrackLatencies();
+    expect(state().project.mixer.every((t) => t.latencyOffset === 0)).toBe(true);
+    undo();
+    expect(state().project.mixer[1].latencyOffset).toBe(12.5);
+  });
+
+  it('stores a plugin latency offset on the instrument or effect it belongs to', () => {
+    const ch = addPluginChannel(plugin(true));
+    const slot = addPluginEffect(1, plugin(false));
+    expect(slot).not.toBeNull();
+    setPluginLatencyOffset(`ch:${ch}`, 64);
+    setPluginLatencyOffset(`fx:${slot}`, -32.4);
+    const p = state().project;
+    const channel = p.channels.find((c) => c.id === ch);
+    expect(channel?.kind === 'plugin' && channel.plugin.latencyOffset).toBe(64);
+    expect(p.mixer[1].effects.find((e) => e.id === slot)?.plugin?.latencyOffset).toBe(-32);
+    setPluginLatencyOffset(`fx:${slot}`, 0);
+    expect(state().project.mixer[1].effects.find((e) => e.id === slot)?.plugin).not.toHaveProperty('latencyOffset');
   });
 });

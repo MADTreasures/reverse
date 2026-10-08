@@ -655,11 +655,12 @@ async function testLatency(engine, plugins) {
   check(loaded.type === 'samples.loaded', 'latency: click sample loads');
 
   const ref = { uid: delay.uid, name: delay.name, vendor: delay.vendor, format: delay.format, fileOrIdentifier: delay.fileOrIdentifier, isInstrument: false, state: null };
-  const project = ({ pdc = true, enabled = true, pluginOffset = 0, offset1 = 0, offset2 = 0 } = {}) => ({
+  const project = ({ pdc = true, pdcAutomation = true, enabled = true, pluginOffset = 0, offset1 = 0, offset2 = 0 } = {}) => ({
     bpm: 120,
     beatsPerBar: 4,
     swing: 0,
     pdc,
+    pdcAutomation,
     channels: [
       { id: 'ch_l', kind: 'sampler', volume: 0.8, pan: 0, muted: false, mixerTrack: 1, sampler: samplerParams('test:click') },
       { id: 'ch_r', kind: 'sampler', volume: 0.8, pan: 0, muted: false, mixerTrack: 2, sampler: samplerParams('test:click') },
@@ -680,7 +681,8 @@ async function testLatency(engine, plugins) {
     const since = engine.messages.length;
     engine.send({ type: 'project.sync', project: p });
     try {
-      return await engine.waitFor((m) => m.type === 'latency' && m.total === total && m.automatic === p.pdc, 10000, `latency report: ${what}`, since);
+      const automations = p.pdc && p.pdcAutomation;
+      return await engine.waitFor((m) => m.type === 'latency' && m.total === total && m.automatic === p.pdc && m.automations === automations, 10000, `latency report: ${what}`, since);
     } catch (err) {
       const last = engine.messages.filter((m) => m.type === 'latency').at(-1);
       check(false, `${err.message} (last report: ${JSON.stringify(last)})`);
@@ -804,6 +806,15 @@ async function testLatency(engine, plugins) {
     const after = peakIn(l, 52000, 56000) / peakIn(r, 52000, 56000);
     near(before, 1, 0.02, 'compensated automation: the click before the step plays at full volume');
     check(after < 0.01, `compensated automation: the click after the step is silenced (${after.toFixed(4)})`);
+  }
+  await sync(project({ pdcAutomation: false }), 9600, 'automation not compensated');
+  wav = await render('pdc-automation-uncompensated.wav');
+  if (wav) {
+    // The audio is still aligned (the dry click plays at 43000), but the lane is read at the
+    // transport position, so the step reaches the latent click, which hits the fader 9600 late.
+    const [l, r] = wav.data;
+    near(onset(r, 30000, 48000), refR + 172 * 250 - 96 * 250, 0, 'Compensate automations off: the dry click stays in time');
+    check(peakIn(l, 42000, 46000) / peakIn(r, 42000, 46000) < 0.01, 'Compensate automations off: the automation step silences the latent click');
   }
   await sync(project({ pdc: false }), 0, 'PDC off, automation');
   wav = await render('pdc-automation-off.wav');

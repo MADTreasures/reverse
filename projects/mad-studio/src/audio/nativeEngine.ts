@@ -11,7 +11,7 @@ import { patternTimeline, songTimeline, withLoop, type Timeline } from '../model
 import { secondsPerTick, snapRound } from '../model/timing';
 import type { Id, Project } from '../model/types';
 import type { EngineMessage, NativeEngineBridge } from '../platform/platform';
-import { usePlugins, type AudioDeviceInfo, type PluginParam } from '../plugins/pluginStore';
+import { parseLatencyReport, usePlugins, type AudioDeviceInfo, type PluginParam } from '../plugins/pluginStore';
 import { addNotes, endCoalesce, setTransport, storePluginStates } from '../store/actions';
 import { noteTweaked } from '../store/automationActions';
 import { pianoRollSnap, patternStartTick } from '../store/snap';
@@ -146,6 +146,9 @@ export class NativeEngine implements EngineApi {
         if (!playing && s.transport.playing) setTransport({ playing: false });
         return;
       }
+      case 'latency':
+        usePlugins.setState({ latency: parseLatencyReport(m) });
+        return;
       case 'meters':
         if (Array.isArray(m.peaks)) this.meterPeaks = m.peaks as [number, number][];
         if (Array.isArray(m.waveform)) this.wave = m.waveform as number[];
@@ -153,6 +156,7 @@ export class NativeEngine implements EngineApi {
       case 'engine.exit':
         this.ready = false;
         this.sentSamples.clear();
+        usePlugins.setState({ latency: null });
         this.transportSeq = 0; // a restarted engine counts from 0
         if (!this.everReady && ++this.failures >= 3) this.fail('The native audio engine keeps crashing on start.');
         else toast('The audio engine stopped unexpectedly – restarting…', 'error');

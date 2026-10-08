@@ -172,5 +172,7 @@ export function createDemoProject(): Project {
     clips,
     mixer,
     samples: Object.fromEntries(usedFactory.map((k) => [factorySampleId(k), factorySampleInfo(k)])),
+    pdc: true,
+    pdcAutomation: true,
   };
 }

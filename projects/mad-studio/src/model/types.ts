@@ -134,6 +134,11 @@ export interface PluginInstanceData {
   isInstrument: boolean;
   /** Opaque plugin state (base64), captured from the engine when the project is saved. */
   state: string | null;
+  /**
+   * Samples added to the latency the plugin reports, for plugins that misreport it (FL Studio: wrapper
+   * settings › Latency). Absent = 0.
+   */
+  latencyOffset?: number;
 }
 
 export interface PluginChannel extends ChannelBase {
@@ -294,6 +299,11 @@ export interface MixerTrack {
   input: TrackInput | null;
   /** Armed for audio recording (FL Studio's red record dot under each track). */
   armed: boolean;
+  /**
+   * Manual delay compensation in ms (FL Studio: the track's PDC panel): > 0 delays this track, < 0 delays
+   * all the others.
+   */
+  latencyOffset: number;
 }
 
 export interface SampleInfo {
@@ -324,4 +334,8 @@ export interface Project {
   /** Index 0 is the master track. */
   mixer: MixerTrack[];
   samples: Record<Id, SampleInfo>;
+  /** Automatic plugin delay compensation (Mixer menu › Plugin delay compensation › Automatic). */
+  pdc: boolean;
+  /** Read automation of parameters behind latent plugins that much earlier (› Compensate automations). */
+  pdcAutomation: boolean;
 }

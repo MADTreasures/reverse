@@ -165,6 +165,7 @@ ProjectModel parseProject (const juce::var& json)
     m.beatsPerBar = std::clamp (json::integer (json, "beatsPerBar", 4), 1, 64);
     m.swing = std::clamp (json::number (json, "swing", 0.0), 0.0, 1.0);
     m.pdc = json::boolean (json, "pdc", true);
+    m.pdcAutomation = json::boolean (json, "pdcAutomation", true);
 
     if (const auto* channels = json::get (json, "channels").getArray())
     {

@@ -766,6 +766,7 @@ void Controller::sendLatencyIfChanged()
     w.beginObject()
         .field ("type", "latency")
         .field ("automatic", builder->project().pdc)
+        .field ("automations", builder->project().pdc && builder->project().pdcAutomation)
         .field ("total", plan.total)
         .field ("sampleRate", engine.getSampleRate());
     w.key ("tracks").beginArray();

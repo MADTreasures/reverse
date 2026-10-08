@@ -151,6 +151,7 @@ export function createMixerTrack(index: number): MixerTrack {
     effects: [],
     input: null,
     armed: false,
+    latencyOffset: 0,
   };
 }
 
@@ -190,5 +191,7 @@ export function createEmptyProject(): Project {
     clips: [],
     mixer,
     samples,
+    pdc: true,
+    pdcAutomation: true,
   };
 }

@@ -13,6 +13,7 @@ import {
 import { defaultEffectParams } from '../model/effects';
 import { factorySampleInfo } from '../model/factory';
 import { makeId } from '../model/ids';
+import { clampPluginOffset, clampTrackOffset } from '../model/latency';
 import { findPattern, patternLength, stepKey } from '../model/patterns';
 import { findPreset } from '../model/presets';
 import { MAX_BPM, MIN_BPM, TICKS_PER_STEP, ticksPerBar } from '../model/timing';
@@ -890,7 +891,7 @@ export function setTrackClipsMuted(trackId: Id, muted: boolean): void {
 // ---------------------------------------------------------------------------
 // Mixer
 
-type MixerPatch = Partial<Pick<MixerTrack, 'name' | 'color' | 'volume' | 'pan' | 'muted' | 'solo'>>;
+type MixerPatch = Partial<Pick<MixerTrack, 'name' | 'color' | 'volume' | 'pan' | 'muted' | 'solo' | 'latencyOffset'>>;
 
 export function setMixerTrackProps(index: number, patch: MixerPatch, opts?: EditOptions): void {
   edit((d) => {
@@ -902,7 +903,38 @@ export function setMixerTrackProps(index: number, patch: MixerPatch, opts?: Edit
     if (patch.pan !== undefined) t.pan = Math.min(1, Math.max(-1, patch.pan));
     if (patch.muted !== undefined) t.muted = patch.muted;
     if (patch.solo !== undefined && index > 0) t.solo = patch.solo;
+    if (patch.latencyOffset !== undefined) t.latencyOffset = clampTrackOffset(patch.latencyOffset);
   }, { label: 'mixer track settings', ...opts });
+}
+
+// ---------------------------------------------------------------------------
+// Plugin delay compensation (FL Studio: Mixer menu › Plugin delay compensation)
+
+export function setPdc(patch: Partial<Pick<Project, 'pdc' | 'pdcAutomation'>>): void {
+  edit((d) => {
+    if (patch.pdc !== undefined) d.pdc = patch.pdc;
+    if (patch.pdcAutomation !== undefined) d.pdcAutomation = patch.pdcAutomation;
+  }, { label: 'plugin delay compensation' });
+}
+
+/** "Reset manual latency on all tracks". */
+export function resetTrackLatencies(): void {
+  edit((d) => {
+    for (const t of d.mixer) t.latencyOffset = 0;
+  }, { label: 'reset manual latency' });
+}
+
+/** Wrapper latency offset of the plugin instance `ch:<channelId>` / `fx:<slotId>` (samples). */
+export function setPluginLatencyOffset(instanceKey: string, samples: number, opts?: EditOptions): void {
+  const value = clampPluginOffset(samples);
+  edit((d) => {
+    const apply = (plugin: Draft<PluginInstanceData>) => {
+      if (value === 0) delete plugin.latencyOffset;
+      else plugin.latencyOffset = value;
+    };
+    for (const ch of d.channels) if (ch.kind === 'plugin' && `ch:${ch.id}` === instanceKey) apply(ch.plugin);
+    for (const t of d.mixer) for (const slot of t.effects) if (slot.plugin && `fx:${slot.id}` === instanceKey) apply(slot.plugin);
+  }, { label: 'plugin latency', ...opts });
 }
 
 export function selectMixerTrack(index: number): void {
