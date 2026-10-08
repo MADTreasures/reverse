@@ -36,3 +36,7 @@ playwright-report/
 *.id2
 *.nam
 *.til
+
+# --- Claude Code -------------------------------------------------------------
+# Temporary git worktrees of background agents
+.claude/worktrees/

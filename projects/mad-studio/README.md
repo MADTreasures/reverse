@@ -1,7 +1,7 @@
 # MAD Studio
 
 > **Vorbild:** FL Studio (Image-Line, <https://www.image-line.com/>) · **Plattform:** macOS (Electron-App) und Browser ·
-> **Status:** 🟢 v0.1 lauffähig
+> **Status:** 🟢 v0.2 – Automation, Audioaufnahme, FL-Bedienung · 🟡 native Engine für VST3/AU in Arbeit
 
 [![MAD Studio CI](https://github.com/MADTreasures/reverse/actions/workflows/mad-studio-ci.yml/badge.svg)](https://github.com/MADTreasures/reverse/actions/workflows/mad-studio-ci.yml)
 [![MAD Studio macOS](https://github.com/MADTreasures/reverse/actions/workflows/mad-studio-macos.yml/badge.svg)](https://github.com/MADTreasures/reverse/actions/workflows/mad-studio-macos.yml)
@@ -9,9 +9,11 @@
 MAD Studio ist eine **pattern-basierte Musikproduktions-Software (DAW)** mit dem Workflow,
 den man von FL Studio kennt: Beats im **Channel Rack** per Step-Sequencer bauen, Melodien
 in der **Piano Roll** schreiben, Patterns in der **Playlist** zu einem Song anordnen und
-alles im **Mixer** mit Effekten abmischen. Alles ist selbst geschrieben – Code, Klänge und
-Grafiken. Das mitgelieferte Drum-Kit wird beim Start synthetisiert, es sind keine fremden
-Samples enthalten.
+alles im **Mixer** mit Effekten abmischen – dazu **Automation-Clips** und **Audioaufnahme**;
+**VST3/AU-Plugins** kommen mit der nativen Engine (in Arbeit). Bedienung, Menüs, Mausbelegung und Tastenkürzel sind an FL Studio
+angeglichen (verglichen mit der installierten Testversion, siehe [RESEARCH.md](RESEARCH.md)).
+Alles ist selbst geschrieben – Code, Klänge und Grafiken. Das mitgelieferte Drum-Kit wird beim
+Start synthetisiert, es sind keine fremden Samples enthalten.
 
 ![MAD Studio – Playlist und Channel Rack](docs/screenshot-main.png)
 ![MAD Studio – Piano Roll, Synth und Mixer](docs/screenshot-editors.png)
@@ -20,17 +22,21 @@ Samples enthalten.
 
 | Bereich | Was geht |
 | ------- | -------- |
-| **Channel Rack** | Step-Sequencer (malen, Rechtsklick löscht, Mausrad = Velocity), Lautstärke/Pan, Mute/Solo, Mixer-Routing, Swing, Pattern-Länge, „Fill each 2/4/8 steps“, Mini-Piano-Roll-Vorschau |
-| **Piano Roll** | Zeichnen, Malen, Verschieben, Länge ziehen, Rechteck-Auswahl, Velocity-Spur, Snap (inkl. Triolen), Ghost Notes, Quantisieren, Kopieren/Einfügen/Duplizieren, Transponieren, Vorhören über die Klaviatur |
-| **Playlist** | Patterns platzieren, verschieben, Länge ändern (Pattern läuft in Schleife), links trimmen, Shift+Ziehen dupliziert, Audio-Clips aus Samples (mit Wellenform), Spuren muten/umbenennen, Song-Position per Klick ins Lineal |
-| **Mixer** | Master + 16 Insert-Spuren (erweiterbar bis 64), Fader, Pan, Mute/Solo, Stereo-Pegelanzeigen, bis zu 8 Effekte pro Spur |
+| **Channel Rack** | Step-Sequencer (malen, Rechtsklick löscht, ⌥+Mausrad = Velocity), Lautstärke/Pan, Mute/Solo (Rechtsklick auf die LED), Mixer-Routing, Swing, Pattern-Länge, „Fill each 2/4/8 steps“, Rotate, Noten eines Kanals kopieren/einfügen, Mini-Piano-Roll-Vorschau; Klick auf den Kanalnamen öffnet/schliesst das Kanalfenster |
+| **Piano Roll** | Werkzeuge Zeichnen/Malen/Löschen/Slice/Auswahl, Verschieben, Länge ziehen, Shift+Ziehen klont, Klick auf eine Note übernimmt Länge und Velocity für neue Noten, Doppelklick = Noteneigenschaften, Velocity-Spur und ⌥+Mausrad, Snap wie in FL (Main/Line/Cell …, zoomabhängiges Raster), Ghost Notes, Quantisieren, Legato, Kopieren/Einfügen/Duplizieren, Transponieren, Klick ins Lineal setzt die Startposition im Pattern |
+| **Playlist** | Picker-Panel (Patterns, Audio-Clips, Automation-Clips), platzieren, verschieben, Länge ändern (Pattern läuft in Schleife), links trimmen, Shift+Ziehen klont, Werkzeuge Mute (T) und Slice (C), Clip-Menü (stumm, Quell-Pattern, *Make unique* …), Spurmenü (einfügen, klonen, löschen, verschieben, alle Clips stumm …), Doppelklick auf Pattern-Clip öffnet die Piano Roll, Song-Position per Klick ins Lineal, **Zeitbereich per Rechts-Ziehen im Lineal – die Wiedergabe loopt darin** |
+| **Automation** | Rechtsklick auf jeden Regler → *Create automation clip* (wie in FL): Automation-Kanal im Channel Rack + Clip in der Playlist; Punkte per Rechtsklick setzen, ziehen, Kurven biegen, 13 Kurvenmodi; Tempo-Automation; Reglerbewegungen während der Song-Aufnahme werden aufgezeichnet; *Tools → Last tweaked* |
+| **Aufnahme** | Mikrofon/Line-In: im Mixer-Track-Inspector Eingang wählen (armt die Spur), Record + Play → Audio-Clip in der Playlist (Song-Modus) bzw. Audio-Clip-Kanal (Pattern-Modus); Vorzähler, Latenzkompensation, Monitoring, Auto-unarm; Ordner „Recorded“ im Browser |
+| **Mixer** | Master + 16 Insert-Spuren (erweiterbar bis 64), Fader, Pan, Mute-LED (Ctrl-Klick = Solo), Arm-Taste, Track-Inspector mit Eingang, **10 Effekt-Slots** und Ausgang, Stereo-Pegelanzeigen |
+| **Plugins** *(in Arbeit)* | Oberfläche vorhanden: VST3 (macOS/Linux) und Audio Units (macOS) als Instrumente im Channel Rack und als Effekte in Mixer-Slots, Plugin-Manager mit Scan (jedes Plugin in eigenem Prozess), Plugin-Fenster, alle Parameter automatisierbar, Plugin-Zustand im Projekt gespeichert. Abspielen setzt die **native Engine** der Desktop-App voraus, die noch nicht in diesem Branch ist |
 | **Effekte** | Parametric EQ, Auto Filter (mit LFO), Compressor, Distortion, Chorus, Tempo Delay (Ping-Pong, tempo-synchron), Reverb, Limiter |
 | **Instrumente** | 3-Oszillator-Synth (Sinus/Dreieck/Säge/Rechteck/Rauschen, Unison, Filter mit Hüllkurve, LFO) mit 14 Presets · Sampler (Root-Key, Feinstimmung, Reverse, One-Shot, Loop, Choke-Gruppen, ADSR) |
 | **Sounds** | 20 synthetisierte Factory-Sounds: Kicks, Snares, Claps, Hi-Hats, Becken, Toms, Percussion, 808-Bass, Riser, Impact |
 | **Transport** | Pattern-/Song-Modus, Tempo (10–522 BPM), Metronom, Aufnahme von Tastatur/MIDI ins Pattern, Positionsanzeige (Takt:Step:Tick oder Zeit) |
 | **Eingabe** | Computertastatur als Klavier (funktioniert auch mit Schweizer/Deutscher QWERTZ-Tastatur), MIDI-Keyboards (Web MIDI) |
 | **Dateien** | Projekte als `.madstudio` (ZIP mit `project.json` und allen eigenen Samples), Autosave & Wiederherstellung, Audio-Import per Drag & Drop (WAV, AIFF, MP3, …), **WAV-Export** (16/24-bit, 32-bit float, 44.1–96 kHz) |
-| **Komfort** | Undo/Redo, frei verschiebbare Fenster wie im Vorbild, Hinweisleiste für jedes Bedienelement, Demo-Song „MAD Groove“ |
+| **Komfort** | Undo/Redo wie in FL Studio 26 (Ctrl/⌘Z rückgängig, Ctrl/⌘⌥Z wiederherstellen, benannte Schritte), Score-Logger (nachträglich ins Pattern übernehmen, was gespielt wurde), frei verschiebbare Fenster wie im Vorbild, Hinweisleiste für jedes Bedienelement, Demo-Song „MAD Groove“ |
+| **Audio-Engines** | Web-Audio-Engine (Browser und Desktop-App); die native Engine (C++/JUCE, eigener Prozess, CoreAudio/ALSA, VST3/AU, Aufnahme) ist in Arbeit – die Desktop-App nutzt sie automatisch, sobald sie mitgeliefert wird |
 
 ## Installation auf dem Mac
 
@@ -84,26 +90,48 @@ MIDI-Keyboards funktionieren in der Mac-App automatisch, im Browser (nur Chrome/
    den Song-Modus wechseln und abspielen.
 5. **Abmischen:** **F9** öffnet den Mixer. Kanäle werden über die Nummer im Channel Rack auf
    Mixer-Spuren geroutet. Effekte über *+ Add effect* hinzufügen.
-6. **Exportieren:** *File → Export WAV…* (**⌘R**).
+6. **Automatisieren:** Rechtsklick auf einen Regler (z. B. Lautstärke im Channel Rack) →
+   *Create automation clip*. Im Clip in der Playlist setzt **Rechtsklick** Punkte, Ziehen verschiebt
+   sie, der kleine Kreis zwischen zwei Punkten biegt die Kurve; Rechtsklick auf einen Punkt öffnet
+   die Kurvenmodi. Abspielen im Song-Modus (**L**).
+7. **Aufnehmen:** **F9** → Mixer-Spur wählen → oben im Track-Inspector den Eingang wählen
+   („In 1 - In 2“ stereo oder „In 1“ mono; die Spur wird scharf geschaltet). Record (**R**), dann
+   Play – nach Stop liegt die Aufnahme als Audio-Clip in der Playlist. Rechtsklick auf Record:
+   Aufnahmefilter, **⌘P** Vorzähler.
+8. **Plugins (Desktop-App, sobald die native Engine mitgeliefert wird):** **F8** öffnet den Plugin-Manager → *Find installed plugins*.
+   Instrumente kommen als Kanal ins Channel Rack, Effekte in einen Mixer-Slot (Klick auf einen
+   leeren Slot). Im Plugin-Fenster öffnet *Show plugin editor* die Oberfläche des Plugins.
+9. **Exportieren:** *File → Export WAV…* (**⌘R**).
 
 Eigene Samples einfach aus dem Finder in das Channel Rack (neuer Kanal), auf einen Kanal
 (Sample ersetzen) oder in die Playlist (Audio-Clip) ziehen.
 
-### Tastenkürzel
+### Tastenkürzel (wie in FL Studio, Ctrl = ⌘ auf dem Mac)
 
 | Taste | Funktion | Taste | Funktion |
 | ----- | -------- | ----- | -------- |
-| Space | Play / Pause | F5 / F6 / F7 / F9 | Playlist / Channel Rack / Piano Roll / Mixer |
-| L | Pattern-/Song-Modus | F8 | Browser ein/aus |
-| R | Aufnahme | M | Metronom |
-| [ / ] | Vorheriges / nächstes Pattern | ⌘T | Computertastatur als Klavier |
-| ⌘Z / ⇧⌘Z | Undo / Redo | ⌘S / ⇧⌘S | Speichern / Speichern unter |
-| ⌘O / ⌘N | Öffnen / Neues Projekt | ⌘R | WAV exportieren |
-| ⌘A / ⌘C / ⌘V / ⌘B | Alles wählen / Kopieren / Einfügen / Duplizieren | Entf | Auswahl löschen |
-| ↑ ↓ (⇧ = Oktave) | Noten transponieren | Q | Quantisieren |
-| ⌘ + Mausrad / Pinch | Horizontal zoomen | ⌥ + Mausrad | Vertikal zoomen |
+| Space | Play / Stop | ⌃Space | Play / Pause |
+| L | Pattern-/Song-Modus | R | Aufnahme |
+| F5 / F6 / F7 / F9 | Playlist / Channel Rack / Piano Roll / Mixer | F8 / ⌥F8 | Plugin-Manager / Browser |
+| F12 | Alle Fenster schliessen | Enter | Playlist maximieren |
+| Esc | Fokussiertes Fenster schliessen | F2 / F4 | Pattern umbenennen / neues Pattern mit Name |
+| + / − | Nächstes / vorheriges Pattern | ⌘F4 | Neues Pattern |
+| ⌘Z | Rückgängig (schrittweise, Menü nennt die Aktion) | ⌥⌘Z | Wiederherstellen |
+| ⌘M / ⌘P | Metronom / Aufnahme-Vorzähler | ⌃H | Alles stumm (Panic) |
+| ⌘S / ⇧⌘S / ⌘N | Speichern / unter / neue Version | ⌘O / ⌘R | Öffnen / WAV exportieren |
+| 1 … 0 / ⌘1 … 0 | Kanäle 1–10 stumm / solo | ⌘T | Computertastatur als Klavier |
+| P · B · D · T · E | Werkzeug Zeichnen · Malen · Löschen · Stumm (Playlist) · Auswahl | Q · ⌥Q | Quantisieren |
+| ⌘A / ⌘D | Alles wählen / Auswahl aufheben | ⌘C / ⌘V / ⌘B | Kopieren / Einfügen / Duplizieren |
+| ⇧↑ ↓ / ⌘↑ ↓ | Noten um Halbton / Oktave transponieren | ⇧← → | Auswahl verschieben (Pfeile allein scrollen) |
+| ⌘L (Piano Roll) | Legato | Home | Songposition an den Anfang |
+| ⇧+Ziehen | Noten/Clips klonen | Entf | Auswahl löschen |
+| ⌥C / ⌥Entf / ⌘L (Channel Rack) | Kanal klonen / löschen / auf freie Mixer-Spur | ⌘ + Mausrad | Horizontal zoomen |
 
-Die vollständige Liste zeigt **F1** in der App.
+Die vollständige Liste zeigt **F1** in der App. Rechtsklick auf einen Regler öffnet wie in FL
+Studio das Reglermenü (Reset, Automation-Clip, Wert kopieren/einfügen/eintippen). Weitere
+FL-Gewohnheiten: Doppelklick auf eine Note öffnet ihre Eigenschaften, Doppelklick auf einen
+Pattern-Clip die Piano Roll, das Symbol links im Clip-Titel das Clip-Menü (stummschalten,
+Quell-Pattern, *Make unique* …), Rechtsklick auf den Spurkopf das Spurmenü.
 
 ## Projektdateien
 
@@ -159,11 +187,20 @@ einem macOS-Runner, startet sie testweise und stellt die DMGs als Artefakte bere
 
 Noch nicht enthalten (Roadmap):
 
-- VST/AU-Plugins (in einer Web-Audio-App nicht möglich – dafür wäre ein nativer Kern nötig, z. B. mit JUCE)
-- Audioaufnahme über Mikrofon, Automationsclips, Time-Stretching von Audio-Clips
-- Sidechain-Kompression, Sends/Busse zwischen Mixer-Spuren
+- Plugin-Latenzausgleich (PDC), Sidechain-Eingänge und Mehrkanal-Ausgänge von Plugins, Plugin-Presets im Wrapper
+- Time-Stretching von Audio-Clips, Takes/Comping, Punch-in
+- Sends/Busse zwischen Mixer-Spuren
 - MIDI-Datei-Import/Export, Import von `.flp`-Projekten (Format ist öffentlich dokumentiert)
 - Autosave speichert grosse Sample-Sammlungen bei jeder Änderung komplett neu
+
+## Lizenz der nativen Engine
+
+Die native Engine (`engine/`, in Arbeit) nutzt das JUCE-Framework unter der **GNU AGPLv3** und
+steht deshalb selbst unter AGPLv3. Wer die App mit Engine weitergibt, muss den
+Quellcode der Engine mitliefern bzw. zugänglich machen – oder eine kommerzielle JUCE-Lizenz
+verwenden. Die Oberfläche (`src/`, `electron/`) läuft in einem eigenen Prozess und spricht mit der
+Engine nur über JSON-Nachrichten; ob das lizenzrechtlich als getrenntes Werk gilt, ist im Zweifel
+juristisch zu klären.
 
 ## Rechtliches
 
