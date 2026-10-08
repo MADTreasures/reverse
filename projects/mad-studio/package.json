@@ -21,6 +21,7 @@
     "app:smoke": "electron . --smoke-test",
     "icon": "node scripts/make-icon.mjs",
     "dist:mac": "npm run build && node scripts/stage-engine.mjs && electron-builder --mac --publish never",
+    "dist:win": "npm run build && node scripts/stage-engine.mjs && electron-builder --win --x64 --publish never",
     "dist:dir": "npm run build && node scripts/stage-engine.mjs && electron-builder --dir --publish never",
     "engine:configure": "cmake -S engine -B engine/build/Release -G Ninja -DCMAKE_BUILD_TYPE=Release",
     "engine:build": "cmake --build engine/build/Release",

@@ -1,10 +1,11 @@
 # MAD Studio
 
-> **Vorbild:** FL Studio (Image-Line, <https://www.image-line.com/>) · **Plattform:** macOS (Electron-App) und Browser ·
-> **Status:** 🟢 v0.2 – Automation, Audioaufnahme, FL-Bedienung, native Engine mit VST®3/AU-Hosting
+> **Vorbild:** FL Studio (Image-Line, <https://www.image-line.com/>) · **Plattform:** macOS und Windows (Electron-App), Linux (aus dem Quellcode) und Browser ·
+> **Status:** 🟢 v0.2 – Automation, Audioaufnahme, FL-Bedienung, native Engine mit VST®3/AU-Hosting und Plugin-Latenzausgleich (PDC)
 
 [![MAD Studio CI](https://github.com/MADTreasures/reverse/actions/workflows/mad-studio-ci.yml/badge.svg)](https://github.com/MADTreasures/reverse/actions/workflows/mad-studio-ci.yml)
 [![MAD Studio macOS](https://github.com/MADTreasures/reverse/actions/workflows/mad-studio-macos.yml/badge.svg)](https://github.com/MADTreasures/reverse/actions/workflows/mad-studio-macos.yml)
+[![MAD Studio Windows](https://github.com/MADTreasures/reverse/actions/workflows/mad-studio-windows.yml/badge.svg)](https://github.com/MADTreasures/reverse/actions/workflows/mad-studio-windows.yml)
 
 MAD Studio ist eine **pattern-basierte Musikproduktions-Software (DAW)** mit dem Workflow,
 den man von FL Studio kennt: Beats im **Channel Rack** per Step-Sequencer bauen, Melodien
@@ -27,8 +28,8 @@ Start synthetisiert, es sind keine fremden Samples enthalten.
 | **Playlist** | Picker-Panel (Patterns, Audio-Clips, Automation-Clips), platzieren, verschieben, Länge ändern (Pattern läuft in Schleife), links trimmen, Shift+Ziehen klont, Werkzeuge Mute (T) und Slice (C), Clip-Menü (stumm, Quell-Pattern, *Make unique* …), Spurmenü (einfügen, klonen, löschen, verschieben, alle Clips stumm …), Doppelklick auf Pattern-Clip öffnet die Piano Roll, Song-Position per Klick ins Lineal, **Zeitbereich per Rechts-Ziehen im Lineal – die Wiedergabe loopt darin** |
 | **Automation** | Rechtsklick auf jeden Regler → *Create automation clip* (wie in FL): Automation-Kanal im Channel Rack + Clip in der Playlist; Punkte per Rechtsklick setzen, ziehen, Kurven biegen, 13 Kurvenmodi; Tempo-Automation; Reglerbewegungen während der Song-Aufnahme werden aufgezeichnet; *Tools → Last tweaked* |
 | **Aufnahme** | Mikrofon/Line-In: im Mixer-Track-Inspector Eingang wählen (armt die Spur), Record + Play → Audio-Clip in der Playlist (Song-Modus) bzw. Audio-Clip-Kanal (Pattern-Modus); Vorzähler, Latenzkompensation, Monitoring, Auto-unarm; Ordner „Recorded“ im Browser |
-| **Mixer** | Master + 16 Insert-Spuren (erweiterbar bis 64), Fader, Pan, Mute-LED (Ctrl-Klick = Solo), Arm-Taste, Track-Inspector mit Eingang, **10 Effekt-Slots** und Ausgang, Stereo-Pegelanzeigen |
-| **Plugins** | VST3 (macOS/Linux) und Audio Units (macOS) als Instrumente im Channel Rack und als Effekte in Mixer-Slots, Plugin-Manager mit Scan (jedes Plugin in eigenem Prozess – ein abstürzendes Plugin reisst nichts mit), Plugin-Fenster mit dem Editor des Plugins, alle Parameter automatisierbar, Plugin-Zustand im Projekt gespeichert – über die **native Engine** der Desktop-App |
+| **Mixer** | Master + 16 Insert-Spuren (erweiterbar bis 64), Fader, Pan, Mute-LED (Ctrl-Klick = Solo), Arm-Taste, Track-Inspector mit Eingang, **10 Effekt-Slots** und Ausgang, Stereo-Pegelanzeigen, **Plugin-Latenzausgleich (PDC)** wie in FL: automatisch, Automationen werden mitkompensiert, Delay-Panel pro Spur (orange = Latenz erkannt, blau = manueller Versatz; *Set in ms / samples / beats*, *Set from*, Mausrad) |
+| **Plugins** | VST3 (macOS/Windows/Linux) und Audio Units (macOS) als Instrumente im Channel Rack und als Effekte in Mixer-Slots, Plugin-Manager mit Scan (jedes Plugin in eigenem Prozess – ein abstürzendes Plugin reisst nichts mit), Plugin-Fenster mit dem Editor des Plugins, alle Parameter automatisierbar, Plugin-Zustand im Projekt gespeichert, gemeldete Latenz und Latenz-Offset im Plugin-Fenster – über die **native Engine** der Desktop-App |
 | **Effekte** | Parametric EQ, Auto Filter (mit LFO), Compressor, Distortion, Chorus, Tempo Delay (Ping-Pong, tempo-synchron), Reverb, Limiter |
 | **Instrumente** | 3-Oszillator-Synth (Sinus/Dreieck/Säge/Rechteck/Rauschen, Unison, Filter mit Hüllkurve, LFO) mit 14 Presets · Sampler (Root-Key, Feinstimmung, Reverse, One-Shot, Loop, Choke-Gruppen, ADSR) |
 | **Sounds** | 20 synthetisierte Factory-Sounds: Kicks, Snares, Claps, Hi-Hats, Becken, Toms, Percussion, 808-Bass, Riser, Impact |
@@ -36,11 +37,11 @@ Start synthetisiert, es sind keine fremden Samples enthalten.
 | **Eingabe** | Computertastatur als Klavier (funktioniert auch mit Schweizer/Deutscher QWERTZ-Tastatur), MIDI-Keyboards (Web MIDI) |
 | **Dateien** | Projekte als `.madstudio` (ZIP mit `project.json` und allen eigenen Samples), Autosave & Wiederherstellung, Audio-Import per Drag & Drop (WAV, AIFF, MP3, …), **WAV-Export** (16/24-bit, 32-bit float, 44.1–96 kHz) |
 | **Komfort** | Undo/Redo wie in FL Studio 26 (Ctrl/⌘Z rückgängig, Ctrl/⌘⌥Z wiederherstellen, benannte Schritte), Score-Logger (nachträglich ins Pattern übernehmen, was gespielt wurde), frei verschiebbare Fenster wie im Vorbild, Hinweisleiste für jedes Bedienelement, Demo-Song „MAD Groove“ |
-| **Audio-Engines** | Desktop-App: **native Engine** (C++/JUCE, eigener Prozess, CoreAudio/ALSA/JACK, VST3/AU, Aufnahme, Offline-Rendering; klingt wie die Web-Engine: Demo-Song innerhalb 0,02 dB RMS); Browser bzw. ohne Engine: Web-Audio-Engine – gleiche Bedienung, automatische Umschaltung |
+| **Audio-Engines** | Desktop-App: **native Engine** (C++/JUCE, eigener Prozess, CoreAudio · Windows Audio (WASAPI, auch Exklusiv- und Low-Latency-Modus) · DirectSound · ALSA/JACK, VST3/AU, Latenzausgleich, Aufnahme, Offline-Rendering; klingt wie die Web-Engine: Demo-Song innerhalb 0,02 dB RMS); Browser bzw. ohne Engine: Web-Audio-Engine – gleiche Bedienung, automatische Umschaltung |
 
-## Installation auf dem Mac
+## Installation
 
-### Variante A – fertige App herunterladen
+### Variante A – fertige App für den Mac
 
 1. Auf GitHub unter **Actions → „MAD Studio · macOS app“** den neuesten erfolgreichen Lauf öffnen
    (oder unter **Releases**, sobald ein Tag `mad-studio-v*` existiert).
@@ -54,6 +55,20 @@ Start synthetisiert, es sind keine fremden Samples enthalten.
    xattr -dr com.apple.quarantine "/Applications/MAD Studio.app"
    ```
 
+### Variante A – fertiger Installer für Windows (10/11, 64-bit)
+
+1. Auf GitHub unter **Actions → „MAD Studio · Windows app“** den neuesten erfolgreichen Lauf öffnen.
+2. Unten bei *Artifacts* **`MAD-Studio-Windows-x64`** herunterladen und entpacken – darin liegt
+   `MAD Studio Setup 0.1.0.exe` (mit nativer Engine).
+3. Doppelklick installiert die App für den aktuellen Benutzer (keine Administratorrechte nötig)
+   und legt Verknüpfungen an.
+4. Der Installer ist nicht signiert. Windows SmartScreen warnt deshalb beim ersten Start:
+   *Weitere Informationen → Trotzdem ausführen*.
+
+VST3-Plugins sucht der Plugin-Manager unter Windows in `C:\Program Files\Common Files\VST3`
+(weitere Ordner lassen sich hinzufügen). Für niedrige Latenz in den Audio-Einstellungen
+*Windows Audio (Exclusive Mode)* oder *(Low Latency Mode)* wählen.
+
 ### Variante B – selbst bauen (empfohlen für Entwickler)
 
 Voraussetzung: [Node.js](https://nodejs.org/) 22.12 oder neuer.
@@ -65,6 +80,14 @@ npm ci
 cmake -S engine -B engine/build/Release -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64"
 cmake --build engine/build/Release
 npm run dist:mac        # erzeugt release/MAD Studio-0.1.0-arm64.dmg und …-x64.dmg (mit Engine)
+```
+
+Unter Windows (Visual Studio 2022 mit „Desktopentwicklung mit C++“, CMake, Node.js):
+
+```bash
+cmake -S engine -B engine/build/Release -G "Visual Studio 17 2022" -A x64
+cmake --build engine/build/Release --config Release
+npm run dist:win        # erzeugt release/MAD Studio Setup 0.1.0.exe (mit Engine)
 ```
 
 Selbst gebaute Apps sind nicht unter Quarantäne und starten direkt. Zum schnellen
@@ -106,6 +129,10 @@ MIDI-Keyboards funktionieren in der Mac-App automatisch, im Browser (nur Chrome/
 8. **Plugins (Desktop-App):** **F8** öffnet den Plugin-Manager → *Find installed plugins*.
    Instrumente kommen als Kanal ins Channel Rack, Effekte in einen Mixer-Slot (Klick auf einen
    leeren Slot). Im Plugin-Fenster öffnet *Show plugin editor* die Oberfläche des Plugins.
+   Plugins mit Latenz (Linear-Phase-EQ, Lookahead-Limiter …) gleicht die Engine automatisch aus
+   (*Mixer-Menü → Plugin delay compensation*); das Uhr-Symbol unten an jeder Mixer-Spur zeigt die
+   Latenz und setzt per Klick oder Mausrad einen manuellen Versatz, das Plugin-Fenster einen
+   Latenz-Offset für Plugins, die ihre Latenz falsch melden.
 9. **Exportieren:** *File → Export WAV…* (**⌘R**).
 
 Eigene Samples einfach aus dem Finder in das Channel Rack (neuer Kanal), auf einen Kanal
@@ -190,6 +217,7 @@ npm test             # Unit-Tests (Vitest): Timing, Timeline, Scheduler, Store, 
 npm run test:e2e     # End-to-End-Tests der laufenden App (Playwright, Chromium)
 npm run check        # Typecheck + Unit-Tests + Build
 npm run dist:mac     # macOS-App als DMG (arm64 + x64) nach release/, inkl. gebauter Engine
+npm run dist:win     # Windows-Installer (NSIS, x64) nach release/, inkl. gebauter Engine
 npm run icon         # App-Icon aus build/icon.svg neu erzeugen
 
 # native Engine
@@ -206,13 +234,21 @@ Engine (Self-Test, Protokolltest mit VST3-Test-Plugins, Electron mit Engine).
 Universal-Binary (Self-Test, Protokolltest inkl. Audio Units), die Mac-App mit Engine, startet sie
 testweise und stellt die DMGs als Artefakte bereit. Bei einem Tag
 `mad-studio-v*` wird daraus ein GitHub-Release.
+[`mad-studio-windows.yml`](../../.github/workflows/mad-studio-windows.yml) baut die Engine und die
+VST3-Test-Plugins mit MSVC, führt Self-Test, Protokolltest und Desktop-Test aus, erstellt den
+NSIS-Installer und startet die installierte App testweise mit der mitgelieferten Engine.
 
 ## Grenzen und nächste Schritte
 
 Noch nicht enthalten (Roadmap):
 
-- Plugin-Latenzausgleich (PDC), Sidechain-Eingänge und Mehrkanal-Ausgänge von Plugins, Plugin-Presets im Wrapper
-- Native Engine unter Windows (vorbereitet, aber nicht gebaut/getestet); Plugin-Editoren brauchen ein Fenstersystem
+- Sidechain-Eingänge und Mehrkanal-Ausgänge von Plugins, Plugin-Presets im Wrapper
+- ASIO-Treiber unter Windows: das ASIO-SDK steht seit Oktober 2025 auch unter GPLv3; offen ist
+  die Entscheidung zu Steinbergs Vorgaben für Namen und Logo (Logo in jedem Dialog, der ASIO
+  auswählt). Bis dahin: Windows Audio (WASAPI, auch Exklusiv-/Low-Latency-Modus) und DirectSound
+- Latenzausgleich: armierte Spuren werden beim Monitoring mitverzögert (FL kennt dafür
+  *Bypass track latency compensation*); keine Eingangs-Latenz pro Spur
+- Plugin-Editoren brauchen ein Fenstersystem (unter Linux ohne Display nur der generische Wrapper)
 - Time-Stretching von Audio-Clips, Takes/Comping, Punch-in
 - Sends/Busse zwischen Mixer-Spuren
 - MIDI-Datei-Import/Export, Import von `.flp`-Projekten (Format ist öffentlich dokumentiert)

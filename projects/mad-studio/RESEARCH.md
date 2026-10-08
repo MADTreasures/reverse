@@ -111,10 +111,13 @@ davon ist passiert: FL Studio wurde nur wie von einem Nutzer bedient und beobach
 Bewusst **nicht** übernommen: FLs Grafik (Skin, Icons, Logo, Farbschema im Detail), Sounds und
 Plugin-Namen. Das Bedienkonzept ist übernommen, das Aussehen bleibt eigenständig.
 
-## VST/AU, Aufnahme und Automation: wie FL Studio es macht
+## VST/AU, Aufnahme, Automation und Latenzausgleich: wie FL Studio es macht
 
 Quellen: FL Studio Online Manual (Seiten *Plugin Wrapper*, *System settings › Manage plugins*,
-*Recording audio*, *Playlist › Automation Clips*, *Keyboard shortcuts*) und die Beobachtungen oben.
+*Recording audio*, *Playlist › Automation Clips*, *Keyboard shortcuts*,
+[*Mixer track properties › Plugin Delay Compensation*](https://www.image-line.com/fl-studio-learning/fl-studio-online-manual/html/mixer_trackprops.htm),
+[*Mixer menu*](https://www.image-line.com/fl-studio-learning/fl-studio-online-manual/html/mixer_mixermenu.htm))
+und die Beobachtungen oben.
 
 | # | Beobachtung (Manual / Testversion) | Schlussfolgerung | Umsetzung |
 | - | ---------------------------------- | ---------------- | --------- |
@@ -125,6 +128,9 @@ Quellen: FL Studio Online Manual (Seiten *Plugin Wrapper*, *System settings › 
 | 17 | Aufnahme: **Eingang am Mixer-Track** wählen (stereo/mono), Track wird **scharf geschaltet**, Record + Play; im Song-Modus entstehen **Audio-Clips in der Playlist**, im Pattern-Modus Audio-Clip-Kanäle; Dateien landen im Ordner **„Recorded“**; Optionen Latenzkompensation, Monitoring (Off / When armed / On), Auto-unarm, Vorzähler | Aufnahme hängt am Mixer, nicht an Playlist-Spuren | Modellfelder `MixerTrack.input`/`armed`; Web-Engine: `getUserMedia` + AudioWorklet (`recorder.ts`); native Engine: Gerät/Interface, WAV-Dateien im Ordner `~/Music/MAD Studio/Recorded`; Takes werden auf die aufnehmende Mixer-Spur geroutet |
 | 18 | **Automation-Clips** sind spezielle Kanäle, ihre Clips laufen in der Playlist; zwischen Clips bleibt der letzte Wert stehen; ein Ziel kann mehrere Clips haben | Automation als Kanal + Playlist-Clip, Auswertung pro Ziel | `automation.ts` (Kurven, Auswertung, Linearisierung zu Stützstellen), `automationRuntime.ts` (Web Audio), Protokoll `automation.set` (native Engine) |
 | 19 | Aufnahmefilter „Automation“: Reglerbewegungen während der Song-Aufnahme werden als Automation aufgezeichnet | Bewegungen in den Clip des Reglers schreiben, alte Punkte im überstrichenen Bereich ersetzen | `recordAutomationValue()` (Clip wird bei der ersten Bewegung angelegt, Punkte ausgedünnt) |
+| 20 | Mixer-Menü › **Plugin delay compensation**: *Automatic* (Standard bei neuen Projekten, pro Projekt gespeichert), *Compensate automations* (FX-Automation bleibt mit dem verzögerten Audio synchron), *Reset manual latency on all tracks* | Plugins melden ihre Latenz; alle anderen Wege werden um die Differenz verzögert, Automation hinter latenten Plugins früher gelesen | native Engine: `planCompensation()` richtet Kanäle je Spur und Spuren am Master aus, Verzögerungsringe in den Graph-Snapshots, versetzt gelesene Automation (auch über den Loop-Sprung), Render ohne Vorlauf, Status/Metronom/Aufnahme um die Gesamtlatenz verschoben; Projektfelder `pdc`, `pdcAutomation`; Ereignis `latency` |
+| 21 | **Delay-Panel** an jeder Mixer-Spur: orange bei erkannter Latenz, blau bei manuellem Versatz; Menü *Reset · Set in ms · Set in samples · Set in beats · Set from*; Mausrad 10 ms, Ctrl 1 ms, Ctrl+Alt 1 Sample; positiv verzögert die Spur, negativ alle anderen | manueller Versatz pro Spur zusätzlich zur Automatik | `MixerTrack.latencyOffset` (ms), Uhr-Symbol in jedem Strip und im Track-Inspector (`LatencyPanel`), Hinweisleiste mit Latenz, Verzögerung und Versatz |
+| 22 | Wrapper › Settings › **Latency**: fester Versatz für Plugins, die ihre Latenz falsch melden | Versatz zur gemeldeten Latenz addieren | `latencyOffset` am Plugin (Samples), Feld im Plugin-Fenster neben der gemeldeten Latenz |
 
 ## REA-Prüfung des eigenen App-Pakets
 

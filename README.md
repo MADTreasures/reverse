@@ -8,7 +8,7 @@ Abhängigkeiten, eigene Tests, eigene CI. Projekte beeinflussen sich gegenseitig
 
 | Projekt | Ordner | Vorbild | Plattform | Stack | Status |
 | ------- | ------ | ------- | --------- | ----- | ------ |
-| **MAD Studio** – pattern-basierte DAW | [`projects/mad-studio`](projects/mad-studio) | FL Studio (Image-Line) | macOS · Browser | TypeScript · React · Web Audio · Electron · C++/JUCE (native Engine) | 🟢 v0.2 – Automation, Aufnahme, VST3/AU |
+| **MAD Studio** – pattern-basierte DAW | [`projects/mad-studio`](projects/mad-studio) | FL Studio (Image-Line) | macOS · Windows · Browser | TypeScript · React · Web Audio · Electron · C++/JUCE (native Engine) | 🟢 v0.2 – Automation, Aufnahme, VST3/AU, Latenzausgleich |
 
 <!-- Neue Projekte hier als Zeile ergänzen. Status: 🔵 Recherche · 🟡 in Arbeit · 🟢 lauffähig · ⚪ pausiert -->
 
@@ -22,7 +22,7 @@ reverse/
 ├── .github/workflows/        ← CI pro Projekt: <projekt>-*.yml, läuft nur bei Änderungen im Projektordner
 ├── templates/project/        ← Vorlage für neue Projekte (README.md + RESEARCH.md)
 └── projects/
-    └── mad-studio/           ← DAW im Stil von FL Studio für macOS
+    └── mad-studio/           ← DAW im Stil von FL Studio für macOS und Windows
 ```
 
 Konventionen:

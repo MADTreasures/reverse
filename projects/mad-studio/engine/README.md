@@ -6,7 +6,8 @@
 > users — or a JUCE commercial/Starter licence.
 
 The native audio engine of MAD Studio. It renders all audio, hosts VST3 plugins (and AudioUnits
-on macOS, LV2 on Linux) and records audio inputs. It is a separate process that the Electron main
+on macOS, LV2 on Linux) with automatic plugin delay compensation and records audio inputs. It
+runs on macOS, Windows and Linux. It is a separate process that the Electron main
 process starts and talks to over newline-delimited JSON on stdin/stdout; the protocol is in
 [PROTOCOL.md](PROTOCOL.md) (including an appendix with the engine's additions).
 
@@ -15,7 +16,8 @@ within 0.02 dB RMS of the browser (see [Parity](#web-audio-parity)).
 
 ## Build
 
-Requirements: CMake ≥ 3.22, Ninja, a C++20 compiler (Xcode 14+ / clang 15+ / GCC 12+).
+Requirements: CMake ≥ 3.22, Ninja (or the Visual Studio generator), a C++20 compiler (Xcode 14+ /
+clang 15+ / GCC 12+ / Visual Studio 2022).
 JUCE **8.0.15** is downloaded as the GitHub release tarball (pinned SHA256) unless
 `-DMAD_JUCE_DIR=<path to a JUCE 8.0.15 checkout>` is given (useful for CI caches).
 
@@ -43,13 +45,27 @@ cmake --build engine/build/Release -j4
 
 Leave out `CMAKE_OSX_ARCHITECTURES` for a native-only build. The deployment target is macOS 11.0.
 
+### Windows (x64)
+
+Visual Studio 2022 with the "Desktop development with C++" workload (its CMake works):
+
+```bash
+cd projects/mad-studio
+cmake -S engine -B engine/build/Release -G "Visual Studio 17 2022" -A x64
+cmake --build engine/build/Release --config Release
+```
+
+`mad-engine.exe` lands directly in `engine/build/Release` (no per-configuration subfolder), where
+the app and the tests look for it. Audio goes through JUCE's Windows Audio (WASAPI: shared,
+exclusive and low-latency modes) and DirectSound. MinGW is not supported (JUCE 8 refuses it).
+
 ### Options
 
 | Option | Default | |
 | ------ | ------- | - |
 | `-DMAD_JUCE_DIR=<path>` | (download) | use a local JUCE 8.0.15 checkout |
 | `-DMAD_JUCE_URL=<url>` / `-DMAD_JUCE_SHA256=<hash>` | GitHub release tarball | alternative mirror |
-| `-DMAD_BUILD_TEST_PLUGINS=ON` | `OFF` | build "MAD Test Gain" / "MAD Test Synth" for the protocol test |
+| `-DMAD_BUILD_TEST_PLUGINS=ON` | `OFF` | build "MAD Test Gain" / "MAD Test Synth" / "MAD Test Delay" for the tests |
 | `-DMAD_ENABLE_LV2=OFF` | `ON` (Linux) | LV2 hosting |
 | `-DMAD_ENABLE_JACK=OFF` | `ON` (Linux, if headers exist) | JACK backend |
 
@@ -62,7 +78,7 @@ With the build directory `engine/build/<config>` (e.g. `engine/build/Release`):
 | macOS app bundle | `engine/build/Release/MAD Engine.app` |
 | macOS executable | `engine/build/Release/MAD Engine.app/Contents/MacOS/MAD Engine` |
 | Linux / Windows | `engine/build/Release/mad-engine` (`mad-engine.exe`) |
-| Test plugins | `engine/build/Release/plugins/MAD Test Gain.vst3`, `…/MAD Test Synth.vst3` (macOS also `*.component`) |
+| Test plugins | `engine/build/Release/plugins/MAD Test Gain.vst3`, `…/MAD Test Synth.vst3`, `…/MAD Test Delay.vst3` (macOS also `*.component`) |
 
 The macOS bundle is an agent app (`LSUIElement`, no Dock icon) with the bundle id
 `io.github.madtreasures.madstudio.engine` and `NSMicrophoneUsageDescription`. It is not code-signed
@@ -115,12 +131,15 @@ Q in dB for lowpass/highpass), StereoPanner laws, `makeImpulseResponse` (first s
 bit-identical) and the ConvolverNode normalisation, oscillator levels, the compressor, sequencer
 timing against `scheduler.ts` (swing, loop wrap, several block sizes, count-in, tempo changes),
 automation interpolation/hold/override rules, WAV writing (byte-identical to `wav.ts encodeWav`)
-and reading, and rendered levels of small graphs (pan laws, faders, solo/mute, chokes,
-automation, effects).
+and reading, rendered levels of small graphs (pan laws, faders, solo/mute, chokes,
+automation, effects), the delay compensation plan, the compensation delay line and compensated
+automation across a loop wrap in the live engine.
 
 The protocol test starts the engine with `--null-audio --null-input-tone 440` and checks every
 command and event, rendered levels/lengths/bit depths, recording with count-in and latency
-trimming, automation, plugin scanning/loading/parameters/states, and ends with a stress section:
+trimming, automation, plugin scanning/loading/parameters/states, plugin delay compensation
+(sample-exact alignment of a path through "MAD Test Delay" with a dry one, PDC off, track and
+plugin offsets, a latency change while running, compensated automation), and ends with a stress section:
 random structural edits, timeline/automation updates, sample reloads, live notes, previews, device
 restarts and an offline render while the transport plays. That part is most useful with sanitizer
 builds (GCC; clang needs its sanitizer runtimes installed):
@@ -185,11 +204,11 @@ src/
 │              DynamicsCompressor, waveshaper, delay line, impulse response, one-pole smoothing
 ├── engine/    AudioEngine (block processing), GraphBuilder (project.sync -> nodes), Graph (channel
 │              strips, mixer tracks, snapshot), instruments, effects, sequencer, timeline/automation,
-│              samples, recorder, offline renderer, WAV I/O, parameter tables
+│              samples, recorder, offline renderer, WAV I/O, parameter tables, Latency (PDC)
 ├── io/        JUCE AudioDeviceManager wrapper and the null device
 ├── plugins/   plugin host (scan, cache, instances, params, editors, states), scan child, slots
 └── tests/     --self-test and generated reference data
-test-plugins/  MAD Test Gain / MAD Test Synth (JUCE plugins)
+test-plugins/  MAD Test Gain / MAD Test Synth / MAD Test Delay (JUCE plugins)
 tests/         protocol-test.mjs, parity/, tools/ (TypeScript import hook, reference generator)
 ```
 
@@ -216,6 +235,17 @@ swing via a pending queue, count-in, metronome, tempo from `proj:bpm`), choke gr
 dispatch with sample offsets, instruments → channel strips (mono or stereo pan law depending on
 the instrument output, as Web Audio's channel-count rules) → mixer tracks (effects, pan, fader,
 solo/mute, meters) → master (+ preview bus) → device, plus the metronome bus.
+
+**Plugin delay compensation.** Like FL Studio's automatic PDC. `planCompensation()` (pure,
+unit-tested) takes every channel's instrument latency, each track's insert latencies and manual
+offsets and aligns channels at their track (each waits for the slowest channel of the track)
+and tracks at the master; master inserts add to the total. The message thread re-plans whenever
+the project changes or a plugin announces a new latency (`AudioProcessorListener` →
+`PluginSlot`, polled with the 30 Hz tick) and publishes a snapshot whose channel and track entries
+carry `CompensationDelay` ring buffers; buffers are reused while big enough, so delayed audio
+keeps flowing across graph updates. Automation bindings carry the latency in front of their
+parameter and are read that much earlier. The total moves `status.tick`, delays the metronome,
+shifts recorded takes and is trimmed from offline renders.
 
 **DSP parity.** Chromium's algorithms are ported where they define the sound: biquad
 coefficients and edge cases, StereoPanner, the DynamicsCompressor kernel (6 ms look-ahead, adaptive
@@ -245,18 +275,22 @@ match too.
 
 ## Known limitations
 
-* No plugin delay compensation (plugin latency is reported in `plugin.loaded` only).
+* Plugin delay compensation: monitored inputs of armed tracks are delayed with their track
+  (FL Studio can bypass that for monitoring); tracks only feed the master (no sends/buses yet);
+  at most 524288 samples per path; when the compensation changes, delayed audio jumps.
 * Plugin editors need a display; on headless Linux `plugin.openEditor` returns an error. Editor
   windows are kept above other windows because the engine is a background process.
 * Chromium quirks not reproduced: GainNodes start at 1 and are smoothed to their value when a graph
   is built (a few ms of leakage at the start of browser renders), the chorus' depth glitch at
   creation, and Chromium's FIR oversampler latency (128/192 frames; native ~1.3 ms less), so the
   distortion has no dry/wet comb filtering at `mix` < 1.
-* AudioUnit hosting, the macOS bundle and microphone permission handling are implemented but have
-  not been built or run on a Mac yet (development happened in a Linux container); the macOS part of
-  the protocol test (AULowpass, DLSMusicDevice) still has to run there.
-* Windows is set up (console program `mad-engine.exe`, WASAPI/DirectSound through JUCE, no ASIO
-  since that needs Steinberg's SDK) but has not been built yet.
+* macOS and Windows are built and tested in CI (`mad-studio-macos.yml`, `mad-studio-windows.yml`):
+  self-test, protocol test (on macOS with Apple's AULowpass and DLSMusicDevice), the desktop
+  test and the packaged app. The Windows runners have no sound card (null device); the macOS
+  microphone permission prompt has not been tried interactively.
+* No ASIO on Windows. Steinberg's ASIO SDK is available under GPLv3 since October 2025 (dual
+  licence), but showing the name "ASIO" requires following Steinberg's usage guidelines (the
+  "ASIO Compatible" logo in every dialog that selects ASIO) – a decision for the project.
 * WAV files are limited to 4 GB (no RF64). Each recording take has a 30 s FIFO between the audio
   thread and the writer thread; if the disk stalls for longer, frames are dropped (reported as
   `droppedFrames` in `record.done`).
