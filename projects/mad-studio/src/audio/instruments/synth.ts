@@ -34,6 +34,8 @@ export class SynthInstrument implements Instrument {
   readonly output: GainNode;
   private params: SynthParams;
   private readonly voices = new Set<Voice>();
+  /** Filters of sounding voices, so cutoff/resonance changes (automation!) reach held notes too. */
+  private readonly voiceFilters = new Map<Voice, { filter: BiquadFilterNode; key: number }>();
   private readonly lfo: OscillatorNode;
   private readonly lfoPitch: GainNode;
   private readonly lfoFilter: GainNode;
@@ -62,6 +64,13 @@ export class SynthInstrument implements Instrument {
     this.lfoPitch.gain.setTargetAtTime(p.lfo.target === 'pitch' ? d * LFO_PITCH_CENTS : 0, now, 0.01);
     this.lfoFilter.gain.setTargetAtTime(p.lfo.target === 'filter' ? d * LFO_FILTER_CENTS : 0, now, 0.01);
     this.lfoAmp.gain.setTargetAtTime(p.lfo.target === 'amp' ? d * 0.5 : 0, now, 0.01);
+    if (p.filter.enabled) {
+      for (const { filter, key } of this.voiceFilters.values()) {
+        const keyTrack = Math.pow(2, ((key - 60) / 12) * p.filter.keyTrack);
+        filter.frequency.setTargetAtTime(Math.min(20000, Math.max(20, p.filter.cutoff * keyTrack)), now, 0.01);
+        filter.Q.setTargetAtTime(p.filter.resonance, now, 0.01);
+      }
+    }
   }
 
   trigger(key: number, velocity: number, t: number, duration: number | null): Voice | null {
@@ -175,8 +184,10 @@ export class SynthInstrument implements Instrument {
       return releaseEnvelope(amp.gain, env, t, 0, peak, at);
     });
     this.voices.add(voice);
+    if (filter) this.voiceFilters.set(voice, { filter, key });
     voice.onEnd(() => {
       this.voices.delete(voice);
+      this.voiceFilters.delete(voice);
       unlinkLfo();
     });
     enforcePolyphony(this.voices, MAX_VOICES, t);

@@ -2,6 +2,8 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { closeDialog, closeMenu, useOverlays, type MenuItem } from './overlays';
 import { ExportDialog } from './dialogs/ExportDialog';
 import { AboutDialog, ShortcutsDialog } from './dialogs/InfoDialogs';
+import { AudioSettingsDialog } from './dialogs/AudioSettings';
+import { PluginManagerDialog } from './dialogs/PluginManager';
 
 /** Context menus, modal dialogs and toast notifications. */
 export function OverlayHost() {
@@ -32,6 +34,8 @@ export function OverlayHost() {
           {dialog.kind === 'custom' && dialog.id === 'export' && <ExportDialog />}
           {dialog.kind === 'custom' && dialog.id === 'about' && <AboutDialog />}
           {dialog.kind === 'custom' && dialog.id === 'shortcuts' && <ShortcutsDialog />}
+          {dialog.kind === 'custom' && dialog.id === 'plugins' && <PluginManagerDialog />}
+          {dialog.kind === 'custom' && dialog.id === 'audio' && <AudioSettingsDialog />}
         </div>
       )}
       <div className="toasts">

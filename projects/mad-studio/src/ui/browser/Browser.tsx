@@ -61,23 +61,29 @@ export function Browser() {
   const width = useStore((s) => s.ui.browserWidth);
   const samples = useStore((s) => s.project.samples);
   const [filter, setFilter] = useState('');
-  const [open, setOpen] = useState<Record<string, boolean>>({ 'f:Kicks': true, 'f:Snares & Claps': true, imported: true });
+  const [open, setOpen] = useState<Record<string, boolean>>({ 'f:Kicks': true, 'f:Snares & Claps': true, imported: true, recorded: true });
 
   const sections = useMemo(() => {
-    const user: Entry[] = Object.values(samples)
-      .filter((s) => s.source === 'user')
-      .map((s) => ({
+    const entry = (s: (typeof samples)[string]): Entry => ({
         key: s.id,
         name: s.name,
         kind: 'sample',
         drag: { type: 'sample', sampleId: s.id, name: s.name },
         preview: () => engine.previewSample(s.id),
         add: () => addSamplerChannelFor(s),
-      }));
+      });
+    const user = Object.values(samples).filter((s) => s.source === 'user');
     return [
       { title: 'Drums & FX', folders: factoryFolders() },
       { title: 'Synth presets', folders: presetFolders() },
-      { title: 'Project samples', folders: [{ id: 'imported', name: 'Imported', entries: user }] },
+      {
+        title: 'Project samples',
+        folders: [
+          { id: 'imported', name: 'Imported', entries: user.filter((s) => !s.recorded).map(entry) },
+          // FL Studio keeps audio recordings in a "Recorded" browser folder.
+          { id: 'recorded', name: 'Recorded', entries: user.filter((s) => s.recorded).map(entry) },
+        ],
+      },
     ];
   }, [samples]);
 

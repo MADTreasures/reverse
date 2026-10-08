@@ -55,6 +55,10 @@ interface PluginState {
   deviceTypes: { name: string; outputs: string[]; inputs: string[] }[];
   sampleRates: number[];
   bufferSizes: number[];
+  /** Default plugin search paths per format (from the engine). */
+  paths: Record<string, string[]>;
+  /** Extra folders the user added (kept in localStorage). */
+  extraPaths: Record<string, string[]>;
 }
 
 export const usePlugins = create<PluginState>(() => ({
@@ -70,7 +74,37 @@ export const usePlugins = create<PluginState>(() => ({
   deviceTypes: [],
   sampleRates: [],
   bufferSizes: [],
+  paths: {},
+  extraPaths: loadExtraPaths(),
 }));
+
+const EXTRA_KEY = 'mad-studio:plugin-paths';
+
+function loadExtraPaths(): Record<string, string[]> {
+  try {
+    const raw = typeof localStorage !== 'undefined' ? localStorage.getItem(EXTRA_KEY) : null;
+    return raw ? (JSON.parse(raw) as Record<string, string[]>) : {};
+  } catch {
+    return {};
+  }
+}
+
+export function setExtraPaths(paths: Record<string, string[]>): void {
+  usePlugins.setState({ extraPaths: paths });
+  try {
+    localStorage.setItem(EXTRA_KEY, JSON.stringify(paths));
+  } catch {
+    // Storage may be unavailable.
+  }
+}
+
+/** Default + user search paths, as sent with plugins.scan. */
+export function scanPaths(): Record<string, string[]> {
+  const { paths, extraPaths } = usePlugins.getState();
+  const out: Record<string, string[]> = {};
+  for (const fmt of new Set([...Object.keys(paths), ...Object.keys(extraPaths)])) out[fmt] = [...new Set([...(paths[fmt] ?? []), ...(extraPaths[fmt] ?? [])])];
+  return out;
+}
 
 /** Input channel names of the current audio device (two generic inputs without the native engine). */
 export function inputChannelNames(): string[] {

@@ -24,11 +24,36 @@ export interface FileSystemFileHandleLike {
   createWritable(): Promise<{ write(data: Blob | BufferSource): Promise<void>; close(): Promise<void> }>;
 }
 
+/** Messages from the native engine process (see engine/PROTOCOL.md), plus the main process' own events. */
+export interface EngineMessage {
+  type: string;
+  [key: string]: unknown;
+}
+
+/** Bridge to the native audio engine process (relayed by the Electron main process). */
+export interface NativeEngineBridge {
+  /** True when an engine binary is bundled / built. */
+  available: boolean;
+  /** Folder where audio recordings are written (FL: "Recorded"). */
+  recordFolder: string;
+  send(message: EngineMessage): void;
+  onMessage(cb: (message: EngineMessage) => void): () => void;
+  /** Sends PCM to the engine (written to a temporary raw file by the main process). */
+  loadSample(id: string, sampleRate: number, channels: Float32Array[]): Promise<void>;
+  /** Reads a file the engine produced (recording or render). */
+  readFile(path: string): Promise<Uint8Array>;
+  /** Path for a temporary render target. */
+  tempPath(name: string): Promise<string>;
+  restart(): void;
+}
+
 /** API exposed by electron/preload.cjs as window.madNative. */
 export interface NativeBridge {
+  engine?: NativeEngineBridge;
   platform: string;
   saveFile(opts: { suggestedName: string; data: Uint8Array; filters: FileFilter[]; path?: string }): Promise<{ path: string; name: string } | null>;
   openFile(opts: { filters: FileFilter[]; multiple?: boolean }): Promise<OpenedFile[] | null>;
+  chooseFolder(title?: string): Promise<string | null>;
   onMenu(cb: (action: string) => void): () => void;
   onOpenFile(cb: (file: OpenedFile) => void): () => void;
   setDocumentEdited(edited: boolean): void;

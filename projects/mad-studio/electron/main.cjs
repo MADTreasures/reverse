@@ -4,6 +4,7 @@ const fs = require('node:fs/promises');
 const fsSync = require('node:fs');
 const path = require('node:path');
 const { pathToFileURL } = require('node:url');
+const { EngineHost } = require('./engine.cjs');
 
 const DIST = path.join(__dirname, '..', 'dist');
 const DEV_URL = process.env.MAD_DEV_URL || '';
@@ -24,6 +25,9 @@ const pendingFiles = [];
 // Files the user picked in a dialog or opened from Finder. The renderer may only
 // re-save to these paths without a dialog, never to arbitrary locations.
 const userChosenPaths = new Set();
+/** Native audio engine process (null until the app is ready). */
+let engine = null;
+let lastEngineReady = null;
 
 // ---------------------------------------------------------------- window state
 
@@ -56,6 +60,13 @@ function isTrustedSender(event) {
 
 function send(action) {
   if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('menu:action', action);
+}
+
+function sendEngineMessage(msg) {
+  if (msg.type === 'ready') lastEngineReady = msg;
+  if (msg.type === 'engine.exit') lastEngineReady = null;
+  if (SMOKE && msg.type === 'ready') console.log(`MAD_STUDIO_ENGINE_OK ${msg.version ?? ''} ${msg.sampleRate ?? ''}Hz null=${msg.device?.null ?? '?'}`);
+  if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('engine:message', msg);
 }
 
 async function readFileForRenderer(filePath) {
@@ -223,6 +234,12 @@ function registerIpc() {
     return Promise.all(res.filePaths.map(readFileForRenderer));
   });
 
+  ipcMain.handle('file:choose-folder', async (event, title) => {
+    if (!isTrustedSender(event)) return null;
+    const res = await dialog.showOpenDialog(mainWindow, { title: typeof title === 'string' ? title : 'Choose folder', properties: ['openDirectory'] });
+    return res.canceled || res.filePaths.length === 0 ? null : res.filePaths[0];
+  });
+
   ipcMain.on('window:set-edited', (event, edited) => {
     if (!isTrustedSender(event)) return;
     documentEdited = Boolean(edited);
@@ -243,8 +260,45 @@ function registerIpc() {
     if (!isTrustedSender(event)) return;
     if (SMOKE) {
       console.log('MAD_STUDIO_SMOKE_OK');
-      app.exit(0);
+      // With a bundled engine the smoke test also waits for the engine to report "ready".
+      if (!engine?.available) app.exit(0);
+      else if (lastEngineReady) app.exit(0);
+      else {
+        const timer = setInterval(() => {
+          if (lastEngineReady) {
+            clearInterval(timer);
+            app.exit(0);
+          }
+        }, 100);
+      }
     }
+  });
+
+  // --- native audio engine relay (engine/PROTOCOL.md)
+  ipcMain.on('engine:info', (event) => {
+    event.returnValue = isTrustedSender(event) && engine ? { available: engine.available, recordFolder: engine.recordFolder } : { available: false, recordFolder: '' };
+  });
+  ipcMain.on('engine:subscribe', (event) => {
+    if (isTrustedSender(event) && lastEngineReady) event.sender.send('engine:message', lastEngineReady);
+  });
+  ipcMain.on('engine:send', (event, msg) => {
+    if (isTrustedSender(event)) engine?.send(msg);
+  });
+  ipcMain.on('engine:restart', (event) => {
+    if (isTrustedSender(event)) engine?.restart();
+  });
+  ipcMain.handle('engine:load-sample', async (event, opts) => {
+    if (!isTrustedSender(event) || !engine || !opts || !Array.isArray(opts.channels)) return;
+    const channels = opts.channels.filter((c) => c instanceof Float32Array);
+    await engine.loadSample(String(opts.id), Number(opts.sampleRate), channels);
+  });
+  ipcMain.handle('engine:read-file', async (event, filePath) => {
+    if (!isTrustedSender(event) || !engine) throw new Error('Access denied');
+    return engine.readFile(filePath);
+  });
+  ipcMain.handle('engine:temp-path', (event, name) => {
+    if (!isTrustedSender(event) || !engine) return null;
+    return engine.tempPath(name);
   });
 }
 
@@ -355,9 +409,11 @@ app.whenReady().then(() => {
     permission === 'media' ? details?.mediaType === 'audio' : allowed.has(permission),
   );
 
+  engine = new EngineHost(sendEngineMessage);
   registerIpc();
   buildMenu();
   createWindow();
+  engine.start();
 
   // Files passed on the command line (Windows/Linux, or `open -a`).
   for (const arg of process.argv.slice(1)) {
@@ -379,3 +435,5 @@ app.whenReady().then(() => {
 app.on('window-all-closed', () => {
   if (!isMac || SMOKE) app.quit();
 });
+
+app.on('will-quit', () => engine?.stop());
