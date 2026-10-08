@@ -122,13 +122,16 @@ export function AboutDialog() {
         MAD<span className="accent">STUDIO</span> <span className="dim">0.1</span>
       </h2>
       <p>
-        Pattern-based music studio: channel rack with step sequencer, piano roll, playlist arrangement, mixer with insert
-        effects, synthesizer, sampler and WAV export.
+        Pattern-based music studio: channel rack with step sequencer, piano roll, playlist arrangement, automation clips,
+        mixer with insert effects and audio recording, synthesizer, sampler and WAV export. The desktop app hosts VST®3
+        and Audio Unit plug-ins through its native engine.
       </p>
       <p className="dim">
-        Independent project inspired by the workflow of classic pattern-based DAWs. All code, sounds and graphics are
-        original; no third-party samples are included – the drum kit is synthesised on start-up.
+        Independent project inspired by the workflow of classic pattern-based DAWs. All sounds and graphics are original;
+        no third-party samples are included – the drum kit is synthesised on start-up. The native engine is built with
+        JUCE (AGPLv3) and the VST3 SDK (MIT).
       </p>
+      <p className="dim">VST is a registered trademark of Steinberg Media Technologies GmbH.</p>
       <div className="modal-actions">
         <button className="btn primary" onClick={closeDialog}>
           Close

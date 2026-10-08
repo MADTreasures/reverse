@@ -1,7 +1,7 @@
 # MAD Studio
 
 > **Vorbild:** FL Studio (Image-Line, <https://www.image-line.com/>) · **Plattform:** macOS (Electron-App) und Browser ·
-> **Status:** 🟢 v0.2 – Automation, Audioaufnahme, FL-Bedienung, native Engine mit VST3/AU-Hosting
+> **Status:** 🟢 v0.2 – Automation, Audioaufnahme, FL-Bedienung, native Engine mit VST®3/AU-Hosting
 
 [![MAD Studio CI](https://github.com/MADTreasures/reverse/actions/workflows/mad-studio-ci.yml/badge.svg)](https://github.com/MADTreasures/reverse/actions/workflows/mad-studio-ci.yml)
 [![MAD Studio macOS](https://github.com/MADTreasures/reverse/actions/workflows/mad-studio-macos.yml/badge.svg)](https://github.com/MADTreasures/reverse/actions/workflows/mad-studio-macos.yml)
@@ -224,8 +224,11 @@ Die native Engine (`engine/`) nutzt das JUCE-Framework unter der **GNU AGPLv3** 
 deshalb selbst unter AGPLv3 (siehe [engine/LICENSE](engine/LICENSE)). Wer die App mit Engine
 weitergibt, muss den Quellcode zugänglich machen (AGPL) – oder eine kommerzielle JUCE-Lizenz
 verwenden (JUCE 8: kostenlose *Starter*-Stufe bis zu einer Umsatzgrenze, sonst *Indie*/*Pro*;
-aktuelle Bedingungen auf juce.com prüfen). Für das VST3-SDK gelten zusätzlich die Bedingungen von
-Steinberg. Die Oberfläche (`src/`, `electron/`) läuft in einem eigenen Prozess und spricht mit der
+aktuelle Bedingungen auf juce.com prüfen). Das in JUCE enthaltene VST3-SDK (Version 3.8) steht
+seit Oktober 2025 unter der **MIT-Lizenz** (Copyright-Hinweis beibehalten). Für den Namen „VST“
+gelten Steinbergs *VST Usage Guidelines* (liegen dem SDK bei): ® bei der ersten Nennung, der
+Markenhinweis unten und das „VST Compatible“-Logo in Dokumentation, Website und About-Fenster.
+Die Oberfläche (`src/`, `electron/`) läuft in einem eigenen Prozess und spricht mit der
 Engine nur über JSON-Nachrichten; ob das lizenzrechtlich als getrenntes Werk gilt, ist im Zweifel
 juristisch zu klären.
 
@@ -235,3 +238,5 @@ MAD Studio ist ein unabhängiges Projekt und steht in keiner Verbindung zu Image
 „FL Studio“ ist eine Marke von Image-Line Software und wird hier nur beschreibend als Vorbild
 genannt. Es wurde kein Code, keine Grafik und kein Sound von FL Studio verwendet und nichts
 dekompiliert. Wie das Vorbild untersucht wurde, steht in [RESEARCH.md](RESEARCH.md).
+
+VST is a registered trademark of Steinberg Media Technologies GmbH.
