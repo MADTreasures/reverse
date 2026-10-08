@@ -103,6 +103,8 @@ export interface TransportState {
   latencyCompensation: boolean;
   /** Unarm all tracks after a recording (FL: Auto-unarm). */
   autoUnarm: boolean;
+  /** With recording armed, the first live note starts playback (FL: Options › Start on input, Ctrl+I). */
+  startOnInput: boolean;
 }
 
 export interface AppState {
@@ -189,6 +191,7 @@ function initialState(): AppState {
       monitoring: 'off',
       latencyCompensation: true,
       autoUnarm: false,
+      startOnInput: false,
     },
     sampleRevision: 0,
     audioReady: false,

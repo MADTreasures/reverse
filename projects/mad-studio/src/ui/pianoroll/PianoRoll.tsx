@@ -483,7 +483,7 @@ export function PianoRoll() {
         const mod = e.metaKey || e.ctrlKey;
         const plain = !mod && !e.altKey && !e.shiftKey;
         const chosen = list.filter((n) => sel.has(n.id));
-        if ((e.key === 'Delete' || e.key === 'Backspace') && chosen.length) {
+        if ((e.key === 'Delete' || e.key === 'Backspace') && !mod && chosen.length) {
           deleteNotes(pid, ch.id, chosen.map((n) => n.id));
           setSelected(new Set());
           return true;
@@ -497,7 +497,7 @@ export function PianoRoll() {
           setSelected(new Set());
           return true;
         }
-        if (mod && (e.code === 'KeyC' || e.code === 'KeyX') && chosen.length) {
+        if (mod && !e.shiftKey && (e.code === 'KeyC' || e.code === 'KeyX') && chosen.length) {
           const min = Math.min(...chosen.map((n) => n.start));
           clipboard = chosen.map(({ id: _id, ...n }) => ({ ...n, start: n.start - min }));
           if (e.code === 'KeyX') {
@@ -507,7 +507,7 @@ export function PianoRoll() {
           lastClick.current = lastClick.current ?? min;
           return true;
         }
-        if (mod && e.code === 'KeyV' && clipboard.length) {
+        if (mod && !e.shiftKey && e.code === 'KeyV' && clipboard.length) {
           const at = lastClick.current ?? 0;
           const ids = addNotes(pid, ch.id, clipboard.map((n) => ({ ...n, start: n.start + at })));
           setSelected(new Set(ids));
@@ -535,8 +535,9 @@ export function PianoRoll() {
         }
         if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
           const dir = e.key === 'ArrowUp' ? 1 : -1;
-          if ((e.shiftKey || mod) && !e.altKey && chosen.length) {
-            // FL Studio: Shift+Up/Down transposes by a semitone, Ctrl+Up/Down by an octave.
+          if (e.shiftKey !== mod && !e.altKey && chosen.length) {
+            // FL Studio: Shift+Up/Down transposes by a semitone, Ctrl+Up/Down by an octave
+            // (Shift+Ctrl+Up/Down moves the pattern in the pattern list).
             const dk = dir * (mod ? 12 : 1);
             updateNotes(pid, ch.id, (l) => {
               for (const n of l) if (sel.has(n.id)) n.key += dk;

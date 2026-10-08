@@ -722,7 +722,7 @@ export function Playlist() {
             return true;
           }
         }
-        if ((e.key === 'Delete' || e.key === 'Backspace') && chosen.length) {
+        if ((e.key === 'Delete' || e.key === 'Backspace') && !mod && chosen.length) {
           deleteClips(chosen.map((c) => c.id));
           setSelected(new Set());
           return true;
@@ -736,11 +736,11 @@ export function Playlist() {
           setSelected(new Set());
           return true;
         }
-        if (mod && e.code === 'KeyC' && chosen.length) {
+        if (mod && !e.shiftKey && e.code === 'KeyC' && chosen.length) {
           clipboard = chosen.map((c) => ({ ...c }));
           return true;
         }
-        if (mod && e.code === 'KeyV' && clipboard.length) {
+        if (mod && !e.shiftKey && e.code === 'KeyV' && clipboard.length) {
           const at = lastClick.current?.tick ?? 0;
           const min = Math.min(...clipboard.map((c) => c.start));
           const copies = clipboard.map((c) => ({ ...c, id: makeId('clip'), start: c.start - min + at }));

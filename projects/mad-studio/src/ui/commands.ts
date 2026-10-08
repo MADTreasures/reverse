@@ -6,6 +6,10 @@ import {
   addPattern,
   clonePattern,
   deletePattern,
+  findFirstEmptyPattern,
+  insertPattern,
+  movePattern,
+  transposePattern,
   redo,
   renamePattern,
   renameProject,
@@ -19,6 +23,7 @@ import {
 } from '../store/actions';
 import { createAutomationClip } from '../store/automationActions';
 import { useStore } from '../store/store';
+import { clearScoreLog, dumpScoreLog } from './liveInput';
 import { confirmDialog, openDialog, promptDialog, toast } from './overlays';
 import { closeWindow, focusWindow, openWindow, toggleMaximize, toggleWindow } from './workspace/windows';
 
@@ -62,6 +67,19 @@ export type CommandId =
   | 'window:pianoRoll'
   | 'window:mixer'
   | 'toggleBrowser'
+  | 'findFirstEmptyPattern'
+  | 'insertPattern'
+  | 'movePatternUp'
+  | 'movePatternDown'
+  | 'transposePattern'
+  | 'closePluginWindows'
+  | 'closeUnfocusedWindows'
+  | 'startOnInput'
+  | 'dumpScoreLog1'
+  | 'dumpScoreLog2'
+  | 'dumpScoreLog5'
+  | 'dumpScoreLog10'
+  | 'clearScoreLog'
   | 'shortcuts'
   | 'about';
 
@@ -91,7 +109,16 @@ export const SHORTCUTS: Partial<Record<CommandId, string>> = {
   typingKeyboard: `${mod}T`,
   newPattern: `${mod}F4`,
   newPatternNamed: 'F4',
+  findFirstEmptyPattern: `${shift}F4`,
   renamePattern: 'F2',
+  clonePattern: `${shift}${mod}C`,
+  deletePattern: isMac ? `${shift}${mod}⌫` : `${shift}${mod}Del`,
+  ...(isMac ? {} : { insertPattern: `${shift}${mod}Ins` }),
+  movePatternUp: `${shift}${mod}↑`,
+  movePatternDown: `${shift}${mod}↓`,
+  startOnInput: `${mod}I`,
+  closePluginWindows: `${alt}F12`,
+  closeUnfocusedWindows: `${mod}F12`,
   nextPattern: '+',
   prevPattern: '−',
   'window:playlist': 'F5',
@@ -217,6 +244,48 @@ export async function runCommand(id: CommandId): Promise<void> {
     case 'closeAllWindows':
       for (const [id, w] of Object.entries(s.ui.windows)) if (w.open && id !== 'playlist') closeWindow(id);
       return;
+    case 'closePluginWindows':
+      for (const [id, w] of Object.entries(s.ui.windows)) if (w.open && (id.startsWith('channel:') || id.startsWith('effect:'))) closeWindow(id);
+      return;
+    case 'closeUnfocusedWindows':
+      for (const [id, w] of Object.entries(s.ui.windows)) if (w.open && id !== 'playlist' && id !== s.ui.focusedWindow) closeWindow(id);
+      return;
+    case 'startOnInput':
+      setTransport({ startOnInput: !s.transport.startOnInput });
+      toast(`Start on input ${!s.transport.startOnInput ? 'on – arm recording, the first note starts playback' : 'off'}`);
+      return;
+    case 'dumpScoreLog1':
+    case 'dumpScoreLog2':
+    case 'dumpScoreLog5':
+    case 'dumpScoreLog10':
+      dumpScoreLog(Number(id.slice('dumpScoreLog'.length)));
+      return;
+    case 'clearScoreLog':
+      clearScoreLog();
+      toast('Score log cleared.');
+      return;
+    case 'findFirstEmptyPattern': {
+      const id = findFirstEmptyPattern();
+      const p = findPattern(useStore.getState().project, id);
+      const name = await promptDialog('Pattern name', p?.name ?? '');
+      if (name) renamePattern(id, name);
+      return;
+    }
+    case 'insertPattern':
+      insertPattern(s.ui.selectedPatternId);
+      return;
+    case 'movePatternUp':
+      movePattern(s.ui.selectedPatternId, -1);
+      return;
+    case 'movePatternDown':
+      movePattern(s.ui.selectedPatternId, 1);
+      return;
+    case 'transposePattern': {
+      const answer = await promptDialog('Transpose pattern (semitones, e.g. -12 or 7)', '12');
+      const semitones = Number(answer);
+      if (answer !== null && Number.isFinite(semitones) && semitones !== 0) transposePattern(s.ui.selectedPatternId, semitones);
+      return;
+    }
     case 'togglePlaylistMax':
       openWindow('playlist');
       toggleMaximize('playlist');

@@ -4,7 +4,12 @@ import { songTimeline } from '../model/timeline';
 import { PPQ, TICKS_PER_STEP, formatDuration, gridLineTicks, snapTicks } from '../model/timing';
 import {
   addNotes,
+  addPattern,
   cloneTrack,
+  findFirstEmptyPattern,
+  insertPattern,
+  movePattern,
+  transposePattern,
   deleteTrack,
   insertTrack,
   legatoNotes,
@@ -131,5 +136,25 @@ describe('playlist tracks', () => {
     deleteTrack(first);
     expect(state().project.tracks.some((t) => t.id === first)).toBe(false);
     expect(state().project.clips.some((c) => c.trackId === first)).toBe(false);
+  });
+});
+
+describe('patterns menu (FL Studio)', () => {
+  it('finds the first empty pattern, inserts, moves and transposes', () => {
+    const first = state().ui.selectedPatternId;
+    const ch = state().project.channels[0].id;
+    addNotes(first, ch, [{ key: 60, start: 0, length: 24, velocity: 0.8 }]);
+    const second = addPattern();
+    expect(findFirstEmptyPattern()).toBe(second);
+    const inserted = insertPattern(second);
+    expect(state().project.patterns.map((p) => p.id)).toEqual([first, inserted, second]);
+    movePattern(inserted, 1);
+    expect(state().project.patterns.map((p) => p.id)).toEqual([first, second, inserted]);
+    movePattern(first, -1);
+    expect(state().project.patterns[0].id).toBe(first);
+    transposePattern(first, 12);
+    expect(state().project.patterns[0].notes[ch][0].key).toBe(72);
+    transposePattern(first, 100);
+    expect(state().project.patterns[0].notes[ch][0].key).toBe(127);
   });
 });

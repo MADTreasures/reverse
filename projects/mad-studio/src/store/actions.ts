@@ -527,6 +527,48 @@ export function addPattern(): Id {
   return pattern.id;
 }
 
+/** FL Studio: Patterns › Find first empty – selects the first pattern without notes, or adds one. */
+export function findFirstEmptyPattern(): Id {
+  const project = useStore.getState().project;
+  const empty = project.patterns.find((p) => Object.values(p.notes).every((list) => list.length === 0));
+  if (!empty) return addPattern();
+  selectPattern(empty.id);
+  return empty.id;
+}
+
+/** Inserts an empty pattern before the given one (FL Studio: Patterns › Insert one). */
+export function insertPattern(beforeId: Id): Id {
+  const project = useStore.getState().project;
+  const index = Math.max(0, project.patterns.findIndex((p) => p.id === beforeId));
+  const name = uniqueName(project.patterns.map((p) => p.name), `Pattern ${project.patterns.length + 1}`);
+  const pattern = createPattern(name, paletteColor(project.patterns.length + 5), project.beatsPerBar);
+  edit((d) => {
+    d.patterns.splice(index, 0, pattern);
+  });
+  selectPattern(pattern.id);
+  return pattern.id;
+}
+
+/** Moves a pattern up or down in the pattern list (FL Studio: Shift+Ctrl+Up/Down). */
+export function movePattern(id: Id, delta: number): void {
+  edit((d) => {
+    const i = d.patterns.findIndex((p) => p.id === id);
+    const j = i + delta;
+    if (i < 0 || j < 0 || j >= d.patterns.length) return;
+    const [p] = d.patterns.splice(i, 1);
+    d.patterns.splice(j, 0, p);
+  });
+}
+
+/** Transposes every note of a pattern (FL Studio: Patterns › Transpose); keys stay within 0..127. */
+export function transposePattern(id: Id, semitones: number): void {
+  edit((d) => {
+    const p = patternOf(d, id);
+    if (!p) return;
+    for (const list of Object.values(p.notes)) for (const n of list) n.key = Math.min(127, Math.max(0, n.key + Math.round(semitones)));
+  });
+}
+
 export function clonePattern(id: Id): Id | null {
   const project = useStore.getState().project;
   const src = findPattern(project, id);

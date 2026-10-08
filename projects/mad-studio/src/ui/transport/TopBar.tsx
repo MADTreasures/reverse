@@ -5,7 +5,7 @@ import { findPattern } from '../../model/patterns';
 import { usePlugins } from '../../plugins/pluginStore';
 import { MAIN_SNAP_OPTIONS, MAX_BPM, MIN_BPM, formatClock, formatDb, formatPosition, snapLabel, ticksToSeconds, volumeToGain, type SnapId } from '../../model/timing';
 import { isElectron, isMac } from '../../platform/platform';
-import { selectPattern, setBpm, setMixerTrackProps, setTransport, setUi } from '../../store/actions';
+import { selectPattern, setBpm, setMixerTrackProps, setPatternColor, setTransport, setUi } from '../../store/actions';
 import { patternStartTick } from '../../store/snap';
 import { useStore } from '../../store/store';
 import { prepareCanvas, useFrame } from '../animation';
@@ -35,6 +35,8 @@ import { useHint } from '../hint';
 import { enableMidi } from '../keyboard';
 import { showMenu, toast, type MenuItem } from '../overlays';
 import { addChannelMenu } from '../menus/channelMenus';
+import { scoreLogSize } from '../liveInput';
+import { PALETTE, PALETTE_NAMES } from '../../model/colors';
 
 function cmd(label: string, id: CommandId, extra: Partial<MenuItem> = {}): MenuItem {
   return { label, shortcut: SHORTCUTS[id], onClick: () => void runCommand(id), ...extra };
@@ -68,15 +70,37 @@ function editMenu(): MenuItem[] {
   ];
 }
 
+/** FL Studio's PATTERNS menu. */
 function patternsMenu(): MenuItem[] {
   const s = useStore.getState();
+  const current = findPattern(s.project, s.ui.selectedPatternId);
+  const index = s.project.patterns.findIndex((p) => p.id === s.ui.selectedPatternId);
   return [
-    cmd('New pattern', 'newPattern'),
-    cmd('New pattern with name…', 'newPatternNamed'),
-    cmd('Clone pattern', 'clonePattern'),
-    cmd('Rename pattern…', 'renamePattern'),
-    cmd('Delete pattern…', 'deletePattern', { danger: true }),
+    cmd('Find first empty…', 'findFirstEmptyPattern'),
+    cmd('Find next empty…', 'newPatternNamed'),
+    cmd('Find next empty (no naming)', 'newPattern'),
     { separator: true },
+    cmd('Rename…', 'renamePattern'),
+    {
+      label: 'Change color',
+      submenu: PALETTE.map((c, i) => ({ label: PALETTE_NAMES[i], swatch: c, onClick: () => current && setPatternColor(current.id, c) })),
+    },
+    {
+      label: 'Random color',
+      onClick: () => {
+        const choices = PALETTE.filter((c) => c !== current?.color);
+        if (current) setPatternColor(current.id, choices[Math.floor(Math.random() * choices.length)]);
+      },
+    },
+    cmd('Transpose…', 'transposePattern'),
+    { separator: true },
+    cmd('Insert one', 'insertPattern'),
+    cmd('Clone', 'clonePattern'),
+    cmd('Delete…', 'deletePattern', { danger: true }),
+    { separator: true },
+    cmd('Move up', 'movePatternUp', { disabled: index <= 0 }),
+    cmd('Move down', 'movePatternDown', { disabled: index >= s.project.patterns.length - 1 }),
+    { label: 'Patterns', header: true },
     ...s.project.patterns.map((p) => ({
       label: p.name,
       swatch: p.color,
@@ -86,38 +110,34 @@ function patternsMenu(): MenuItem[] {
   ];
 }
 
+/** FL Studio's VIEW menu (the windows MAD Studio has). */
 function viewMenu(): MenuItem[] {
   const s = useStore.getState();
   const open = (id: string) => s.ui.windows[id]?.open ?? false;
   return [
+    { label: 'Windows', header: true },
     cmd('Playlist', 'window:playlist', { checked: open('playlist') }),
-    cmd('Channel rack', 'window:channelRack', { checked: open('channelRack') }),
     cmd('Piano roll', 'window:pianoRoll', { checked: open('pianoRoll') }),
+    cmd('Channel rack', 'window:channelRack', { checked: open('channelRack') }),
     cmd('Mixer', 'window:mixer', { checked: open('mixer') }),
     cmd('Browser', 'toggleBrowser', { checked: s.ui.browserOpen }),
     cmd('Plugin picker', 'pluginPicker'),
-    { separator: true },
+    { label: 'Layout', header: true },
     cmd('Close all windows', 'closeAllWindows'),
+    cmd('Close all plugin windows', 'closePluginWindows'),
+    cmd('Close all unfocused windows', 'closeUnfocusedWindows'),
   ];
 }
 
+/** FL Studio's OPTIONS menu: System, Project, MIDI and Switches. */
 function optionsMenu(): MenuItem[] {
   const s = useStore.getState();
   return [
-    cmd('Project info…', 'projectInfo'),
+    { label: 'System', header: true },
     cmd('Audio settings…', 'audioSettings'),
     cmd('Manage plugins…', 'pluginPicker'),
-    { separator: true },
-    cmd('Metronome', 'metronome', { checked: s.transport.metronome }),
-    cmd('Recording precount', 'precount', { checked: s.transport.precount }),
-    cmd('Typing keyboard to piano', 'typingKeyboard', { checked: s.ui.typingKeyboard }),
-    {
-      label: 'Enable MIDI keyboard input',
-      onClick: () =>
-        void enableMidi()
-          .then((n) => toast(n < 0 ? 'MIDI input is already enabled.' : `MIDI enabled – ${n} input${n === 1 ? '' : 's'} found. Notes play on the selected channel.`))
-          .catch((err: unknown) => toast(err instanceof Error ? err.message : 'MIDI is not available.', 'error')),
-    },
+    { label: 'Project', header: true },
+    cmd('Project info…', 'projectInfo'),
     {
       label: 'Time display',
       submenu: [
@@ -125,17 +145,41 @@ function optionsMenu(): MenuItem[] {
         { label: 'Minutes:seconds', checked: s.ui.timeDisplay === 'clock', onClick: () => useStore.setState((x) => ({ ui: { ...x.ui, timeDisplay: 'clock' } })) },
       ],
     },
+    { label: 'MIDI', header: true },
+    {
+      label: 'Enable MIDI keyboard input',
+      onClick: () =>
+        void enableMidi()
+          .then((n) => toast(n < 0 ? 'MIDI input is already enabled.' : `MIDI enabled – ${n} input${n === 1 ? '' : 's'} found. Notes play on the selected channel.`))
+          .catch((err: unknown) => toast(err instanceof Error ? err.message : 'MIDI is not available.', 'error')),
+    },
+    { label: 'Switches', header: true },
+    cmd('Typing keyboard to piano', 'typingKeyboard', { checked: s.ui.typingKeyboard }),
+    cmd('Metronome', 'metronome', { checked: s.transport.metronome }),
+    cmd('Recording precount', 'precount', { checked: s.transport.precount }),
+    cmd('Start on input', 'startOnInput', { checked: s.transport.startOnInput }),
   ];
 }
 
+/** FL Studio's TOOLS menu: last tweaked parameter, score logger, macros. */
 function toolsMenu(): MenuItem[] {
   const s = useStore.getState();
   const last = s.ui.lastTweaked;
   const info = last ? describeTarget(s.project, last) : null;
+  const logged = scoreLogSize();
   return [
-    { label: info ? `Last tweaked: ${info.label}` : 'Last tweaked: –', header: true },
+    { label: 'Last tweaked parameter', header: true },
+    { label: info ? `Last tweaked: ${info.label}` : 'Last tweaked: –', disabled: true },
     cmd('Create automation clip', 'lastTweakedAutomation', { disabled: !info }),
-    { separator: true },
+    { label: 'Score logger', header: true },
+    {
+      label: 'Dump score log to selected pattern',
+      disabled: logged === 0,
+      submenu: [cmd('Last minute', 'dumpScoreLog1'), cmd('Last 2 minutes', 'dumpScoreLog2'), cmd('Last 5 minutes', 'dumpScoreLog5'), cmd('Last 10 minutes', 'dumpScoreLog10')],
+    },
+    cmd('Clear log', 'clearScoreLog', { disabled: logged === 0 }),
+    { label: 'Macros', header: true },
+    cmd('Stop sound', 'panic'),
     cmd('Plugin manager…', 'pluginPicker'),
   ];
 }

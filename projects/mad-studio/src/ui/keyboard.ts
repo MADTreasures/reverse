@@ -1,6 +1,6 @@
-import { engine } from '../audio/engine';
 import { useStore } from '../store/store';
 import { muteChannelByIndex, runCommand, type CommandId } from './commands';
+import { liveNoteOff, liveNoteOn } from './liveInput';
 import { closeDialog, closeMenu, useOverlays } from './overlays';
 import { closeWindow } from './workspace/windows';
 
@@ -34,13 +34,29 @@ export function isTextInput(target: EventTarget | null): boolean {
 const held = new Map<string, number>();
 
 function releaseAll(): void {
-  for (const handle of held.values()) engine.noteOff(handle);
+  for (const handle of held.values()) liveNoteOff(handle);
   held.clear();
 }
 
 /** Global shortcuts, following FL Studio's defaults (Ctrl = Cmd on the Mac). */
 function shortcutFor(e: KeyboardEvent): CommandId | null {
   const mod = e.metaKey || e.ctrlKey;
+  if (mod && e.shiftKey && !e.altKey) {
+    // FL Studio's pattern list shortcuts.
+    switch (e.code) {
+      case 'KeyC':
+        return 'clonePattern';
+      case 'Delete':
+      case 'Backspace':
+        return 'deletePattern';
+      case 'Insert':
+        return 'insertPattern';
+      case 'ArrowUp':
+        return 'movePatternUp';
+      case 'ArrowDown':
+        return 'movePatternDown';
+    }
+  }
   if (mod) {
     switch (e.code) {
       case 'KeyZ':
@@ -67,11 +83,16 @@ function shortcutFor(e: KeyboardEvent): CommandId | null {
         return 'pause';
       case 'F4':
         return 'newPattern';
+      case 'F12':
+        return 'closeUnfocusedWindows';
+      case 'KeyI':
+        return 'startOnInput';
       default:
         return null;
     }
   }
-  if (e.altKey) return e.code === 'F8' ? 'toggleBrowser' : null;
+  if (e.altKey) return e.code === 'F8' ? 'toggleBrowser' : e.code === 'F12' ? 'closePluginWindows' : null;
+  if (e.shiftKey && e.code === 'F4') return 'findFirstEmptyPattern';
   switch (e.code) {
     case 'Space':
       return 'playPause';
@@ -147,7 +168,7 @@ function onKeyDown(e: KeyboardEvent): void {
   if (s.ui.typingKeyboard && !mod && !e.altKey && semitone !== undefined) {
     e.preventDefault();
     if (!e.repeat && !held.has(e.code) && s.ui.selectedChannelId) {
-      held.set(e.code, engine.noteOn(s.ui.selectedChannelId, TYPING_BASE + semitone));
+      held.set(e.code, liveNoteOn(s.ui.selectedChannelId, TYPING_BASE + semitone));
     }
     return;
   }
@@ -176,7 +197,7 @@ function onKeyDown(e: KeyboardEvent): void {
 function onKeyUp(e: KeyboardEvent): void {
   const handle = held.get(e.code);
   if (handle !== undefined) {
-    engine.noteOff(handle);
+    liveNoteOff(handle);
     held.delete(e.code);
   }
 }
@@ -208,12 +229,12 @@ export async function enableMidi(): Promise<number> {
       const channelId = useStore.getState().ui.selectedChannelId;
       if (status === 0x90 && vel > 0 && channelId) {
         const prev = notes.get(key);
-        if (prev !== undefined) engine.noteOff(prev);
-        notes.set(key, engine.noteOn(channelId, key, vel / 127));
+        if (prev !== undefined) liveNoteOff(prev);
+        notes.set(key, liveNoteOn(channelId, key, vel / 127));
       } else if (status === 0x80 || (status === 0x90 && vel === 0)) {
         const h = notes.get(key);
         if (h !== undefined) {
-          engine.noteOff(h);
+          liveNoteOff(h);
           notes.delete(key);
         }
       }

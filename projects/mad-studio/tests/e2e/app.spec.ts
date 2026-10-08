@@ -418,3 +418,43 @@ test('channel rack: the channel button opens and closes the channel window', asy
   await button.click();
   expect((await state(page)).ui.windows[`channel:${id}`]?.open ?? false).toBe(false);
 });
+
+test('score logger: notes played while stopped can be dumped into the pattern; start on input starts playback', async ({ page }) => {
+  await boot(page);
+  const target = await page.evaluate(() => {
+    const m = window.__madStudio;
+    const s = m.useStore.getState();
+    const lead = s.project.channels.find((c: any) => c.name === 'Lead');
+    m.actions.selectChannel(lead.id);
+    m.actions.addPattern();
+    return { channelId: lead.id, patternId: m.useStore.getState().ui.selectedPatternId };
+  });
+  await page.keyboard.press('ControlOrMeta+t');
+  for (const key of ['z', 'c', 'b']) {
+    await page.keyboard.down(key);
+    await page.waitForTimeout(120);
+    await page.keyboard.up(key);
+    await page.waitForTimeout(60);
+  }
+  await page.locator('.menubar .menu-btn', { hasText: /^Tools$/i }).click();
+  await page.getByRole('menuitem', { name: 'Dump score log to selected pattern' }).hover();
+  await page.getByRole('menuitem', { name: 'Last minute' }).click();
+  const notes = await page.evaluate(
+    ({ channelId, patternId }) => window.__madStudio.useStore.getState().project.patterns.find((p: any) => p.id === patternId).notes[channelId] ?? [],
+    target,
+  );
+  expect(notes.map((n: any) => n.key)).toEqual([48, 52, 55]);
+  expect(notes[0].start).toBe(0);
+  expect(notes[1].start).toBeGreaterThan(notes[0].start);
+  expect((await state(page)).transport.playing).toBe(false);
+
+  // Start on input: with recording armed, the first note starts playback.
+  await page.keyboard.press('ControlOrMeta+i');
+  await page.locator('.transport-btn.record').click(); // R is a note while the typing keyboard is on
+  expect((await state(page)).transport.startOnInput).toBe(true);
+  expect((await state(page)).transport.recording).toBe(true);
+  await page.keyboard.down('x');
+  await expect.poll(async () => (await state(page)).transport.playing).toBe(true);
+  await page.keyboard.up('x');
+  await page.keyboard.press('Space');
+});
