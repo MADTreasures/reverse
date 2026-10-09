@@ -10,7 +10,7 @@ import { getState, useStore } from '../../store/store';
 import { Icon } from '../controls/Icons';
 import { PropSlider } from '../controls/PropSlider';
 
-const supportsEffects = (l: Layer) => l.kind !== 'correction';
+const supportsEffects = (l: Layer) => l.kind !== 'correction' && l.kind !== 'audio';
 
 export function LayerPropertyPalette() {
   const layer = useStore((s) => findLayer(s.doc.layers, s.activeLayerId));

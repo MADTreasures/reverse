@@ -82,6 +82,10 @@ export function registerSelectedLayer(): void {
   const s = getState();
   const layer = actions.activeLayer(s);
   if (!layer) return;
+  if (layer.kind === 'audio') {
+    setState({ hint: 'Audio layers cannot be registered on the light table' });
+    return;
+  }
   const target = targetCel(s);
   const own = target && (target.cel.id === layer.id || findLayer([target.cel], layer.id));
   register([newLightLayer({ kind: 'layer', layer: layer.id })], 'Register layer on light table', !target || Boolean(own));

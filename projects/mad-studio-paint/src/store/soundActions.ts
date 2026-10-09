@@ -1,43 +1,54 @@
 /**
- * Audio tracks (File > Import > Audio, Animation > New animation layer > Audio): importing sound
- * files as clips of an audio track, selecting, muting, renaming and deleting tracks, their volume.
+ * Audio layers (File > Import > Audio, Animation > New animation layer > Audio): importing sound
+ * files as clips of an audio layer, selecting, muting (the eye), renaming and deleting them, their
+ * volume and volume keyframes.
  */
+import { isAnimationFolder, tracksOf } from '../model/animation';
+import { createAudioLayer, findLayer, flatten, insertAbove } from '../model/layers';
+import type { AudioLayer, Id, Layer, PaintDocument } from '../model/types';
 import { pasteClip } from '../paint/clips';
-import { newSoundId, newSoundTrack, setVolumeKey, volumeAt, type DocSound, type SoundTrack } from '../paint/sound';
+import { newSoundId, setVolumeKey, volumeAt } from '../paint/sound';
 import { decodeBytes, setSoundBytes } from '../engine/sounds';
 import { toast } from '../ui/overlays';
 import * as actions from './actions';
+import { activeAudio } from './animationActions';
 import { getState, setState, type PaintState } from './store';
 
-export const soundOf = (s: PaintState = getState()): DocSound | undefined => s.doc.sound;
+/** The selected audio layer, if any. */
+export const activeSoundTrack = (s: PaintState = getState()): AudioLayer | null => activeAudio(s);
 
-/** The selected audio track, if it still exists. */
-export function activeSoundTrack(s: PaintState = getState()): SoundTrack | null {
-  return s.activeSound ? (s.doc.sound?.tracks.find((t) => t.id === s.activeSound) ?? null) : null;
-}
+const audioLayers = (layers: Layer[]): AudioLayer[] => flatten(layers).filter((l): l is AudioLayer => l.kind === 'audio');
 
-const nextName = (tracks: SoundTrack[]) => {
-  const used = new Set(tracks.map((t) => t.name));
+const nextName = (layers: Layer[]) => {
+  const used = new Set(flatten(layers).map((l) => l.name));
   for (let n = 1; ; n++) if (!used.has(`Audio ${n}`)) return `Audio ${n}`;
 };
 
-/** Animation > New animation layer > Audio: an empty audio track (selected). */
+/** Puts a new audio layer above the current layer (never inside an animation folder: above its track). */
+function insertAudio(doc: PaintDocument, layer: AudioLayer, activeId: Id): void {
+  const track = tracksOf(doc.layers, activeId)[0];
+  if (track && isAnimationFolder(track)) insertAbove(doc.layers, layer, track.id);
+  else actions.insertNew(doc, layer, activeId);
+}
+
+/** Animation > New animation layer > Audio: an empty audio layer (selected). */
 export function newAudioTrack(): string | null {
   const s = getState();
   if (!s.doc.timeline) {
     setState({ hint: 'The canvas has no timeline yet (Animation > Timeline > New timeline)' });
     return null;
   }
-  const track = newSoundTrack(nextName(s.doc.sound?.tracks ?? []));
-  actions.changeDoc('New audio track', (doc) => {
-    doc.sound = { tracks: [...(doc.sound?.tracks ?? []), track], files: doc.sound?.files ?? [] };
+  const layer = createAudioLayer(nextName(s.doc.layers));
+  actions.changeDoc('New audio layer', (doc, st) => {
+    insertAudio(doc, layer, st.activeLayerId);
+    return layer.id;
   });
-  setState({ activeSound: track.id, timelineShown: true, clipSelection: [], keySelection: [] });
-  return track.id;
+  setState({ timelineShown: true, clipSelection: [], keySelection: [] });
+  return layer.id;
 }
 
 /**
- * File > Import > Audio: the sound becomes a clip of the selected audio track (or a new one) from
+ * File > Import > Audio: the sound becomes a clip of the selected audio layer (or a new one) from
  * the current frame on, as long as the sound lasts. Needs an enabled timeline.
  */
 export async function importAudio(file: Blob, name: string): Promise<boolean> {
@@ -59,52 +70,46 @@ export async function importAudio(file: Blob, name: string): Promise<boolean> {
   const frame = getState().frame;
   const length = Math.max(1, Math.ceil(decoded.duration * t.fps));
   const target = activeSoundTrack();
-  const track = target ?? newSoundTrack(nextName(s.doc.sound?.tracks ?? []));
   const label = name.replace(/\.[^.]+$/, '').slice(0, 120) || 'Audio';
-  actions.changeDoc('Import audio', (doc) => {
-    const sound = doc.sound ?? { tracks: [], files: [] };
-    sound.files = [...sound.files, { id, name: label, type, duration: decoded.duration }];
-    let tr = sound.tracks.find((x) => x.id === track.id);
-    if (!tr) {
-      tr = { ...track, name: target ? track.name : label };
-      sound.tracks = [...sound.tracks, tr];
+  const layer = target ?? createAudioLayer(label);
+  actions.changeDoc('Import audio', (doc, st) => {
+    doc.sound = { files: [...(doc.sound?.files ?? []), { id, name: label, type, duration: decoded.duration }] };
+    let l = findLayer(doc.layers, layer.id);
+    if (!l) {
+      insertAudio(doc, layer, st.activeLayerId);
+      l = layer;
     }
-    const next = pasteClip({ clips: tr.clips, keys: tr.keys }, { length, offset: 0, sound: id }, frame, t.fps);
-    tr.clips = next.clips;
-    tr.keys = next.keys ?? tr.keys;
-    doc.sound = sound;
+    if (l.kind !== 'audio') return;
+    const next = pasteClip({ clips: l.clips, keys: l.keys.frames }, { length, offset: 0, sound: id }, frame, t.fps);
+    l.clips = next.clips;
+    if (next.keys) l.keys = { ...l.keys, frames: next.keys };
+    return layer.id;
   });
-  setState({ activeSound: track.id, timelineShown: true, clipSelection: [{ track: track.id, start: frame }], keySelection: [] });
+  setState({ timelineShown: true, clipSelection: [{ track: layer.id, start: frame }], keySelection: [] });
   return true;
 }
 
-/** Selects an audio track (and a frame) in the Timeline palette. */
+/** Selects an audio layer (and a frame) in the Timeline palette. */
 export function selectSoundTrack(id: string, frame?: number): void {
   const s = getState();
-  setState({ activeSound: id, ...(frame !== undefined ? { frame: Math.max(1, Math.min(s.doc.timeline?.frames ?? 1, frame)) } : {}) });
+  actions.selectLayer(id);
+  if (frame !== undefined) setState({ frame: Math.max(1, Math.min(s.doc.timeline?.frames ?? 1, frame)) });
 }
 
-/** Changes an audio track (name, mute, volume). */
-export function setSoundTrack(id: string, patch: Partial<Pick<SoundTrack, 'name' | 'visible' | 'volume'>>, label: string, key?: string): void {
-  actions.changeDoc(
-    label,
-    (doc) => {
-      const t = doc.sound?.tracks.find((x) => x.id === id);
-      if (t) Object.assign(t, patch);
-    },
-    key ? { key } : {},
-  );
+/** Changes an audio layer (name, mute, volume). */
+export function setSoundTrack(id: string, patch: Partial<Pick<AudioLayer, 'name' | 'visible' | 'volume'>>, label: string, key?: string): void {
+  actions.setLayerProps(id, patch, label, key);
 }
 
 /**
- * The volume of the selected audio track at the current frame: with volume keyframes, a keyframe
- * there; else the track's volume.
+ * The volume of the selected audio layer at the current frame: with volume keyframes, a keyframe
+ * there; else the layer's volume.
  */
 export function setVolumeNow(volume: number): void {
   const s = getState();
   const t = activeSoundTrack(s);
   if (!t) return;
-  if (t.keys.length === 0) {
+  if (t.keys.frames.length === 0) {
     setSoundTrack(t.id, { volume }, 'Volume', `volume:${t.id}`);
     return;
   }
@@ -112,9 +117,8 @@ export function setVolumeNow(volume: number): void {
   actions.changeDoc(
     'Volume keyframe',
     (doc) => {
-      const x = doc.sound?.tracks.find((y) => y.id === t.id);
-      if (!x) return;
-      x.keys = setVolumeKey(x.keys, frame, volume, s.keyInterp);
+      const x = findLayer(doc.layers, t.id);
+      if (x?.kind === 'audio') x.keys = { ...x.keys, frames: setVolumeKey(x.keys.frames, frame, volume, s.keyInterp) };
     },
     { key: `volkey:${t.id}:${frame}` },
   );
@@ -122,19 +126,17 @@ export function setVolumeNow(volume: number): void {
 
 export const volumeNow = (s: PaintState = getState()): number => {
   const t = activeSoundTrack(s);
-  return t ? volumeAt(t, s.frame) : 1;
+  return t ? volumeAt({ volume: t.volume, keys: t.keys.frames }, s.frame) : 1;
 };
 
-/** Deletes the selected audio track (its sound files go with it when no other track plays them). */
-export function deleteSoundTrack(id = getState().activeSound): void {
+/** Deletes an audio layer. */
+export function deleteSoundTrack(id: string | null = activeSoundTrack()?.id ?? null): void {
   if (!id) return;
-  actions.changeDoc('Delete audio track', (doc) => {
-    if (!doc.sound) return;
-    const tracks = doc.sound.tracks.filter((t) => t.id !== id);
-    const used = new Set(tracks.flatMap((t) => t.clips.map((c) => c.sound)));
-    const files = doc.sound.files.filter((f) => used.has(f.id));
-    doc.sound = { tracks, files };
-    if (tracks.length === 0 && files.length === 0) delete doc.sound;
-  });
-  setState({ activeSound: null, clipSelection: [], keySelection: [] });
+  actions.deleteLayer(id);
+  setState({ clipSelection: [], keySelection: [] });
+}
+
+/** The sound files the audio layers of a document play (others are not saved). */
+export function usedSoundFiles(doc: PaintDocument): Set<string> {
+  return new Set(audioLayers(doc.layers).flatMap((l) => l.clips.map((c) => c.sound).filter((x): x is string => Boolean(x))));
 }

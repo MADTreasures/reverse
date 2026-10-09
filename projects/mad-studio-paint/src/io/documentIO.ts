@@ -15,6 +15,8 @@ import { EXTENSION, IMAGE_EXTENSIONS, isDocumentFileName, isImageFileName, isPsd
 import { idbDelete, idbGet, idbSet } from './idb';
 import { docLightImages } from '../paint/lightTable';
 import { clearSounds, mixSound, setSoundBytes, soundBytes } from '../engine/sounds';
+import { hasSound, soundMix } from '../model/animation';
+import { usedSoundFiles } from '../store/soundActions';
 // Type only: the PSD code (and ag-psd) loads when a PSD is opened or saved.
 import type { Pixels } from './psd';
 
@@ -58,14 +60,17 @@ export async function buildDocumentBytes(): Promise<Uint8Array> {
     const s = getSurface(id);
     if (s) layers.set(id, await canvasToBytes(s));
   }
+  // The sound files the audio layers play (deleted layers' files stay in memory for undo, not in the file).
+  const used = usedSoundFiles(doc);
+  const files = (doc.sound?.files ?? []).filter((f) => used.has(f.id));
   const sounds = new Map<Id, Uint8Array>();
-  for (const f of doc.sound?.files ?? []) {
+  for (const f of files) {
     const b = soundBytes(f.id);
     if (b) sounds.set(f.id, b.bytes);
   }
   const previewScale = Math.min(1, 512 / Math.max(doc.width, doc.height));
   const preview = await canvasToBytes(renderMerged({ paper: true, skipDraft: true, scale: previewScale }));
-  return packDocument({ doc, activeLayerId, layers, sounds, preview });
+  return packDocument({ doc: { ...doc, sound: files.length ? { files } : undefined }, activeLayerId, layers, sounds, preview });
 }
 
 export async function saveDocument(saveAs = false): Promise<boolean> {
@@ -429,7 +434,7 @@ export async function exportMovie(o: MovieOptions, progress?: (done: number, tot
     const { chooseCodecs, encodeMovie, evenSize } = await import('./movie');
     const w = evenSize(o.width);
     const h = evenSize(Math.round((o.width * doc.height) / doc.width));
-    const sound = doc.sound?.tracks.some((x) => x.visible && x.clips.length) ? doc.sound : undefined;
+    const sound = hasSound(doc) ? soundMix(doc) : undefined;
     const codecs = await chooseCodecs(o.format, w, h, o.fps, o.sampleRate, o.channels, Boolean(sound));
     if (!codecs) {
       toast('This system cannot encode MP4 video: export a MOV movie instead', 'error');

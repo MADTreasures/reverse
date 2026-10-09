@@ -360,7 +360,7 @@ export const COMMANDS: Command[] = [
   { id: 'exportMovie', label: 'Movie…', run: () => openDialog('exportMovie'), enabled: hasTimeline },
   { id: 'importAudio', label: 'Audio…', run: () => void pickAudioFile(), enabled: hasTimeline },
   { id: 'newAudioTrack', label: 'Audio', run: () => void sound.newAudioTrack(), enabled: () => Boolean(getState().doc.timeline) },
-  { id: 'deleteAudioTrack', label: 'Delete audio track', run: () => sound.deleteSoundTrack(), enabled: () => getState().activeSound !== null },
+  { id: 'deleteAudioTrack', label: 'Delete audio layer', run: () => sound.deleteSoundTrack(), enabled: () => sound.activeSoundTrack() !== null },
   { id: 'toggleTimeline', label: 'Timeline', run: () => anim.toggleTimelinePalette(), checked: () => getState().timelineShown },
   // Filter
   { id: 'gaussianBlur', label: 'Blur: Gaussian blur…', run: () => openDialog('gaussianBlur'), enabled: canEdit },

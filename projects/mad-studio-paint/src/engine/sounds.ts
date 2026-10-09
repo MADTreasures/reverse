@@ -2,7 +2,7 @@
  * Sound at run time: the bytes of the document's sound files (saved with it), decoded audio,
  * waveform peaks, playback in step with the timeline and the mix for movie exports (Web Audio).
  */
-import { peaks, soundPlays, volumeSteps, type DocSound, type SoundTrack } from '../paint/sound';
+import { peaks, soundPlays, volumeSteps, type SoundMix, type SoundTrack } from '../paint/sound';
 
 interface Entry {
   bytes: Uint8Array;
@@ -93,7 +93,7 @@ export function soundPeaks(id: string, start: number, duration: number, buckets:
 // ------------------------------------------------------------------ playing and mixing
 
 /** Schedules what the tracks play from frame `from` to `to` on a context, starting at its time `at`. */
-function schedule(ctx: BaseAudioContext, sound: DocSound, from: number, to: number, fps: number, at: number): AudioBufferSourceNode[] {
+function schedule(ctx: BaseAudioContext, sound: SoundMix, from: number, to: number, fps: number, at: number): AudioBufferSourceNode[] {
   const nodes: AudioBufferSourceNode[] = [];
   for (const play of soundPlays(sound.tracks, sound.files, from, to, fps)) {
     const buffer = decodedSound(play.sound);
@@ -114,7 +114,7 @@ let player: AudioContext | null = null;
 let playing: AudioBufferSourceNode[] = [];
 
 /** Timeline playback: plays the sound from frame `from` on (to the end frame). */
-export function startSound(sound: DocSound | undefined, from: number, to: number, fps: number): void {
+export function startSound(sound: SoundMix | undefined, from: number, to: number, fps: number): void {
   stopSound();
   if (!sound?.tracks.length) return;
   try {
@@ -138,7 +138,7 @@ export function stopSound(): void {
 }
 
 /** The mix of frames `from` … `to` for a movie (null without sound). */
-export async function mixSound(sound: DocSound | undefined, from: number, to: number, fps: number, sampleRate: number, channels: number): Promise<AudioBuffer | null> {
+export async function mixSound(sound: SoundMix | undefined, from: number, to: number, fps: number, sampleRate: number, channels: number): Promise<AudioBuffer | null> {
   if (!sound?.tracks.some((t) => t.visible && t.clips.length)) return null;
   await Promise.all(sound.files.map((f) => decodeSound(f.id)));
   const length = Math.max(1, Math.ceil(((to - from + 1) / fps) * sampleRate));

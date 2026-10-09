@@ -5,6 +5,7 @@
 import { celAt, framesOf, pruneTrack, type AnimationTrack } from '../paint/animation';
 import { clipsOf, inClips, type TrackContent } from '../paint/clips';
 import type { Keyframe } from '../paint/keyframes';
+import type { SoundMix, SoundTrack } from '../paint/sound';
 import { findLayer, flatten, locate } from './layers';
 import type { FolderLayer, Id, Layer, PaintDocument } from './types';
 
@@ -77,10 +78,10 @@ export function timelineTracks(layers: Layer[], depth = 0, out: TrackRow[] = [])
   return out;
 }
 
-/** What a track holds: its clips (made explicit), an animation folder's cel assignments and its keyframes. */
+/** What a track holds: its clips (made explicit; an audio layer's are where its sounds play), an animation folder's cel assignments and its keyframes. */
 export function trackContent(layer: Layer, frames: number): TrackContent<Keyframe> {
   return {
-    clips: clipsOf(layer.clips, frames),
+    clips: layer.kind === 'audio' ? layer.clips : clipsOf(layer.clips, frames),
     ...(isAnimationFolder(layer) ? { cels: layer.animation.cels } : {}),
     ...(layer.keys ? { keys: layer.keys.frames } : {}),
   };
@@ -95,8 +96,24 @@ export function setTrackContent(layer: Layer, t: TrackContent<Keyframe>): void {
 
 export const isCameraFolder = (l: Layer | null | undefined): l is FolderLayer => l?.kind === 'folder' && Boolean(l.camera);
 
-/** Whether a track's keyframes are in effect: turned on, or a 2D camera folder's. */
-export const keysOn = (l: Layer): boolean => isCameraFolder(l) || Boolean(l.keys?.enabled);
+/** Whether a track's keyframes are in effect: turned on, or a 2D camera folder's or an audio layer's (always). */
+export const keysOn = (l: Layer): boolean => isCameraFolder(l) || l.kind === 'audio' || Boolean(l.keys?.enabled);
+
+/** The audio layers as the timeline plays them (muted when they or a folder around them are hidden). */
+export function soundMix(doc: PaintDocument): SoundMix {
+  const tracks: SoundTrack[] = [];
+  const walk = (layers: Layer[], shown: boolean) => {
+    for (const l of layers) {
+      if (l.kind === 'audio') tracks.push({ id: l.id, name: l.name, visible: shown && l.visible, volume: l.volume, clips: l.clips, keys: l.keys.frames });
+      else if (l.kind === 'folder') walk(l.children, shown && l.visible);
+    }
+  };
+  walk(doc.layers, true);
+  return { tracks, files: doc.sound?.files ?? [] };
+}
+
+/** Whether any audio layer plays a clip. */
+export const hasSound = (doc: PaintDocument): boolean => soundMix(doc).tracks.some((t) => t.visible && t.clips.length > 0);
 
 const MASK = '#mask';
 /** The id under which a layer mask's keyframes appear in the Timeline palette and the Graph Editor. */

@@ -15,6 +15,17 @@ const blendLabel = (mode: FolderBlendMode) => FOLDER_BLEND_MODES.find((m) => m.i
 export function LayerPropertyBar() {
   const layer = useStore((s) => findLayer(s.doc.layers, s.activeLayerId));
   if (!layer) return null;
+  if (layer.kind === 'audio') {
+    // An audio layer: no blending; the bar sets its volume.
+    return (
+      <div className="layer-props" title="Audio layer: the bar sets its volume">
+        <select className="blend-select" aria-label="Blending mode" value="normal" disabled>
+          <option value="normal">Normal</option>
+        </select>
+        <OpacityBar value={Math.round(layer.volume * 100)} onChange={(v) => actions.setLayerProps(layer.id, { volume: v / 100 }, 'Volume', `volume:${layer.id}`)} />
+      </div>
+    );
+  }
   const modes = layer.kind === 'folder' ? FOLDER_BLEND_MODES : BLEND_MODES;
   return (
     <div className="layer-props">
@@ -311,6 +322,10 @@ function LayerRow({ layer, depth, drag, setDrag, drop, setDrop }: RowsProps & { 
             <Icon name={layer.frame ? 'frame' : layer.animation ? 'animFolder' : layer.camera ? 'camera' : 'folder'} size={22} />
           </span>
         </>
+      ) : layer.kind === 'audio' ? (
+        <span className="correction-icon audio-icon" title="Audio layer: its clips play sound in the timeline; hidden, it is muted" data-testid="audio-icon" onPointerDown={pickTarget(false)}>
+          <Icon name="audio" size={22} />
+        </span>
       ) : layer.kind === 'correction' ? (
         <span
           className={`correction-icon ${active && layer.mask && !maskTarget ? 'target' : ''}`}
@@ -354,9 +369,7 @@ function LayerRow({ layer, depth, drag, setDrag, drop, setDrop }: RowsProps & { 
         </>
       )}
       <span className="layer-text" onDoubleClick={() => setEditing(true)}>
-        <span className="layer-meta">
-          {Math.round(layer.opacity * 100)} % {blendLabel(layer.blend)}
-        </span>
+        <span className="layer-meta">{layer.kind === 'audio' ? `Volume ${Math.round(layer.volume * 100)} %` : `${Math.round(layer.opacity * 100)} % ${blendLabel(layer.blend)}`}</span>
         {editing ? (
           <input
             className="rename"

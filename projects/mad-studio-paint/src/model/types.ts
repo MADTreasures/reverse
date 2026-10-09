@@ -169,7 +169,24 @@ export interface GradientLayer extends LayerBase {
   rev: number;
 }
 
-export type Layer = RasterLayer | FolderLayer | CorrectionLayer | VectorLayer | TextLayer | GradientLayer;
+/**
+ * Audio layer (Animation > New animation layer > Audio, File > Import > Audio): a track of the
+ * timeline whose clips play sound files; hidden, it is muted. It has no pixels.
+ */
+export interface AudioLayer extends LayerBase {
+  kind: 'audio';
+  /** 0..1, when there are no volume keyframes. */
+  volume: number;
+  /** Each clip plays its `sound` from its `offset` on (no clips: silence). */
+  clips: Clip[];
+  /** Volume keyframes (always on). */
+  keys: KeyTrack;
+}
+
+export type Layer = RasterLayer | FolderLayer | CorrectionLayer | VectorLayer | TextLayer | GradientLayer | AudioLayer;
+
+/** Layers that take part in the picture (all but audio layers). */
+export type DrawnLayer = Exclude<Layer, AudioLayer>;
 
 export interface PaperSettings {
   visible: boolean;

@@ -1,7 +1,7 @@
 import { strFromU8, unzipSync } from 'fflate';
 import { describe, expect, it } from 'vitest';
 import { createDocument } from '../model/document';
-import { cloneDocument, createFolder, createLayerMask, createRasterLayer, createVectorLayer, flatten } from '../model/layers';
+import { cloneDocument, createAudioLayer, createFolder, createLayerMask, createRasterLayer, createVectorLayer, flatten } from '../model/layers';
 import type { FolderLayer } from '../model/types';
 import { DEFAULT_BRUSH } from '../paint/tools';
 import { isDocumentFileName, isImageFileName, mimeForName, packDocument, sanitizeDocument, unpackDocument } from './format';
@@ -48,20 +48,41 @@ describe('.madpaint format', () => {
     expect(odd.layers[1].keys).toBeUndefined();
   });
 
-  it('keeps audio tracks and their sound files', () => {
+  it('keeps audio layers and their sound files', () => {
     const doc = createDocument('Sound', 200, 100, 72);
     doc.timeline = { enabled: true, fps: 12, frames: 12 };
-    doc.sound = {
-      files: [{ id: 'snd1', name: 'Beat', type: 'audio/wav', duration: 1.5 }],
-      tracks: [{ id: 's1', name: 'Beat', visible: true, volume: 0.8, clips: [{ start: 2, end: 9, offset: 0.25, sound: 'snd1' }], keys: [{ frame: 2, interp: 'smooth', values: { volume: 0.4 } }] }],
-    };
+    doc.sound = { files: [{ id: 'snd1', name: 'Beat', type: 'audio/wav', duration: 1.5 }] };
+    doc.layers.unshift(createAudioLayer('Beat', { volume: 0.8, clips: [{ start: 2, end: 9, offset: 0.25, sound: 'snd1' }], keys: { enabled: true, frames: [{ frame: 2, interp: 'smooth', values: { volume: 0.4 } }] } }));
     const bytes = new Uint8Array([82, 73, 70, 70, 1, 2, 3]);
     const back = unpackDocument(packDocument({ doc, activeLayerId: null, layers: new Map(), sounds: new Map([['snd1', bytes]]) }));
-    expect(back.doc.sound).toEqual(doc.sound);
+    expect(back.doc).toEqual(doc);
     expect([...back.sounds!.get('snd1')!]).toEqual([...bytes]);
     // Sound files the document does not list are not read.
     const stray = unpackDocument(packDocument({ doc: { ...doc, sound: undefined }, activeLayerId: null, layers: new Map(), sounds: new Map([['snd1', bytes]]) }));
     expect(stray.sounds!.size).toBe(0);
+    // Clips of unknown sounds and keyframes of other settings are left out; audio layers have no mask.
+    const odd = sanitizeDocument({
+      sound: { files: [{ id: 'snd1', type: 'audio/wav' }] },
+      layers: [{ id: 'a', kind: 'audio', volume: 3, mask: { id: 'm' }, clips: [{ start: 1, end: 4, sound: 'snd1' }, { start: 6, end: 8, sound: 'nope' }], keys: { enabled: false, frames: [{ frame: 1, values: { x: 3, volume: 0.5 } }] } }],
+    });
+    expect(odd.layers[0]).toMatchObject({ kind: 'audio', volume: 1, clips: [{ start: 1, end: 4, sound: 'snd1' }], keys: { enabled: true, frames: [{ frame: 1, interp: 'linear', values: { volume: 0.5 } }] } });
+    expect(odd.layers[0].mask).toBeUndefined();
+  });
+
+  it('turns the audio tracks of earlier files into audio layers at the bottom', () => {
+    const old = sanitizeDocument({
+      layers: [{ id: 'l1', kind: 'raster' }],
+      sound: {
+        files: [{ id: 'snd1', name: 'Beat', type: 'audio/wav', duration: 1.5 }],
+        tracks: [{ id: 's1', name: 'Beat', visible: false, volume: 0.8, clips: [{ start: 2, end: 9, offset: 0.25, sound: 'snd1' }], keys: [{ frame: 2, interp: 'smooth', volume: 0.4 }] }],
+      },
+    });
+    expect(old.layers.map((l) => [l.id, l.kind])).toEqual([
+      ['l1', 'raster'],
+      ['s1', 'audio'],
+    ]);
+    expect(old.layers[1]).toMatchObject({ name: 'Beat', visible: false, volume: 0.8, clips: [{ start: 2, end: 9, offset: 0.25, sound: 'snd1' }], keys: { enabled: true, frames: [{ frame: 2, interp: 'smooth', values: { volume: 0.4 } }] } });
+    expect(old.sound).toEqual({ files: [{ id: 'snd1', name: 'Beat', type: 'audio/wav', duration: 1.5 }] });
   });
 
   it('keeps the clips of tracks', () => {

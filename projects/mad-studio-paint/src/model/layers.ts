@@ -1,6 +1,6 @@
 import { uid } from './ids';
 import type { Correction } from '../paint/tonal';
-import type { CorrectionLayer, FolderLayer, GradientLayer, Id, Layer, LayerMask, PaintDocument, RasterLayer, TextLayer, VectorLayer } from './types';
+import type { AudioLayer, CorrectionLayer, DrawnLayer, FolderLayer, GradientLayer, Id, Layer, LayerMask, PaintDocument, RasterLayer, TextLayer, VectorLayer } from './types';
 import type { GradientFill } from '../paint/gradient';
 import { remapTrack } from '../paint/animation';
 import { newLightId } from '../paint/lightTable';
@@ -112,6 +112,25 @@ export function createCorrectionLayer(name: string, correction: Correction, patc
     reference: false,
     draft: false,
     correction,
+    ...patch,
+  };
+}
+
+/** An audio layer without sound yet. */
+export function createAudioLayer(name: string, patch: Partial<AudioLayer> = {}): AudioLayer {
+  return {
+    id: uid('a'),
+    kind: 'audio',
+    name,
+    visible: true,
+    opacity: 1,
+    clip: false,
+    locked: false,
+    reference: false,
+    draft: false,
+    volume: 1,
+    clips: [],
+    keys: { enabled: true, frames: [] },
     ...patch,
   };
 }
@@ -282,12 +301,16 @@ export function layerBelow(layers: Layer[], id: Id): Layer | null {
  * A clipped layer without a non-clipped layer below it is drawn as a normal layer.
  */
 export interface ClipGroup {
-  base: Layer;
-  clipped: Layer[];
+  base: DrawnLayer;
+  clipped: DrawnLayer[];
 }
 
+/** Whether a layer takes part in the picture (audio layers do not). */
+export const isDrawn = (l: Layer): l is DrawnLayer => l.kind !== 'audio';
+
+/** Siblings as clipping groups, bottom first (audio layers are left out: they clip nothing). */
 export function clipGroups(siblings: Layer[]): ClipGroup[] {
-  const bottomUp = [...siblings].reverse();
+  const bottomUp = [...siblings].reverse().filter(isDrawn);
   const groups: ClipGroup[] = [];
   for (const layer of bottomUp) {
     const current = groups[groups.length - 1];

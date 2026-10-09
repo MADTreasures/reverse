@@ -11,8 +11,8 @@
 import { strFromU8, strToU8, unzipSync, zipSync } from 'fflate';
 import { isBlendMode } from '../model/blend';
 import { clampCanvasSide } from '../model/document';
-import { createRasterLayer, flatten, nextRev } from '../model/layers';
-import type { CorrectionLayer, FolderLayer, GradientLayer, Id, Layer, LayerMask, LayerRulers, PaintDocument, RasterLayer, TextLayer, VectorLayer } from '../model/types';
+import { createAudioLayer, createRasterLayer, flatten, nextRev } from '../model/layers';
+import type { AudioLayer, CorrectionLayer, FolderLayer, GradientLayer, Id, Layer, LayerMask, LayerRulers, PaintDocument, RasterLayer, TextLayer, VectorLayer } from '../model/types';
 import { sanitizeGradientFill } from '../paint/gradient';
 import { sanitizeEffects } from '../paint/effects';
 import { sanitizeRuler, type Ruler } from '../paint/rulers';
@@ -23,7 +23,7 @@ import { sanitizeBalloon, sanitizeTextBox, type Balloon, type TextBox } from '..
 import { sanitizeFrame } from '../paint/frames';
 import { pruneTrack, sanitizeTimeline, sanitizeTrack } from '../paint/animation';
 import { sanitizeClips } from '../paint/clips';
-import { removeChannels, sanitizeKeyframes, sanitizeKeyTrack } from '../paint/keyframes';
+import { PLACEMENT_CHANNELS, removeChannels, sanitizeKeyframes, sanitizeKeyTrack } from '../paint/keyframes';
 import { sanitizeLightLayers } from '../paint/lightTable';
 import { sanitizeSound } from '../paint/sound';
 
@@ -31,9 +31,11 @@ export const FORMAT = 'mad-studio-paint';
 /**
  * 2: layer masks, correction layers, effects, rulers. 3: vector and text layers, comic frames.
  * 4: animation (timeline, animation folders). 5: clips, keyframes, 2D camera folders, light tables
- * (their images are stored like layer pixels, as layers/<id>.png). Older files open unchanged.
+ * (their images are stored like layer pixels, as layers/<id>.png), sound. 6: keyframes record
+ * single settings, mask keyframes, audio layers (audio tracks were kept beside the layers). Older
+ * files open unchanged.
  */
-export const FORMAT_VERSION = 5;
+export const FORMAT_VERSION = 6;
 export const EXTENSION = 'madpaint';
 
 export interface DocumentFile {
@@ -74,7 +76,7 @@ function sanitizeRulers(raw: unknown): LayerRulers | undefined {
   return { items, range: r.range === 'folder' || r.range === 'editing' ? r.range : 'all', visible: r.visible !== false };
 }
 
-function sanitizeLayer(raw: unknown, seen: Set<string>, depth: number): Layer | null {
+function sanitizeLayer(raw: unknown, seen: Set<string>, depth: number, files: Set<string>): Layer | null {
   if (!raw || typeof raw !== 'object' || depth > 32) return null;
   const r = raw as Record<string, unknown>;
   let id = str(r.id, '', 64);
@@ -103,7 +105,7 @@ function sanitizeLayer(raw: unknown, seen: Set<string>, depth: number): Layer | 
     ...(lightTable ? { lightTable } : {}),
   };
   if (r.kind === 'folder') {
-    const children = Array.isArray(r.children) ? r.children.map((c) => sanitizeLayer(c, seen, depth + 1)).filter((c): c is Layer => c !== null) : [];
+    const children = Array.isArray(r.children) ? r.children.map((c) => sanitizeLayer(c, seen, depth + 1, files)).filter((c): c is Layer => c !== null) : [];
     const folder: FolderLayer = {
       ...common,
       kind: 'folder',
@@ -127,6 +129,24 @@ function sanitizeLayer(raw: unknown, seen: Set<string>, depth: number): Layer | 
       if (folder.blend === 'pass-through') folder.blend = 'normal';
     }
     return folder;
+  }
+  if (r.kind === 'audio') {
+    // Clips play the document's sound files; keyframes record the volume.
+    const audio: AudioLayer = {
+      id,
+      kind: 'audio',
+      name: common.name,
+      visible: common.visible,
+      opacity: 1,
+      clip: false,
+      locked: common.locked,
+      reference: false,
+      draft: false,
+      volume: num(r.volume, 1, 0, 1),
+      clips: (clips ?? []).filter((c) => c.sound !== undefined && files.has(c.sound)),
+      keys: { enabled: true, frames: (keys?.frames ?? []).flatMap((k) => removeChannels([k], k.frame, PLACEMENT_CHANNELS)) },
+    };
+    return audio;
   }
   if (r.kind === 'correction') {
     const correction: CorrectionLayer = {
@@ -177,11 +197,17 @@ export function sanitizeDocument(raw: unknown): PaintDocument {
   if (!raw || typeof raw !== 'object') throw new Error('Not a MAD Studio Paint document');
   const r = raw as Record<string, unknown>;
   const seen = new Set<string>();
-  const layers = Array.isArray(r.layers) ? r.layers.map((l) => sanitizeLayer(l, seen, 0)).filter((l): l is Layer => l !== null) : [];
+  const sound = sanitizeSound(r.sound);
+  const files = new Set(sound?.files.map((f) => f.id) ?? []);
+  const layers = Array.isArray(r.layers) ? r.layers.map((l) => sanitizeLayer(l, seen, 0, files)).filter((l): l is Layer => l !== null) : [];
+  // Earlier files kept audio tracks beside the layers: they become audio layers at the bottom.
+  for (const t of sound?.tracks ?? []) {
+    layers.push(createAudioLayer(t.name, { ...(ID.test(t.id) && !seen.has(t.id) ? { id: t.id } : {}), visible: t.visible, volume: t.volume, clips: t.clips, keys: { enabled: true, frames: t.keys } }));
+    seen.add(t.id);
+  }
   const paper = (r.paper && typeof r.paper === 'object' ? r.paper : {}) as Record<string, unknown>;
   const timeline = sanitizeTimeline(r.timeline);
   const general = sanitizeLightLayers((r.lightTable as Record<string, unknown> | undefined)?.general);
-  const sound = sanitizeSound(r.sound);
   return {
     id: str(r.id, 'd-imported', 64),
     name: str(r.name, 'Untitled', 120),
@@ -192,7 +218,7 @@ export function sanitizeDocument(raw: unknown): PaintDocument {
     layers: layers.length ? layers : [createRasterLayer('Layer 1')],
     ...(timeline ? { timeline } : {}),
     ...(general ? { lightTable: { general } } : {}),
-    ...(sound ? { sound } : {}),
+    ...(sound?.files.length ? { sound: { files: sound.files } } : {}),
   };
 }
 

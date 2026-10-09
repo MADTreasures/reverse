@@ -2571,7 +2571,7 @@ function sineWav(seconds: number, rate: number, freq: number): Buffer {
   return b;
 }
 
-test('sound: audio as a clip, volume keyframes, mute; movies as MP4 and MOV; saved', async ({ page }) => {
+test('sound: audio layers with clips, volume keyframes, mute; movies as MP4 and MOV; saved', async ({ page }) => {
   const errors = await boot(page);
   await page.evaluate(() => delete (window as any).showSaveFilePicker);
   await page.evaluate(() => void window.__madPaint.runCommand('new'));
@@ -2587,31 +2587,42 @@ test('sound: audio as a clip, volume keyframes, mute; movies as MP4 and MOV; sav
     m.actions.setDrawingColor('#d02020');
     m.actions.fillWithColor();
   });
-  const sound = () => page.evaluate(() => window.__madPaint.useStore.getState().doc.sound);
-  // File > Import > Audio: a one-second tone becomes a clip from frame 1 on a new audio track.
+  const sound = () =>
+    page.evaluate(() => {
+      const d = window.__madPaint.useStore.getState().doc;
+      return { files: d.sound?.files ?? [], track: d.layers.find((l: any) => l.kind === 'audio'), kinds: d.layers.map((l: any) => l.kind) };
+    });
+  // File > Import > Audio: a one-second tone becomes a clip from frame 1 on a new audio layer, above the animation folder.
   const [chooser] = await Promise.all([page.waitForEvent('filechooser'), page.evaluate(() => void window.__madPaint.runCommand('importAudio'))]);
   await chooser.setFiles({ name: 'beep.wav', mimeType: 'audio/wav', buffer: sineWav(1, 48000, 440) });
   await expect(page.getByTestId('timeline-audio')).toHaveCount(1);
-  let snd = (await sound())!;
-  expect(snd.tracks[0].name).toBe('beep');
-  expect(snd.tracks[0].clips.map((c: any) => [c.start, c.end, c.sound === snd.files[0].id])).toEqual([[1, 12, true]]);
+  await expect(page.getByTestId('audio-icon')).toHaveCount(1);
+  let snd = await sound();
+  expect(snd.kinds).toEqual(['audio', 'folder']);
+  expect(snd.track.name).toBe('beep');
+  expect(snd.track.clips.map((c: any) => [c.start, c.end, c.sound === snd.files[0].id])).toEqual([[1, 12, true]]);
   expect(snd.files[0].duration).toBeGreaterThan(0.99);
+  // Audio layers cannot be drawn on.
+  await thinPen(page);
+  await drag(page, [20, 60], [140, 60]);
+  expect(await page.evaluate(() => window.__madPaint.useStore.getState().hint)).toMatch(/Audio layers cannot be drawn on/);
   // Clip commands work on the audio track: it ends before frame 7.
   await page.getByTestId('timeline-ruler').locator('.tl-cell').nth(6).click();
   await page.evaluate(() => window.__madPaint.runCommand('setLastDisplayed'));
-  expect((await sound())!.tracks[0].clips.map((c: any) => [c.start, c.end])).toEqual([[1, 6]]);
+  expect((await sound()).track.clips.map((c: any) => [c.start, c.end])).toEqual([[1, 6]]);
   // Volume: the Object tool's settings; with keyframes it fades.
   await selectTool(page, 'object');
   await page.getByRole('button', { name: 'Tool Settings', exact: true }).click();
   await expect(page.getByTestId('audio-info')).toContainText('beep');
   await page.getByRole('spinbutton', { name: 'Volume' }).fill('50');
-  expect((await sound())!.tracks[0].volume).toBe(0.5);
+  expect((await sound()).track.volume).toBe(0.5);
+  await expect(page.locator('[data-testid=layer-row]', { hasText: 'beep' })).toContainText('Volume 50 %');
   await page.getByTestId('timeline-ruler').locator('.tl-cell').nth(0).click();
   await page.getByRole('button', { name: 'Add keyframe' }).first().click();
   await page.getByTestId('timeline-ruler').locator('.tl-cell').nth(5).click();
   await page.getByRole('spinbutton', { name: 'Volume' }).fill('0');
-  snd = (await sound())!;
-  expect(snd.tracks[0].keys.map((k: any) => [k.frame, k.values.volume])).toEqual([
+  snd = await sound();
+  expect(snd.track.keys.frames.map((k: any) => [k.frame, k.values.volume])).toEqual([
     [1, 0.5],
     [6, 0],
   ]);
@@ -2645,8 +2656,9 @@ test('sound: audio as a clip, volume keyframes, mute; movies as MP4 and MOV; sav
   const back = await page.evaluate(async () => {
     const m = window.__madPaint;
     await m.openFileBytes({ name: 'sound.madpaint', data: await m.buildDocumentBytes() });
-    const s = m.useStore.getState().doc.sound;
-    return { clips: s.tracks[0].clips.map((c: any) => [c.start, c.end]), keys: s.tracks[0].keys.length, files: s.files.length, bytes: (await m.buildDocumentBytes()).length };
+    const d = m.useStore.getState().doc;
+    const a = d.layers.find((l: any) => l.kind === 'audio');
+    return { clips: a.clips.map((c: any) => [c.start, c.end]), keys: a.keys.frames.length, files: d.sound.files.length, bytes: (await m.buildDocumentBytes()).length };
   });
   expect(back.clips).toEqual([[1, 6]]);
   expect(back.keys).toBe(2);

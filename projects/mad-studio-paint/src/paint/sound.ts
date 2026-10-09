@@ -1,8 +1,8 @@
 /**
- * Sound: the audio tracks of the timeline. Each clip of an audio track plays a stretch of a sound
- * file (its offset says where in the sound the clip starts), at the track's volume or as its volume
- * keyframes say. What plays when (for playback, movie export), waveform peaks and 16-bit PCM. Pure,
- * unit tested.
+ * Sound: the audio tracks of the timeline (audio layers). Each clip of an audio track plays a
+ * stretch of a sound file (its offset says where in the sound the clip starts), at the track's
+ * volume or as its volume keyframes say. What plays when (for playback, movie export), waveform
+ * peaks and 16-bit PCM. Pure, unit tested.
  */
 import { sanitizeClips, type Clip } from './clips';
 import { channelAt, recordKey, sanitizeKeyframes, type Interp, type Keyframe } from './keyframes';
@@ -20,10 +20,11 @@ export interface SoundFile {
 /** Volume keyframes are keyframes recording `volume` (0..1). */
 export type VolumeKey = Keyframe;
 
+/** An audio track as the mix plays it (an audio layer; muted when it or a folder around it is hidden). */
 export interface SoundTrack {
   id: string;
   name: string;
-  /** Off: muted (the eye in the Timeline palette). */
+  /** Off: muted. */
   visible: boolean;
   /** 0..1, when there are no volume keyframes. */
   volume: number;
@@ -32,8 +33,13 @@ export interface SoundTrack {
   keys: VolumeKey[];
 }
 
-/** The canvas's sound: audio tracks and the files their clips play. */
+/** The canvas's sound files (the clips of its audio layers play them). */
 export interface DocSound {
+  files: SoundFile[];
+}
+
+/** What the timeline plays: the audio tracks and the files. */
+export interface SoundMix {
   tracks: SoundTrack[];
   files: SoundFile[];
 }
@@ -42,10 +48,6 @@ export const AUDIO_EXTENSIONS = ['wav', 'mp3', 'ogg', 'oga', 'm4a', 'aac', 'flac
 
 let counter = 0;
 export const newSoundId = (prefix: 's' | 'snd') => `${prefix}${Date.now().toString(36)}${(counter++).toString(36)}`;
-
-export function newSoundTrack(name: string): SoundTrack {
-  return { id: newSoundId('s'), name, visible: true, volume: 1, clips: [], keys: [] };
-}
 
 /** The volume at `frame`: the keyframes' (interpolated as the earlier one says), else the track's. */
 export function volumeAt(track: Pick<SoundTrack, 'volume' | 'keys'>, frame: number): number {
@@ -165,7 +167,8 @@ export function encodeWav(channels: Float32Array[], sampleRate: number): Uint8Ar
 const num = (v: unknown, fallback: number, min: number, max: number) => (typeof v === 'number' && Number.isFinite(v) ? Math.min(max, Math.max(min, v)) : fallback);
 const ID = /^[A-Za-z0-9_-]{1,64}$/;
 
-export function sanitizeSound(raw: unknown): DocSound | undefined {
+/** The sound files of a document, and (earlier files) its audio tracks, which become audio layers. */
+export function sanitizeSound(raw: unknown): (DocSound & { tracks: SoundTrack[] }) | undefined {
   if (!raw || typeof raw !== 'object') return undefined;
   const r = raw as Record<string, unknown>;
   const files: SoundFile[] = [];

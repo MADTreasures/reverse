@@ -106,9 +106,8 @@ type Drag =
 function graphTrack(s: ReturnType<typeof getState>) {
   const id = anim.keyTrackId(s);
   const mask = id ? maskOwner(id) !== null : false;
-  const snd = id ? s.doc.sound?.tracks.find((t) => t.id === id) : undefined;
-  const layer = id && !snd ? anim.currentTrack(s) : null;
-  return { name: snd?.name ?? (layer ? `${layer.name}${mask ? ' : Mask' : ''}` : ''), sound: Boolean(snd), mask, keyed: Boolean(snd) || Boolean(layer && keysOn(layer)) };
+  const layer = id ? anim.currentTrack(s) : null;
+  return { name: layer ? `${layer.name}${mask ? ' : Mask' : ''}` : '', sound: layer?.kind === 'audio', mask, keyed: Boolean(layer && keysOn(layer)) };
 }
 
 export function GraphEditor({ frames, cell }: { frames: number; cell: number }) {

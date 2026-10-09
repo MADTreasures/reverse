@@ -4,6 +4,7 @@
  */
 import { useEffect, useState } from 'react';
 import { exportAnimation, exportMovie, type AnimationFormat } from '../../io/documentIO';
+import { hasSound } from '../../model/animation';
 import { DEFAULT_TIMELINE, MAX_FPS, MAX_FRAMES, type OnionMode } from '../../paint/animation';
 import * as anim from '../../store/animationActions';
 import { getState, useStore } from '../../store/store';
@@ -257,7 +258,7 @@ export function MovieExportDialog() {
   const [codecs, setCodecs] = useState('…');
   const evenW = Math.max(2, Math.floor(width / 2) * 2);
   const height = Math.max(2, Math.floor(Math.round((width * doc.height) / doc.width) / 2) * 2);
-  const sound = Boolean(doc.sound?.tracks.some((x) => x.visible && x.clips.length));
+  const sound = hasSound(doc);
   useEffect(() => {
     let live = true;
     void import('../../io/movie').then(async ({ chooseCodecs, codecLabel }) => {

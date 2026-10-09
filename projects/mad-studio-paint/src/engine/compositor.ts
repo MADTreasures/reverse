@@ -11,8 +11,8 @@ import { inClips } from '../paint/clips';
 import { cameraMatrix, invert, isRest, placementAt, placementMatrix, placedCorners, restPlacement, type Placement } from '../paint/keyframes';
 import type { Affine } from '../paint/rulers';
 import { lightMatrix, type LightLayer } from '../paint/lightTable';
-import { clipGroups, findLayer, flatten } from '../model/layers';
-import type { BlendMode, CorrectionLayer, FolderBlendMode, FolderLayer, GradientLayer, Id, Layer, PaintDocument, RasterLayer, TextLayer, VectorLayer } from '../model/types';
+import { clipGroups, findLayer, flatten, isDrawn } from '../model/layers';
+import type { BlendMode, CorrectionLayer, DrawnLayer, FolderBlendMode, FolderLayer, GradientLayer, Id, Layer, PaintDocument, RasterLayer, TextLayer, VectorLayer } from '../model/types';
 import { anyEffect, applyEdge, applyLayerColor, applyWatercolorEdge, effectReach } from '../paint/effects';
 import { applyDropShadow, applyInnerGlow, applyInnerShadow, applyOuterGlow } from '../paint/styles';
 import { inflate, intersect, union, type Rect } from '../paint/rect';
@@ -211,7 +211,7 @@ export class Compositor {
     this.doc = doc;
     this.masksNow.clear();
     const out = createCanvas(this.canvas.width, this.canvas.height);
-    this.drawContent(layer, ctx2d(out), this.bounds, opts);
+    if (isDrawn(layer)) this.drawContent(layer, ctx2d(out), this.bounds, opts);
     return out;
   }
 
@@ -362,7 +362,7 @@ export class Compositor {
   }
 
   /** Draws a layer with its own opacity and blend mode. */
-  private drawLayer(layer: Layer, target: Ctx, r: Rect, opts: ComposeOptions): void {
+  private drawLayer(layer: DrawnLayer, target: Ctx, r: Rect, opts: ComposeOptions): void {
     if (layer.kind === 'correction') {
       this.drawCorrection(layer, target, r);
       return;
@@ -510,8 +510,8 @@ export class Compositor {
           if (img) this.drawPlaced(tmp, img, m, 1);
         } else {
           const layer = findLayer(this.doc.layers, l.source.layer);
-          const src = layer && layer.kind !== 'correction' ? this.sourceOf(m, r) : null;
-          if (layer && src) {
+          const src = layer && isDrawn(layer) && layer.kind !== 'correction' ? this.sourceOf(m, r) : null;
+          if (layer && isDrawn(layer) && src) {
             const c = this.pool.acquire(src);
             this.drawContent(layer, c, src, opts);
             this.drawPlaced(tmp, c.canvas, m, 1);
@@ -544,7 +544,7 @@ export class Compositor {
       this.inCel++;
       const tmp = this.pool.acquire(r);
       try {
-        if (this.shown(cel, opts)) this.drawContent(cel, tmp, r, opts);
+        if (this.shown(cel, opts) && isDrawn(cel)) this.drawContent(cel, tmp, r, opts);
       } finally {
         this.inCel--;
       }
@@ -584,7 +584,7 @@ export class Compositor {
    * Draws a layer's pixels (mask applied) at full opacity in normal mode onto an empty `target`;
    * clipping groups apply opacity and blending later.
    */
-  private drawContent(layer: Layer, target: Ctx, r: Rect, opts: ComposeOptions): void {
+  private drawContent(layer: DrawnLayer, target: Ctx, r: Rect, opts: ComposeOptions): void {
     if (layer.kind === 'correction') return;
     const xf = this.placed(layer);
     if (xf) {

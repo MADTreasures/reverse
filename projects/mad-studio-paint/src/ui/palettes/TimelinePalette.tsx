@@ -16,11 +16,11 @@
 import { memo, useCallback, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import { isAnimationFolder, isCameraFolder, keysOn, maskTrackId, timelineTracks, trackContent, type AnimationFolder, type TrackRow as Row } from '../../model/animation';
-import type { Id, Layer } from '../../model/types';
+import type { AudioLayer, Id, Layer } from '../../model/types';
 import { assignmentAt, entryAt } from '../../paint/animation';
 import { clipIndexAt, type ClipEdge, type Timed, type TrackContent } from '../../paint/clips';
 import { curveInterp, GROUPS, groupInterp, PLACEMENT_CHANNELS, records, touches, TRANSFORM_GROUPS, type Channel, type ChannelGroup, type Interp, type Keyframe } from '../../paint/keyframes';
-import type { SoundFile, SoundTrack } from '../../paint/sound';
+import type { SoundFile } from '../../paint/sound';
 import { soundPeaks, soundsVersion, subscribeSounds } from '../../engine/sounds';
 import * as sound from '../../store/soundActions';
 import * as actions from '../../store/actions';
@@ -106,7 +106,7 @@ type Drag =
   | { kind: 'edge'; track: Id; start: number; edge: ClipEdge; stretch: boolean; frame: number }
   | { kind: 'keys'; x0: number; delta: number; copy: boolean };
 
-const ICONS: Record<Layer['kind'], string> = { raster: 'layer', vector: 'vector', text: 'text', gradient: 'gradient', correction: 'correction', folder: 'folder' };
+const ICONS: Record<Layer['kind'], string> = { raster: 'layer', vector: 'vector', text: 'text', gradient: 'gradient', correction: 'correction', folder: 'folder', audio: 'audio' };
 const trackIcon = (l: Layer) => (isAnimationFolder(l) ? 'animFolder' : l.kind === 'folder' && l.camera ? 'camera' : l.kind === 'folder' && l.frame ? 'frame' : ICONS[l.kind]);
 const INTERP_LABELS: Record<Interp, string> = { hold: 'Hold', linear: 'Linear', smooth: 'Smooth' };
 
@@ -363,7 +363,8 @@ function Waveform({ sound: id, offset, seconds, width, height }: { sound: string
 }
 
 interface SoundRowProps {
-  track: SoundTrack;
+  track: AudioLayer;
+  depth: number;
   files: SoundFile[];
   frames: number;
   fps: number;
@@ -375,10 +376,10 @@ interface SoundRowProps {
   onKey: RowProps['onKey'];
 }
 
-/** An audio track: its clips with their waveforms, and volume keyframes. */
-const SoundRow = memo(function SoundRow({ track, files, frames, fps, active, selected, selectedKeys, preview, onGrip, onKey }: SoundRowProps) {
+/** An audio layer's track: its clips with their waveforms, and volume keyframes. */
+const SoundRow = memo(function SoundRow({ track, depth, files, frames, fps, active, selected, selectedKeys, preview, onGrip, onKey }: SoundRowProps) {
   const clips = preview?.clips ?? track.clips;
-  const keys = (preview?.keys ?? track.keys) as SoundTrack['keys'];
+  const keys = (preview?.keys ?? track.keys.frames) as Keyframe[];
   const starts = new Set(selected ? selected.split(',').map(Number) : []);
   const keySel = parseKeySel(selectedKeys);
   const lane = useRef<HTMLDivElement>(null);
@@ -386,13 +387,13 @@ const SoundRow = memo(function SoundRow({ track, files, frames, fps, active, sel
   const menu = (e: React.MouseEvent, f: number) => {
     e.preventDefault();
     sound.selectSoundTrack(track.id, f);
-    showMenu({ x: e.clientX, y: e.clientY }, [...clipItems(), { separator: true }, { label: 'Delete audio track', onClick: () => sound.deleteSoundTrack(track.id) }]);
+    showMenu({ x: e.clientX, y: e.clientY }, [...clipItems(), { separator: true }, { label: 'Delete audio layer', onClick: () => sound.deleteSoundTrack(track.id) }]);
   };
   return (
     <div className={`tl-row tl-sound ${active ? 'active' : ''}`} data-testid="timeline-audio" data-track={track.name} data-track-id={track.id}>
-      <div className="tl-name" style={{ paddingLeft: 4 }}>
+      <div className="tl-name" style={{ paddingLeft: 4 + depth * 12 }}>
         <span className="tl-twisty" />
-        <button className={`eye ${track.visible ? 'on' : ''}`} aria-label={track.visible ? 'Mute track' : 'Unmute track'} onClick={() => sound.setSoundTrack(track.id, { visible: !track.visible }, track.visible ? 'Mute audio track' : 'Unmute audio track')}>
+        <button className={`eye ${track.visible ? 'on' : ''}`} aria-label={track.visible ? 'Mute track' : 'Unmute track'} onClick={() => sound.setSoundTrack(track.id, { visible: !track.visible }, track.visible ? 'Mute audio layer' : 'Unmute audio layer')}>
           <Icon name="eye" size={14} />
         </button>
         <span className="tl-track-icon">
@@ -447,11 +448,10 @@ const SoundRow = memo(function SoundRow({ track, files, frames, fps, active, sel
 
 const VOLUME: Channel[] = ['volume'];
 
-/** Selects a frame of a track: a layer's (and the cel shown there) or an audio track's. */
-function selectAt(track: Id, frame: number): void {
-  if (getState().doc.sound?.tracks.some((t) => t.id === track)) sound.selectSoundTrack(track, frame);
-  else anim.selectTrackFrame(track, frame);
-}
+/** Selects a frame of a track (an animation folder's: the cel shown there). */
+const selectAt = (track: Id, frame: number) => anim.selectTrackFrame(track, frame);
+
+const NO_FILES: SoundFile[] = [];
 
 /** The current version of a track (rows may hold an older one in a menu). */
 const findTrack = (id: Id) => timelineTracks(getState().doc.layers).find((r) => r.layer.id === id)?.layer ?? null;
@@ -464,7 +464,7 @@ export function TimelinePalette() {
   );
   const activeId = useStore((s) => anim.currentTrackId(s));
   const maskKeyed = useStore((s) => anim.maskKeyed(s)?.id ?? null);
-  const soundDoc = useStore((s) => s.doc.sound);
+  const files = useStore((s) => s.doc.sound?.files ?? NO_FILES);
   const hasCels = useStore((s) => anim.activeTrack(s) !== null);
   const { keySelection, editKeyed, keyDetails, transformDetails, graph, snapX, snapY, dragZoom } = useStore(
     useShallow((s) => ({
@@ -594,7 +594,7 @@ export function TimelinePalette() {
   const stableKey = useCallback<RowProps['onKey']>((...args) => keyRef.current(...args), []);
 
   // What dragged tracks look like before the drop.
-  const soundTracks = soundDoc?.tracks;
+
   const previews = useMemo(() => {
     const out = new Map<Id, TrackContent<Timed>>();
     if (!drag || !timeline) return out;
@@ -605,7 +605,7 @@ export function TimelinePalette() {
       if (t && i >= 0) out.set(drag.track, anim.draggedEdge(t, i, drag.edge, drag.frame, drag.stretch, fps));
       return out;
     }
-    const ids = [...rows.map((r) => r.layer.id), ...rows.filter((r) => r.layer.mask).map((r) => maskTrackId(r.layer.id)), ...(soundTracks ?? []).map((t) => t.id)];
+    const ids = [...rows.map((r) => r.layer.id), ...rows.filter((r) => r.layer.mask).map((r) => maskTrackId(r.layer.id))];
     if (drag.kind === 'keys') {
       if (!drag.delta) return out;
       for (const id of ids) {
@@ -625,7 +625,7 @@ export function TimelinePalette() {
       out.set(id, { ...t, clips: t.clips.map((c) => (starts.includes(c.start) ? { ...c, start: c.start + d, end: c.end + d } : c)) });
     }
     return out;
-  }, [drag, rows, soundTracks, fps, timeline, clipSelection, keySelection]);
+  }, [drag, rows, fps, timeline, clipSelection, keySelection]);
 
   const keysOf = (id: Id) =>
     keySelection
@@ -788,40 +788,41 @@ export function TimelinePalette() {
             </div>
             {graph && <GraphEditor frames={frames} cell={CELL} />}
             {!graph &&
-              rows.map((r) => (
-                <TrackRow
-                  key={r.layer.id}
-                  row={r}
-                  frames={frames}
-                  active={r.layer.id === activeId}
-                  selected={selectedOf(r.layer.id)}
-                  selectedKeys={keysOf(r.layer.id)}
-                  preview={previews.get(r.layer.id) ?? null}
-                  details={keyDetails.includes(r.layer.id)}
-                  transformOpen={transformDetails.includes(r.layer.id)}
-                  maskKeys={r.layer.mask ? keysOf(maskTrackId(r.layer.id)) : ''}
-                  maskPreview={(previews.get(maskTrackId(r.layer.id))?.keys as Keyframe[] | undefined) ?? null}
-                  maskActive={maskKeyed === r.layer.id}
-                  onGrip={stableGrip}
-                  onKey={stableKey}
-                />
-              ))}
-            {!graph &&
-              soundDoc?.tracks.map((t) => (
-                <SoundRow
-                  key={t.id}
-                  track={t}
-                  files={soundDoc.files}
-                  frames={frames}
-                  fps={fps}
-                  active={t.id === activeId}
-                  selected={selectedOf(t.id)}
-                  selectedKeys={keysOf(t.id)}
-                  preview={previews.get(t.id) ?? null}
-                  onGrip={stableGrip}
-                  onKey={stableKey}
-                />
-              ))}
+              rows.map((r) =>
+                r.layer.kind === 'audio' ? (
+                  <SoundRow
+                    key={r.layer.id}
+                    track={r.layer}
+                    depth={r.depth}
+                    files={files}
+                    frames={frames}
+                    fps={fps}
+                    active={r.layer.id === activeId}
+                    selected={selectedOf(r.layer.id)}
+                    selectedKeys={keysOf(r.layer.id)}
+                    preview={previews.get(r.layer.id) ?? null}
+                    onGrip={stableGrip}
+                    onKey={stableKey}
+                  />
+                ) : (
+                  <TrackRow
+                    key={r.layer.id}
+                    row={r}
+                    frames={frames}
+                    active={r.layer.id === activeId}
+                    selected={selectedOf(r.layer.id)}
+                    selectedKeys={keysOf(r.layer.id)}
+                    preview={previews.get(r.layer.id) ?? null}
+                    details={keyDetails.includes(r.layer.id)}
+                    transformOpen={transformDetails.includes(r.layer.id)}
+                    maskKeys={r.layer.mask ? keysOf(maskTrackId(r.layer.id)) : ''}
+                    maskPreview={(previews.get(maskTrackId(r.layer.id))?.keys as Keyframe[] | undefined) ?? null}
+                    maskActive={maskKeyed === r.layer.id}
+                    onGrip={stableGrip}
+                    onKey={stableKey}
+                  />
+                ),
+              )}
             <div className="tl-now" style={{ left: `calc(var(--name-w) + ${(frame - 1) * CELL}px)` }} aria-hidden="true" />
             {marquee && <div className="tl-marquee" data-testid="timeline-marquee" style={{ left: marquee.x, top: marquee.y, width: marquee.w, height: marquee.h }} aria-hidden="true" />}
           </div>

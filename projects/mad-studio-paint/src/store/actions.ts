@@ -31,7 +31,7 @@ import {
   shiftLayer as shiftLayerInTree,
   type DropPosition,
 } from '../model/layers';
-import type { FolderLayer, GradientLayer, Id, Layer, LayerMask, PaintDocument, RasterLayer, RulerRange, TextLayer, VectorLayer } from '../model/types';
+import type { AudioLayer, DrawnLayer, FolderLayer, GradientLayer, Id, Layer, LayerMask, PaintDocument, RasterLayer, RulerRange, TextLayer, VectorLayer } from '../model/types';
 import { defaultPerspective, rulerLine, type Affine, type Ruler, type RulerInput } from '../paint/rulers';
 import { eraseWhere, keepWhere, type VectorStroke } from '../paint/vector';
 import { editable } from '../paint/vectorEdit';
@@ -165,7 +165,7 @@ export function loadDocument(doc: PaintDocument, images: Map<Id, HTMLCanvasEleme
     keySelection: [],
     lightSelection: null,
     lockedCel: null,
-    activeSound: null,
+    graphSelection: [],
     ...(doc.timeline ? { timelineShown: true } : {}),
   });
   fitToWindow();
@@ -252,6 +252,7 @@ export function editBlocker(s: PaintState = getState()): string | null {
   if (!editTarget(s)) {
     if (l.kind === 'text' || l.kind === 'gradient') return `${l.kind === 'text' ? 'Text' : 'Gradient'} layers cannot be drawn on (Layer > Rasterize converts the layer)`;
     if (isAnimationFolder(l)) return 'Select a cel to draw on, or make one with New animation cel';
+    if (l.kind === 'audio') return 'Audio layers cannot be drawn on';
     return 'Select a raster layer to draw on (folders cannot be drawn on)';
   }
   if (isEffectivelyLocked(s.doc.layers, l.id)) return 'The layer is locked';
@@ -272,7 +273,7 @@ export function selectLayer(id: Id, mask = false): void {
   const s = getState();
   const l = findLayer(s.doc.layers, id);
   if (!l) return;
-  setState({ activeLayerId: id, activeSound: null, maskEditing: mask && Boolean(l.mask), ...(id !== s.activeLayerId ? { selectedObjects: [] } : {}) });
+  setState({ activeLayerId: id, maskEditing: mask && Boolean(l.mask), ...(id !== s.activeLayerId ? { selectedObjects: [] } : {}) });
   // A cel that is not shown at the current frame: go to the nearest frame that shows it.
   const c = s.doc.timeline?.enabled && !s.playing ? celOf(s.doc.layers, id) : null;
   if (c && celAt(c.folder.animation, s.frame) !== c.cel.id) {
@@ -402,9 +403,9 @@ export function duplicateLayer(id: Id = getState().activeLayerId): void {
 }
 
 /** Properties a locked layer refuses (drawing, transforms and settings are blocked). */
-const LOCKED_PROPS = ['blend', 'opacity', 'clip', 'lockAlpha', 'reference', 'draft'];
+const LOCKED_PROPS = ['blend', 'opacity', 'clip', 'lockAlpha', 'reference', 'draft', 'volume'];
 
-export function setLayerProps(id: Id, patch: Partial<RasterLayer> | Partial<FolderLayer>, label = 'Layer property', key?: string): void {
+export function setLayerProps(id: Id, patch: Partial<RasterLayer> | Partial<FolderLayer> | Partial<AudioLayer>, label = 'Layer property', key?: string): void {
   const current = findLayer(getState().doc.layers, id);
   if (current?.locked && Object.keys(patch).some((k) => LOCKED_PROPS.includes(k))) {
     setState({ hint: 'The layer is locked' });
@@ -497,6 +498,7 @@ export function mergeDownBlocker(s: PaintState = getState()): string | null {
   const upper = activeLayer(s);
   const lower = layerBelow(s.doc.layers, s.activeLayerId);
   if (!upper || !lower) return 'There is no layer below';
+  if (upper.kind === 'audio' || lower.kind === 'audio') return 'Audio layers cannot be merged';
   if (lower.kind === 'vector' && !linesMerge(upper)) return 'Lines merge into a vector layer only from a plain vector layer (rasterize the layer below first)';
   if (lower.kind !== 'raster' && lower.kind !== 'vector') return 'The layer below must be a raster layer';
   if (upper.locked || lower.locked) return 'Locked layers cannot be merged';
@@ -560,7 +562,8 @@ export function mergeDown(): void {
 /** Merges all visible layers into one raster layer; hidden and draft layers stay separate (paper too). */
 export function mergeVisible(): void {
   const s = getState();
-  const merges = (l: Layer) => l.visible && !l.draft;
+  // Audio layers stay as they are.
+  const merges = (l: Layer) => l.visible && !l.draft && l.kind !== 'audio';
   const visible = s.doc.layers.filter(merges);
   if (visible.length < 2 && !(visible[0]?.kind === 'folder')) return;
   const merged = createCanvas(s.doc.width, s.doc.height);
@@ -584,7 +587,8 @@ export function flattenImage(): void {
   const target = createRasterLayer('Layer 1');
   ctx2d(ensureSurface(target.id, s.doc.width, s.doc.height)).drawImage(merged, 0, 0);
   changeDoc('Flatten image', (doc) => {
-    doc.layers = [target];
+    // The audio layers stay, above the picture.
+    doc.layers = [...flatten(doc.layers).filter((l) => l.kind === 'audio'), target];
     return target.id;
   });
 }
@@ -1119,10 +1123,14 @@ export function previewCorrection(id: Id, correction: Correction): void {
 
 // ------------------------------------------------------------------ layer masks
 
-function maskedLayer(id: Id): Layer | null {
+function maskedLayer(id: Id): DrawnLayer | null {
   const s = getState();
   const l = findLayer(s.doc.layers, id);
   if (!l) return null;
+  if (l.kind === 'audio') {
+    setState({ hint: 'Audio layers have no layer mask' });
+    return null;
+  }
   if (isEffectivelyLocked(s.doc.layers, id)) {
     setState({ hint: 'The layer is locked' });
     return null;

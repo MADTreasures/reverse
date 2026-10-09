@@ -414,16 +414,16 @@ function AudioTrackSettings() {
   const volume = useStore((s) => sound.volumeNow(s));
   const frame = useStore((s) => s.frame);
   if (!track) return null;
-  const atKey = track.keys.some((k) => k.frame === frame);
+  const atKey = track.keys.frames.some((k) => k.frame === frame);
   return (
     <>
       <div className="prop-note" data-testid="audio-info">
-        Audio track {track.name} · frame {frame}
-        {atKey ? ' (keyframe)' : track.keys.length ? '' : ' · no volume keyframes'}
+        Audio layer {track.name} · frame {frame}
+        {atKey ? ' (keyframe)' : track.keys.frames.length ? '' : ' · no volume keyframes'}
       </div>
       <PropSlider label="Volume" unit="%" value={Math.round(volume * 100)} min={0} max={100} onChange={(v) => sound.setVolumeNow(v / 100)} />
       <label className="check prop-check">
-        <input type="checkbox" checked={!track.visible} onChange={(e) => sound.setSoundTrack(track.id, { visible: !e.target.checked }, e.target.checked ? 'Mute audio track' : 'Unmute audio track')} />
+        <input type="checkbox" checked={!track.visible} onChange={(e) => sound.setSoundTrack(track.id, { visible: !e.target.checked }, e.target.checked ? 'Mute audio layer' : 'Unmute audio layer')} />
         Mute
       </label>
       <div className="prop-row">
@@ -431,7 +431,7 @@ function AudioTrackSettings() {
           Add keyframe
         </button>
         <button className="btn small" onClick={() => sound.deleteSoundTrack(track.id)}>
-          Delete audio track
+          Delete audio layer
         </button>
       </div>
       <div className="prop-note">With volume keyframes the volume changes between them (Timeline palette: Add keyframe, interpolation).</div>

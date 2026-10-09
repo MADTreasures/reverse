@@ -20,7 +20,7 @@ import type { AdjustmentLayer, BlendMode as PsdBlendMode, CurvesAdjustment, Laye
 import { rgbToHex, hexToRgb } from '../model/color';
 import { createDocument, MAX_CANVAS_SIDE } from '../model/document';
 import { clipGroups, createCorrectionLayer, createFolder, createLayerMask, createRasterLayer, createTextLayer } from '../model/layers';
-import type { BlendMode, FolderBlendMode, FolderLayer, Id, Layer, LayerMask, PaintDocument, TextLayer } from '../model/types';
+import type { BlendMode, DrawnLayer, FolderBlendMode, FolderLayer, Id, Layer, LayerMask, PaintDocument, TextLayer } from '../model/types';
 import { sanitizeCorrection, type Channel, type Correction, type Levels } from '../paint/tonal';
 import { celAt } from '../paint/animation';
 import type { TextBox } from '../paint/text';
@@ -292,7 +292,7 @@ export interface PsdSource {
 /** Effects Photoshop has no layer style for: the layer is written as it looks. */
 const bakes = (l: Layer) => Boolean(l.effects?.tone?.enabled || (l.effects?.border?.enabled && l.effects.border.kind === 'watercolor'));
 
-function common(l: Layer): PsdLayer {
+function common(l: DrawnLayer): PsdLayer {
   const out: PsdLayer = { name: l.name, hidden: !l.visible, opacity: l.opacity, clipping: l.clip, blendMode: toPsdBlend(l.blend) };
   if (l.locked) out.protected = { transparency: true, composite: true, position: true };
   else if (l.kind === 'raster' && l.lockAlpha) {
@@ -342,7 +342,7 @@ function exportText(l: TextLayer, src: PsdSource): PsdLayer {
   return withMask(styled({ ...common(l), opened: true, children }, l), l, src);
 }
 
-function exportLayer(l: Layer, src: PsdSource): PsdLayer {
+function exportLayer(l: DrawnLayer, src: PsdSource): PsdLayer {
   if (l.kind === 'correction') return withMask({ ...common(l), adjustment: toAdjustment(l.correction) }, l, src);
   if (bakes(l)) {
     // Drawn as it looks: effects, mask and (for a screentone that shows the opacity in its dots) opacity.
@@ -371,7 +371,7 @@ function exportLayer(l: Layer, src: PsdSource): PsdLayer {
 function exportList(layers: Layer[], src: PsdSource, parent?: FolderLayer): PsdLayer[] {
   // An animation folder shows the cel of the current frame; the other cels are written hidden.
   const shown = parent?.animation && src.doc.timeline?.enabled ? celAt(parent.animation, src.frame ?? 1) : undefined;
-  const one = (l: Layer, clipping?: boolean): PsdLayer => {
+  const one = (l: DrawnLayer, clipping?: boolean): PsdLayer => {
     const out = exportLayer(l, src);
     if (clipping !== undefined) out.clipping = clipping;
     if (shown !== undefined && l.id !== shown) out.hidden = true;

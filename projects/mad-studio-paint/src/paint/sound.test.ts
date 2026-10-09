@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { encodeWav, interleave16, newSoundTrack, peaks, sanitizeSound, soundPlays, volumeAt, volumeSteps, type SoundFile, type SoundTrack } from './sound';
+import { encodeWav, interleave16, peaks, sanitizeSound, soundPlays, volumeAt, volumeSteps, type SoundFile, type SoundTrack } from './sound';
 
 const file: SoundFile = { id: 'snd1', name: 'Beat', type: 'audio/wav', duration: 2 };
-const track = (patch: Partial<SoundTrack> = {}): SoundTrack => ({ ...newSoundTrack('Audio'), clips: [{ start: 5, end: 20, offset: 0, sound: 'snd1' }], ...patch });
+const track = (patch: Partial<SoundTrack> = {}): SoundTrack => ({ id: 'a1', name: 'Audio', visible: true, volume: 1, keys: [], clips: [{ start: 5, end: 20, offset: 0, sound: 'snd1' }], ...patch });
 
 describe('sound', () => {
   it('works out what plays when', () => {

@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { BLEND_MODES } from '../model/blend';
 import { createDocument } from '../model/document';
 import { createCorrectionLayer, createFolder, createLayerMask, createRasterLayer, flatten } from '../model/layers';
-import type { FolderLayer, Id, Layer } from '../model/types';
+import type { DrawnLayer, FolderLayer, Id, Layer } from '../model/types';
 import { rectPoints } from '../paint/frames';
 import { CORRECTIONS, defaultCorrection, type Correction } from '../paint/tonal';
 import { isPsdFileName } from './format';
@@ -112,7 +112,7 @@ describe('PSD documents', () => {
     expect(c.kind === 'correction' && c.correction).toEqual({ type: 'posterize', levels: 5 });
     expect(g.kind).toBe('folder');
     expect(g.blend).toBe('pass-through');
-    expect(g.children.map((l) => [l.name, l.blend, l.clip, l.visible, l.opacity])).toEqual([
+    expect((g.children as DrawnLayer[]).map((l) => [l.name, l.blend, l.clip, l.visible, l.opacity])).toEqual([
       ['Shade', 'normal', true, false, 1],
       ['Ink', 'multiply', false, true, expect.closeTo(0.5, 2)],
     ]);

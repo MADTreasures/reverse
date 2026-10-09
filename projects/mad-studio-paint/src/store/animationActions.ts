@@ -11,13 +11,14 @@ import {
   maskOwner,
   maskTrackId,
   setTrackContent,
+  soundMix,
   trackContent,
   trackFolderOf,
   tracksOf,
   type AnimationFolder,
 } from '../model/animation';
 import { createFolder, createRasterLayer, findLayer, flatten, locate } from '../model/layers';
-import type { Id, Layer, PaintDocument } from '../model/types';
+import type { AudioLayer, Id, Layer, PaintDocument } from '../model/types';
 import { assignAt, celAt, DEFAULT_TIMELINE, emptyTrack, entryAt, MAX_FRAMES, nextCelName, nextTrackName, removeAt, type OnionSkin, type Timeline } from '../paint/animation';
 import {
   clipIndexAt,
@@ -40,7 +41,7 @@ import {
   type Timed,
   type TrackContent,
 } from '../paint/clips';
-import { setVolumeKey, volumeAt, type SoundTrack, type VolumeKey } from '../paint/sound';
+import { setVolumeKey, volumeAt } from '../paint/sound';
 import {
   GROUPS,
   moveKeys,
@@ -69,39 +70,37 @@ import { getState, setState, type ClipRef, type CurveRef, type KeyRef, type Pain
 /** A track's content: clips, cel assignments, keyframes (placements, or volumes on audio tracks). */
 type Content = TrackContent<Timed>;
 
-/** A track: a layer (animation folders too) or an audio track. */
+/** A track: a layer (animation folders and audio layers too). */
 interface AnyTrack {
   id: Id;
-  layer: Layer | null;
-  sound: SoundTrack | null;
+  layer: Layer;
+  /** An audio layer. */
+  sound: boolean;
 }
 
 function trackById(doc: PaintDocument, id: Id): AnyTrack | null {
   const layer = findLayer(doc.layers, id);
-  if (layer) return { id, layer, sound: null };
-  const sound = doc.sound?.tracks.find((t) => t.id === id);
-  return sound ? { id, layer: null, sound } : null;
+  return layer ? { id, layer, sound: layer.kind === 'audio' } : null;
 }
 
 /** What a track holds (clips made explicit). */
-function contentOf(t: AnyTrack, frames: number): Content {
-  return t.layer ? trackContent(t.layer, frames) : { clips: t.sound!.clips, keys: t.sound!.keys };
-}
+const contentOf = (t: AnyTrack, frames: number): Content => trackContent(t.layer, frames);
 
 /** Stores a track's changed content (in a document copy being edited). */
 function storeContent(doc: PaintDocument, id: Id, c: Content): void {
   const t = trackById(doc, id);
-  if (t?.layer) setTrackContent(t.layer, c as TrackContent<Keyframe>);
-  else if (t?.sound) {
-    t.sound.clips = c.clips;
-    if (c.keys) t.sound.keys = c.keys as VolumeKey[];
-  }
+  if (t) setTrackContent(t.layer, c as TrackContent<Keyframe>);
 }
 
-/** The track Edit track commands work on: the selected audio track, else the current layer's track. */
+/** The track Edit track commands work on: the current layer's track (an audio layer is its own). */
 export function currentTrackId(s: PaintState = getState()): Id | null {
-  if (s.activeSound && s.doc.sound?.tracks.some((t) => t.id === s.activeSound)) return s.activeSound;
   return currentTrack(s)?.id ?? null;
+}
+
+/** The selected audio layer, or null. */
+export function activeAudio(s: PaintState = getState()): AudioLayer | null {
+  const l = findLayer(s.doc.layers, s.activeLayerId);
+  return l?.kind === 'audio' ? l : null;
 }
 
 export const timelineOf = (s: PaintState = getState()): Timeline | null => s.doc.timeline ?? null;
@@ -153,7 +152,7 @@ export function selectTrackFrame(trackId: Id, frame: number): void {
   if (!track) return;
   const f = clampFrame(frame, timelineOf(s));
   const target = isAnimationFolder(track) ? editTargetAt(track, f, s.activeLayerId, s.doc.layers) : track.id;
-  setState({ frame: f, activeLayerId: target, activeSound: null, ...(target !== s.activeLayerId ? { maskEditing: false, selectedObjects: [] } : {}) });
+  setState({ frame: f, activeLayerId: target, ...(target !== s.activeLayerId ? { maskEditing: false, selectedObjects: [] } : {}) });
 }
 
 /** The track of the layer being edited: the layer itself, or the animation folder of a cel. */
@@ -204,7 +203,6 @@ function everyTrack(doc: PaintDocument, op: (t: Content) => Content): void {
     setTrackContent(l, op(whole ? { ...t, clips: [{ start: 1, end: MAX_FRAMES }] } : t) as TrackContent<Keyframe>);
     if (whole) delete l.clips;
   }
-  for (const t of doc.sound?.tracks ?? []) storeContent(doc, t.id, op({ clips: t.clips, keys: t.keys }));
 }
 
 /** Animation > Timeline > Insert frame / Delete frame at the current frame, on every track. */
@@ -487,8 +485,8 @@ export function copySelectedClip(): void {
     return;
   }
   const names = new Map<Id, string>();
-  if (c.track.layer?.kind === 'folder') for (const cel of c.track.layer.children) names.set(cel.id, cel.name);
-  clipboard = { track: c.track.id, copy, names, sound: Boolean(c.track.sound) };
+  if (c.track.layer.kind === 'folder') for (const cel of c.track.layer.children) names.set(cel.id, cel.name);
+  clipboard = { track: c.track.id, copy, names, sound: c.track.sound };
   setState({ hint: 'Clip copied: select a frame and use Paste clip' });
 }
 
@@ -506,7 +504,7 @@ export function pasteCopiedClip(): void {
   }
   const { copy, names } = clipboard;
   const sameTrack = clipboard.track === track.id;
-  if (Boolean(copy.cels) !== isAnimationFolder(track.layer) || clipboard.sound !== Boolean(track.sound)) {
+  if (Boolean(copy.cels) !== isAnimationFolder(track.layer) || clipboard.sound !== track.sound) {
     setState({ hint: 'Clips can only be pasted on tracks of the same kind' });
     return;
   }
@@ -597,7 +595,8 @@ export type { ClipRef };
 /** The track whose keyframes are edited: the current track, when its keyframes are on (2D camera folders: always). */
 export function keyTrack(s: PaintState = getState()): Layer | null {
   const t = currentTrack(s);
-  return t && s.doc.timeline && keysOn(t) ? t : null;
+  // Audio layers have volume keyframes, set in the Tool Settings palette.
+  return t && s.doc.timeline && keysOn(t) && t.kind !== 'audio' ? t : null;
 }
 
 /** A track's placement at a frame: from its keyframes, else as it is. */
@@ -614,8 +613,8 @@ export function toggleKeyframes(): void {
     setState({ hint: 'Select a layer or animation folder on the timeline' });
     return;
   }
-  if (isCameraFolder(track)) {
-    setState({ hint: 'Keyframes are always on for 2D camera folders' });
+  if (isCameraFolder(track) || track.kind === 'audio') {
+    setState({ hint: `Keyframes are always on for ${track.kind === 'audio' ? 'audio layers' : '2D camera folders'}` });
     return;
   }
   if (track.kind === 'correction') {
@@ -659,7 +658,7 @@ export function maskPlacementNow(layer: Layer, frame = getState().frame, s: Pain
 export function selectMaskFrame(trackId: Id, frame: number): void {
   const s = getState();
   if (!findLayer(s.doc.layers, trackId)?.mask) return;
-  setState({ frame: clampFrame(frame, timelineOf(s)), activeLayerId: trackId, activeSound: null, maskEditing: true, ...(trackId !== s.activeLayerId ? { selectedObjects: [] } : {}) });
+  setState({ frame: clampFrame(frame, timelineOf(s)), activeLayerId: trackId, maskEditing: true, ...(trackId !== s.activeLayerId ? { selectedObjects: [] } : {}) });
 }
 
 /**
@@ -694,12 +693,12 @@ export function setKeyframe(trackId: Id, frame: number, p: Placement, label = 'K
 /** Timeline palette / Animation > Edit track > Add keyframe: the current placement (audio: volume) at the current frame. */
 export function addKeyframe(): void {
   const s = getState();
-  const sound = s.activeSound ? s.doc.sound?.tracks.find((t) => t.id === s.activeSound) : undefined;
+  const sound = activeAudio(s);
   if (sound) {
-    const volume = volumeAt(sound, s.frame);
+    const volume = volumeAt({ volume: sound.volume, keys: sound.keys.frames }, s.frame);
     actions.changeDoc('Add keyframe', (doc) => {
-      const t = doc.sound?.tracks.find((x) => x.id === sound.id);
-      if (t) t.keys = setVolumeKey(t.keys, s.frame, volume, s.keyInterp);
+      const t = findLayer(doc.layers, sound.id);
+      if (t?.kind === 'audio') t.keys = { ...t.keys, frames: setVolumeKey(t.keys.frames, s.frame, volume, s.keyInterp) };
     });
     setState({ keySelection: [{ track: sound.id, frame: s.frame }] });
     return;
@@ -729,16 +728,9 @@ function keysOfTrack(doc: PaintDocument, id: Id): { list: Keyframe[]; set: (list
     const mask = l?.mask;
     return l && mask ? { list: mask.keys ?? [], set: (list) => (l.mask = { ...mask, keys: list }) } : null;
   }
-  const t = trackById(doc, id);
-  if (t?.layer?.keys) {
-    const l = t.layer;
-    return { list: l.keys!.frames, set: (list) => (l.keys = { ...l.keys!, frames: list }) };
-  }
-  if (t?.sound) {
-    const sound = t.sound;
-    return { list: sound.keys, set: (list) => (sound.keys = list) };
-  }
-  return null;
+  const l = findLayer(doc.layers, id);
+  const keys = l?.keys;
+  return l && keys ? { list: keys.frames, set: (list) => (l.keys = { ...keys, frames: list }) } : null;
 }
 
 /** Selected keyframes grouped by track and property row (`channels` undefined: whole keyframes). */
@@ -831,7 +823,6 @@ export function selectKeyframe(track: Id, frame: number, add = false, group?: Ch
   setState({ keySelection, clipSelection: [] });
   const owner = maskOwner(track);
   if (owner) selectMaskFrame(owner, frame);
-  else if (getState().doc.sound?.tracks.some((t) => t.id === track)) setState({ activeSound: track, frame });
   else selectTrackFrame(track, frame);
 }
 
@@ -858,9 +849,9 @@ export function moveSelectedKeys(delta: number, copy = false): void {
       const k = keysOfTrack(doc, t.track);
       if (!k || !doc.timeline) continue;
       k.set(moveKeys(k.list, t.frames, delta, copy, t.channels));
-      // Keyframes need a clip where they land (audio tracks: only where a sound plays).
+      // Keyframes need a clip where they land (audio layers: only where a sound plays).
       const l = findLayer(doc.layers, t.track);
-      if (l?.clips) for (const f of t.frames) setTrackContent(l, ensureClipAt(trackContent(l, doc.timeline.frames), Math.max(1, f + delta), doc.timeline.frames, true));
+      if (l?.clips && l.kind !== 'audio') for (const f of t.frames) setTrackContent(l, ensureClipAt(trackContent(l, doc.timeline.frames), Math.max(1, f + delta), doc.timeline.frames, true));
     }
   });
   setState({ keySelection: s.keySelection.map((k) => ({ ...k, frame: Math.max(1, k.frame + delta) })) });
@@ -998,7 +989,7 @@ export function play(): void {
   // From the start when at the end.
   if (getState().frame >= t.frames) setFrame(1, false);
   setState({ playing: true });
-  startSound(getState().doc.sound, getState().frame, t.frames, t.fps);
+  startSound(soundMix(getState().doc), getState().frame, t.frames, t.fps);
   let last = performance.now();
   let carry = 0;
   const tick = (now: number) => {
@@ -1015,7 +1006,7 @@ export function play(): void {
       else if (s.loop) {
         frame = 1;
         // The sound starts again with the animation.
-        startSound(s.doc.sound, 1, tl.frames, tl.fps);
+        startSound(soundMix(s.doc), 1, tl.frames, tl.fps);
       } else return stop();
     }
     if (frame !== s.frame) setState({ frame });
