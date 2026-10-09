@@ -57,7 +57,9 @@ cmake --build engine/build/Release --config Release
 
 `mad-engine.exe` lands directly in `engine/build/Release` (no per-configuration subfolder), where
 the app and the tests look for it. Audio goes through JUCE's Windows Audio (WASAPI: shared,
-exclusive and low-latency modes) and DirectSound. MinGW is not supported (JUCE 8 refuses it).
+exclusive and low-latency modes), DirectSound and ASIO® (the ASIO SDK 2.3.4 headers bundled with
+JUCE, which Steinberg licenses under GPLv3 or a proprietary licence; the engine uses the GPLv3,
+see [licenses/](licenses/THIRD-PARTY-NOTICES.md)). MinGW is not supported (JUCE 8 refuses it).
 
 ### Options
 
@@ -68,6 +70,7 @@ exclusive and low-latency modes) and DirectSound. MinGW is not supported (JUCE 8
 | `-DMAD_BUILD_TEST_PLUGINS=ON` | `OFF` | build "MAD Test Gain" / "MAD Test Synth" / "MAD Test Delay" for the tests |
 | `-DMAD_ENABLE_LV2=OFF` | `ON` (Linux) | LV2 hosting |
 | `-DMAD_ENABLE_JACK=OFF` | `ON` (Linux, if headers exist) | JACK backend |
+| `-DMAD_ENABLE_ASIO=OFF` | `ON` (Windows) | ASIO drivers (GPLv3 headers bundled with JUCE) |
 
 ### Output paths
 
@@ -288,9 +291,8 @@ match too.
   self-test, protocol test (on macOS with Apple's AULowpass and DLSMusicDevice), the desktop
   test and the packaged app. The Windows runners have no sound card (null device); the macOS
   microphone permission prompt has not been tried interactively.
-* No ASIO on Windows. Steinberg's ASIO SDK is available under GPLv3 since October 2025 (dual
-  licence), but showing the name "ASIO" requires following Steinberg's usage guidelines (the
-  "ASIO Compatible" logo in every dialog that selects ASIO) – a decision for the project.
+* ASIO is built in, but CI has no ASIO driver to open (the runners have no sound card); the
+  device list, the shared input/output device and `audio.showControlPanel` are tested without one.
 * WAV files are limited to 4 GB (no RF64). Each recording take has a 30 s FIFO between the audio
   thread and the writer thread; if the disk stalls for longer, frames are dropped (reported as
   `droppedFrames` in `record.done`).
@@ -298,3 +300,8 @@ match too.
 * Each reverb owns a JUCE `dsp::Convolution`, which runs its own small background thread (it
   wakes every 10 ms); a shared `ConvolutionMessageQueue` would be leaner for projects with many
   reverbs.
+
+---
+
+VST is a registered trademark of Steinberg Media Technologies GmbH.
+ASIO is a registered trademark of Steinberg Media Technologies GmbH.

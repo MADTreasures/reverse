@@ -37,7 +37,22 @@ Start synthetisiert, es sind keine fremden Samples enthalten.
 | **Eingabe** | Computertastatur als Klavier (funktioniert auch mit Schweizer/Deutscher QWERTZ-Tastatur), MIDI-Keyboards (Web MIDI) |
 | **Dateien** | Projekte als `.madstudio` (ZIP mit `project.json` und allen eigenen Samples), Autosave & Wiederherstellung, Audio-Import per Drag & Drop (WAV, AIFF, MP3, …), **WAV-Export** (16/24-bit, 32-bit float, 44.1–96 kHz) |
 | **Komfort** | Undo/Redo wie in FL Studio 26 (Ctrl/⌘Z rückgängig, Ctrl/⌘⌥Z wiederherstellen, benannte Schritte), Score-Logger (nachträglich ins Pattern übernehmen, was gespielt wurde), frei verschiebbare Fenster wie im Vorbild, Hinweisleiste für jedes Bedienelement, Demo-Song „MAD Groove“ |
-| **Audio-Engines** | Desktop-App: **native Engine** (C++/JUCE, eigener Prozess, CoreAudio · Windows Audio (WASAPI, auch Exklusiv- und Low-Latency-Modus) · DirectSound · ALSA/JACK, VST3/AU, Latenzausgleich, Aufnahme, Offline-Rendering; klingt wie die Web-Engine: Demo-Song innerhalb 0,02 dB RMS); Browser bzw. ohne Engine: Web-Audio-Engine – gleiche Bedienung, automatische Umschaltung |
+| **Audio-Engines** | Desktop-App: **native Engine** (C++/JUCE, eigener Prozess, CoreAudio · ASIO® und Windows Audio (WASAPI, auch Exklusiv- und Low-Latency-Modus) · DirectSound · ALSA/JACK, VST3/AU, Latenzausgleich, Aufnahme, Offline-Rendering; klingt wie die Web-Engine: Demo-Song innerhalb 0,02 dB RMS); Browser bzw. ohne Engine: Web-Audio-Engine – gleiche Bedienung, automatische Umschaltung |
+
+### Plugin- und Treiberstandards
+
+<p>
+  <img src="docs/logos/VST_Compatible_Logo_Steinberg_with_TM.png" alt="VST Compatible" width="110">
+  &nbsp;&nbsp;
+  <img src="docs/logos/ASIO_Compatible_Logo_Steinberg_TM.png" alt="ASIO Compatible" width="110">
+</p>
+
+Die Desktop-App hostet **VST®3**-Plugins (macOS, Windows, Linux) und spielt unter Windows über
+**ASIO®**-Treiber von Audio-Interfaces. Die Logos sind Steinbergs unveränderte Originale
+([docs/logos](docs/logos/README.md)); in der App stehen sie im About-Fenster, im Plugin-Manager und
+(ASIO) in den Audio-Einstellungen.
+VST is a registered trademark of Steinberg Media Technologies GmbH.
+ASIO is a registered trademark of Steinberg Media Technologies GmbH.
 
 ## Installation
 
@@ -66,8 +81,11 @@ Start synthetisiert, es sind keine fremden Samples enthalten.
    *Weitere Informationen → Trotzdem ausführen*.
 
 VST3-Plugins sucht der Plugin-Manager unter Windows in `C:\Program Files\Common Files\VST3`
-(weitere Ordner lassen sich hinzufügen). Für niedrige Latenz in den Audio-Einstellungen
-*Windows Audio (Exclusive Mode)* oder *(Low Latency Mode)* wählen.
+(weitere Ordner lassen sich hinzufügen). Audio-Interfaces laufen am besten über ihren
+ASIO-Treiber: in den Audio-Einstellungen (*Options → Audio settings*) als Treiber **ASIO** und als
+Gerät den Treiber des Interfaces wählen; wie in FL Studio öffnet *Show ASIO panel* dessen
+Einstellungen (Puffergrösse). Ohne ASIO-Treiber *Windows Audio (Exclusive Mode)* oder
+*(Low Latency Mode)* wählen.
 
 ### Variante B – selbst bauen (empfohlen für Entwickler)
 
@@ -243,9 +261,8 @@ NSIS-Installer und startet die installierte App testweise mit der mitgelieferten
 Noch nicht enthalten (Roadmap):
 
 - Sidechain-Eingänge und Mehrkanal-Ausgänge von Plugins, Plugin-Presets im Wrapper
-- ASIO-Treiber unter Windows: das ASIO-SDK steht seit Oktober 2025 auch unter GPLv3; offen ist
-  die Entscheidung zu Steinbergs Vorgaben für Namen und Logo (Logo in jedem Dialog, der ASIO
-  auswählt). Bis dahin: Windows Audio (WASAPI, auch Exklusiv-/Low-Latency-Modus) und DirectSound
+- ASIO ist eingebaut, aber nur ohne echten Treiber getestet (die Windows-Rechner der CI haben
+  keine Soundkarte)
 - Latenzausgleich: armierte Spuren werden beim Monitoring mitverzögert (FL kennt dafür
   *Bypass track latency compensation*); keine Eingangs-Latenz pro Spur
 - Plugin-Editoren brauchen ein Fenstersystem (unter Linux ohne Display nur der generische Wrapper)
@@ -261,9 +278,13 @@ deshalb selbst unter AGPLv3 (siehe [engine/LICENSE](engine/LICENSE)). Wer die Ap
 weitergibt, muss den Quellcode zugänglich machen (AGPL) – oder eine kommerzielle JUCE-Lizenz
 verwenden (JUCE 8: kostenlose *Starter*-Stufe bis zu einer Umsatzgrenze, sonst *Indie*/*Pro*;
 aktuelle Bedingungen auf juce.com prüfen). Das in JUCE enthaltene VST3-SDK (Version 3.8) steht
-seit Oktober 2025 unter der **MIT-Lizenz** (Copyright-Hinweis beibehalten). Für den Namen „VST“
-gelten Steinbergs *VST Usage Guidelines* (liegen dem SDK bei): ® bei der ersten Nennung, der
-Markenhinweis unten und das „VST Compatible“-Logo in Dokumentation, Website und About-Fenster.
+seit Oktober 2025 unter der **MIT-Lizenz** (Copyright-Hinweis beibehalten). Die Windows-Engine
+nutzt zusätzlich die mit JUCE gelieferten Header des **ASIO-SDK 2.3.4**, das Steinberg seit
+Oktober 2025 wahlweise proprietär oder unter der **GPLv3** lizenziert – MAD Studio nutzt die GPLv3.
+Die Lizenztexte liegen in [engine/licenses](engine/licenses/THIRD-PARTY-NOTICES.md) und werden mit
+der Engine ausgeliefert. Für die Namen „VST“ und „ASIO“ gelten Steinbergs *Usage Guidelines*
+(liegen den SDKs bei): ® bei der ersten Nennung, die Markenhinweise unten und die
+„Compatible“-Logos in Dokumentation, About-Fenster und (ASIO) in jedem Dialog, der ASIO einstellt.
 Die Oberfläche (`src/`, `electron/`) läuft in einem eigenen Prozess und spricht mit der
 Engine nur über JSON-Nachrichten; ob das lizenzrechtlich als getrenntes Werk gilt, ist im Zweifel
 juristisch zu klären.
@@ -274,5 +295,7 @@ MAD Studio ist ein unabhängiges Projekt und steht in keiner Verbindung zu Image
 „FL Studio“ ist eine Marke von Image-Line Software und wird hier nur beschreibend als Vorbild
 genannt. Es wurde kein Code, keine Grafik und kein Sound von FL Studio verwendet und nichts
 dekompiliert. Wie das Vorbild untersucht wurde, steht in [RESEARCH.md](RESEARCH.md).
+VST is a registered trademark of Steinberg Media Technologies GmbH.
+ASIO is a registered trademark of Steinberg Media Technologies GmbH.
 
 VST is a registered trademark of Steinberg Media Technologies GmbH.
