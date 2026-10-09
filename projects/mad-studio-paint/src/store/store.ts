@@ -6,7 +6,7 @@ import { LINEAR, type CurvePoint } from '../paint/curve';
 import { DEFAULT_SUB_TOOLS, type SubTool, type ToolId, type WorkspaceId } from '../paint/tools';
 import type { TextBox } from '../paint/text';
 import { DEFAULT_ONION, type OnionSkin } from '../paint/animation';
-import type { ChannelGroup, Interp } from '../paint/keyframes';
+import type { Channel, ChannelGroup, Interp } from '../paint/keyframes';
 
 export interface ViewState {
   /** Screen pixels per document pixel. */
@@ -124,6 +124,19 @@ export interface PaintState {
   /** Timeline palette: tracks with Details (+) open (their property rows), and those with Transform opened (>). */
   keyDetails: Id[];
   transformDetails: Id[];
+  /** The Timeline palette shows the Graph Editor: the current track's settings as curves. */
+  graphEditor: boolean;
+  /** Graph Editor: the selected points of curves. */
+  graphSelection: CurveRef[];
+  /** Graph Editor > View: the X, Y and other curves shown. */
+  graphAxes: { x: boolean; y: boolean; other: boolean };
+  /** Graph Editor: settings whose eye is off in the settings list, and the setting selected there. */
+  graphHidden: ChannelGroup[];
+  graphSetting: ChannelGroup | null;
+  /** Graph Editor: Snap to X axis (frames) / Y axis (value grid); Drag to zoom. */
+  graphSnapX: boolean;
+  graphSnapY: boolean;
+  graphDragZoom: boolean;
   /** Show camera's field of view: the display applies 2D camera effects. */
   cameraView: boolean;
   /** Animation cels palette: Enable light table, Show cel-specific / general light table. */
@@ -147,6 +160,13 @@ export interface KeyRef {
   track: Id;
   frame: number;
   group?: ChannelGroup;
+}
+
+/** A point of a curve in the Graph Editor: the track, the keyframe's frame and the channel. */
+export interface CurveRef {
+  track: Id;
+  frame: number;
+  ch: Channel;
 }
 
 /** A clip in the Timeline palette: the track (layer) and the clip's first frame. */
@@ -206,6 +226,14 @@ function initialState(): PaintState {
     editKeyed: false,
     keyDetails: [],
     transformDetails: [],
+    graphEditor: false,
+    graphSelection: [],
+    graphAxes: { x: true, y: true, other: true },
+    graphHidden: [],
+    graphSetting: null,
+    graphSnapX: true,
+    graphSnapY: false,
+    graphDragZoom: false,
     cameraView: false,
     lightOn: true,
     lightShowCel: true,

@@ -18,7 +18,7 @@ import { isAnimationFolder, isCameraFolder, keysOn, timelineTracks, trackContent
 import type { Id, Layer } from '../../model/types';
 import { assignmentAt, entryAt } from '../../paint/animation';
 import { clipIndexAt, type ClipEdge, type Timed, type TrackContent } from '../../paint/clips';
-import { GROUPS, groupInterp, PLACEMENT_CHANNELS, records, touches, TRANSFORM_GROUPS, type Channel, type ChannelGroup, type Interp, type Keyframe } from '../../paint/keyframes';
+import { curveInterp, GROUPS, groupInterp, PLACEMENT_CHANNELS, records, touches, TRANSFORM_GROUPS, type Channel, type ChannelGroup, type Interp, type Keyframe } from '../../paint/keyframes';
 import type { SoundFile, SoundTrack } from '../../paint/sound';
 import { soundPeaks, soundsVersion, subscribeSounds } from '../../engine/sounds';
 import * as sound from '../../store/soundActions';
@@ -27,6 +27,7 @@ import * as anim from '../../store/animationActions';
 import { getState, setState, useStore, type ClipRef, type KeyRef } from '../../store/store';
 import { Icon } from '../controls/Icons';
 import { openDialog, showMenu, type MenuItem } from '../overlays';
+import { GraphEditor, useGraphTrackName } from './GraphEditor';
 
 const CELL = 24;
 /** Pixels at a clip's ends where dragging trims it. */
@@ -440,9 +441,20 @@ export function TimelinePalette() {
   const activeId = useStore((s) => anim.currentTrackId(s));
   const soundDoc = useStore((s) => s.doc.sound);
   const hasCels = useStore((s) => anim.activeTrack(s) !== null);
-  const { keySelection, editKeyed, keyDetails, transformDetails } = useStore(
-    useShallow((s) => ({ keySelection: s.keySelection, editKeyed: s.editKeyed, keyDetails: s.keyDetails, transformDetails: s.transformDetails })),
+  const { keySelection, editKeyed, keyDetails, transformDetails, graph, snapX, snapY, dragZoom } = useStore(
+    useShallow((s) => ({
+      keySelection: s.keySelection,
+      editKeyed: s.editKeyed,
+      keyDetails: s.keyDetails,
+      transformDetails: s.transformDetails,
+      graph: s.graphEditor,
+      snapX: s.graphSnapX,
+      snapY: s.graphSnapY,
+      dragZoom: s.graphDragZoom,
+    })),
   );
+  const graphTrack = useGraphTrackName();
+  const graphPicked = useStore((s) => s.graphSelection.length > 0);
   const keyOn = useStore((s) => {
     if (sound.activeSoundTrack(s)) return true;
     const t = anim.currentTrack(s);
@@ -450,6 +462,11 @@ export function TimelinePalette() {
   });
   // The interpolation shown: the selected keyframe's (on a property row: that property's), else the one for new keyframes.
   const shownInterp = useStore((s) => {
+    const point = s.graphEditor ? s.graphSelection[0] : undefined;
+    if (point) {
+      const k = anim.trackKeys(point.track, s).find((x) => x.frame === point.frame);
+      return k ? curveInterp(k, point.ch) : s.keyInterp;
+    }
     const ref = s.keySelection[0];
     const k = ref ? anim.trackKeys(ref.track, s).find((x) => x.frame === ref.frame) : undefined;
     if (!k) return s.keyInterp;
@@ -657,6 +674,9 @@ export function TimelinePalette() {
       <div className="tl-resize" role="separator" aria-orientation="horizontal" aria-label="Resize the Timeline palette" onPointerDown={resize} />
       <div className="timeline-bar">
         <span className="palette-title">Timeline</span>
+        <Button icon="graph" label="Graph Editor" on={graph} disabled={!timeline} onClick={anim.toggleGraphEditor} />
+        {graph && <Button icon="dragZoom" label="Drag to zoom" on={dragZoom} onClick={() => setState({ graphDragZoom: !dragZoom })} />}
+        <span className="sep" />
         <Button icon="frameFirst" label="Go to start" disabled={!enabled} onClick={anim.firstFrame} />
         <Button icon="framePrev" label="Go to previous frame" disabled={!enabled} onClick={anim.previousFrame} />
         <Button icon={playing ? 'stop' : 'play'} label={playing ? 'Stop' : 'Play'} disabled={!enabled} onClick={anim.togglePlay} />
@@ -664,12 +684,21 @@ export function TimelinePalette() {
         <Button icon="frameLast" label="Go to end" disabled={!enabled} onClick={anim.lastFrame} />
         <Button icon="loop" label="Loop play" on={loop} onClick={anim.toggleLoop} />
         <span className="sep" />
-        <Button icon="newAnimFolder" label="New animation folder" onClick={() => void anim.newAnimationFolder()} />
-        <Button icon="newCel" label="New animation cel" disabled={!enabled} onClick={() => void anim.newAnimationCel()} />
-        <Button icon="newLayer" label="Assign cel to frame" disabled={!enabled || !hasCels} onClick={openAssignMenu} />
-        <Button icon="removeCel" label="Delete assigned cel" disabled={!enabled || !hasCels} onClick={() => anim.removeAssignedCel()} />
-        <span className="sep" />
-        <Button icon="onion" label="Enable onion skin" on={onionSkin} disabled={!enabled} onClick={anim.toggleOnionSkin} />
+        {graph ? (
+          <>
+            <Button icon="snapX" label="Snap to X axis" on={snapX} onClick={() => setState({ graphSnapX: !snapX })} />
+            <Button icon="snapY" label="Snap to Y axis" on={snapY} onClick={() => setState({ graphSnapY: !snapY })} />
+          </>
+        ) : (
+          <>
+            <Button icon="newAnimFolder" label="New animation folder" onClick={() => void anim.newAnimationFolder()} />
+            <Button icon="newCel" label="New animation cel" disabled={!enabled} onClick={() => void anim.newAnimationCel()} />
+            <Button icon="newLayer" label="Assign cel to frame" disabled={!enabled || !hasCels} onClick={openAssignMenu} />
+            <Button icon="removeCel" label="Delete assigned cel" disabled={!enabled || !hasCels} onClick={() => anim.removeAssignedCel()} />
+            <span className="sep" />
+            <Button icon="onion" label="Enable onion skin" on={onionSkin} disabled={!enabled} onClick={anim.toggleOnionSkin} />
+          </>
+        )}
         <span className="sep" />
         <Button icon="keyAdd" label="Add keyframe" disabled={!enabled || !activeId} onClick={anim.addKeyframe} />
         <select className="tl-interp" aria-label="Keyframe interpolation" title="Keyframe interpolation" value={shownInterp} disabled={!enabled} onChange={(e) => anim.setKeyInterp(e.target.value as Interp)}>
@@ -680,8 +709,14 @@ export function TimelinePalette() {
           ))}
         </select>
         <Button icon="keyDelete" label="Delete keyframe" disabled={!enabled || !keyOn} onClick={anim.deleteKeyframes} />
-        <Button icon="keyEnable" label="Enable keyframes on this layer" on={keyOn} disabled={!enabled || !activeId} onClick={anim.toggleKeyframes} />
-        <Button icon="keyEdit" label="Edit layers with active keyframes" on={editKeyed} disabled={!enabled || !keyOn} onClick={anim.toggleEditKeyed} />
+        {graph ? (
+          <Button icon="unpair" label="Unpair handles" disabled={!enabled || !graphPicked} onClick={anim.toggleUnpairHandles} />
+        ) : (
+          <>
+            <Button icon="keyEnable" label="Enable keyframes on this layer" on={keyOn} disabled={!enabled || !activeId} onClick={anim.toggleKeyframes} />
+            <Button icon="keyEdit" label="Edit layers with active keyframes" on={editKeyed} disabled={!enabled || !keyOn} onClick={anim.toggleEditKeyed} />
+          </>
+        )}
         <span className="spacer" />
         {timeline && (
           <button className="tl-info" title="Animation > Timeline > Change settings" onClick={() => openDialog('timelineSettings')}>
@@ -704,7 +739,7 @@ export function TimelinePalette() {
             }}
           >
             <div className="tl-row tl-head">
-              <div className="tl-name">Frame</div>
+              <div className="tl-name" title={graph ? graphTrack : undefined}>{graph ? graphTrack || 'Graph Editor' : 'Frame'}</div>
               <div
                 className="tl-cells tl-ruler"
                 data-testid="timeline-ruler"
@@ -725,36 +760,39 @@ export function TimelinePalette() {
                 ))}
               </div>
             </div>
-            {rows.map((r) => (
-              <TrackRow
-                key={r.layer.id}
-                row={r}
-                frames={frames}
-                active={r.layer.id === activeId}
-                selected={selectedOf(r.layer.id)}
-                selectedKeys={keysOf(r.layer.id)}
-                preview={previews.get(r.layer.id) ?? null}
-                details={keyDetails.includes(r.layer.id)}
-                transformOpen={transformDetails.includes(r.layer.id)}
-                onGrip={stableGrip}
-                onKey={stableKey}
-              />
-            ))}
-            {soundDoc?.tracks.map((t) => (
-              <SoundRow
-                key={t.id}
-                track={t}
-                files={soundDoc.files}
-                frames={frames}
-                fps={fps}
-                active={t.id === activeId}
-                selected={selectedOf(t.id)}
-                selectedKeys={keysOf(t.id)}
-                preview={previews.get(t.id) ?? null}
-                onGrip={stableGrip}
-                onKey={stableKey}
-              />
-            ))}
+            {graph && <GraphEditor frames={frames} cell={CELL} />}
+            {!graph &&
+              rows.map((r) => (
+                <TrackRow
+                  key={r.layer.id}
+                  row={r}
+                  frames={frames}
+                  active={r.layer.id === activeId}
+                  selected={selectedOf(r.layer.id)}
+                  selectedKeys={keysOf(r.layer.id)}
+                  preview={previews.get(r.layer.id) ?? null}
+                  details={keyDetails.includes(r.layer.id)}
+                  transformOpen={transformDetails.includes(r.layer.id)}
+                  onGrip={stableGrip}
+                  onKey={stableKey}
+                />
+              ))}
+            {!graph &&
+              soundDoc?.tracks.map((t) => (
+                <SoundRow
+                  key={t.id}
+                  track={t}
+                  files={soundDoc.files}
+                  frames={frames}
+                  fps={fps}
+                  active={t.id === activeId}
+                  selected={selectedOf(t.id)}
+                  selectedKeys={keysOf(t.id)}
+                  preview={previews.get(t.id) ?? null}
+                  onGrip={stableGrip}
+                  onKey={stableKey}
+                />
+              ))}
             <div className="tl-now" style={{ left: `calc(var(--name-w) + ${(frame - 1) * CELL}px)` }} aria-hidden="true" />
             {marquee && <div className="tl-marquee" data-testid="timeline-marquee" style={{ left: marquee.x, top: marquee.y, width: marquee.w, height: marquee.h }} aria-hidden="true" />}
           </div>

@@ -89,6 +89,7 @@ export const MENUS: MenuSpec[] = [
           'selectNextCel',
         ],
       },
+      { label: 'Animation curve', items: ['graphEditor', 'unpairHandles'] },
       { label: 'Timeline', items: ['newTimeline', 'timelineSettings', 'enableTimeline', '-', 'insertFrame', 'deleteFrame'] },
       { label: 'Move frame', items: ['firstFrame', 'prevFrame', 'nextFrame', 'lastFrame'] },
       '-',

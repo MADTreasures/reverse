@@ -327,6 +327,8 @@ export const COMMANDS: Command[] = [
   { id: 'keyLinear', label: 'Switch keyframe to linear interpolation', run: () => anim.setKeyInterp('linear'), enabled: hasTimeline },
   { id: 'keySmooth', label: 'Switch keyframe to smooth interpolation', run: () => anim.setKeyInterp('smooth'), enabled: hasTimeline },
   { id: 'editKeyed', label: 'Edit layers with active keyframes', run: () => anim.toggleEditKeyed(), enabled: hasTimeline, checked: () => getState().editKeyed },
+  { id: 'graphEditor', label: 'Graph Editor', run: () => anim.toggleGraphEditor(), enabled: () => Boolean(getState().doc.timeline), checked: () => getState().graphEditor },
+  { id: 'unpairHandles', label: 'Unpair handles', run: () => anim.toggleUnpairHandles(), enabled: () => getState().graphEditor && getState().graphSelection.length > 0 },
   { id: 'newCameraFolder', label: '2D camera folder', run: () => void anim.newCameraFolder() },
   { id: 'cameraView', label: "Show camera's field of view", run: () => anim.toggleCameraView(), enabled: hasTimeline, checked: () => getState().cameraView },
   { id: 'enableLightTable', label: 'Enable light table', run: () => light.toggleLightTable(), checked: () => getState().lightOn },

@@ -8,6 +8,7 @@ import { keyedTrackOf } from './model/animation';
 import { sanitizeOnion } from './paint/animation';
 import { shownLightLayers } from './store/lightTableActions';
 import * as actions from './store/actions';
+import * as anim from './store/animationActions';
 import { getState, useStore } from './store/store';
 import { controller } from './tools/controller';
 import { runCommand } from './ui/commands';
@@ -122,7 +123,7 @@ async function boot(): Promise<void> {
 
   // Automation hooks for tests and power users.
   Object.assign(window, {
-    __madPaint: { useStore, actions, engine, controller, runCommand, buildDocumentBytes, openFileBytes },
+    __madPaint: { useStore, actions, anim, engine, controller, runCommand, buildDocumentBytes, openFileBytes },
   });
   native?.ready();
 }

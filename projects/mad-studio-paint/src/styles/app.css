@@ -2459,6 +2459,189 @@
   padding: 0 3px;
 }
 
+/* Graph Editor: X red, Y green, others orange */
+.tl-graph {
+  display: flex;
+  width: max-content;
+  min-width: 100%;
+}
+
+.tl-graph-side {
+  position: sticky;
+  left: 0;
+  z-index: 3;
+  display: grid;
+  flex: 0 0 var(--name-w);
+  grid-template-columns: 1fr 40px;
+  background: var(--bg-1);
+  border-right: 1px solid var(--line);
+}
+
+.tl-graph-lists {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  padding: 4px;
+  overflow: hidden;
+}
+
+.tl-graph-view {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  height: 22px;
+  color: var(--text-dim);
+  font-size: 12px;
+}
+
+.tl-graph-view > span {
+  margin-right: 4px;
+}
+
+.tl-axis {
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius);
+  background: var(--bg-3);
+  font-weight: 700;
+  opacity: 0.4;
+}
+
+.tl-axis.on {
+  background: var(--bg-4);
+  opacity: 1;
+}
+
+.tl-graph-setting {
+  display: flex;
+  align-items: center;
+  height: 22px;
+  border-radius: var(--radius);
+  background: var(--bg-2);
+}
+
+.tl-graph-setting.on {
+  background: var(--select-row);
+}
+
+.tl-graph-setting .eye {
+  width: 22px;
+  opacity: 0.4;
+}
+
+.tl-graph-setting .eye.on {
+  opacity: 1;
+}
+
+.tl-graph-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text);
+  font-size: 12px;
+}
+
+.tl-graph-values {
+  position: relative;
+  border-left: 1px solid var(--line);
+}
+
+.tl-graph-values span {
+  position: absolute;
+  right: 4px;
+  transform: translateY(-50%);
+  color: var(--text-faint);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+
+.tl-graph-plot {
+  display: block;
+  flex: 0 0 auto;
+  background: var(--well);
+  touch-action: none;
+}
+
+.tl-graph-plot.zoom {
+  cursor: ew-resize;
+}
+
+.tl-graph-grid {
+  stroke: var(--line-soft);
+  stroke-width: 1;
+  opacity: 0.7;
+}
+
+.tl-graph-grid.minor {
+  opacity: 0.3;
+}
+
+.tl-graph-frame {
+  stroke: var(--line);
+  stroke-width: 1;
+}
+
+.tl-curve-line {
+  fill: none;
+  stroke-width: 1.8;
+}
+
+.tl-curve-ext {
+  fill: none;
+  stroke-width: 1.2;
+  stroke-dasharray: 4 4;
+  opacity: 0.55;
+}
+
+.tl-curve.dim .tl-curve-line {
+  stroke-dasharray: 5 4;
+  opacity: 0.45;
+}
+
+.tl-curve-hit {
+  fill: none;
+  stroke: transparent;
+  stroke-width: 10;
+  cursor: move;
+  pointer-events: stroke;
+}
+
+.tl-graph-key {
+  stroke-width: 1.5;
+  cursor: pointer;
+}
+
+.tl-handle-line {
+  stroke-width: 1;
+  opacity: 0.8;
+}
+
+.tl-handle {
+  stroke: #ffffff;
+  stroke-width: 1;
+  cursor: pointer;
+}
+
+.tl-graph-marquee {
+  fill: var(--accent-soft);
+  stroke: var(--accent-strong);
+  stroke-dasharray: 3 3;
+}
+
+.tl-graph-empty {
+  display: flex;
+  align-items: center;
+  padding: 0 16px;
+  background: var(--well);
+  color: var(--text-dim);
+}
+
 /* frame templates */
 
 .template-list {

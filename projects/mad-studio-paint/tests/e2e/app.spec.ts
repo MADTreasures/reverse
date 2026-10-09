@@ -2271,6 +2271,104 @@ test('keyframes record each setting: Details rows, small keyframes, selecting by
   expect(errors).toEqual([]);
 });
 
+test('Graph Editor: curves per setting, move and add keyframes on one curve, slope handles, unpair', async ({ page }) => {
+  const errors = await boot(page);
+  await page.evaluate(() => void window.__madPaint.runCommand('new'));
+  const dlg = page.getByRole('dialog', { name: 'New canvas' });
+  await dlg.getByLabel('Width').fill('400');
+  await dlg.getByLabel('Height').fill('300');
+  await dlg.getByText('Create animated illustration').click();
+  await dlg.getByLabel('Number of cels').fill('12');
+  await dlg.getByLabel('Frame rate').fill('12');
+  await dlg.getByRole('button', { name: 'OK' }).click();
+  await page.evaluate(() => window.__madPaint.useStore.setState({ timelineHeight: 300 }));
+  const ruler = (f: number) => page.getByTestId('timeline-ruler').locator('.tl-cell').nth(f - 1).click();
+  const keys = () => page.evaluate(() => window.__madPaint.useStore.getState().doc.layers[0].keys.frames);
+  await page.getByRole('button', { name: 'Add keyframe' }).click();
+  await ruler(9);
+  await selectTool(page, 'object');
+  await page.getByRole('button', { name: 'Tool Settings', exact: true }).click();
+  await page.getByRole('spinbutton', { name: 'Position X' }).fill('100');
+  // The Graph Editor shows the current track's curves; View: only the X curves.
+  await page.getByRole('button', { name: 'Graph Editor' }).click();
+  const graph = page.getByTestId('graph-editor');
+  await expect(graph.getByTestId('graph-setting')).toHaveText(['Position', 'Scale ratio', 'Rotate', 'Center of rotation', 'Opacity']);
+  await expect(graph.locator('[data-testid=graph-curve][data-ch="y"]')).toHaveCount(1);
+  await graph.getByRole('button', { name: 'Y graph' }).click();
+  await graph.getByRole('button', { name: 'Other' }).click();
+  await expect(graph.getByTestId('graph-curve')).toHaveCount(3);
+  await expect(graph.locator('[data-testid=graph-curve][data-ch="y"]')).toHaveCount(0);
+  // The eye of a setting hides its curves.
+  await graph.getByRole('button', { name: 'Hide Center of rotation' }).click();
+  await expect(graph.getByTestId('graph-curve')).toHaveCount(2);
+  const key = (f: number, ch = 'x') => graph.locator(`[data-testid=graph-key][data-frame="${f}"][data-ch="${ch}"]`);
+  const centre = async (f: number, ch = 'x') => {
+    const b = (await key(f, ch).boundingBox())!;
+    return { x: b.x + b.width / 2, y: b.y + b.height / 2 };
+  };
+  // Shift+drag moves the X keyframe of frame 9 two frames on, keeping its value; Y stays on frame 9.
+  const k9 = await centre(9);
+  await page.keyboard.down('Shift');
+  await page.mouse.move(k9.x, k9.y);
+  await page.mouse.down();
+  await page.mouse.move(k9.x + 30, k9.y + 3, { steps: 3 });
+  await page.mouse.move(k9.x + 48, k9.y + 9, { steps: 3 });
+  await page.mouse.up();
+  await page.keyboard.up('Shift');
+  let k = await keys();
+  expect(k.map((x: any) => [x.frame, Object.keys(x.values).sort().join(' ')])).toEqual([
+    [1, 'opacity pivotX pivotY rotation scaleX scaleY x y'],
+    [9, 'y'],
+    [11, 'x'],
+  ]);
+  expect(k[2].values.x).toBe(100);
+  expect(await page.evaluate(() => window.__madPaint.useStore.getState().graphSelection.map((r: any) => [r.frame, r.ch]))).toEqual([[11, 'x']]);
+  // Alt+click on the X curve at frame 5 adds a keyframe on that curve only, where it runs (40).
+  const a = await centre(1);
+  const b = await centre(11);
+  await page.keyboard.down('Alt');
+  await page.mouse.click(a.x + (b.x - a.x) * 0.4, a.y + (b.y - a.y) * 0.4);
+  await page.keyboard.up('Alt');
+  k = await keys();
+  expect(k.find((x: any) => x.frame === 5).values).toEqual({ x: 40 });
+  // Unpair handles: the keyframe shows square, and its out handle turns alone.
+  await key(5).click();
+  await page.getByRole('button', { name: 'Unpair handles' }).click();
+  await expect(key(5)).toHaveJSProperty('tagName', 'rect');
+  const out = graph.locator('[data-testid=graph-handle][data-side="out"][data-frame="5"][data-ch="x"]');
+  const ob = (await out.boundingBox())!;
+  await page.mouse.move(ob.x + ob.width / 2, ob.y + ob.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(ob.x + ob.width / 2, ob.y + ob.height / 2 - 30, { steps: 4 });
+  await page.mouse.up();
+  k = await keys();
+  const c5 = k.find((x: any) => x.frame === 5).curves.x;
+  expect(c5.broken).toBe(true);
+  expect(c5.out[1]).toBeGreaterThan(20);
+  expect(c5.in).toBeUndefined();
+  // The curve bends: between 5 and 11 it rises faster than the straight line.
+  expect(await page.evaluate(() => window.__madPaint.anim.placementNow(window.__madPaint.useStore.getState().doc.layers[0], 7).x)).toBeGreaterThan(60);
+  // Delete keyframe removes the selected point.
+  await page.getByRole('button', { name: 'Delete keyframe' }).click();
+  expect((await keys()).map((x: any) => x.frame)).toEqual([1, 9, 11]);
+  // Interpolation of one curve: hold from frame 1 on, the keyframe's own stays linear.
+  await key(1).click();
+  await page.getByTestId('timeline').getByLabel('Keyframe interpolation').selectOption('hold');
+  k = await keys();
+  expect([k[0].interp, k[0].curves.x.interp]).toEqual(['linear', 'hold']);
+  // The wheel zooms the values.
+  const before = (await centre(11)).y;
+  const plot = (await graph.getByTestId('graph-plot').boundingBox())!;
+  await page.mouse.move(plot.x + 40, plot.y + plot.height - 20);
+  await page.mouse.wheel(0, -300);
+  await expect.poll(async () => Math.round((await centre(11)).y)).not.toBe(Math.round(before));
+  // Animation > Animation curve > Graph Editor goes back to the tracks.
+  await page.evaluate(() => window.__madPaint.runCommand('graphEditor'));
+  await expect(graph).toHaveCount(0);
+  await expect(page.getByTestId('timeline-track')).toHaveCount(1);
+  expect(errors).toEqual([]);
+});
+
 test('light table: a cel and an image on the target cel, colour mode, Light table tool, saved', async ({ page }) => {
   const errors = await boot(page);
   await page.evaluate(() => void window.__madPaint.runCommand('new'));

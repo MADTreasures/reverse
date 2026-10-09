@@ -242,18 +242,36 @@ export function setInterp(keys: Keyframe[], frames: number[], interp: Interp, ch
   });
 }
 
-/** Sets a curve's slope handles at a keyframe (Graph Editor); the other side follows unless unpaired. */
-export function setHandle(keys: Keyframe[], frame: number, ch: Channel, side: 'in' | 'out', d: [number, number]): Keyframe[] {
+/** The slope handles a curve shows at a keyframe (Graph Editor): towards the keyframes before and after. */
+export function curveHandles(keys: Keyframe[], frame: number, ch: Channel): { in?: [number, number]; out?: [number, number] } {
+  const list = keysOf(keys, ch);
+  const i = list.findIndex((k) => k.frame === frame);
+  if (i < 0) return {};
+  const prev = list[i - 1];
+  const next = list[i + 1];
+  return {
+    ...(prev && curveInterp(prev, ch) !== 'hold' ? { in: segmentHandles(prev, list[i], ch).in } : {}),
+    ...(next && curveInterp(list[i], ch) !== 'hold' ? { out: segmentHandles(list[i], next, ch).out } : {}),
+  };
+}
+
+/**
+ * Sets a curve's slope handle at a keyframe (Graph Editor); unless unpaired, the other side turns to
+ * point the opposite way (keeping its reach; `other` is the handle it shows now).
+ */
+export function setHandle(keys: Keyframe[], frame: number, ch: Channel, side: 'in' | 'out', d: [number, number], other?: [number, number]): Keyframe[] {
   return keys.map((k) => {
     if (k.frame !== frame || k.values[ch] === undefined) return k;
     const h = { ...(k.curves?.[ch] ?? {}) };
     h[side] = d;
     if (!h.broken) {
-      // Paired: the other handle points the opposite way (its length stays).
-      const other = side === 'in' ? 'out' : 'in';
-      const len = Math.hypot(...(h[other] ?? d));
-      const dl = Math.hypot(d[0], d[1]) || 1;
-      h[other] = [(-d[0] / dl) * len, (-d[1] / dl) * len];
+      const o = side === 'in' ? 'out' : 'in';
+      const cur = h[o] ?? other;
+      // Paired: the same slope on the other side, as far along the time axis as before.
+      const reach = Math.abs(cur?.[0] ?? d[0]) || Math.abs(d[0]) || 1;
+      const slope = d[0] ? d[1] / d[0] : 0;
+      const sign = side === 'in' ? 1 : -1;
+      h[o] = [sign * reach, sign * reach * slope];
     }
     // A handle bends the stretch: linear becomes smooth (Bézier).
     if ((h.interp ?? k.interp) === 'linear') h.interp = 'smooth';
@@ -271,15 +289,62 @@ export function toggleUnpaired(keys: Keyframe[], frame: number, ch: Channel): Ke
   });
 }
 
-/** Sets a curve's value at a keyframe (Graph Editor), and moves it to another frame. */
-export function moveCurvePoint(keys: Keyframe[], frame: number, ch: Channel, toFrame: number, value: number): Keyframe[] {
-  const k = keys.find((x) => x.frame === frame);
-  if (!k || k.values[ch] === undefined) return keys;
-  const handles = k.curves?.[ch];
-  let out = toFrame === frame ? keys : removeChannels(keys, frame, [ch]);
-  out = recordKey(out, Math.max(1, Math.round(toFrame)), { [ch]: value }, curveInterp(k, ch));
-  if (handles) out = out.map((x) => (x.frame === Math.max(1, Math.round(toFrame)) ? { ...x, curves: { ...(x.curves ?? {}), [ch]: handles } } : x));
+/** A point of a curve (Graph Editor): a keyframe's value of one channel. */
+export interface CurvePoint {
+  frame: number;
+  ch: Channel;
+}
+
+/**
+ * Moves points of curves (Graph Editor) to new frames and values: `to` gives each point's place.
+ * The points keep their interpolation and slope handles; points already where they land give way.
+ */
+export function placeCurvePoints(keys: Keyframe[], points: readonly CurvePoint[], to: (p: CurvePoint, value: number) => { frame: number; value: number }): Keyframe[] {
+  const moving = points.flatMap((p) => {
+    const k = keys.find((x) => x.frame === p.frame);
+    const value = k?.values[p.ch];
+    if (!k || value === undefined) return [];
+    const target = to(p, value);
+    return [{ ch: p.ch, from: p.frame, frame: Math.max(1, Math.round(target.frame)), value: clampChannel(p.ch, target.value), interp: curveInterp(k, p.ch), handles: k.curves?.[p.ch] }];
+  });
+  let out = keys;
+  for (const m of moving) out = removeChannels(out, m.from, [m.ch]);
+  for (const m of moving) {
+    out = recordKey(out, m.frame, { [m.ch]: m.value }, m.interp);
+    out = out.map((x) => {
+      if (x.frame !== m.frame) return x;
+      // The curve's own interpolation, where it differs from the keyframe's.
+      const h: CurveHandles = { ...(m.handles ?? {}) };
+      delete h.interp;
+      if (m.interp !== x.interp) h.interp = m.interp;
+      const curves = { ...(x.curves ?? {}) };
+      if (Object.keys(h).length) curves[m.ch] = h;
+      else delete curves[m.ch];
+      const next: Keyframe = { frame: x.frame, interp: x.interp, values: x.values };
+      if (Object.keys(curves).length) next.curves = curves;
+      return next;
+    });
+  }
   return out;
+}
+
+/** Moves points of curves by `frames` and by `value(ch)` (Graph Editor drag). */
+export const moveCurvePoints = (keys: Keyframe[], points: readonly CurvePoint[], frames: number, value: (ch: Channel) => number): Keyframe[] =>
+  placeCurvePoints(keys, points, (p, v) => ({ frame: p.frame + frames, value: v + value(p.ch) }));
+
+/**
+ * Stretches points of curves (Graph Editor, Ctrl+Shift drag): in time from the leftmost one by
+ * `sx`, in value about 0 by `sy`.
+ */
+export function scaleCurvePoints(keys: Keyframe[], points: readonly CurvePoint[], sx: number, sy: number): Keyframe[] {
+  const left = Math.min(...points.map((p) => p.frame));
+  return placeCurvePoints(keys, points, (p, v) => ({ frame: left + (p.frame - left) * sx, value: v * sy }));
+}
+
+/** Adds a point to one curve at a frame, on the curve as it runs there (Graph Editor: Alt+click). */
+export function addCurvePoint(keys: Keyframe[], ch: Channel, frame: number, interp: Interp): Keyframe[] {
+  const v = channelAt(keys, ch, frame);
+  return v === undefined ? keys : recordKey(keys, frame, { [ch]: v }, interp);
 }
 
 // ------------------------------------------------------------------ placement maths
@@ -374,10 +439,10 @@ const interpOfRaw = (v: unknown): Interp => (v === 'hold' || v === 'smooth' ? v 
 const pair = (v: unknown): [number, number] | undefined =>
   Array.isArray(v) && v.length === 2 && v.every((x) => typeof x === 'number' && Number.isFinite(x)) ? [Math.max(-1e6, Math.min(1e6, v[0])), Math.max(-1e6, Math.min(1e6, v[1]))] : undefined;
 
-function sanitizeValue(c: Channel, v: number): number {
+/** A channel's value within its limits (opacity and volume 0..1; a scale of 0 would make the layer vanish for good). */
+export function clampChannel(c: Channel, v: number): number {
   const [lo, hi] = LIMITS[c];
   const x = Math.min(hi, Math.max(lo, v));
-  // A scale of 0 would make the layer vanish for good.
   return (c === 'scaleX' || c === 'scaleY') && Math.abs(x) < 0.001 ? 0.001 * (Math.sign(x) || 1) : x;
 }
 
@@ -391,7 +456,7 @@ export function sanitizeKeyframe(raw: unknown): Keyframe | null {
   const values: Partial<Record<Channel, number>> = {};
   for (const c of CHANNELS) {
     const v = source[c];
-    if (typeof v === 'number' && Number.isFinite(v)) values[c] = sanitizeValue(c, v);
+    if (typeof v === 'number' && Number.isFinite(v)) values[c] = clampChannel(c, v);
   }
   if (Object.keys(values).length === 0) return null;
   const curves: Partial<Record<Channel, CurveHandles>> = {};

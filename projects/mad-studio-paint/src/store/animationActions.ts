@@ -37,10 +37,12 @@ import {
   removeChannels,
   restPlacement,
   setInterp,
+  toggleUnpaired,
   TRANSFORM_GROUPS,
   withSettings,
   type Channel,
   type ChannelGroup,
+  type CurvePoint,
   type Interp,
   type Keyframe,
   type Placement,
@@ -49,7 +51,7 @@ import {
 import { ensureSurface } from '../engine/surfaces';
 import { startSound, stopSound } from '../engine/sounds';
 import * as actions from './actions';
-import { getState, setState, type ClipRef, type KeyRef, type PaintState } from './store';
+import { getState, setState, type ClipRef, type CurveRef, type KeyRef, type PaintState } from './store';
 
 /** A track's content: clips, cel assignments, keyframes (placements, or volumes on audio tracks). */
 type Content = TrackContent<Timed>;
@@ -703,6 +705,10 @@ function keyTargets(s: PaintState): KeyTarget[] {
 /** Delete keyframe: the selected keyframes (on a property row: that property only), or the one at the current frame. */
 export function deleteKeyframes(): void {
   const s = getState();
+  if (s.graphEditor && s.graphSelection.length) {
+    deleteCurvePoints();
+    return;
+  }
   const targets = keyTargets(s);
   if (targets.length === 0) {
     setState({ hint: 'Select a keyframe in the Timeline palette' });
@@ -736,6 +742,10 @@ export function deleteAllKeyframes(): void {
 export function setKeyInterp(interp: Interp): void {
   const s = getState();
   setState({ keyInterp: interp });
+  if (s.graphEditor && s.graphSelection.length) {
+    editCurvePoints(`Switch keyframe to ${interp} interpolation`, (keys, points) => points.reduce((out, p) => setInterp(out, [p.frame], interp, [p.ch]), keys));
+    return;
+  }
   const targets = keyTargets(s);
   if (targets.length === 0) return;
   actions.changeDoc(`Switch keyframe to ${interp} interpolation`, (doc) => {
@@ -807,9 +817,11 @@ export function toggleTransformDetails(id: Id): void {
   setState((s) => ({ transformDetails: s.transformDetails.includes(id) ? s.transformDetails.filter((x) => x !== id) : [...s.transformDetails, id] }));
 }
 
+const NO_KEYS: Keyframe[] = [];
+
 /** The keyframes of a track (for the Timeline palette and the Graph Editor). */
 export function trackKeys(id: Id, s: PaintState = getState()): Keyframe[] {
-  return keysOfTrack(s.doc, id)?.list ?? [];
+  return keysOfTrack(s.doc, id)?.list ?? NO_KEYS;
 }
 
 /** Changes a track's keyframes (Graph Editor edits), one undo step per `key`. */
@@ -822,6 +834,55 @@ export function editTrackKeys(id: Id, fn: (keys: Keyframe[]) => Keyframe[], labe
     },
     key ? { key } : {},
   );
+}
+
+// ------------------------------------------------------------------ Graph Editor
+
+/** Timeline palette / Animation > Animation curve > Graph Editor. */
+export function toggleGraphEditor(): void {
+  setState((s) => ({ graphEditor: !s.graphEditor, graphSelection: [] }));
+}
+
+const sameRef = (a: CurveRef, b: CurveRef) => a.track === b.track && a.frame === b.frame && a.ch === b.ch;
+
+/** Selects points of curves (`add`: to the selection; `toggle`: in or out; `remove`: out). */
+export function selectCurvePoints(refs: CurveRef[], mode: 'set' | 'add' | 'toggle' | 'remove' = 'set'): void {
+  const cur = getState().graphSelection;
+  const rest = cur.filter((c) => !refs.some((r) => sameRef(r, c)));
+  let next: CurveRef[];
+  if (mode === 'set') next = refs;
+  else if (mode === 'add') next = [...rest, ...refs];
+  else if (mode === 'remove') next = rest;
+  else next = [...rest, ...refs.filter((r) => !cur.some((c) => sameRef(r, c)))];
+  setState({ graphSelection: next });
+}
+
+/** Changes the selected points' curves, track by track, as one undo step. */
+function editCurvePoints(label: string, fn: (keys: Keyframe[], points: CurvePoint[]) => Keyframe[]): void {
+  const s = getState();
+  const tracks = [...new Set(s.graphSelection.map((r) => r.track))];
+  actions.changeDoc(label, (doc) => {
+    for (const id of tracks) {
+      const k = keysOfTrack(doc, id);
+      if (k) k.set(fn(k.list, s.graphSelection.filter((r) => r.track === id)));
+    }
+  });
+}
+
+/** Delete keyframe in the Graph Editor: the selected points (other curves keep their keyframes). */
+export function deleteCurvePoints(): void {
+  if (getState().graphSelection.length === 0) return;
+  editCurvePoints('Delete keyframe', (keys, points) => points.reduce((out, p) => removeChannels(out, p.frame, [p.ch]), keys));
+  setState({ graphSelection: [] });
+}
+
+/** Animation > Animation curve > Unpair handles: the selected points' two slope handles move separately (again: reset). */
+export function toggleUnpairHandles(): void {
+  if (getState().graphSelection.length === 0) {
+    setState({ hint: 'Select a keyframe in the Graph Editor' });
+    return;
+  }
+  editCurvePoints('Unpair handles', (keys, points) => points.reduce((out, p) => toggleUnpaired(out, p.frame, p.ch), keys));
 }
 
 /** Animation > Edit track > Edit layers with active keyframes: the current track is drawn as it is and can be drawn on. */

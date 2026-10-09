@@ -488,6 +488,28 @@ const paths: Record<string, ReactNode> = {
   keyDelete: <path d="M8 4.5l4.5 4.5L8 13.5 3.5 9zM12.5 12.5l4 4M16.5 12.5l-4 4" />,
   keyEnable: <path d="M10 3l7 7-7 7-7-7zM10 7l3 3-3 3-3-3z" />,
   keyEdit: <path d="M7 3.5l4 4-4 4-4-4zM10.5 16.5l1-3.5 5-5 2.5 2.5-5 5z" />,
+  graph: (
+    <>
+      <path d="M3 3v14h14" />
+      <path d="M5.5 14c2.5 0 3-7.5 5.5-7.5s3 4.5 5.5 4.5" />
+    </>
+  ),
+  dragZoom: (
+    <>
+      <circle cx="8.5" cy="7.5" r="4.2" />
+      <path d="M11.5 10.5l2.3 2.3M3 16.5h14M3 16.5l2-1.6M3 16.5l2 1.6M17 16.5l-2-1.6M17 16.5l-2 1.6" />
+    </>
+  ),
+  snapX: <path d="M6 3v14M10 3v14M14 3v14M3 10h14" />,
+  snapY: <path d="M3 6h14M3 10h14M3 14h14M10 3v14" />,
+  unpair: (
+    <>
+      <path d="M3 15.5 7.5 9.5M12.5 9.5l4.5 6" />
+      <rect x="8" y="6.5" width="4" height="4" />
+      <circle cx="3" cy="15.5" r="1.3" />
+      <circle cx="17" cy="15.5" r="1.3" />
+    </>
+  ),
   camera: (
     <>
       <rect x="2.5" y="6" width="11" height="9" rx="1.2" />

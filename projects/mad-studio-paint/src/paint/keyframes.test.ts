@@ -7,7 +7,9 @@ import {
   ease,
   invert,
   isRest,
-  moveCurvePoint,
+  addCurvePoint,
+  curveHandles,
+  moveCurvePoints,
   moveKeys,
   movePivot,
   placedCorners,
@@ -18,6 +20,7 @@ import {
   removeChannels,
   restPlacement,
   sanitizeKeyTrack,
+  scaleCurvePoints,
   segmentHandles,
   setHandle,
   setInterp,
@@ -125,15 +128,42 @@ describe('keyframes', () => {
     expect(toggleUnpaired(broken, 11, 'x')[1].curves!.x).toEqual({ interp: 'smooth' });
   });
 
-  it('moves a curve point to another frame and value (Graph Editor)', () => {
-    const keys = [key(1, { x: 0, y: 5 }), key(11, { x: 100 })];
-    const moved = moveCurvePoint(keys, 1, 'x', 3, 20);
+  it('moves, stretches and adds points of single curves (Graph Editor)', () => {
+    const keys = [key(1, { x: 0, y: 5 }), key(11, { x: 100 }, 'smooth')];
+    // The x point of frame 1 moves two frames on and up by 20; y stays.
+    const moved = moveCurvePoints(keys, [{ frame: 1, ch: 'x' }], 2, () => 20);
     expect(moved).toEqual([
       { frame: 1, interp: 'linear', values: { y: 5 } },
       { frame: 3, interp: 'linear', values: { x: 20 } },
-      { frame: 11, interp: 'linear', values: { x: 100 } },
+      { frame: 11, interp: 'smooth', values: { x: 100 } },
     ]);
-    expect(moveCurvePoint(keys, 1, 'rotation', 3, 20)).toBe(keys);
+    // A point moved into a keyframe with another interpolation keeps its own.
+    const into = moveCurvePoints(keys, [{ frame: 1, ch: 'y' }], 10, () => 0);
+    expect(into[1]).toEqual({ frame: 11, interp: 'smooth', values: { x: 100, y: 5 }, curves: { y: { interp: 'linear' } } });
+    // Moving every point of a curve moves the whole curve; values keep their limits.
+    const fade = [key(1, { opacity: 0.2 }), key(5, { opacity: 0.9 })];
+    expect(moveCurvePoints(fade, [{ frame: 1, ch: 'opacity' }, { frame: 5, ch: 'opacity' }], 1, () => 0.5).map((k) => [k.frame, k.values.opacity])).toEqual([
+      [2, 0.7],
+      [6, 1],
+    ]);
+    // Stretched in time from the leftmost point, in value about 0.
+    const stretched = scaleCurvePoints(keys, [{ frame: 1, ch: 'x' }, { frame: 11, ch: 'x' }], 2, 0.5);
+    expect(stretched.filter((k) => k.values.x !== undefined).map((k) => [k.frame, k.values.x])).toEqual([
+      [1, 0],
+      [21, 50],
+    ]);
+    // Alt+click adds a point on the curve as it runs there.
+    expect(addCurvePoint(keys, 'x', 6, 'hold').find((k) => k.frame === 6)).toEqual({ frame: 6, interp: 'hold', values: { x: 50 } });
+    expect(addCurvePoint(keys, 'rotation', 6, 'hold')).toBe(keys);
+  });
+
+  it('shows the slope handles towards the neighbouring keyframes', () => {
+    const keys = [key(1, { x: 0 }), key(4, { x: 30 }, 'hold'), key(10, { x: 0 })];
+    expect(curveHandles(keys, 1, 'x')).toEqual({ out: [1, 10] });
+    // Hold after frame 4: no out handle there.
+    expect(curveHandles(keys, 4, 'x')).toEqual({ in: [-1, -10] });
+    expect(curveHandles(keys, 10, 'x')).toEqual({});
+    expect(curveHandles(keys, 7, 'x')).toEqual({});
   });
 
   it('places about the centre of rotation', () => {
