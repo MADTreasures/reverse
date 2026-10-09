@@ -16,7 +16,8 @@ import { idbDelete, idbGet, idbSet } from './idb';
 import { docLightImages } from '../paint/lightTable';
 import { clearSounds, mixSound, setSoundBytes, soundBytes } from '../engine/sounds';
 import { hasSound, soundMix } from '../model/animation';
-import { usedSoundFiles } from '../store/soundActions';
+import { usedMovieFiles, usedSoundFiles } from '../store/soundActions';
+import { clearMovies, movieBytes, prepareMovieFrame, setMovieBytes } from '../engine/movies';
 // Type only: the PSD code (and ag-psd) loads when a PSD is opened or saved.
 import type { Pixels } from './psd';
 import { areaRect, safeRect, type DrawingArea, type FrameRect, type OutputFrame } from '../paint/outputFrame';
@@ -59,6 +60,19 @@ export function renderMerged(
   return out;
 }
 
+/** Waits until the movie layers' pictures at a timeline frame are decoded (exports draw exact pictures). */
+async function prepareMovies(frame: number): Promise<void> {
+  const { doc } = getState();
+  const fps = doc.timeline?.fps ?? 24;
+  const waits: Promise<void>[] = [];
+  for (const l of flatten(doc.layers)) {
+    if (l.kind !== 'movie') continue;
+    const clip = l.clips.find((c) => frame >= c.start && frame <= c.end);
+    if (clip) waits.push(prepareMovieFrame(l.movie, (clip.offset ?? 0) + (frame - clip.start) / fps));
+  }
+  await Promise.all(waits);
+}
+
 /** Export frames: the overflow and output frames in black, the title-safe area in grey. */
 function drawExportFrameLines(ctx: CanvasRenderingContext2D, f: OutputFrame): void {
   ctx.save();
@@ -89,9 +103,17 @@ export async function buildDocumentBytes(): Promise<Uint8Array> {
     const b = soundBytes(f.id);
     if (b) sounds.set(f.id, b.bytes);
   }
+  // The movie files the movie layers show.
+  const shownMovies = usedMovieFiles(doc);
+  const movieFiles = (doc.movies ?? []).filter((m) => shownMovies.has(m.id));
+  const movies = new Map<Id, Uint8Array>();
+  for (const m of movieFiles) {
+    const b = movieBytes(m.id);
+    if (b) movies.set(m.id, b.bytes);
+  }
   const previewScale = Math.min(1, 512 / Math.max(doc.width, doc.height));
   const preview = await canvasToBytes(renderMerged({ paper: true, skipDraft: true, scale: previewScale }));
-  return packDocument({ doc: { ...doc, sound: files.length ? { files } : undefined }, activeLayerId, layers, sounds, preview });
+  return packDocument({ doc: { ...doc, sound: files.length ? { files } : undefined, movies: movieFiles.length ? movieFiles : undefined }, activeLayerId, layers, sounds, movies, preview });
 }
 
 export async function saveDocument(saveAs = false): Promise<boolean> {
@@ -133,6 +155,14 @@ async function loadFromBytes(data: Uint8Array): Promise<{ doc: PaintDocument; im
   for (const f of file.doc.sound?.files ?? []) {
     const bytes = file.sounds?.get(f.id);
     if (bytes) setSoundBytes(f.id, bytes, f.type);
+  }
+  clearMovies();
+  for (const m of file.doc.movies ?? []) {
+    const bytes = file.movies?.get(m.id);
+    if (!bytes) continue;
+    setMovieBytes(m.id, bytes, m.type);
+    // Its sound plays like an audio clip.
+    setSoundBytes(m.id, bytes, m.type);
   }
   const images = new Map<Id, HTMLCanvasElement>();
   await Promise.all(
@@ -315,7 +345,8 @@ export async function exportPsd(opts: { skipDraft: boolean }): Promise<boolean> 
       frame: getState().frame,
       composite: pixelsOf(renderMerged({ paper: true, skipDraft: opts.skipDraft })),
       skipDraft: opts.skipDraft,
-      layerPixels: (l) => surface(l.id),
+      // A movie layer: its picture at the current frame.
+      layerPixels: (l) => (l.kind === 'movie' ? pixelsOf(engine.compositor.layerImage(doc, { ...l, mask: undefined, effects: undefined }, { frame: getState().frame })) : surface(l.id)),
       bakedPixels: (l) => pixelsOf(engine.compositor.layerImage(doc, l, { skipDraft: opts.skipDraft })),
       maskPixels: (m) => surface(m.id),
       frameShapes,
@@ -388,9 +419,10 @@ export async function exportAnimation(o: AnimationExportOptions): Promise<boolea
     const scale = o.width / area.w;
     // Each timeline frame is drawn once, even when it is shown several times.
     const drawn = new Map<number, HTMLCanvasElement>();
-    const draw = (f: number) => {
+    const draw = async (f: number) => {
       let c = drawn.get(f);
       if (!c) {
+        await prepareMovies(f);
         c = renderMerged({ paper: !transparent, skipDraft: !o.drafts, scale, frame: f, camera: o.camera, area, frameLines: o.format === 'sequence' && o.frameLines });
         if (!transparent && !doc.paper.visible) c = onWhite(c);
         drawn.set(f, c);
@@ -406,13 +438,14 @@ export async function exportAnimation(o: AnimationExportOptions): Promise<boolea
       const ext = o.sequence.type === 'jpeg' ? 'jpg' : 'png';
       const names = sequenceNames(frames.length, { ...o.sequence, start: o.sequence.startNumber, ext });
       const files = [];
-      for (let i = 0; i < frames.length; i++) files.push({ name: names[i], data: await canvasToBytes(draw(frames[i]), o.sequence.type === 'jpeg' ? 'image/jpeg' : 'image/png', 0.92) });
+      for (let i = 0; i < frames.length; i++) files.push({ name: names[i], data: await canvasToBytes(await draw(frames[i]), o.sequence.type === 'jpeg' ? 'image/jpeg' : 'image/png', 0.92) });
       bytes = zipSequence(files);
       name = `${base}.zip`;
       filter = { name: 'Image sequence (ZIP)', extensions: ['zip'] };
       mime = 'application/zip';
     } else {
-      const pixels = frames.map((f) => pixelsOf(draw(f)));
+      const pixels = [];
+      for (const f of frames) pixels.push(pixelsOf(await draw(f)));
       if (o.format === 'gif') {
         bytes = encodeGif(pixels, { delays: frameDelays(pixels.length, o.fps, 10), plays: o.plays, transparent, dither: o.dither });
         name = `${base}.gif`;
@@ -472,8 +505,11 @@ export async function exportMovie(o: MovieOptions, progress?: (done: number, tot
     const scale = w / area.w;
     // Frames shown several times in a row are drawn once.
     let last: { frame: number; canvas: HTMLCanvasElement } | null = null;
-    const render = (frame: number) => {
-      if (last?.frame !== frame) last = { frame, canvas: renderMerged({ paper: true, skipDraft: true, scale, frame, camera: o.camera, area }) };
+    const render = async (frame: number) => {
+      if (last?.frame !== frame) {
+        await prepareMovies(frame);
+        last = { frame, canvas: renderMerged({ paper: true, skipDraft: true, scale, frame, camera: o.camera, area }) };
+      }
       return last.canvas;
     };
     const bytes = await encodeMovie({

@@ -108,7 +108,7 @@ export interface MovieJob {
   frames: number[];
   channels: number;
   /** A movie frame's picture (any size; drawn to fit). */
-  render: (timelineFrame: number) => HTMLCanvasElement;
+  render: (timelineFrame: number) => HTMLCanvasElement | Promise<HTMLCanvasElement>;
   /** The sound mix (null: none). */
   mix: () => Promise<AudioBuffer | null>;
   progress?: (done: number, total: number) => void;
@@ -124,15 +124,16 @@ async function encodeVideo(job: MovieJob): Promise<VideoTrack> {
   canvas.height = h;
   const ctx = canvas.getContext('2d')!;
   ctx.imageSmoothingQuality = 'high';
-  const draw = (f: number) => {
+  const draw = async (f: number) => {
+    const picture = await job.render(f);
     ctx.fillStyle = '#ffffff';
     ctx.fillRect(0, 0, w, h);
-    ctx.drawImage(job.render(f), 0, 0, w, h);
+    ctx.drawImage(picture, 0, 0, w, h);
   };
   const samples: Sample[] = [];
   if (job.codecs.video === 'jpeg') {
     for (let i = 0; i < job.frames.length; i++) {
-      draw(job.frames[i]);
+      await draw(job.frames[i]);
       const blob = await new Promise<Blob>((res, rej) => canvas.toBlob((b) => (b ? res(b) : rej(new Error('JPEG encoding failed'))), 'image/jpeg', 0.92));
       samples.push({ data: new Uint8Array(await blob.arrayBuffer()), duration: 100, sync: true });
       job.progress?.(i + 1, job.frames.length);
@@ -158,7 +159,7 @@ async function encodeVideo(job: MovieJob): Promise<VideoTrack> {
   const frameUs = 1e6 / fps;
   for (let i = 0; i < job.frames.length; i++) {
     if (failure) throw failure;
-    draw(job.frames[i]);
+    await draw(job.frames[i]);
     const frame = new VideoFrame(canvas, { timestamp: Math.round(i * frameUs), duration: Math.round(frameUs) });
     // A key frame every two seconds.
     encoder.encode(frame, { keyFrame: i % Math.max(1, fps * 2) === 0 });

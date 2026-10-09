@@ -4,11 +4,12 @@
  * volume and volume keyframes.
  */
 import { isAnimationFolder, tracksOf } from '../model/animation';
-import { createAudioLayer, findLayer, flatten, insertAbove } from '../model/layers';
+import { createAudioLayer, createMovieLayer, findLayer, flatten, insertAbove } from '../model/layers';
 import type { AudioLayer, Id, Layer, PaintDocument } from '../model/types';
 import { pasteClip } from '../paint/clips';
 import { newSoundId, setVolumeKey, volumeAt } from '../paint/sound';
 import { decodeBytes, setSoundBytes } from '../engine/sounds';
+import { probeMovie, setMovieBytes } from '../engine/movies';
 import { toast } from '../ui/overlays';
 import * as actions from './actions';
 import { activeAudio } from './animationActions';
@@ -24,8 +25,8 @@ const nextName = (layers: Layer[]) => {
   for (let n = 1; ; n++) if (!used.has(`Audio ${n}`)) return `Audio ${n}`;
 };
 
-/** Puts a new audio layer above the current layer (never inside an animation folder: above its track). */
-function insertAudio(doc: PaintDocument, layer: AudioLayer, activeId: Id): void {
+/** Puts a new audio or movie layer above the current layer (never inside an animation folder: above its track). */
+function insertAudio(doc: PaintDocument, layer: Layer, activeId: Id): void {
   const track = tracksOf(doc.layers, activeId)[0];
   if (track && isAnimationFolder(track)) insertAbove(doc.layers, layer, track.id);
   else actions.insertNew(doc, layer, activeId);
@@ -139,4 +140,44 @@ export function deleteSoundTrack(id: string | null = activeSoundTrack()?.id ?? n
 /** The sound files the audio layers of a document play (others are not saved). */
 export function usedSoundFiles(doc: PaintDocument): Set<string> {
   return new Set(audioLayers(doc.layers).flatMap((l) => l.clips.map((c) => c.sound).filter((x): x is string => Boolean(x))));
+}
+
+/**
+ * File > Import > Movie: a movie layer above the current layer, its clip from the current frame on
+ * as long as the movie lasts; its sound plays with it. Needs an enabled timeline.
+ */
+export async function importMovie(file: Blob, name: string): Promise<boolean> {
+  const s = getState();
+  const t = s.doc.timeline;
+  if (!t?.enabled) {
+    toast('Movies can only be imported while the timeline is enabled (Animation > Timeline)', 'error');
+    return false;
+  }
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  const type = file.type && /^video\//.test(file.type) ? file.type : /\.mov$/i.test(name) ? 'video/quicktime' : /\.webm$/i.test(name) ? 'video/webm' : 'video/mp4';
+  const info = await probeMovie(bytes, type);
+  if (!info) {
+    toast(`${name} is not a movie this system can play`, 'error');
+    return false;
+  }
+  const id = newSoundId('mov');
+  setMovieBytes(id, bytes, type);
+  // The movie's sound (when it has one) plays like an audio clip.
+  setSoundBytes(id, bytes, type);
+  const frame = getState().frame;
+  const length = Math.max(1, Math.ceil(info.duration * t.fps));
+  const label = name.replace(/\.[^.]+$/, '').slice(0, 120) || 'Movie';
+  const layer = createMovieLayer(label, id, { clips: [{ start: frame, end: frame + length - 1, offset: 0 }] });
+  actions.changeDoc('Import movie', (doc, st) => {
+    doc.movies = [...(doc.movies ?? []), { id, name: label, type, duration: info.duration, width: info.width, height: info.height }];
+    insertAudio(doc, layer, st.activeLayerId);
+    return layer.id;
+  });
+  setState({ timelineShown: true, clipSelection: [{ track: layer.id, start: frame }], keySelection: [] });
+  return true;
+}
+
+/** The movie files the movie layers of a document show (others are not saved). */
+export function usedMovieFiles(doc: PaintDocument): Set<string> {
+  return new Set(flatten(doc.layers).flatMap((l) => (l.kind === 'movie' ? [l.movie] : [])));
 }

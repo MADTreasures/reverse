@@ -6,13 +6,17 @@
 import { nativeOp } from '../model/blend';
 import { hexToRgb } from '../model/color';
 import { celAt, onionCels, onionOpacity, tintOnion, type OnionSkin } from '../paint/animation';
-import { maskTrackId, restOf } from '../model/animation';
+import { maskTrackId, outputRect, restOf } from '../model/animation';
+import { movieFrame } from './movies';
 import { inClips } from '../paint/clips';
 import { cameraMatrix, invert, isRest, placementAt, placementMatrix, placedCorners, restPlacement, type Placement } from '../paint/keyframes';
 import type { Affine } from '../paint/rulers';
 import { lightMatrix, type LightLayer } from '../paint/lightTable';
 import { clipGroups, findLayer, flatten, isDrawn } from '../model/layers';
-import type { BlendMode, CorrectionLayer, DrawnLayer, FolderBlendMode, FolderLayer, GradientLayer, Id, Layer, PaintDocument, RasterLayer, TextLayer, VectorLayer } from '../model/types';
+import type { BlendMode, CorrectionLayer, DrawnLayer, FolderBlendMode, FolderLayer, GradientLayer, Id, Layer, MovieLayer, PaintDocument, RasterLayer, TextLayer, VectorLayer } from '../model/types';
+
+/** Layers with pixels of their own (painted, rendered from content, or a movie's pictures). */
+type PixelLayer = RasterLayer | VectorLayer | TextLayer | GradientLayer | MovieLayer;
 import { anyEffect, applyEdge, applyLayerColor, applyWatercolorEdge, effectReach } from '../paint/effects';
 import { applyDropShadow, applyInnerGlow, applyInnerShadow, applyOuterGlow } from '../paint/styles';
 import { inflate, intersect, union, type Rect } from '../paint/rect';
@@ -129,6 +133,8 @@ export class Compositor {
   private inLight = false;
   /** Masks placed by their keyframes, per layer. */
   private placedMasks = new Map<Id, HTMLCanvasElement>();
+  /** Movie layers: the picture drawn last, at document size. */
+  private moviePictures = new Map<Id, { picture: HTMLCanvasElement; canvas: HTMLCanvasElement }>();
   /** The masks of the composition under way (each placed once). */
   private masksNow = new Map<Id, HTMLCanvasElement | null>();
 
@@ -267,6 +273,41 @@ export class Compositor {
     return out;
   }
 
+  /**
+   * A layer's own pixels at document size: its surface, or for a movie layer the movie's picture
+   * at the frame, fitted into the output frame.
+   */
+  private pixels(layer: PixelLayer): HTMLCanvasElement | null {
+    if (layer.kind !== 'movie') return getSurface(layer.id) ?? null;
+    const doc = this.doc;
+    const fps = doc?.timeline?.fps ?? 24;
+    // Without a timeline the movie shows where its first clip starts.
+    const frame = this.anim.frame ?? layer.clips[0]?.start ?? 1;
+    const clip = layer.clips.find((c) => frame >= c.start && frame <= c.end);
+    const file = doc?.movies?.find((m) => m.id === layer.movie);
+    if (!clip || !file || !doc) return null;
+    const time = (clip.offset ?? 0) + (frame - clip.start) / fps;
+    if (time < 0 || time > file.duration) return null;
+    const ahead = [1, 2, 3].map((n) => time + n / fps).filter((t) => t <= file.duration && frame + Math.round((t - time) * fps) <= clip.end);
+    const picture = movieFrame(layer.movie, time, ahead);
+    if (!picture) return null;
+    const known = this.moviePictures.get(layer.id);
+    const sized = known && known.canvas.width === doc.width && known.canvas.height === doc.height;
+    if (sized && known.picture === picture) return known.canvas;
+    const canvas = sized ? known.canvas : createCanvas(doc.width, doc.height);
+    const ctx = ctx2d(canvas);
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    // Fitted into the output frame, centred.
+    const r = outputRect(doc);
+    const k = Math.min(r.w / file.width, r.h / file.height);
+    const w = file.width * k;
+    const h = file.height * k;
+    ctx.imageSmoothingQuality = 'high';
+    ctx.drawImage(picture, r.x + (r.w - w) / 2, r.y + (r.h - h) / 2, w, h);
+    this.moviePictures.set(layer.id, { picture, canvas });
+    return canvas;
+  }
+
   /** How a track is placed at the frame by its keyframes, or seen through its 2D camera; null: as it is. */
   private placed(layer: Layer): Placed | null {
     if (this.anim.frame === null || this.inCel > 0 || layer.kind === 'correction') return null;
@@ -279,14 +320,14 @@ export class Compositor {
   }
 
   /** A placed layer's pixels (mask and effects applied, then moved; its keyframe opacity too), valid inside `r`. */
-  private placedContent(layer: RasterLayer | VectorLayer | TextLayer | GradientLayer | FolderLayer, xf: Placed, r: Rect, opts: ComposeOptions): Ctx {
+  private placedContent(layer: PixelLayer | FolderLayer, xf: Placed, r: Rect, opts: ComposeOptions): Ctx {
     const out = this.pool.acquire(r);
     // Only the part of the layer that lands in `r` is needed.
     const src = this.sourceOf(xf.m, r);
     if (!src) return out;
     const plain = layer.kind !== 'folder' && !this.maskOf(layer) && !hasEffects(layer);
     const c = plain ? null : this.content(layer, src, opts);
-    const source = c ? c.canvas : getSurface(layer.id);
+    const source = c ? c.canvas : layer.kind === 'folder' ? null : this.pixels(layer);
     if (source) this.drawPlaced(out, source, xf.m, xf.opacity);
     if (c) this.pool.release(c);
     return out;
@@ -375,8 +416,8 @@ export class Compositor {
       this.pool.release(c);
       return;
     }
-    if (layer.kind === 'raster' || layer.kind === 'vector' || layer.kind === 'text' || layer.kind === 'gradient') {
-      const s = getSurface(layer.id);
+    if (layer.kind === 'raster' || layer.kind === 'vector' || layer.kind === 'text' || layer.kind === 'gradient' || layer.kind === 'movie') {
+      const s = this.pixels(layer);
       if (!s) return;
       if (!this.maskOf(layer) && !hasEffects(layer)) {
         paint(target, s, r, layer.opacity, layer.blend);
@@ -414,11 +455,11 @@ export class Compositor {
    * valid inside `r`. Border effects need the pixels around `r`, so they are drawn wider. The
    * caller releases the canvas.
    */
-  private content(layer: RasterLayer | VectorLayer | TextLayer | GradientLayer | FolderLayer, r: Rect, opts: ComposeOptions): Ctx {
+  private content(layer: PixelLayer | FolderLayer, r: Rect, opts: ComposeOptions): Ctx {
     const rr = intersect(inflate(r, effectReach(layer.effects)), this.bounds) ?? r;
     const ctx = this.pool.acquire(rr);
     if (layer.kind !== 'folder') {
-      const s = getSurface(layer.id);
+      const s = this.pixels(layer);
       if (s) ctx.drawImage(s, 0, 0);
     } else {
       if (this.skinned(layer)) this.drawOnionSkins(layer, ctx, rr, opts);
@@ -594,7 +635,7 @@ export class Compositor {
       return;
     }
     if (layer.kind !== 'folder' && !this.maskOf(layer) && !hasEffects(layer)) {
-      const s = getSurface(layer.id);
+      const s = this.pixels(layer);
       if (s) target.drawImage(s, 0, 0);
       return;
     }

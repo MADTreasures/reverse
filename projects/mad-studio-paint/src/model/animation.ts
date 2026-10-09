@@ -82,7 +82,7 @@ export function timelineTracks(layers: Layer[], depth = 0, out: TrackRow[] = [])
 /** What a track holds: its clips (made explicit; an audio layer's are where its sounds play), an animation folder's cel assignments and its keyframes. */
 export function trackContent(layer: Layer, frames: number): TrackContent<Keyframe> {
   return {
-    clips: layer.kind === 'audio' ? layer.clips : clipsOf(layer.clips, frames),
+    clips: layer.kind === 'audio' || layer.kind === 'movie' ? layer.clips : clipsOf(layer.clips, frames),
     ...(isAnimationFolder(layer) ? { cels: layer.animation.cels } : {}),
     ...(layer.keys ? { keys: layer.keys.frames } : {}),
   };
@@ -100,17 +100,19 @@ export const isCameraFolder = (l: Layer | null | undefined): l is FolderLayer =>
 /** Whether a track's keyframes are in effect: turned on, or a 2D camera folder's or an audio layer's (always). */
 export const keysOn = (l: Layer): boolean => isCameraFolder(l) || l.kind === 'audio' || Boolean(l.keys?.enabled);
 
-/** The audio layers as the timeline plays them (muted when they or a folder around them are hidden). */
+/** The audio layers (and movie layers' sound) as the timeline plays them (muted when they or a folder around them are hidden). */
 export function soundMix(doc: PaintDocument): SoundMix {
   const tracks: SoundTrack[] = [];
   const walk = (layers: Layer[], shown: boolean) => {
     for (const l of layers) {
       if (l.kind === 'audio') tracks.push({ id: l.id, name: l.name, visible: shown && l.visible, volume: l.volume, clips: l.clips, keys: l.keys.frames });
-      else if (l.kind === 'folder') walk(l.children, shown && l.visible);
+      else if (l.kind === 'movie') tracks.push({ id: l.id, name: l.name, visible: shown && l.visible, volume: l.volume, clips: l.clips.map((c) => ({ ...c, sound: l.movie })), keys: [] });
+      else if (l.kind === 'folder' && !l.animation) walk(l.children, shown && l.visible);
     }
   };
   walk(doc.layers, true);
-  return { tracks, files: doc.sound?.files ?? [] };
+  const movies = (doc.movies ?? []).map((m) => ({ id: m.id, name: m.name, type: m.type, duration: m.duration }));
+  return { tracks, files: [...(doc.sound?.files ?? []), ...movies] };
 }
 
 /** Whether any audio layer plays a clip. */

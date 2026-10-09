@@ -255,6 +255,7 @@ export function editBlocker(s: PaintState = getState()): string | null {
     if (l.kind === 'text' || l.kind === 'gradient') return `${l.kind === 'text' ? 'Text' : 'Gradient'} layers cannot be drawn on (Layer > Rasterize converts the layer)`;
     if (isAnimationFolder(l)) return 'Select a cel to draw on, or make one with New animation cel';
     if (l.kind === 'audio') return 'Audio layers cannot be drawn on';
+    if (l.kind === 'movie') return 'Movie layers cannot be drawn on (they show a movie file)';
     return 'Select a raster layer to draw on (folders cannot be drawn on)';
   }
   if (isEffectivelyLocked(s.doc.layers, l.id)) return 'The layer is locked';
@@ -501,6 +502,7 @@ export function mergeDownBlocker(s: PaintState = getState()): string | null {
   const lower = layerBelow(s.doc.layers, s.activeLayerId);
   if (!upper || !lower) return 'There is no layer below';
   if (upper.kind === 'audio' || lower.kind === 'audio') return 'Audio layers cannot be merged';
+  if (upper.kind === 'movie' || lower.kind === 'movie') return 'Movie layers cannot be merged';
   if (lower.kind === 'vector' && !linesMerge(upper)) return 'Lines merge into a vector layer only from a plain vector layer (rasterize the layer below first)';
   if (lower.kind !== 'raster' && lower.kind !== 'vector') return 'The layer below must be a raster layer';
   if (upper.locked || lower.locked) return 'Locked layers cannot be merged';

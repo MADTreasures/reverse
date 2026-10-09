@@ -107,7 +107,7 @@ type Drag =
   | { kind: 'edge'; track: Id; start: number; edge: ClipEdge; stretch: boolean; frame: number }
   | { kind: 'keys'; x0: number; delta: number; copy: boolean };
 
-const ICONS: Record<Layer['kind'], string> = { raster: 'layer', vector: 'vector', text: 'text', gradient: 'gradient', correction: 'correction', folder: 'folder', audio: 'audio' };
+const ICONS: Record<Layer['kind'], string> = { raster: 'layer', vector: 'vector', text: 'text', gradient: 'gradient', correction: 'correction', folder: 'folder', audio: 'audio', movie: 'movie' };
 const trackIcon = (l: Layer) => (isAnimationFolder(l) ? 'animFolder' : l.kind === 'folder' && l.camera ? 'camera' : l.kind === 'folder' && l.frame ? 'frame' : ICONS[l.kind]);
 const INTERP_LABELS: Record<Interp, string> = { hold: 'Hold', linear: 'Linear', smooth: 'Smooth' };
 

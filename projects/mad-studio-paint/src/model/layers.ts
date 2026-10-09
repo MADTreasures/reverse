@@ -1,6 +1,6 @@
 import { uid } from './ids';
 import type { Correction } from '../paint/tonal';
-import type { AudioLayer, CorrectionLayer, DrawnLayer, FolderLayer, GradientLayer, Id, Layer, LayerMask, PaintDocument, RasterLayer, TextLayer, VectorLayer } from './types';
+import type { AudioLayer, CorrectionLayer, DrawnLayer, FolderLayer, GradientLayer, Id, Layer, LayerMask, MovieLayer, PaintDocument, RasterLayer, TextLayer, VectorLayer } from './types';
 import type { GradientFill } from '../paint/gradient';
 import { remapTrack } from '../paint/animation';
 import { newLightId } from '../paint/lightTable';
@@ -131,6 +131,26 @@ export function createAudioLayer(name: string, patch: Partial<AudioLayer> = {}):
     volume: 1,
     clips: [],
     keys: { enabled: true, frames: [] },
+    ...patch,
+  };
+}
+
+/** A movie layer showing a movie file (no clips yet). */
+export function createMovieLayer(name: string, movie: Id, patch: Partial<MovieLayer> = {}): MovieLayer {
+  return {
+    id: uid('v'),
+    kind: 'movie',
+    name,
+    visible: true,
+    opacity: 1,
+    blend: 'normal',
+    clip: false,
+    locked: false,
+    reference: false,
+    draft: false,
+    movie,
+    volume: 1,
+    clips: [],
     ...patch,
   };
 }

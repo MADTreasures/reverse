@@ -2,6 +2,7 @@ import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { App } from './App';
 import { engine } from './engine/engine';
+import { onMovieFrame } from './engine/movies';
 import { buildDocumentBytes, listenForNativeOpen, openFileBytes, restoreAutosave, startAutosave } from './io/documentIO';
 import { native, isElectron, isMac } from './platform/platform';
 import { keyedTrackOf } from './model/animation';
@@ -113,6 +114,8 @@ async function boot(): Promise<void> {
   else actions.fitToWindow();
   startAutosave();
   syncTitle();
+  // A movie picture decoded later shows as soon as it is there.
+  onMovieFrame(() => engine.invalidate());
   listenForNativeOpen();
   native?.onMenu((action) => void runCommand(action));
   native?.setMenu(nativeMenuTemplate());

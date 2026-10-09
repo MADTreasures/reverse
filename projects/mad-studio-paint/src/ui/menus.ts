@@ -21,7 +21,7 @@ export const MENUS: MenuSpec[] = [
       'saveAs',
       { label: 'Save duplicate', items: ['saveDuplicate', 'saveDuplicatePsd'] },
       '-',
-      { label: 'Import', items: ['importImage', 'importAudio'] },
+      { label: 'Import', items: ['importImage', 'importAudio', 'importMovie'] },
       'export',
       { label: 'Export animation', items: ['exportSequence', 'exportGif', 'exportApng', 'exportMovie'] },
       '-',

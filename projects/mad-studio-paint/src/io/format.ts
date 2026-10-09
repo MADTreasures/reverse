@@ -4,7 +4,8 @@
  *   layers/<id>.png    – pixels of each raster layer and layer mask (document size, straight alpha);
  *                        vector and text layers store their lines, text and balloons in
  *                        document.json and are rendered on load
- *   sounds/<id>        – the sound files of audio tracks, as imported
+ *   sounds/<id>        – the sound files of audio layers, as imported
+ *   movies/<id>        – the movie files of movie layers, as imported
  *   preview.png        – merged image for previews (optional)
  * Pure (no DOM): PNG encoding/decoding happens in the browser layer.
  */
@@ -12,7 +13,7 @@ import { strFromU8, strToU8, unzipSync, zipSync } from 'fflate';
 import { isBlendMode } from '../model/blend';
 import { clampCanvasSide } from '../model/document';
 import { createAudioLayer, createRasterLayer, flatten, nextRev } from '../model/layers';
-import type { AudioLayer, CorrectionLayer, FolderLayer, GradientLayer, Id, Layer, LayerMask, LayerRulers, PaintDocument, RasterLayer, TextLayer, VectorLayer } from '../model/types';
+import type { AudioLayer, CorrectionLayer, FolderLayer, GradientLayer, Id, Layer, LayerMask, LayerRulers, MovieFile, MovieLayer, PaintDocument, RasterLayer, TextLayer, VectorLayer } from '../model/types';
 import { sanitizeGradientFill } from '../paint/gradient';
 import { sanitizeEffects } from '../paint/effects';
 import { sanitizeRuler, type Ruler } from '../paint/rulers';
@@ -47,6 +48,8 @@ export interface DocumentFile {
   layers: Map<Id, Uint8Array>;
   /** Bytes of each sound file (by id). */
   sounds?: Map<Id, Uint8Array>;
+  /** Bytes of each movie file (by id). */
+  movies?: Map<Id, Uint8Array>;
   preview?: Uint8Array;
 }
 
@@ -78,7 +81,7 @@ function sanitizeRulers(raw: unknown): LayerRulers | undefined {
   return { items, range: r.range === 'folder' || r.range === 'editing' ? r.range : 'all', visible: r.visible !== false };
 }
 
-function sanitizeLayer(raw: unknown, seen: Set<string>, depth: number, files: Set<string>): Layer | null {
+function sanitizeLayer(raw: unknown, seen: Set<string>, depth: number, files: Set<string>, movies: Set<string> = new Set()): Layer | null {
   if (!raw || typeof raw !== 'object' || depth > 32) return null;
   const r = raw as Record<string, unknown>;
   let id = str(r.id, '', 64);
@@ -107,7 +110,7 @@ function sanitizeLayer(raw: unknown, seen: Set<string>, depth: number, files: Se
     ...(lightTable ? { lightTable } : {}),
   };
   if (r.kind === 'folder') {
-    const children = Array.isArray(r.children) ? r.children.map((c) => sanitizeLayer(c, seen, depth + 1, files)).filter((c): c is Layer => c !== null) : [];
+    const children = Array.isArray(r.children) ? r.children.map((c) => sanitizeLayer(c, seen, depth + 1, files, movies)).filter((c): c is Layer => c !== null) : [];
     const folder: FolderLayer = {
       ...common,
       kind: 'folder',
@@ -131,6 +134,21 @@ function sanitizeLayer(raw: unknown, seen: Set<string>, depth: number, files: Se
       if (folder.blend === 'pass-through') folder.blend = 'normal';
     }
     return folder;
+  }
+  if (r.kind === 'movie') {
+    // A movie layer shows a movie file the document has.
+    const movie = typeof r.movie === 'string' && movies.has(r.movie) ? r.movie : null;
+    if (!movie) return null;
+    const layer: MovieLayer = {
+      ...common,
+      kind: 'movie',
+      blend: isBlendMode(r.blend) ? r.blend : 'normal',
+      movie,
+      volume: num(r.volume, 1, 0, 1),
+      clips: (clips ?? []).map((c) => ({ start: c.start, end: c.end, ...(c.offset !== undefined ? { offset: c.offset } : {}) })),
+      ...(keys ? { keys: { ...keys, frames: keys.frames.flatMap((k) => removeChannels([k], k.frame, ['volume'])) } } : {}),
+    };
+    return layer;
   }
   if (r.kind === 'audio') {
     // Clips play the document's sound files; keyframes record the volume.
@@ -201,7 +219,9 @@ export function sanitizeDocument(raw: unknown): PaintDocument {
   const seen = new Set<string>();
   const sound = sanitizeSound(r.sound);
   const files = new Set(sound?.files.map((f) => f.id) ?? []);
-  const layers = Array.isArray(r.layers) ? r.layers.map((l) => sanitizeLayer(l, seen, 0, files)).filter((l): l is Layer => l !== null) : [];
+  const movieFiles = sanitizeMovies(r.movies);
+  const movieIds = new Set(movieFiles.map((m) => m.id));
+  const layers = Array.isArray(r.layers) ? r.layers.map((l) => sanitizeLayer(l, seen, 0, files, movieIds)).filter((l): l is Layer => l !== null) : [];
   // Earlier files kept audio tracks beside the layers: they become audio layers at the bottom.
   for (const t of sound?.tracks ?? []) {
     layers.push(createAudioLayer(t.name, { ...(ID.test(t.id) && !seen.has(t.id) ? { id: t.id } : {}), visible: t.visible, volume: t.volume, clips: t.clips, keys: { enabled: true, frames: t.keys } }));
@@ -227,7 +247,27 @@ export function sanitizeDocument(raw: unknown): PaintDocument {
     ...(sound?.files.length ? { sound: { files: sound.files } } : {}),
     ...(outputFrame ? { outputFrame } : {}),
     ...(timelines ? { timelines } : {}),
+    ...(movieFiles.length ? { movies: movieFiles } : {}),
   };
+}
+
+/** The movie files listed in a document. */
+function sanitizeMovies(raw: unknown): MovieFile[] {
+  const out: MovieFile[] = [];
+  for (const m of Array.isArray(raw) ? raw.slice(0, 64) : []) {
+    if (!m || typeof m !== 'object') continue;
+    const x = m as Record<string, unknown>;
+    if (typeof x.id !== 'string' || !ID.test(x.id) || out.some((o) => o.id === x.id)) continue;
+    out.push({
+      id: x.id,
+      name: str(x.name, 'Movie', 120),
+      type: typeof x.type === 'string' && /^video\/[a-z0-9.+-]{1,40}$/i.test(x.type) ? x.type : 'video/mp4',
+      duration: num(x.duration, 0, 0, 36000),
+      width: Math.round(num(x.width, 1, 1, 16384)),
+      height: Math.round(num(x.height, 1, 1, 16384)),
+    });
+  }
+  return out;
 }
 
 /** A vector layer for the file: compact lines that share a table of the brushes they use. */
@@ -270,6 +310,7 @@ export function packDocument(file: DocumentFile): Uint8Array {
   for (const [id, png] of file.layers) entries[`layers/${id}.png`] = [png, { level: 0 }];
   // Sound files are compressed already (or barely compress).
   for (const [id, bytes] of file.sounds ?? []) entries[`sounds/${id}`] = [bytes, { level: 0 }];
+  for (const [id, bytes] of file.movies ?? []) entries[`movies/${id}`] = [bytes, { level: 0 }];
   if (file.preview) entries['preview.png'] = [file.preview, { level: 0 }];
   return zipSync(entries, { level: 6 });
 }
@@ -289,13 +330,16 @@ export function unpackDocument(bytes: Uint8Array): DocumentFile {
   const doc = sanitizeDocument(meta.document);
   const layers = new Map<Id, Uint8Array>();
   const sounds = new Map<Id, Uint8Array>();
+  const movies = new Map<Id, Uint8Array>();
   for (const [path, data] of Object.entries(files)) {
     const m = /^layers\/([A-Za-z0-9_-]+)\.png$/.exec(path);
     if (m) layers.set(m[1], data);
     const a = /^sounds\/([A-Za-z0-9_-]+)$/.exec(path);
     if (a && doc.sound?.files.some((f) => f.id === a[1])) sounds.set(a[1], data);
+    const v = /^movies\/([A-Za-z0-9_-]+)$/.exec(path);
+    if (v && doc.movies?.some((f) => f.id === v[1])) movies.set(v[1], data);
   }
-  return { doc, activeLayerId: typeof meta.activeLayerId === 'string' ? meta.activeLayerId : null, layers, sounds, preview: files['preview.png'] };
+  return { doc, activeLayerId: typeof meta.activeLayerId === 'string' ? meta.activeLayerId : null, layers, sounds, movies, preview: files['preview.png'] };
 }
 
 export function isDocumentFileName(name: string): boolean {

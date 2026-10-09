@@ -60,6 +60,10 @@ export function applyTracks(layers: Layer[], tracks: Record<Id, TrackData>): voi
       // Audio layers always have their lists; their keyframes are always on.
       l.clips = clone(d.clips ?? []);
       l.keys = { enabled: true, frames: clone(d.keys?.frames ?? []) };
+    } else if (l.kind === 'movie') {
+      l.clips = clone(d.clips ?? []);
+      if (d.keys) l.keys = clone(d.keys);
+      else delete l.keys;
     } else {
       if (d.clips) l.clips = clone(d.clips);
       else delete l.clips;

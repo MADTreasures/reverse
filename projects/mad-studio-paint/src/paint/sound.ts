@@ -47,7 +47,7 @@ export interface SoundMix {
 export const AUDIO_EXTENSIONS = ['wav', 'mp3', 'ogg', 'oga', 'm4a', 'aac', 'flac', 'opus', 'webm'];
 
 let counter = 0;
-export const newSoundId = (prefix: 's' | 'snd') => `${prefix}${Date.now().toString(36)}${(counter++).toString(36)}`;
+export const newSoundId = (prefix: 's' | 'snd' | 'mov') => `${prefix}${Date.now().toString(36)}${(counter++).toString(36)}`;
 
 /** The volume at `frame`: the keyframes' (interpolated as the earlier one says), else the track's. */
 export function volumeAt(track: Pick<SoundTrack, 'volume' | 'keys'>, frame: number): number {

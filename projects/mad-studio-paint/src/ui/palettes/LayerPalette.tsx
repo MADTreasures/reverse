@@ -322,6 +322,10 @@ function LayerRow({ layer, depth, drag, setDrag, drop, setDrop }: RowsProps & { 
             <Icon name={layer.frame ? 'frame' : layer.animation ? 'animFolder' : layer.camera ? 'camera' : 'folder'} size={22} />
           </span>
         </>
+      ) : layer.kind === 'movie' ? (
+        <span className="correction-icon audio-icon" title="Movie layer: shows a movie file where its clips are in the timeline" data-testid="movie-icon" onPointerDown={pickTarget(false)}>
+          <Icon name="movie" size={22} />
+        </span>
       ) : layer.kind === 'audio' ? (
         <span className="correction-icon audio-icon" title="Audio layer: its clips play sound in the timeline; hidden, it is muted" data-testid="audio-icon" onPointerDown={pickTarget(false)}>
           <Icon name="audio" size={22} />

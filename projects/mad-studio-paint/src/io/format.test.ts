@@ -1,7 +1,7 @@
 import { strFromU8, unzipSync } from 'fflate';
 import { describe, expect, it } from 'vitest';
 import { createDocument } from '../model/document';
-import { cloneDocument, createAudioLayer, createFolder, createLayerMask, createRasterLayer, createVectorLayer, flatten } from '../model/layers';
+import { cloneDocument, createAudioLayer, createFolder, createLayerMask, createMovieLayer, createRasterLayer, createVectorLayer, flatten } from '../model/layers';
 import type { FolderLayer } from '../model/types';
 import { DEFAULT_BRUSH } from '../paint/tools';
 import { isDocumentFileName, isImageFileName, mimeForName, packDocument, sanitizeDocument, unpackDocument } from './format';
@@ -96,6 +96,22 @@ describe('.madpaint format', () => {
     expect(back.doc).toEqual(doc);
     // Start after end, end beyond the frames: kept within the frames.
     expect(sanitizeDocument({ timeline: { frames: 5, start: 4, end: 2 } }).timeline).toEqual({ enabled: true, fps: 8, frames: 5, start: 4, end: 4 });
+  });
+
+  it('keeps movie layers and their movie files', () => {
+    const doc = createDocument('Movie', 200, 100, 72);
+    doc.timeline = { enabled: true, fps: 8, frames: 16 };
+    doc.movies = [{ id: 'mov1', name: 'Clip', type: 'video/webm', duration: 2, width: 64, height: 48 }];
+    doc.layers.unshift(createMovieLayer('Clip', 'mov1', { clips: [{ start: 3, end: 10, offset: 0.5 }] }));
+    const bytes = new Uint8Array([26, 69, 223, 163, 1, 2]);
+    const back = unpackDocument(packDocument({ doc, activeLayerId: null, layers: new Map(), movies: new Map([['mov1', bytes]]) }));
+    expect(back.doc).toEqual(doc);
+    expect([...back.movies!.get('mov1')!]).toEqual([...bytes]);
+    // A movie layer without its file is left out; files are videos.
+    const odd = sanitizeDocument({ movies: [{ id: 'm2', type: 'text/html', width: 0 }], layers: [{ id: 'a', kind: 'movie', movie: 'nope' }, { id: 'b', kind: 'movie', movie: 'm2', clips: [{ start: 1, end: 2, sound: 'x' }] }] });
+    expect(odd.layers.map((l) => l.id)).toEqual(['b']);
+    expect(odd.layers[0]).toMatchObject({ kind: 'movie', movie: 'm2', volume: 1, clips: [{ start: 1, end: 2 }] });
+    expect(odd.movies).toEqual([{ id: 'm2', name: 'Movie', type: 'video/mp4', duration: 0, width: 1, height: 1 }]);
   });
 
   it('keeps the clips of tracks', () => {

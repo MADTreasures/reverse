@@ -2618,6 +2618,63 @@ test('several timelines, start and end frame, change frame rate, manage timeline
   expect(errors).toEqual([]);
 });
 
+test('movie import: a movie layer shows the movie frame by frame where its clip is; saved', async ({ page }) => {
+  const errors = await boot(page);
+  await page.evaluate(() => void window.__madPaint.runCommand('new'));
+  const dlg = page.getByRole('dialog', { name: 'New canvas' });
+  await dlg.getByLabel('Width').fill('160');
+  await dlg.getByLabel('Height').fill('120');
+  await dlg.getByText('Create animated illustration').click();
+  await dlg.getByLabel('Number of cels').fill('16');
+  await dlg.getByLabel('Frame rate').fill('8');
+  await dlg.getByRole('button', { name: 'OK' }).click();
+  // File > Import > Movie: one second red, one second blue (own test movie).
+  const [chooser] = await Promise.all([page.waitForEvent('filechooser'), page.evaluate(() => void window.__madPaint.runCommand('importMovie'))]);
+  await chooser.setFiles({ name: 'colors.webm', mimeType: 'video/webm', buffer: readFileSync(new URL('./fixtures/colors.webm', import.meta.url)) });
+  await expect(page.getByTestId('movie-icon')).toHaveCount(1);
+  const layer = () => page.evaluate(() => window.__madPaint.useStore.getState().doc.layers.find((l: any) => l.kind === 'movie'));
+  const l = await layer();
+  expect(l.clips).toEqual([{ start: 1, end: 17, offset: 0 }]);
+  expect(await page.evaluate(() => window.__madPaint.useStore.getState().doc.movies.map((m: any) => [m.width, m.height, Math.round(m.duration)]))).toEqual([[64, 48, 2]]);
+  const rgb = () => page.evaluate(() => [...window.__madPaint.engine.sampleDisplayed(80, 60, '#ffffff')].slice(0, 3));
+  const isRed = (c: number[]) => c[0] > 180 && c[2] < 80;
+  const isBlue = (c: number[]) => c[2] > 180 && c[0] < 80;
+  await expect.poll(async () => isRed(await rgb()), { timeout: 10000 }).toBe(true);
+  // Frame 12 lies in the second second: blue.
+  await page.getByTestId('timeline-ruler').locator('.tl-cell').nth(11).click();
+  await expect.poll(async () => isBlue(await rgb()), { timeout: 10000 }).toBe(true);
+  // Split at frame 9, the first part deleted, the rest moved to frame 1: it starts one second into the movie (blue).
+  await page.evaluate((id) => {
+    const a = window.__madPaint.anim;
+    a.setFrame(9);
+    a.splitClipAtFrame();
+    a.selectClip(id, 1);
+    a.deleteSelectedClips();
+    a.selectClip(id, 9);
+    a.moveSelectedClips(-8);
+    a.setFrame(1);
+  }, l.id);
+  expect((await layer()).clips).toEqual([{ start: 1, end: 9, offset: 1 }]);
+  await expect.poll(async () => isBlue(await rgb()), { timeout: 10000 }).toBe(true);
+  for (let i = 0; i < 3; i++) await page.evaluate(() => window.__madPaint.runCommand('undo'));
+  expect((await layer()).clips).toEqual([{ start: 1, end: 17, offset: 0 }]);
+  // Movie layers cannot be drawn on.
+  await selectTool(page, 'pen');
+  await drag(page, [20, 20], [100, 20]);
+  expect(await page.evaluate(() => window.__madPaint.useStore.getState().hint)).toMatch(/Movie layers cannot be drawn on/);
+  // Saved and opened again: the movie comes back and shows.
+  const back = await page.evaluate(async () => {
+    const m = window.__madPaint;
+    await m.openFileBytes({ name: 'movie.madpaint', data: await m.buildDocumentBytes() });
+    m.anim.setFrame(2);
+    const d = m.useStore.getState().doc;
+    return { kinds: d.layers.map((x: any) => x.kind), movies: d.movies.length };
+  });
+  expect(back).toEqual({ kinds: ['movie', 'folder'], movies: 1 });
+  await expect.poll(async () => isRed(await rgb()), { timeout: 10000 }).toBe(true);
+  expect(errors).toEqual([]);
+});
+
 test('light table: a cel and an image on the target cel, colour mode, Light table tool, saved', async ({ page }) => {
   const errors = await boot(page);
   await page.evaluate(() => void window.__madPaint.runCommand('new'));

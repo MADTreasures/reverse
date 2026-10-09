@@ -185,7 +185,35 @@ export interface AudioLayer extends LayerBase {
   keys: KeyTrack;
 }
 
-export type Layer = RasterLayer | FolderLayer | CorrectionLayer | VectorLayer | TextLayer | GradientLayer | AudioLayer;
+/**
+ * Movie layer (File > Import > Movie): a movie file shown frame by frame where its clips are
+ * (fitted into the output frame); its sound plays with it. It cannot be drawn on.
+ */
+export interface MovieLayer extends LayerBase {
+  kind: 'movie';
+  blend: BlendMode;
+  /** The movie file (`PaintDocument.movies`). */
+  movie: Id;
+  /** Volume of the movie's sound (0..1). */
+  volume: number;
+  /** Each clip shows the movie from its `offset` (seconds) on (no clips: nothing). */
+  clips: Clip[];
+}
+
+/** A movie file kept with the document. */
+export interface MovieFile {
+  id: Id;
+  name: string;
+  /** MIME type of the stored bytes. */
+  type: string;
+  /** Seconds. */
+  duration: number;
+  /** Picture size (px). */
+  width: number;
+  height: number;
+}
+
+export type Layer = RasterLayer | FolderLayer | CorrectionLayer | VectorLayer | TextLayer | GradientLayer | AudioLayer | MovieLayer;
 
 /** Layers that take part in the picture (all but audio layers). */
 export type DrawnLayer = Exclude<Layer, AudioLayer>;
@@ -215,4 +243,6 @@ export interface PaintDocument {
   outputFrame?: OutputFrame;
   /** The other timelines (Animation > Timeline > Manage timeline); `timeline` is the one being edited. */
   timelines?: TimelineSet;
+  /** The movie files the movie layers show. */
+  movies?: MovieFile[];
 }

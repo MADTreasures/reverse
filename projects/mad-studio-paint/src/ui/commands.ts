@@ -93,6 +93,21 @@ function pickAudioFile(): Promise<void> {
   });
 }
 
+/** File > Import > Movie: picks a movie file. */
+function pickMovieFile(): Promise<void> {
+  return new Promise((resolve) => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'video/*,.mp4,.mov,.m4v,.webm';
+    input.onchange = () => {
+      const f = input.files?.[0];
+      if (f) void sound.importMovie(f, f.name).then(() => resolve());
+      else resolve();
+    };
+    input.click();
+  });
+}
+
 /** Animation > Light table > Select and register file: picks an image file. */
 function pickLightFile(): Promise<void> {
   return new Promise((resolve) => {
@@ -362,6 +377,7 @@ export const COMMANDS: Command[] = [
   { id: 'exportApng', label: 'Animated sticker (APNG)…', run: () => openDialog('exportApng'), enabled: hasTimeline },
   { id: 'exportMovie', label: 'Movie…', run: () => openDialog('exportMovie'), enabled: hasTimeline },
   { id: 'importAudio', label: 'Audio…', run: () => void pickAudioFile(), enabled: hasTimeline },
+  { id: 'importMovie', label: 'Movie…', run: () => void pickMovieFile(), enabled: hasTimeline },
   { id: 'newAudioTrack', label: 'Audio', run: () => void sound.newAudioTrack(), enabled: () => Boolean(getState().doc.timeline) },
   { id: 'deleteAudioTrack', label: 'Delete audio layer', run: () => sound.deleteSoundTrack(), enabled: () => sound.activeSoundTrack() !== null },
   { id: 'toggleTimeline', label: 'Timeline', run: () => anim.toggleTimelinePalette(), checked: () => getState().timelineShown },
