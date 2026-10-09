@@ -208,6 +208,31 @@ test('desktop app drives the native engine: playback, VST3 plugins, render, plug
     await expect(page.locator('.plugin-latency')).toContainText('compensated as');
     expect(errors).toEqual([]);
     step('plugin delay compensation ok');
+
+    // Steinberg's usage guidelines: the VST Compatible logo in the plugin manager, the ASIO
+    // Compatible logo in the dialog that configures ASIO (Windows only), each with its notice.
+    const logoLoaded = (selector: string) =>
+      page.locator(selector).evaluate((el: HTMLImageElement) => el.complete && el.naturalWidth > 0 && el.getBoundingClientRect().width >= 57);
+    await page.evaluate(() => window.__madStudio.runCommand('pluginPicker'));
+    await expect(page.locator('.plugin-manager .brand-logo.vst figcaption')).toHaveText('VST is a registered trademark of Steinberg Media Technologies GmbH.');
+    expect(await logoLoaded('.plugin-manager .brand-logo.vst img')).toBe(true);
+    await page.keyboard.press('Escape');
+    await page.evaluate(() => window.__madStudio.runCommand('audioSettings'));
+    await expect(page.locator('.audio-settings')).toBeVisible();
+    await expect.poll(() => page.evaluate(() => window.__madStudio.usePlugins.getState().deviceTypes.length)).toBeGreaterThan(0);
+    const types = await page.evaluate(() => window.__madStudio.usePlugins.getState().deviceTypes.map((t: any) => t.name));
+    if (process.platform === 'win32') {
+      expect(types).toContain('ASIO');
+      await expect(page.locator('.audio-settings .brand-logo.asio figcaption')).toHaveText('ASIO is a registered trademark of Steinberg Media Technologies GmbH.');
+      expect(await logoLoaded('.audio-settings .brand-logo.asio img')).toBe(true);
+      await expect(page.locator('.audio-settings select').first().locator('option', { hasText: 'ASIO®' })).toHaveCount(1);
+    } else {
+      expect(types).not.toContain('ASIO');
+      await expect(page.locator('.audio-settings .brand-logo.asio')).toHaveCount(0);
+    }
+    await page.keyboard.press('Escape');
+    expect(errors).toEqual([]);
+    step(`trademark logos ok (${types.join(', ')})`);
   } finally {
     await app.close();
     rmSync(profile, { recursive: true, force: true });

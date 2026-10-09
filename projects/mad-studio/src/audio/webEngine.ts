@@ -368,6 +368,8 @@ export class WebAudioEngine implements EngineApi {
   getAudioDevices(): void {}
   setAudioDevice(): void {}
 
+  showAudioControlPanel(): void {}
+
   async renderWav(opts: RenderOptions & { bitDepth: WavBitDepth }): Promise<{ wav: Uint8Array; buffer: AudioBuffer }> {
     const buffer = await renderProject(useStore.getState().project, opts);
     return { wav: encodeWav(bufferChannels(buffer), buffer.sampleRate, opts.bitDepth), buffer };

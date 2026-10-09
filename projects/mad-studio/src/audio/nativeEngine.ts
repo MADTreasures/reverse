@@ -11,7 +11,7 @@ import { patternTimeline, songTimeline, withLoop, type Timeline } from '../model
 import { secondsPerTick, snapRound } from '../model/timing';
 import type { Id, Project } from '../model/types';
 import type { EngineMessage, NativeEngineBridge } from '../platform/platform';
-import { parseLatencyReport, usePlugins, type AudioDeviceInfo, type PluginParam } from '../plugins/pluginStore';
+import { parseLatencyReport, usePlugins, type AudioDeviceInfo, type AudioDeviceType, type PluginParam } from '../plugins/pluginStore';
 import { addNotes, endCoalesce, setTransport, storePluginStates } from '../store/actions';
 import { noteTweaked } from '../store/automationActions';
 import { pianoRollSnap, patternStartTick } from '../store/snap';
@@ -168,7 +168,7 @@ export class NativeEngine implements EngineApi {
       case 'audio.devices':
         usePlugins.setState({
           device: (m.current as AudioDeviceInfo) ?? null,
-          deviceTypes: (m.types as { name: string; outputs: string[]; inputs: string[] }[]) ?? [],
+          deviceTypes: (m.types as AudioDeviceType[]) ?? [],
           sampleRates: (m.sampleRates as number[]) ?? [],
           bufferSizes: (m.bufferSizes as number[]) ?? [],
         });
@@ -602,5 +602,9 @@ export class NativeEngine implements EngineApi {
 
   setAudioDevice(opts: { type?: string; output?: string; input?: string; sampleRate?: number; bufferSize?: number }): void {
     this.send({ type: 'audio.setDevice', ...opts });
+  }
+
+  showAudioControlPanel(): void {
+    this.send({ type: 'audio.showControlPanel' });
   }
 }

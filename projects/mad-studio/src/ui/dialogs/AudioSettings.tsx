@@ -4,6 +4,7 @@ import { native } from '../../platform/platform';
 import { usePlugins } from '../../plugins/pluginStore';
 import { setTransport } from '../../store/actions';
 import { useStore } from '../../store/store';
+import { AsioLogo } from '../brand/SteinbergLogos';
 import { closeDialog } from '../overlays';
 
 const ms = (samples: number, rate: number) => (rate > 0 ? `${((samples / rate) * 1000).toFixed(1)} ms` : '–');
@@ -23,6 +24,10 @@ export function AudioSettingsDialog() {
   }, [nativeEngine]);
 
   const type = types.find((x) => x.name === device?.type) ?? types[0];
+  // ASIO drivers are one device for inputs and outputs (FL Studio shows a single device list).
+  const sharedDevice = type?.separateInputs === false;
+  // Steinberg's ASIO usage guidelines: the logo in every dialog that enables or configures ASIO.
+  const asioAvailable = types.some((x) => x.name === 'ASIO');
 
   return (
     <div className="modal wide audio-settings" role="dialog" aria-label="Audio settings">
@@ -33,11 +38,11 @@ export function AudioSettingsDialog() {
           <select value={device?.type ?? ''} onChange={(e) => engine.setAudioDevice({ type: e.target.value })}>
             {types.map((x) => (
               <option key={x.name} value={x.name}>
-                {x.name}
+                {x.name === 'ASIO' ? 'ASIO®' : x.name}
               </option>
             ))}
           </select>
-          <label>Output</label>
+          <label>{sharedDevice ? 'Device' : 'Output'}</label>
           <select value={device?.output ?? ''} onChange={(e) => engine.setAudioDevice({ output: e.target.value })}>
             {(type?.outputs ?? []).map((x) => (
               <option key={x} value={x}>
@@ -46,14 +51,31 @@ export function AudioSettingsDialog() {
             ))}
           </select>
           <label>Input</label>
-          <select value={device?.input ?? ''} onChange={(e) => engine.setAudioDevice({ input: e.target.value })}>
-            <option value="">(none)</option>
-            {(type?.inputs ?? []).map((x) => (
-              <option key={x} value={x}>
-                {x}
-              </option>
-            ))}
-          </select>
+          {sharedDevice ? (
+            <select value={device?.input ? 'device' : ''} onChange={(e) => engine.setAudioDevice({ input: e.target.value ? (device?.output ?? '') : 'none' })}>
+              <option value="">(none)</option>
+              <option value="device">Inputs of the device</option>
+            </select>
+          ) : (
+            <select value={device?.input ?? ''} onChange={(e) => engine.setAudioDevice({ input: e.target.value || 'none' })}>
+              <option value="">(none)</option>
+              {(type?.inputs ?? []).map((x) => (
+                <option key={x} value={x}>
+                  {x}
+                </option>
+              ))}
+            </select>
+          )}
+          {device?.hasControlPanel && (
+            <>
+              <label>Driver settings</label>
+              <span>
+                <button className="btn" onClick={() => engine.showAudioControlPanel()}>
+                  Show {device.type === 'ASIO' ? 'ASIO' : 'driver'} panel
+                </button>
+              </span>
+            </>
+          )}
           <label>Sample rate</label>
           <select value={device?.sampleRate ?? ''} onChange={(e) => engine.setAudioDevice({ sampleRate: Number(e.target.value) })}>
             {rates.map((r) => (
@@ -76,6 +98,11 @@ export function AudioSettingsDialog() {
               ? `input ${ms(device.inputLatency, device.sampleRate)} · output ${ms(device.outputLatency, device.sampleRate)} · inputs: ${device.inputChannels.join(', ') || 'none'}`
               : 'Waiting for the engine…'}
           </span>
+          {asioAvailable && (
+            <div className="brand-logos span2">
+              <AsioLogo />
+            </div>
+          )}
           {device?.null && (
             <p className="notice span2">
               No audio device could be opened – the engine runs silently (timing and meters still work). Connect a device or pick another

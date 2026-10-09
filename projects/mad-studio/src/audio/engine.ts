@@ -112,6 +112,10 @@ class EngineFacade implements EngineApi {
   setAudioDevice(opts: { type?: string; output?: string; input?: string; sampleRate?: number; bufferSize?: number }) {
     this.impl.setAudioDevice(opts);
   }
+
+  showAudioControlPanel() {
+    this.impl.showAudioControlPanel();
+  }
 }
 
 export const engine = new EngineFacade();

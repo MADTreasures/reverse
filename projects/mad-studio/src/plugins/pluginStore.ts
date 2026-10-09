@@ -38,6 +38,17 @@ export interface AudioDeviceInfo {
   inputLatency: number;
   outputLatency: number;
   null: boolean;
+  /** The driver has its own settings panel (ASIO; FL Studio's "Show ASIO panel"). */
+  hasControlPanel?: boolean;
+}
+
+/** A driver type of the engine (Windows Audio, ASIO, CoreAudio, ALSA …) and its devices. */
+export interface AudioDeviceType {
+  name: string;
+  outputs: string[];
+  inputs: string[];
+  /** False for ASIO: one device for inputs and outputs. */
+  separateInputs?: boolean;
 }
 
 /** What the native engine's plugin delay compensation does (its `latency` event). */
@@ -67,7 +78,7 @@ interface PluginState {
   params: Record<string, PluginParam[]>;
   instances: Record<string, PluginInstanceStatus>;
   device: AudioDeviceInfo | null;
-  deviceTypes: { name: string; outputs: string[]; inputs: string[] }[];
+  deviceTypes: AudioDeviceType[];
   sampleRates: number[];
   bufferSizes: number[];
   /** Default plugin search paths per format (from the engine). */

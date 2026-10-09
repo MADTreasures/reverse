@@ -587,3 +587,19 @@ test('channel menu: copy a channel\'s steps and paste them into another channel'
   expect(strip(pasted)).toEqual(strip(srcNotes));
   expect(after.pastLabels[after.pastLabels.length - 1]).toBe('channel rack paste');
 });
+
+test('about box shows the VST Compatible logo with its trademark notice (Steinberg usage guidelines)', async ({ page }) => {
+  const errors = await boot(page);
+  await page.evaluate(() => window.__madStudio.runCommand('about'));
+  const logo = page.locator('.modal .brand-logo.vst');
+  await expect(logo).toBeVisible();
+  await expect(logo.locator('figcaption')).toHaveText('VST is a registered trademark of Steinberg Media Technologies GmbH.');
+  // The SVG loads under the app's Content-Security-Policy and keeps Steinberg's minimum size (15 × 10 mm ≈ 57 × 38 px).
+  const img = await logo.locator('img').evaluate((el: HTMLImageElement) => ({ loaded: el.complete && el.naturalWidth > 0, w: el.getBoundingClientRect().width, h: el.getBoundingClientRect().height }));
+  expect(img.loaded).toBe(true);
+  expect(img.w).toBeGreaterThanOrEqual(57);
+  expect(img.h).toBeGreaterThanOrEqual(38);
+  // ASIO belongs to the Windows desktop app only.
+  await expect(page.locator('.modal .brand-logo.asio')).toHaveCount(0);
+  expect(errors).toEqual([]);
+});

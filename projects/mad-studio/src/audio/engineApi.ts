@@ -44,4 +44,6 @@ export interface EngineApi {
   /** Audio device selection (native engine only). */
   getAudioDevices(): void;
   setAudioDevice(opts: { type?: string; output?: string; input?: string; sampleRate?: number; bufferSize?: number }): void;
+  /** Opens the audio driver's own settings panel (ASIO). */
+  showAudioControlPanel(): void;
 }

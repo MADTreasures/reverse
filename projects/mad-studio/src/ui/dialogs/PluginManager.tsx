@@ -5,6 +5,7 @@ import { native } from '../../platform/platform';
 import { scanPaths, setExtraPaths, usePlugins } from '../../plugins/pluginStore';
 import { addPluginChannel, addPluginEffect } from '../../store/actions';
 import { useStore } from '../../store/store';
+import { VstLogo } from '../brand/SteinbergLogos';
 import { pluginInstanceFrom } from '../menus/pluginMenus';
 import { closeDialog, toast } from '../overlays';
 import { openChannelEditor, openEffectEditor } from '../workspace/windows';
@@ -62,9 +63,12 @@ export function PluginManagerDialog() {
       <div className="modal" role="dialog" aria-label="Plugin manager">
         <h2>Plugin manager</h2>
         <p>
-          VST3 and Audio Unit plugins are hosted by the native audio engine of the MAD Studio desktop app (macOS). The browser version
-          can open projects that contain plugins, but cannot run them.
+          VST®3 and Audio Unit plugins are hosted by the native audio engine of the MAD Studio desktop app (macOS, Windows, Linux). The
+          browser version can open projects that contain plugins, but cannot run them.
         </p>
+        <div className="brand-logos">
+          <VstLogo />
+        </div>
         <div className="modal-actions">
           <button className="btn primary" onClick={closeDialog}>
             Close
@@ -82,7 +86,7 @@ export function PluginManagerDialog() {
         {fmtList.map((fmt) => (
           <div key={fmt} className="pm-format">
             <div className="pm-format-head">
-              <strong>{fmt === 'AudioUnit' ? 'Audio Units' : fmt}</strong>
+              <strong>{fmt === 'AudioUnit' ? 'Audio Units' : fmt === 'VST3' ? 'VST®3' : fmt}</strong>
               {fmt !== 'AudioUnit' && (
                 <button className="btn" onClick={() => void addFolder(fmt)}>
                   + Add folder
@@ -185,6 +189,9 @@ export function PluginManagerDialog() {
         ) : (
           <p className="faint">{plugins.length ? 'No plugin matches.' : 'No plugins known yet – click “Find installed plugins”.'}</p>
         )}
+      </div>
+      <div className="brand-logos">
+        <VstLogo />
       </div>
       <div className="modal-actions">
         <button className="btn primary" onClick={closeDialog}>

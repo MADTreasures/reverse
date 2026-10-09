@@ -2145,3 +2145,32 @@ button.link {
 .note-props input[aria-invalid='true'] {
   border-color: var(--danger, #e0705a);
 }
+
+/* Steinberg "VST Compatible" / "ASIO Compatible" logos (official artwork, at least 15 × 10 mm) */
+
+.brand-logos {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 22px;
+  margin: 10px 0 4px;
+}
+
+.brand-logo {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0;
+}
+
+.brand-logo img {
+  flex: none;
+  width: 84px;
+  height: auto;
+}
+
+.brand-logo figcaption {
+  max-width: 190px;
+  font-size: 11px;
+  line-height: 1.35;
+  color: var(--text-dim);
+}

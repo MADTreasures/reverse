@@ -1,6 +1,7 @@
 import { SHORTCUTS, type CommandId } from '../commands';
 import { closeDialog } from '../overlays';
-import { isMac } from '../../platform/platform';
+import { isMac, native } from '../../platform/platform';
+import { AsioLogo, VstLogo } from '../brand/SteinbergLogos';
 
 const mod = isMac ? '⌘' : 'Ctrl';
 
@@ -116,6 +117,8 @@ export function ShortcutsDialog() {
 }
 
 export function AboutDialog() {
+  // ASIO drivers are a Windows-only part of the native engine.
+  const asio = native?.platform === 'win32';
   return (
     <div className="modal" role="dialog" aria-label="About MAD Studio">
       <h2>
@@ -124,14 +127,17 @@ export function AboutDialog() {
       <p>
         Pattern-based music studio: channel rack with step sequencer, piano roll, playlist arrangement, automation clips,
         mixer with insert effects and audio recording, synthesizer, sampler and WAV export. The desktop app hosts VST®3
-        and Audio Unit plug-ins through its native engine.
+        and Audio Unit plug-ins through its native engine{asio ? ' and plays through ASIO® audio interfaces' : ''}.
       </p>
       <p className="dim">
         Independent project inspired by the workflow of classic pattern-based DAWs. All sounds and graphics are original;
         no third-party samples are included – the drum kit is synthesised on start-up. The native engine is built with
-        JUCE (AGPLv3) and the VST3 SDK (MIT).
+        JUCE (AGPLv3) and the VST3 SDK (MIT){asio ? ', with the ASIO SDK headers (GPLv3)' : ''}.
       </p>
-      <p className="dim">VST is a registered trademark of Steinberg Media Technologies GmbH.</p>
+      <div className="brand-logos">
+        <VstLogo />
+        {asio && <AsioLogo />}
+      </div>
       <div className="modal-actions">
         <button className="btn primary" onClick={closeDialog}>
           Close
