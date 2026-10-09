@@ -35,5 +35,13 @@ for (const base of fromEnv ? [path.dirname(fromEnv)] : bases) {
   }
 }
 
-if (staged) console.log(`Staged native engine: ${path.relative(root, staged)} → build/engine-staging/`);
-else console.warn('No native engine build found (engine/build) – the app will use the Web Audio engine.');
+if (staged) {
+  // Licence texts travel with the engine (AGPLv3 for the engine and JUCE, MIT for the VST3 SDK,
+  // GPLv3 for the ASIO SDK headers of the Windows engine).
+  const licenses = path.join(staging, 'licenses');
+  cpSync(path.join(root, 'engine', 'licenses'), licenses, { recursive: true });
+  cpSync(path.join(root, 'engine', 'LICENSE'), path.join(licenses, 'MAD-Engine-LICENSE.txt'));
+  console.log(`Staged native engine: ${path.relative(root, staged)} → build/engine-staging/ (with licenses/)`);
+} else {
+  console.warn('No native engine build found (engine/build) – the app will use the Web Audio engine.');
+}

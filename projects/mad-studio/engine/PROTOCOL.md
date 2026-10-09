@@ -306,7 +306,14 @@ ignore unknown fields keep working.
   while its editor is open. Without a display (headless Linux) `plugin.openEditor` replies with
   an `error`.
 * **`plugin.paramChanged`**: at most one event per instance per ~33 ms (the most recent change).
-* **Audio devices**: `audio.devices.types` contains a pseudo type `"Null"`;
+* **Audio devices**: every entry of `audio.devices.types` has `separateInputs` (false for ASIO®,
+  whose drivers are one device for inputs and outputs: the engine then uses the output device as
+  input too); `current.hasControlPanel` is true when the driver has its own settings panel.
+  `audio.showControlPanel` opens that panel (FL Studio: *Show ASIO panel*), blocks until it is
+  closed, restarts the device if the driver changed its settings and replies with `audio.devices`
+  (an `error` when there is no panel). The Windows engine lists the `ASIO` type (Steinberg's ASIO
+  SDK headers bundled with JUCE, used under GPLv3). ASIO is a registered trademark of Steinberg
+  Media Technologies GmbH. `audio.devices.types` contains a pseudo type `"Null"`;
   `audio.setDevice {"type":"Null"}` selects the null device, `"input": null` (or `"none"`) opens
   no input. `current.inputChannels` / `outputChannels` list the active channels (up to 8 inputs,
   2 outputs).

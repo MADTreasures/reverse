@@ -300,6 +300,15 @@ async function testBasics(engine, ready) {
   const devices = await engine.request({ type: 'audio.getDevices', requestId: 'd' }, (m) => m.type === 'audio.devices', 10000, 'audio.devices');
   check(Array.isArray(devices.types) && devices.types.some((t) => t.name === 'Null'), 'audio.devices lists types');
   check(devices.current && devices.current.null === true && devices.current.inputChannels.length === 2, 'audio.devices current (null device, 2 inputs)');
+  check(devices.types.every((t) => typeof t.separateInputs === 'boolean') && devices.current.hasControlPanel === false,
+    'audio.devices reports separateInputs per driver type and hasControlPanel');
+  if (platform() === 'win32') {
+    // ASIO: one device for inputs and outputs, listed even without installed drivers (CI runners have none).
+    const asio = devices.types.find((t) => t.name === 'ASIO');
+    check(asio && asio.separateInputs === false, `Windows build lists the ASIO driver type (${JSON.stringify(asio)})`);
+  }
+  const panel = await engine.request({ type: 'audio.showControlPanel' }, (m) => m.type === 'error' && m.request === 'audio.showControlPanel', 5000, 'audio.showControlPanel error');
+  check(/control panel/.test(panel.message), `audio.showControlPanel without a driver panel is refused (${panel.message})`);
   const paths = await engine.request({ type: 'plugins.getPaths' }, (m) => m.type === 'plugins.paths', 5000, 'plugins.paths');
   check(paths.paths && Array.isArray(paths.paths.VST3), 'plugins.paths has VST3');
 }

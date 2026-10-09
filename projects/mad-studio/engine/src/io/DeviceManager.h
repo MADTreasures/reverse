@@ -50,6 +50,11 @@ public:
     /** The audio.devices message (protocol JSON line). */
     std::string devicesJson() const;
 
+    /** Shows the driver's own settings panel (ASIO; FL Studio's "Show ASIO panel"). Blocks until
+        the panel closes and restarts the device if the driver changed its settings, calling
+        `prepare` like open(). False if the current device has no panel. */
+    bool showControlPanel (const std::function<void (double, int)>& prepare);
+
     /** Called on the message thread when the device stopped or changed by itself. */
     std::function<void()> onDeviceChanged;
 
@@ -65,6 +70,7 @@ private:
     void changeListenerCallback (juce::ChangeBroadcaster*) override;
 
     void startNull (double sampleRate, int blockSize, const std::function<void (double, int)>& prepare);
+    bool startCurrentDevice (const std::function<void (double, int)>& prepare);
 
     AudioEngine& engine;
     juce::AudioDeviceManager manager;

@@ -65,6 +65,10 @@ juce::String DeviceController::open (const Request& request, const std::function
             setup.outputDeviceName = request.output;
         if (request.input.isNotEmpty())
             setup.inputDeviceName = request.input == "none" ? juce::String() : request.input;
+        // ASIO drivers are one device for inputs and outputs.
+        if (auto* type = manager.getCurrentDeviceTypeObject(); type != nullptr && ! type->hasSeparateInputsAndOutputs()
+                                                                && setup.inputDeviceName.isNotEmpty())
+            setup.inputDeviceName = setup.outputDeviceName;
         if (request.sampleRate > 0.0)
             setup.sampleRate = request.sampleRate;
         if (request.bufferSize > 0)
@@ -79,16 +83,8 @@ juce::String DeviceController::open (const Request& request, const std::function
         if (setupError.isNotEmpty())
             error = setupError;
 
-        if (auto* device = manager.getCurrentAudioDevice(); device != nullptr && device->isOpen())
-        {
-            preparedRate = device->getCurrentSampleRate();
-            preparedBlock = device->getCurrentBufferSizeSamples();
-            usingNull = false;
-            prepare (preparedRate, std::clamp (preparedBlock, 16, maxBlockSize));
-            manager.addAudioCallback (this);
-            callbackAdded = true;
+        if (startCurrentDevice (prepare))
             return error;
-        }
 
         if (error.isEmpty())
             error = "no audio device available";
@@ -99,6 +95,40 @@ juce::String DeviceController::open (const Request& request, const std::function
 
     startNull (request.sampleRate, request.bufferSize, prepare);
     return {};
+}
+
+bool DeviceController::startCurrentDevice (const std::function<void (double, int)>& prepare)
+{
+    auto* device = manager.getCurrentAudioDevice();
+    if (device == nullptr || ! device->isOpen())
+        return false;
+    preparedRate = device->getCurrentSampleRate();
+    preparedBlock = device->getCurrentBufferSizeSamples();
+    usingNull = false;
+    prepare (preparedRate, std::clamp (preparedBlock, 16, maxBlockSize));
+    manager.addAudioCallback (this);
+    callbackAdded = true;
+    return true;
+}
+
+bool DeviceController::showControlPanel (const std::function<void (double, int)>& prepare)
+{
+    auto* device = usingNull ? nullptr : manager.getCurrentAudioDevice();
+    if (device == nullptr || ! device->hasControlPanel())
+        return false;
+    if (device->showControlPanel())
+    {
+        // The driver changed its settings (buffer size, rate): reopen it with them.
+        close();
+        manager.closeAudioDevice();
+        manager.restartLastAudioDevice();
+        if (! startCurrentDevice (prepare))
+        {
+            logMessage ("audio device: could not restart after its control panel - using the null device");
+            startNull (preparedRate, preparedBlock, prepare);
+        }
+    }
+    return true;
 }
 
 void DeviceController::audioDeviceIOCallbackWithContext (const float* const* inputs, int numInputs, float* const* outputs,
@@ -176,7 +206,7 @@ std::string DeviceController::devicesJson() const
     w.key ("types").beginArray();
     for (auto* type : m.getAvailableDeviceTypes())
     {
-        w.beginObject().field ("name", type->getTypeName());
+        w.beginObject().field ("name", type->getTypeName()).field ("separateInputs", type->hasSeparateInputsAndOutputs());
         w.key ("outputs").beginArray();
         for (const auto& n : type->getDeviceNames (false))
             w.value (n);
@@ -185,7 +215,7 @@ std::string DeviceController::devicesJson() const
             w.value (n);
         w.endArray().endObject();
     }
-    w.beginObject().field ("name", "Null");
+    w.beginObject().field ("name", "Null").field ("separateInputs", true);
     w.key ("outputs").beginArray().value ("Null Output").endArray();
     w.key ("inputs").beginArray().value ("Null Input").endArray();
     w.endObject();
@@ -208,6 +238,7 @@ std::string DeviceController::devicesJson() const
         .field ("inputLatency", i.inputLatency)
         .field ("outputLatency", i.outputLatency)
         .field ("null", i.isNull)
+        .field ("hasControlPanel", ! usingNull && m.getCurrentAudioDevice() != nullptr && m.getCurrentAudioDevice()->hasControlPanel())
         .endObject();
 
     juce::Array<double> rates { 44100.0, 48000.0, 88200.0, 96000.0 };

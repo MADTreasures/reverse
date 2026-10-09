@@ -23,6 +23,7 @@ endif()
 option(MAD_BUILD_TEST_PLUGINS "Build the 'MAD Test Gain', 'MAD Test Synth' and 'MAD Test Delay' plugins used by the tests" OFF)
 option(MAD_ENABLE_LV2 "Host LV2 plugins on Linux" ON)
 option(MAD_ENABLE_JACK "Enable the JACK audio backend on Linux when its headers are available" ON)
+option(MAD_ENABLE_ASIO "ASIO audio devices on Windows (ASIO SDK headers bundled with JUCE, used under GPLv3)" ON)
 
 # ---------------------------------------------------------------------------------------------
 # JUCE 8 (latest 8.x release). Either a local checkout (-DMAD_JUCE_DIR=...) or the release tarball.
@@ -157,19 +158,23 @@ target_sources(MadEngine PRIVATE
 
 target_include_directories(MadEngine PRIVATE src)
 
-set(MAD_LINUX_DEFS)
+set(MAD_PLATFORM_DEFS)
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     if(MAD_ENABLE_LV2)
-        list(APPEND MAD_LINUX_DEFS JUCE_PLUGINHOST_LV2=1)
+        list(APPEND MAD_PLATFORM_DEFS JUCE_PLUGINHOST_LV2=1)
     endif()
     if(MAD_ENABLE_JACK)
         include(CheckIncludeFileCXX)
         check_include_file_cxx("jack/jack.h" MAD_HAVE_JACK_HEADERS)
         if(MAD_HAVE_JACK_HEADERS)
             # JUCE loads libjack at runtime, so this adds no link dependency.
-            list(APPEND MAD_LINUX_DEFS JUCE_JACK=1)
+            list(APPEND MAD_PLATFORM_DEFS JUCE_JACK=1)
         endif()
     endif()
+elseif(WIN32 AND MAD_ENABLE_ASIO)
+    # JUCE ships Steinberg's ASIO SDK 2.3.4 headers, dual-licensed (proprietary or GPLv3); the
+    # engine uses them under GPLv3 (licence texts in licenses/).
+    list(APPEND MAD_PLATFORM_DEFS JUCE_ASIO=1)
 endif()
 
 target_compile_definitions(MadEngine PRIVATE
@@ -183,7 +188,7 @@ target_compile_definitions(MadEngine PRIVATE
     JUCE_PLUGINHOST_VST3=1
     JUCE_STRICT_REFCOUNTEDPOINTER=1
     JUCE_SILENCE_XCODE_15_LINKER_WARNING=1
-    ${MAD_LINUX_DEFS})
+    ${MAD_PLATFORM_DEFS})
 
 target_link_libraries(MadEngine
     PRIVATE

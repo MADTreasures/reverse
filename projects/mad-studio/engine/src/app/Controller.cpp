@@ -470,6 +470,24 @@ void Controller::handle (const juce::String& type, const juce::var& msg, const j
         return;
     }
 
+    if (type == "audio.showControlPanel")
+    {
+        if (render != nullptr)
+            return fail ("an offline render is running");
+        if (session != nullptr)
+        {
+            EngineCommand stop;
+            stop.type = EngineCommand::Type::stop;
+            engine.post (stop);
+        }
+        if (! device.showControlPanel ([this] (double sr, int block) { prepareForDevice (sr, block); }))
+            return fail ("the audio device has no control panel");
+        if (! juce::approximatelyEqual (device.info().sampleRate, readySampleRate))
+            sendReady();
+        sendReply (device.devicesJson(), requestId);
+        return;
+    }
+
     // ---- recording ---------------------------------------------------------------------------
     if (type == "record.config")
     {

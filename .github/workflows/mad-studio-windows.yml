@@ -73,7 +73,11 @@ jobs:
 
       - name: Smoke test the packaged app (with the bundled engine)
         run: |
-          ls -la release release/win-unpacked/resources/engine
+          ls -la release release/win-unpacked/resources/engine release/win-unpacked/resources/engine/licenses
+          # Licence texts ship with the engine (AGPLv3, MIT for the VST3 SDK, GPLv3 for the ASIO SDK headers).
+          for f in MAD-Engine-LICENSE.txt VST3-SDK-LICENSE.txt ASIO-SDK-LICENSE.txt GPL-3.0.txt THIRD-PARTY-NOTICES.md; do
+            test -s "release/win-unpacked/resources/engine/licenses/$f"
+          done
           "release/win-unpacked/MAD Studio.exe" --smoke-test | tee smoke-packaged.log
           grep -q MAD_STUDIO_ENGINE_PONG smoke-packaged.log
 

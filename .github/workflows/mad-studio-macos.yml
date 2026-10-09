@@ -70,7 +70,8 @@ jobs:
       - name: Smoke test the packaged app (with the bundled engine)
         run: |
           ls -la release
-          ls -la "release/mac-arm64/MAD Studio.app/Contents/Resources/engine"
+          ls -la "release/mac-arm64/MAD Studio.app/Contents/Resources/engine" "release/mac-arm64/MAD Studio.app/Contents/Resources/engine/licenses"
+          test -s "release/mac-arm64/MAD Studio.app/Contents/Resources/engine/licenses/THIRD-PARTY-NOTICES.md"
           "release/mac-arm64/MAD Studio.app/Contents/MacOS/MAD Studio" --smoke-test | tee smoke.log
           grep -q MAD_STUDIO_ENGINE_PONG smoke.log
 
