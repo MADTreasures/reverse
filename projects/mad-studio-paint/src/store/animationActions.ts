@@ -20,7 +20,8 @@ import {
 } from '../model/animation';
 import { createFolder, createRasterLayer, findLayer, flatten, locate } from '../model/layers';
 import type { AudioLayer, Id, Layer, PaintDocument } from '../model/types';
-import { assignAt, celAt, DEFAULT_TIMELINE, emptyTrack, entryAt, MAX_FRAMES, nextCelName, nextTrackName, removeAt, type OnionSkin, type Timeline } from '../paint/animation';
+import { assignAt, celAt, DEFAULT_TIMELINE, emptyTrack, endOf, entryAt, MAX_FRAMES, nextCelName, nextTrackName, removeAt, startOf, type OnionSkin, type Timeline } from '../paint/animation';
+import { addTimeline, changeFrameRate, deleteTimeline, moveTimeline, nextTimelineName, switchTimeline, timelineIndex, timelineList } from '../model/timelines';
 import {
   clipIndexAt,
   copyClip as copyClipContent,
@@ -164,13 +165,104 @@ export function currentTrack(s: PaintState = getState()): Layer | null {
 // ------------------------------------------------------------------ timeline
 
 /** Creates the timeline (Animation > Timeline > New timeline) or changes its settings. */
-export function setTimeline(patch: Partial<Timeline>, label = 'Timeline settings'): void {
-  actions.changeDoc(label, (doc) => {
-    doc.timeline = { ...(doc.timeline ?? DEFAULT_TIMELINE), ...patch };
-    doc.timeline.frames = Math.max(1, Math.min(MAX_FRAMES, Math.round(doc.timeline.frames)));
-  });
+export function setTimeline(patch: Partial<Timeline>, label = 'Timeline settings', key?: string): void {
+  actions.changeDoc(
+    label,
+    (doc) => {
+      const t = { ...(doc.timeline ?? DEFAULT_TIMELINE), ...patch };
+      t.frames = Math.max(1, Math.min(MAX_FRAMES, Math.round(t.frames)));
+      // Start and end frame within the frames (not set: every frame).
+      const start = Math.max(1, Math.min(t.frames, Math.round(t.start ?? 1)));
+      const end = Math.max(start, Math.min(t.frames, Math.round(t.end ?? t.frames)));
+      delete t.start;
+      delete t.end;
+      doc.timeline = { ...t, ...(start > 1 ? { start } : {}), ...(end < t.frames ? { end } : {}) };
+    },
+    key ? { key } : {},
+  );
   const t = timelineOf();
   if (t && getState().frame > t.frames) setFrame(t.frames);
+}
+
+// ------------------------------------------------------------------ several timelines
+
+/** Clears what is selected on the tracks (another timeline shows other contents). */
+const clearTrackSelections = () => setState({ clipSelection: [], keySelection: [], graphSelection: [] });
+
+/** Timeline palette (timeline list) / Manage timeline: edits another timeline. */
+export function switchToTimeline(index: number): void {
+  const s = getState();
+  if (!s.doc.timeline || index === timelineIndex(s.doc)) return;
+  actions.changeDoc('Switch timeline', (doc) => switchTimeline(doc, index));
+  clearTrackSelections();
+  const t = timelineOf();
+  if (t) setFrame(Math.min(getState().frame, t.frames));
+}
+
+/** Animation > Timeline > New timeline: the canvas's first one, or another one (empty) after the edited one. */
+export function newTimeline(settings: Pick<Timeline, 'fps' | 'frames'> & { name?: string }): void {
+  const s = getState();
+  const timeline: Timeline = { enabled: true, fps: settings.fps, frames: settings.frames, name: settings.name || nextTimelineName(s.doc) };
+  actions.changeDoc('New timeline', (doc) => addTimeline(doc, timeline));
+  clearTrackSelections();
+  setState({ timelineShown: true });
+  setFrame(Math.min(getState().frame, timeline.frames));
+}
+
+/** Manage timeline > Duplicate: a copy of the edited timeline (with its tracks), edited next. */
+export function duplicateTimeline(name?: string): void {
+  const s = getState();
+  const t = s.doc.timeline;
+  if (!t) return;
+  actions.changeDoc('Duplicate timeline', (doc) => addTimeline(doc, { ...t, name: name || nextTimelineName(doc) }, true));
+  clearTrackSelections();
+}
+
+/** Manage timeline > Delete: the canvas keeps at least one timeline. */
+export function removeTimeline(index: number): void {
+  const s = getState();
+  if (timelineList(s.doc).length <= 1) {
+    setState({ hint: 'The canvas needs one timeline (Animation > Timeline > Enable timeline turns it off)' });
+    return;
+  }
+  actions.changeDoc('Delete timeline', (doc) => void deleteTimeline(doc, index));
+  clearTrackSelections();
+  const t = timelineOf();
+  if (t) setFrame(Math.min(getState().frame, t.frames));
+}
+
+/** Manage timeline > Move up / Move down. */
+export function reorderTimeline(index: number, dir: -1 | 1): void {
+  actions.changeDoc(dir < 0 ? 'Move timeline up' : 'Move timeline down', (doc) => moveTimeline(doc, index, dir));
+}
+
+/** Manage timeline > Change settings of a timeline that is not edited (name, frame rate, frames, start and end). */
+export function setStoredTimeline(index: number, patch: Partial<Timeline>): void {
+  const s = getState();
+  if (index === timelineIndex(s.doc)) {
+    setTimeline(patch);
+    return;
+  }
+  actions.changeDoc('Timeline settings', (doc) => {
+    const others = doc.timelines?.others;
+    const at = index < timelineIndex(doc) ? index : index - 1;
+    const o = others?.[at];
+    if (!o) return;
+    const t = { ...o.timeline, ...patch };
+    const frames = Math.max(1, Math.min(MAX_FRAMES, Math.round(t.frames)));
+    o.timeline = { ...t, frames, ...(t.start !== undefined ? { start: Math.min(frames, t.start) } : {}), ...(t.end !== undefined ? { end: Math.min(frames, t.end) } : {}) };
+  });
+}
+
+/** Animation > Timeline > Change frame rate (Change total number of frames: the playing time stays). */
+export function setFrameRate(fps: number, rescale: boolean): void {
+  const s = getState();
+  const t = s.doc.timeline;
+  if (!t || fps === t.fps) return;
+  const k = fps / t.fps;
+  actions.changeDoc('Change frame rate', (doc) => changeFrameRate(doc, fps, rescale));
+  clearTrackSelections();
+  if (rescale) setFrame(Math.max(1, Math.round((s.frame - 1) * k) + 1));
 }
 
 /** Animation > Timeline > Enable timeline: off shows every cel, like normal folders. */
@@ -989,10 +1081,12 @@ export function togglePlay(): void {
 export function play(): void {
   const t = timelineOf();
   if (!t?.enabled || getState().playing) return;
-  // From the start when at the end.
-  if (getState().frame >= t.frames) setFrame(1, false);
+  // Playback covers the start … end frame; from the start when outside or at the end.
+  const first = startOf(t);
+  const last0 = endOf(t);
+  if (getState().frame >= last0 || getState().frame < first) setFrame(first, false);
   setState({ playing: true });
-  startSound(soundMix(getState().doc), getState().frame, t.frames, t.fps);
+  startSound(soundMix(getState().doc), getState().frame, last0, t.fps);
   let last = performance.now();
   let carry = 0;
   const tick = (now: number) => {
@@ -1002,14 +1096,16 @@ export function play(): void {
     carry += now - last;
     last = now;
     const step = 1000 / tl.fps;
+    const start = startOf(tl);
+    const end = endOf(tl);
     let frame = s.frame;
     while (carry >= step) {
       carry -= step;
-      if (frame < tl.frames) frame++;
+      if (frame < end) frame++;
       else if (s.loop) {
-        frame = 1;
+        frame = start;
         // The sound starts again with the animation.
-        startSound(soundMix(s.doc), 1, tl.frames, tl.fps);
+        startSound(soundMix(s.doc), start, end, tl.fps);
       } else return stop();
     }
     if (frame !== s.frame) setState({ frame });

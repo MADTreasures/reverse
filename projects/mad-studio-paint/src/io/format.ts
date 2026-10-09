@@ -27,14 +27,15 @@ import { PLACEMENT_CHANNELS, removeChannels, sanitizeKeyframes, sanitizeKeyTrack
 import { sanitizeLightLayers } from '../paint/lightTable';
 import { sanitizeSound } from '../paint/sound';
 import { sanitizeOutputFrame } from '../paint/outputFrame';
+import { sanitizeTimelines } from '../model/timelines';
 
 export const FORMAT = 'mad-studio-paint';
 /**
  * 2: layer masks, correction layers, effects, rulers. 3: vector and text layers, comic frames.
  * 4: animation (timeline, animation folders). 5: clips, keyframes, 2D camera folders, light tables
  * (their images are stored like layer pixels, as layers/<id>.png), sound. 6: keyframes record
- * single settings, mask keyframes, audio layers (audio tracks were kept beside the layers). Older
- * files open unchanged.
+ * single settings, mask keyframes, audio layers (audio tracks were kept beside the layers),
+ * animation frame lines, several timelines (start and end frames). Older files open unchanged.
  */
 export const FORMAT_VERSION = 6;
 export const EXTENSION = 'madpaint';
@@ -212,6 +213,7 @@ export function sanitizeDocument(raw: unknown): PaintDocument {
   const width = clampCanvasSide(num(r.width, 1000, 1, 1e6));
   const height = clampCanvasSide(num(r.height, 1000, 1, 1e6));
   const outputFrame = sanitizeOutputFrame(r.outputFrame, width, height);
+  const timelines = timeline ? sanitizeTimelines(r.timelines, layers) : undefined;
   return {
     id: str(r.id, 'd-imported', 64),
     name: str(r.name, 'Untitled', 120),
@@ -224,6 +226,7 @@ export function sanitizeDocument(raw: unknown): PaintDocument {
     ...(general ? { lightTable: { general } } : {}),
     ...(sound?.files.length ? { sound: { files: sound.files } } : {}),
     ...(outputFrame ? { outputFrame } : {}),
+    ...(timelines ? { timelines } : {}),
   };
 }
 

@@ -90,7 +90,7 @@ export const MENUS: MenuSpec[] = [
         ],
       },
       { label: 'Animation curve', items: ['graphEditor', 'unpairHandles'] },
-      { label: 'Timeline', items: ['newTimeline', 'timelineSettings', 'enableTimeline', '-', 'insertFrame', 'deleteFrame'] },
+      { label: 'Timeline', items: ['newTimeline', 'timelineSettings', 'frameRate', 'manageTimelines', 'enableTimeline', '-', 'insertFrame', 'deleteFrame'] },
       { label: 'Move frame', items: ['firstFrame', 'prevFrame', 'nextFrame', 'lastFrame'] },
       '-',
       { label: 'Show animation cels', items: ['onionSkin', 'onionSkinSettings', '-', 'cameraView'] },

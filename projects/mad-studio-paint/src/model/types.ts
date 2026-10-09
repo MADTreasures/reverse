@@ -5,6 +5,7 @@ import type { Keyframe, KeyTrack } from '../paint/keyframes';
 import type { LightLayer, LightTable } from '../paint/lightTable';
 import type { DocSound } from '../paint/sound';
 import type { OutputFrame } from '../paint/outputFrame';
+import type { TimelineSet } from './timelines';
 import type { LayerEffects } from '../paint/effects';
 import type { Ruler } from '../paint/rulers';
 import type { Correction } from '../paint/tonal';
@@ -212,4 +213,6 @@ export interface PaintDocument {
   sound?: DocSound;
   /** Animation frame lines: the output frame (what exports show), title-safe area and overflow frame. */
   outputFrame?: OutputFrame;
+  /** The other timelines (Animation > Timeline > Manage timeline); `timeline` is the one being edited. */
+  timelines?: TimelineSet;
 }

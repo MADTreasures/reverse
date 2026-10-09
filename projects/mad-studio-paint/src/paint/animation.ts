@@ -12,9 +12,19 @@ export interface Timeline {
   enabled: boolean;
   /** Frames per second. */
   fps: number;
-  /** Frames 1 … frames are played and exported (the end frame). */
+  /** Number of frames (1 … frames). */
   frames: number;
+  /** Name in the timeline list (several timelines: Animation > Timeline > Manage timeline). */
+  name?: string;
+  /** Start and end frame: playback and exports cover start … end (default: every frame). */
+  start?: number;
+  end?: number;
 }
+
+/** The start frame (1 when not set). */
+export const startOf = (t: Timeline): number => Math.max(1, Math.min(t.frames, t.start ?? 1));
+/** The end frame (the last frame when not set). */
+export const endOf = (t: Timeline): number => Math.max(startOf(t), Math.min(t.frames, t.end ?? t.frames));
 
 /** A cel shown from `frame` on (null: nothing from here on). */
 export interface CelAssignment {
@@ -186,10 +196,16 @@ const hex = (v: unknown, fallback: string) => (typeof v === 'string' && /^#[0-9a
 export function sanitizeTimeline(raw: unknown): Timeline | undefined {
   if (!raw || typeof raw !== 'object') return undefined;
   const r = raw as Record<string, unknown>;
+  const frames = Math.round(num(r.frames, DEFAULT_TIMELINE.frames, 1, MAX_FRAMES));
+  const start = typeof r.start === 'number' && Number.isFinite(r.start) ? Math.round(num(r.start, 1, 1, frames)) : undefined;
+  const end = typeof r.end === 'number' && Number.isFinite(r.end) ? Math.round(num(r.end, frames, start ?? 1, frames)) : undefined;
   return {
     enabled: r.enabled !== false,
     fps: Math.round(num(r.fps, DEFAULT_TIMELINE.fps, 1, MAX_FPS)),
-    frames: Math.round(num(r.frames, DEFAULT_TIMELINE.frames, 1, MAX_FRAMES)),
+    frames,
+    ...(typeof r.name === 'string' && r.name ? { name: r.name.slice(0, 60) } : {}),
+    ...(start !== undefined && start > 1 ? { start } : {}),
+    ...(end !== undefined && end < frames ? { end } : {}),
   };
 }
 

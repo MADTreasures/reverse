@@ -7,7 +7,7 @@ import { GradientDialog } from './dialogs/GradientDialog';
 import { TonalDialog } from './dialogs/TonalDialog';
 import { PreferencesDialog } from './dialogs/PreferencesDialog';
 import { ExportDialog, PsdExportDialog } from './dialogs/ExportDialog';
-import { AnimationExportDialog, CameraFolderDialog, MovieExportDialog, OnionSkinDialog, TimelineSettingsDialog } from './dialogs/AnimationDialogs';
+import { AnimationExportDialog, CameraFolderDialog, FrameRateDialog, ManageTimelinesDialog, MovieExportDialog, NewTimelineDialog, OnionSkinDialog, TimelineSettingsDialog } from './dialogs/AnimationDialogs';
 import { AboutDialog, ShortcutsDialog } from './dialogs/InfoDialogs';
 import { NewCanvasDialog } from './dialogs/NewCanvasDialog';
 import { closeDialog, closeMenu, useOverlays, type MenuItem } from './overlays';
@@ -56,6 +56,9 @@ export function OverlayHost() {
           {dialog.kind === 'custom' && dialog.id === 'timelineSettings' && <TimelineSettingsDialog />}
           {dialog.kind === 'custom' && dialog.id === 'onionSkin' && <OnionSkinDialog />}
           {dialog.kind === 'custom' && dialog.id === 'cameraFolder' && <CameraFolderDialog />}
+          {dialog.kind === 'custom' && dialog.id === 'newTimeline' && <NewTimelineDialog />}
+          {dialog.kind === 'custom' && dialog.id === 'frameRate' && <FrameRateDialog />}
+          {dialog.kind === 'custom' && dialog.id === 'manageTimelines' && <ManageTimelinesDialog />}
           {dialog.kind === 'custom' && dialog.id === 'exportGif' && <AnimationExportDialog format="gif" />}
           {dialog.kind === 'custom' && dialog.id === 'exportApng' && <AnimationExportDialog format="apng" />}
           {dialog.kind === 'custom' && dialog.id === 'exportSequence' && <AnimationExportDialog format="sequence" />}

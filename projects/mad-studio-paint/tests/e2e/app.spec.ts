@@ -2534,6 +2534,90 @@ test('animation frame lines: output frame, title-safe area, overflow frame and b
   expect(errors).toEqual([]);
 });
 
+test('several timelines, start and end frame, change frame rate, manage timeline', async ({ page }) => {
+  const errors = await boot(page);
+  await page.evaluate(() => void window.__madPaint.runCommand('new'));
+  const dlg = page.getByRole('dialog', { name: 'New canvas' });
+  await dlg.getByText('Create animated illustration').click();
+  await dlg.getByLabel('Number of cels').fill('4');
+  await dlg.getByRole('button', { name: 'OK' }).click();
+  const st = () =>
+    page.evaluate(() => {
+      const s = window.__madPaint.useStore.getState();
+      return { timeline: s.doc.timeline, cels: s.doc.layers[0].animation.cels.map((a: any) => a.frame), frame: s.frame, names: [...document.querySelectorAll('[aria-label="Timeline list"] option')].map((o) => o.textContent) };
+    });
+  // New timeline (Timeline palette button): it starts empty and is edited.
+  await page.getByRole('button', { name: 'New timeline' }).click();
+  const nd = page.getByRole('dialog', { name: 'New timeline' });
+  await expect(nd.getByLabel('Timeline name')).toHaveValue('Timeline 2');
+  await nd.getByLabel('Frame rate').fill('12');
+  await nd.getByLabel('Number of frames').fill('6');
+  await nd.getByRole('button', { name: 'OK' }).click();
+  let s = await st();
+  expect(s.names).toEqual(['Timeline 1', 'Timeline 2']);
+  expect(s.timeline).toMatchObject({ fps: 12, frames: 6, name: 'Timeline 2' });
+  expect(s.cels).toEqual([]);
+  await page.evaluate(() => {
+    const m = window.__madPaint;
+    const a = m.useStore.getState().doc.layers[0];
+    m.anim.assignCel(a.id, 3, a.children[0].id);
+  });
+  // The timeline list switches back: the first timeline's cels and settings.
+  await page.getByLabel('Timeline list').selectOption({ label: 'Timeline 1' });
+  s = await st();
+  expect(s.timeline).toMatchObject({ fps: 8, frames: 4 });
+  expect(s.cels).toEqual([1]);
+  await page.getByLabel('Timeline list').selectOption({ label: 'Timeline 2' });
+  expect((await st()).cels).toEqual([3]);
+  await page.getByLabel('Timeline list').selectOption({ label: 'Timeline 1' });
+  // End frame: drag the blue mark from frame 4 back to frame 3.
+  const end = (await page.getByTestId('timeline-end').boundingBox())!;
+  await page.mouse.move(end.x + end.width / 2, end.y + end.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(end.x + end.width / 2 - 24, end.y + end.height / 2, { steps: 4 });
+  await page.mouse.up();
+  expect((await st()).timeline).toMatchObject({ frames: 4, end: 3 });
+  await expect(page.locator('.tl-info')).toContainText('/ 1 / 3');
+  // Playback starts at the start frame when at the end.
+  await page.evaluate(() => {
+    const m = window.__madPaint;
+    m.anim.setFrame(3);
+    m.anim.play();
+  });
+  expect((await st()).frame).toBe(1);
+  await page.evaluate(() => window.__madPaint.anim.stop());
+  // Change frame rate with Change total number of frames: twice the frames, the same playing time.
+  await page.evaluate(() => window.__madPaint.runCommand('frameRate'));
+  const fr = page.getByRole('dialog', { name: 'Change frame rate' });
+  await fr.getByLabel('Frame rate').fill('16');
+  await expect(fr.getByTestId('frame-rate-result')).toContainText('8 frames · 0.50 s');
+  await fr.getByRole('button', { name: 'OK' }).click();
+  s = await st();
+  expect(s.timeline).toMatchObject({ fps: 16, frames: 8, end: 6 });
+  // Saved and opened again: both timelines.
+  const back = await page.evaluate(async () => {
+    const m = window.__madPaint;
+    await m.openFileBytes({ name: 'timelines.madpaint', data: await m.buildDocumentBytes() });
+    const d = m.useStore.getState().doc;
+    return { edited: d.timeline.name ?? null, others: d.timelines.others.map((o: any) => o.timeline.name) };
+  });
+  expect(back).toEqual({ edited: null, others: ['Timeline 2'] });
+  // Manage timeline: move Timeline 2 up, then delete it.
+  await page.evaluate(() => window.__madPaint.runCommand('manageTimelines'));
+  const mg = page.getByRole('dialog', { name: 'Manage timeline' });
+  const items = mg.getByRole('option');
+  await expect(items).toHaveCount(2);
+  await items.nth(1).click();
+  await mg.getByRole('button', { name: 'Move up' }).click();
+  await expect(items.first()).toContainText('Timeline 2');
+  await mg.getByRole('button', { name: 'Delete' }).click();
+  await expect(items).toHaveCount(1);
+  await expect(mg.getByRole('button', { name: 'Delete' })).toBeDisabled();
+  await mg.getByRole('button', { name: 'Close' }).click();
+  expect((await st()).names).toEqual(['Timeline 1']);
+  expect(errors).toEqual([]);
+});
+
 test('light table: a cel and an image on the target cel, colour mode, Light table tool, saved', async ({ page }) => {
   const errors = await boot(page);
   await page.evaluate(() => void window.__madPaint.runCommand('new'));

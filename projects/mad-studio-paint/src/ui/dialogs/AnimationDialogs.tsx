@@ -6,12 +6,13 @@ import { useEffect, useState } from 'react';
 import { exportAnimation, exportMovie, type AnimationFormat } from '../../io/documentIO';
 import { hasSound, isCameraFolder, outputRect } from '../../model/animation';
 import { flatten } from '../../model/layers';
-import { DEFAULT_TIMELINE, MAX_FPS, MAX_FRAMES, type OnionMode } from '../../paint/animation';
+import { DEFAULT_TIMELINE, endOf, MAX_FPS, MAX_FRAMES, startOf, type OnionMode, type Timeline } from '../../paint/animation';
+import { nextTimelineName, timelineIndex, timelineList, timelineName } from '../../model/timelines';
 import { areaRect, type DrawingArea } from '../../paint/outputFrame';
 import type { PaintDocument } from '../../model/types';
 import * as anim from '../../store/animationActions';
 import { getState, useStore } from '../../store/store';
-import { closeDialog } from '../overlays';
+import { closeDialog, openDialog } from '../overlays';
 
 const clampInt = (v: string, min: number, max: number, fallback: number) => {
   const n = Math.round(Number(v));
@@ -31,26 +32,27 @@ function Actions({ ok = 'OK', busy = false }: { ok?: string; busy?: boolean }) {
   );
 }
 
-/** Animation > Timeline > New timeline / Change settings: frame rate and length. */
-export function TimelineSettingsDialog() {
-  const current = getState().doc.timeline;
-  const [fps, setFps] = useState(current?.fps ?? DEFAULT_TIMELINE.fps);
-  const [frames, setFrames] = useState(current?.frames ?? DEFAULT_TIMELINE.frames);
-  const [enabled, setEnabled] = useState(current?.enabled ?? true);
-  const title = current ? 'Change timeline settings' : 'New timeline';
+/** Animation > Timeline > New timeline: a canvas's first timeline, or another one (empty). */
+export function NewTimelineDialog() {
+  const doc = getState().doc;
+  const [name, setName] = useState(nextTimelineName(doc));
+  const [fps, setFps] = useState(doc.timeline?.fps ?? DEFAULT_TIMELINE.fps);
+  const [frames, setFrames] = useState(doc.timeline?.frames ?? DEFAULT_TIMELINE.frames);
   return (
     <form
       className="modal"
       role="dialog"
-      aria-label={title}
+      aria-label="New timeline"
       onSubmit={(e) => {
         e.preventDefault();
-        anim.setTimeline({ fps, frames, enabled }, current ? 'Timeline settings' : 'New timeline');
+        anim.newTimeline({ name: name.trim(), fps, frames });
         closeDialog();
       }}
     >
-      <h2>{title}</h2>
+      <h2>New timeline</h2>
       <div className="form-grid">
+        <label htmlFor="tl-name">Timeline name</label>
+        <input id="tl-name" value={name} onChange={(e) => setName(e.target.value.slice(0, 60))} autoFocus />
         <label htmlFor="tl-fps">Frame rate</label>
         <span className="with-unit">
           <input id="tl-fps" type="number" min={1} max={MAX_FPS} value={fps} onChange={(e) => setFps(clampInt(e.target.value, 1, MAX_FPS, fps))} /> fps
@@ -59,13 +61,210 @@ export function TimelineSettingsDialog() {
         <input id="tl-frames" type="number" min={1} max={MAX_FRAMES} value={frames} onChange={(e) => setFrames(clampInt(e.target.value, 1, MAX_FRAMES, frames))} />
         <label>Playback time</label>
         <span>{(frames / fps).toFixed(2)} s</span>
+      </div>
+      {doc.timeline && <p className="muted">The canvas keeps its other timelines; the new one starts empty.</p>}
+      <Actions />
+    </form>
+  );
+}
+
+/** Settings of a timeline: name, number of frames, start and end frame (the frame rate: Change frame rate). */
+function TimelineFields({ value, onChange }: { value: Timeline; onChange: (t: Timeline) => void }) {
+  const start = startOf(value);
+  const end = endOf(value);
+  return (
+    <>
+      <label htmlFor="tl-name">Timeline name</label>
+      <input id="tl-name" value={value.name ?? ''} onChange={(e) => onChange({ ...value, name: e.target.value.slice(0, 60) })} />
+      <label>Frame rate</label>
+      <span className="muted">{value.fps} fps (Animation &gt; Timeline &gt; Change frame rate)</span>
+      <label htmlFor="tl-frames">Number of frames</label>
+      <input id="tl-frames" type="number" min={1} max={MAX_FRAMES} value={value.frames} onChange={(e) => onChange({ ...value, frames: clampInt(e.target.value, 1, MAX_FRAMES, value.frames) })} />
+      <label>Playback time</label>
+      <span>{(value.frames / value.fps).toFixed(2)} s</span>
+      <label>Start / end frame</label>
+      <span className="with-unit">
+        <input type="number" aria-label="Start frame" min={1} max={end} value={start} onChange={(e) => onChange({ ...value, start: clampInt(e.target.value, 1, end, start) })} /> –{' '}
+        <input type="number" aria-label="End frame" min={start} max={value.frames} value={end} onChange={(e) => onChange({ ...value, end: clampInt(e.target.value, start, value.frames, end) })} />
+      </span>
+    </>
+  );
+}
+
+/** Animation > Timeline > Change settings of the edited timeline. */
+export function TimelineSettingsDialog() {
+  const current = getState().doc.timeline ?? DEFAULT_TIMELINE;
+  const [t, setT] = useState(current);
+  return (
+    <form
+      className="modal"
+      role="dialog"
+      aria-label="Change timeline settings"
+      onSubmit={(e) => {
+        e.preventDefault();
+        anim.setTimeline({ ...t, name: t.name?.trim() || undefined });
+        closeDialog();
+      }}
+    >
+      <h2>Change timeline settings</h2>
+      <div className="form-grid">
+        <TimelineFields value={t} onChange={setT} />
         <label />
         <label className="check">
-          <input type="checkbox" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} /> Enable timeline
+          <input type="checkbox" checked={t.enabled} onChange={(e) => setT({ ...t, enabled: e.target.checked })} /> Enable timeline
         </label>
       </div>
       <Actions />
     </form>
+  );
+}
+
+/** Animation > Timeline > Change frame rate (Change total number of frames: the playing time stays). */
+export function FrameRateDialog() {
+  const current = getState().doc.timeline ?? DEFAULT_TIMELINE;
+  const [fps, setFps] = useState(current.fps);
+  const [rescale, setRescale] = useState(true);
+  const frames = rescale ? Math.max(1, Math.min(MAX_FRAMES, Math.round((current.frames * fps) / current.fps))) : current.frames;
+  return (
+    <form
+      className="modal"
+      role="dialog"
+      aria-label="Change frame rate"
+      onSubmit={(e) => {
+        e.preventDefault();
+        anim.setFrameRate(fps, rescale);
+        closeDialog();
+      }}
+    >
+      <h2>Change frame rate</h2>
+      <div className="form-grid">
+        <label htmlFor="fr-fps">Frame rate</label>
+        <span className="with-unit">
+          <input id="fr-fps" type="number" min={1} max={MAX_FPS} value={fps} onChange={(e) => setFps(clampInt(e.target.value, 1, MAX_FPS, fps))} /> fps
+        </span>
+        <label />
+        <label className="check">
+          <input type="checkbox" checked={rescale} onChange={(e) => setRescale(e.target.checked)} /> Change total number of frames
+        </label>
+        <label>Result</label>
+        <span data-testid="frame-rate-result">
+          {frames} frames · {(frames / fps).toFixed(2)} s
+        </span>
+      </div>
+      <p className="muted">With Change total number of frames, cels, clips and keyframes move so that the animation keeps its playing time.</p>
+      <Actions />
+    </form>
+  );
+}
+
+/** Animation > Timeline > Manage timeline: the canvas's timelines; new, duplicate, delete, settings, order. */
+export function ManageTimelinesDialog() {
+  const doc = useStore((s) => s.doc);
+  const list = timelineList(doc);
+  const edited = timelineIndex(doc);
+  const [selected, setSelected] = useState(edited);
+  const sel = Math.min(selected, list.length - 1);
+  const [draft, setDraft] = useState<Timeline | null>(null);
+  const t = draft ?? list[sel];
+  return (
+    <div className="modal" role="dialog" aria-label="Manage timeline">
+      <h2>Manage timeline</h2>
+      <div className="timeline-manager">
+        <ul className="timeline-list" role="listbox" aria-label="Timelines">
+          {list.map((x, i) => (
+            <li
+              key={i}
+              role="option"
+              aria-selected={i === sel}
+              className={`${i === sel ? 'selected' : ''} ${i === edited ? 'edited' : ''}`}
+              onClick={() => {
+                setSelected(i);
+                setDraft(null);
+              }}
+              onDoubleClick={() => anim.switchToTimeline(i)}
+            >
+              {timelineName(x, i)}
+              {i === edited && <span className="muted"> · edited</span>}
+            </li>
+          ))}
+        </ul>
+        <div className="timeline-buttons">
+          <button type="button" className="btn small" onClick={() => openDialog('newTimeline')}>
+            New timeline
+          </button>
+          <button
+            type="button"
+            className="btn small"
+            onClick={() => {
+              if (sel !== edited) anim.switchToTimeline(sel);
+              anim.duplicateTimeline();
+              setSelected(timelineIndex(getState().doc));
+            }}
+          >
+            Duplicate
+          </button>
+          <button
+            type="button"
+            className="btn small"
+            disabled={list.length <= 1}
+            onClick={() => {
+              anim.removeTimeline(sel);
+              setSelected(Math.max(0, sel - 1));
+              setDraft(null);
+            }}
+          >
+            Delete
+          </button>
+          <button type="button" className="btn small" disabled={sel === edited} onClick={() => anim.switchToTimeline(sel)}>
+            Edit this timeline
+          </button>
+          <button
+            type="button"
+            className="btn small"
+            disabled={sel === 0}
+            onClick={() => {
+              anim.reorderTimeline(sel, -1);
+              setSelected(sel - 1);
+            }}
+          >
+            Move up
+          </button>
+          <button
+            type="button"
+            className="btn small"
+            disabled={sel >= list.length - 1}
+            onClick={() => {
+              anim.reorderTimeline(sel, 1);
+              setSelected(sel + 1);
+            }}
+          >
+            Move down
+          </button>
+        </div>
+      </div>
+      {t && (
+        <form
+          className="form-grid"
+          aria-label="Change settings"
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (draft) anim.setStoredTimeline(sel, { ...draft, name: draft.name?.trim() || undefined });
+            setDraft(null);
+          }}
+        >
+          <TimelineFields value={t} onChange={setDraft} />
+          <label />
+          <button type="submit" className="btn small" disabled={!draft}>
+            Change settings
+          </button>
+        </form>
+      )}
+      <div className="modal-actions">
+        <button type="button" className="btn primary" onClick={closeDialog}>
+          Close
+        </button>
+      </div>
+    </div>
   );
 }
 
@@ -179,8 +378,9 @@ export function AnimationExportDialog({ format }: { format: AnimationFormat }) {
   const rect = areaRect(doc.outputFrame, area, doc.width, doc.height);
   const [width, setWidth] = useState(rect.w);
   const [frameLines, setFrameLines] = useState(false);
-  const [start, setStart] = useState(1);
-  const [end, setEnd] = useState(t.frames);
+  // Export range: the start … end frame.
+  const [start, setStart] = useState(startOf(t));
+  const [end, setEnd] = useState(endOf(t));
   const [fps, setFps] = useState(t.fps);
   const [endless, setEndless] = useState(true);
   const [plays, setPlays] = useState(1);
@@ -326,8 +526,9 @@ export function MovieExportDialog() {
   const [area, setArea] = useState<DrawingArea>('output');
   const rect = areaRect(doc.outputFrame, area, doc.width, doc.height);
   const [width, setWidth] = useState(Math.min(rect.w, 1920));
-  const [start, setStart] = useState(1);
-  const [end, setEnd] = useState(t.frames);
+  // Export range: the start … end frame.
+  const [start, setStart] = useState(startOf(t));
+  const [end, setEnd] = useState(endOf(t));
   const [fps, setFps] = useState(t.fps);
   const [camera, setCamera] = useState(true);
   const [sampleRate, setSampleRate] = useState(48000);

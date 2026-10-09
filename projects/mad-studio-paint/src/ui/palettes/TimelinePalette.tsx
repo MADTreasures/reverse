@@ -17,7 +17,8 @@ import { memo, useCallback, useMemo, useRef, useState, useSyncExternalStore } fr
 import { useShallow } from 'zustand/react/shallow';
 import { isAnimationFolder, isCameraFolder, keysOn, maskTrackId, timelineTracks, trackContent, type AnimationFolder, type TrackRow as Row } from '../../model/animation';
 import type { AudioLayer, Id, Layer } from '../../model/types';
-import { assignmentAt, entryAt } from '../../paint/animation';
+import { assignmentAt, endOf, entryAt, startOf } from '../../paint/animation';
+import { timelineIndex, timelineList, timelineName } from '../../model/timelines';
 import { clipIndexAt, type ClipEdge, type Timed, type TrackContent } from '../../paint/clips';
 import { curveInterp, GROUPS, groupInterp, PLACEMENT_CHANNELS, records, touches, TRANSFORM_GROUPS, type Channel, type ChannelGroup, type Interp, type Keyframe } from '../../paint/keyframes';
 import type { SoundFile } from '../../paint/sound';
@@ -458,6 +459,9 @@ const findTrack = (id: Id) => timelineTracks(getState().doc.layers).find((r) => 
 
 export function TimelinePalette() {
   const timeline = useStore((s) => s.doc.timeline);
+  // The timeline list: names, and which one is edited.
+  const timelineNames = useStore(useShallow((s) => timelineList(s.doc).map((t, i) => timelineName(t, i))));
+  const timelineIdx = useStore((s) => timelineIndex(s.doc));
   const layers = useStore((s) => s.doc.layers);
   const { frame, playing, loop, onionSkin, clipSelection, height } = useStore(
     useShallow((s) => ({ frame: s.frame, playing: s.playing, loop: s.loop, onionSkin: s.onionSkin, clipSelection: s.clipSelection, height: s.timelineHeight })),
@@ -639,6 +643,34 @@ export function TimelinePalette() {
       .map((c) => c.start + (drag?.kind === 'move' ? anim.clipMoveDelta(drag.delta) : 0))
       .join(',');
 
+  // Start and end frame: the blue marks on the frame ruler.
+  const rangeStart = timeline ? startOf(timeline) : 1;
+  const rangeEnd = timeline ? endOf(timeline) : 1;
+  const dragRange = (e: React.PointerEvent<HTMLDivElement>, which: 'start' | 'end') => {
+    if (e.button !== 0) return;
+    e.stopPropagation();
+    e.preventDefault();
+    const ruler = e.currentTarget.parentElement!;
+    const move = (ev: PointerEvent) => {
+      const t = getState().doc.timeline;
+      if (!t) return;
+      const x = ev.clientX - ruler.getBoundingClientRect().left;
+      if (which === 'start') {
+        const start = Math.max(1, Math.min(endOf(t), Math.round(x / CELL) + 1));
+        if (start !== startOf(t)) anim.setTimeline({ start }, 'Start frame', 'timeline-start');
+      } else {
+        const end = Math.max(startOf(t), Math.min(t.frames, Math.round(x / CELL)));
+        if (end !== endOf(t)) anim.setTimeline({ end }, 'End frame', 'timeline-end');
+      }
+    };
+    const up = () => {
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+    };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+  };
+
   // Dragging around keyframes selects them (Shift: adds, Ctrl/⌘: takes out).
   const rowsRef = useRef<HTMLDivElement>(null);
   const [marquee, setMarquee] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
@@ -700,6 +732,16 @@ export function TimelinePalette() {
       <div className="tl-resize" role="separator" aria-orientation="horizontal" aria-label="Resize the Timeline palette" onPointerDown={resize} />
       <div className="timeline-bar">
         <span className="palette-title">Timeline</span>
+        {timeline && (
+          <select className="tl-timelines" aria-label="Timeline list" title="Timeline list: the timeline being edited" value={timelineIdx} onChange={(e) => anim.switchToTimeline(Number(e.target.value))}>
+            {timelineNames.map((n, i) => (
+              <option key={i} value={i}>
+                {n}
+              </option>
+            ))}
+          </select>
+        )}
+        <Button icon="newTimeline" label="New timeline" onClick={() => openDialog('newTimeline')} />
         <Button icon="graph" label="Graph Editor" on={graph} disabled={!timeline} onClick={anim.toggleGraphEditor} />
         {graph && <Button icon="dragZoom" label="Drag to zoom" on={dragZoom} onClick={() => setState({ graphDragZoom: !dragZoom })} />}
         <span className="sep" />
@@ -745,8 +787,8 @@ export function TimelinePalette() {
         )}
         <span className="spacer" />
         {timeline && (
-          <button className="tl-info" title="Animation > Timeline > Change settings" onClick={() => openDialog('timelineSettings')}>
-            <span data-testid="timeline-frame">{frame}</span> / {frames} · {timeline.fps} fps{enabled ? '' : ' · off'}
+          <button className="tl-info" title="Current frame / start frame / end frame (Animation > Timeline > Change settings)" onClick={() => openDialog('timelineSettings')}>
+            <span data-testid="timeline-frame">{frame}</span> / {startOf(timeline)} / {endOf(timeline)} · {timeline.fps} fps{enabled ? '' : ' · off'}
           </button>
         )}
       </div>
@@ -780,10 +822,13 @@ export function TimelinePalette() {
                 onPointerUp={() => (scrub.current = false)}
               >
                 {Array.from({ length: frames }, (_, i) => (
-                  <div key={i} className={`tl-cell ${i + 1 === frame ? 'current' : ''}`}>
+                  <div key={i} className={`tl-cell ${i + 1 === frame ? 'current' : ''} ${i + 1 < rangeStart || i + 1 > rangeEnd ? 'outside' : ''}`}>
                     {i + 1}
                   </div>
                 ))}
+                {/* Start and end frame: drag the blue marks. */}
+                <div className="tl-range start" data-testid="timeline-start" title={`Start frame ${rangeStart}: drag to change`} style={{ left: (rangeStart - 1) * CELL }} onPointerDown={(e) => dragRange(e, 'start')} />
+                <div className="tl-range end" data-testid="timeline-end" title={`End frame ${rangeEnd}: drag to change`} style={{ left: rangeEnd * CELL }} onPointerDown={(e) => dragRange(e, 'end')} />
               </div>
             </div>
             {graph && <GraphEditor frames={frames} cell={CELL} />}

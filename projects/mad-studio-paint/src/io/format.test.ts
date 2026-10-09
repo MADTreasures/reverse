@@ -85,6 +85,19 @@ describe('.madpaint format', () => {
     expect(old.sound).toEqual({ files: [{ id: 'snd1', name: 'Beat', type: 'audio/wav', duration: 1.5 }] });
   });
 
+  it('keeps several timelines, their tracks, start and end frames', () => {
+    const doc = createDocument('Timelines', 200, 100, 72);
+    const c1 = createRasterLayer('1');
+    const folder = createFolder('A', [c1], { animation: { cels: [{ frame: 1, cel: c1.id }] } });
+    doc.layers = [folder];
+    doc.timeline = { enabled: true, fps: 8, frames: 8, name: 'Main', start: 2, end: 6 };
+    doc.timelines = { others: [{ timeline: { enabled: true, fps: 12, frames: 6, name: 'Other' }, tracks: { [folder.id]: { cels: [{ frame: 3, cel: c1.id }], clips: [{ start: 2, end: 5 }] } } }], index: 1 };
+    const back = unpackDocument(packDocument({ doc, activeLayerId: null, layers: new Map() }));
+    expect(back.doc).toEqual(doc);
+    // Start after end, end beyond the frames: kept within the frames.
+    expect(sanitizeDocument({ timeline: { frames: 5, start: 4, end: 2 } }).timeline).toEqual({ enabled: true, fps: 8, frames: 5, start: 4, end: 4 });
+  });
+
   it('keeps the clips of tracks', () => {
     const doc = createDocument('Clips', 200, 100, 72);
     doc.layers[0].clips = [

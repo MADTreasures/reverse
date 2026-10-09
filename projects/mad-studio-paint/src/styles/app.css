@@ -2674,6 +2674,87 @@
   color: var(--text-dim);
 }
 
+/* Manage timeline */
+.timeline-manager {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.timeline-list {
+  flex: 1;
+  min-height: 120px;
+  max-height: 220px;
+  margin: 0;
+  padding: 4px;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--well);
+  list-style: none;
+}
+
+.timeline-list li {
+  padding: 4px 8px;
+  border-radius: var(--radius);
+  cursor: pointer;
+}
+
+.timeline-list li.selected {
+  background: var(--select-row);
+}
+
+.timeline-list li.edited {
+  font-weight: 600;
+}
+
+.timeline-buttons {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+/* Timeline palette: the timeline list, start and end frame */
+.tl-timelines {
+  max-width: 140px;
+  height: 22px;
+  margin: 0 2px;
+  padding: 0 4px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--bg-3);
+  color: var(--text);
+  font-size: 12px;
+}
+
+.tl-ruler {
+  position: relative;
+}
+
+.tl-ruler .tl-cell.outside {
+  opacity: 0.45;
+}
+
+.tl-range {
+  position: absolute;
+  z-index: 2;
+  top: 0;
+  width: 7px;
+  height: 20px;
+  background: #4f6fe0;
+  cursor: ew-resize;
+}
+
+.tl-range.start {
+  margin-left: -1px;
+  border-radius: 0 3px 3px 0;
+}
+
+.tl-range.end {
+  margin-left: -6px;
+  border-radius: 3px 0 0 3px;
+}
+
 /* frame templates */
 
 .template-list {
