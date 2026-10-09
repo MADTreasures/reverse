@@ -1,7 +1,7 @@
 /** Open, save, import, export and autosave – the browser/Electron side of the document format. */
 import { createRasterLayer, flatten, insertAbove, nextLayerName, pixelIds } from '../model/layers';
 import { createDocument } from '../model/document';
-import type { FolderLayer, Id, PaintDocument } from '../model/types';
+import type { FolderLayer, Id, Layer, PaintDocument } from '../model/types';
 import { bytesToCanvas, canvasToBytes, createCanvas, ctx2d } from '../engine/canvas';
 import { framePath, strokeFrame } from '../engine/compositor';
 import { engine } from '../engine/engine';
@@ -12,6 +12,9 @@ import * as actions from '../store/actions';
 import { getState, setState, useStore } from '../store/store';
 import { confirmDialog, toast } from '../ui/overlays';
 import { SEQUENCE_EXT, sequenceNames, type SequenceType } from './sequence';
+import { expressColors, IMAGE_FORMATS, jpegWithDpi, outputSize, type ExpressionColor, type ImageFormat, type OutputSize } from './imageExport';
+import { pngWithDpi } from './png';
+import { maskBounds } from '../paint/mask';
 import { EXTENSION, IMAGE_EXTENSIONS, isDocumentFileName, isImageFileName, isPsdFileName, mimeForName, packDocument, PSD_EXTENSIONS, unpackDocument } from './format';
 import { idbDelete, idbGet, idbSet } from './idb';
 import { docLightImages } from '../paint/lightTable';
@@ -26,6 +29,7 @@ import { areaRect, safeRect, type DrawingArea, type FrameRect, type OutputFrame 
 const DOC_FILTERS = [{ name: 'MAD Studio Paint Document', extensions: [EXTENSION] }];
 const OPEN_FILTERS = [{ name: 'Documents and images', extensions: [EXTENSION, ...PSD_EXTENSIONS, ...IMAGE_EXTENSIONS] }];
 const PSD_FILTERS = [{ name: 'Photoshop document', extensions: ['psd'] }];
+const PSB_FILTERS = [{ name: 'Photoshop big document', extensions: ['psb'] }];
 const PSD_MIME = 'image/vnd.adobe.photoshop';
 const AUTOSAVE_KEY = 'autosave';
 
@@ -40,21 +44,30 @@ export async function confirmDiscard(): Promise<boolean> {
 
 // ------------------------------------------------------------------ saving
 
-/** Merged image of the document (optionally on paper, without draft layers; a frame of the timeline). */
+/**
+ * Merged image of the document (optionally on paper, without draft or text layers; a frame of the
+ * timeline): an area of the canvas, scaled (or brought to `size`).
+ */
 export function renderMerged(
-  opts: { paper: boolean; skipDraft: boolean; scale?: number; frame?: number; camera?: boolean; area?: FrameRect; frameLines?: boolean } = { paper: true, skipDraft: true },
+  opts: { paper: boolean; skipDraft: boolean; skipText?: boolean; scale?: number; size?: { w: number; h: number }; frame?: number; camera?: boolean; area?: FrameRect; frameLines?: boolean } = {
+    paper: true,
+    skipDraft: true,
+  },
 ): HTMLCanvasElement {
   const { doc } = getState();
   const full = createCanvas(doc.width, doc.height);
   // The paper is part of the stack (blend modes and correction layers see it), unless left out.
   const paper = opts.paper && doc.paper.visible ? doc.paper.color : null;
-  engine.compositor.compose(doc, ctx2d(full), { x: 0, y: 0, w: doc.width, h: doc.height }, { skipDraft: opts.skipDraft, paper, frame: opts.frame, camera: opts.camera });
+  const filter = opts.skipText ? (l: Layer) => l.kind !== 'text' : undefined;
+  engine.compositor.compose(doc, ctx2d(full), { x: 0, y: 0, w: doc.width, h: doc.height }, { skipDraft: opts.skipDraft, paper, frame: opts.frame, camera: opts.camera, filter });
   if (opts.frameLines && doc.outputFrame) drawExportFrameLines(ctx2d(full), doc.outputFrame);
   // Drawing area: part of the canvas (the output frame or the overflow frame), scaled.
   const area = opts.area ?? { x: 0, y: 0, w: doc.width, h: doc.height };
   const scale = opts.scale ?? 1;
-  if (scale === 1 && area.x === 0 && area.y === 0 && area.w === doc.width && area.h === doc.height) return full;
-  const out = createCanvas(Math.max(1, Math.round(area.w * scale)), Math.max(1, Math.round(area.h * scale)));
+  const w = opts.size?.w ?? Math.max(1, Math.round(area.w * scale));
+  const h = opts.size?.h ?? Math.max(1, Math.round(area.h * scale));
+  if (w === doc.width && h === doc.height && area.x === 0 && area.y === 0 && area.w === doc.width && area.h === doc.height) return full;
+  const out = createCanvas(w, h);
   const o = ctx2d(out);
   o.imageSmoothingQuality = 'high';
   o.drawImage(full, area.x, area.y, area.w, area.h, 0, 0, out.width, out.height);
@@ -266,10 +279,6 @@ export function listenForNativeOpen(): void {
 
 // ------------------------------------------------------------------ export
 
-export type ExportFormat = 'png' | 'jpeg' | 'webp' | 'psd';
-
-const MIME: Record<ExportFormat, string> = { png: 'image/png', jpeg: 'image/jpeg', webp: 'image/webp', psd: PSD_MIME };
-
 function pixelsOf(canvas: HTMLCanvasElement): Pixels {
   const img = ctx2d(canvas).getImageData(0, 0, canvas.width, canvas.height);
   return { width: img.width, height: img.height, data: img.data };
@@ -281,32 +290,90 @@ function pixelsToCanvas(p: Pixels): HTMLCanvasElement {
   return c;
 }
 
-/**
- * File > Export (single layer). PSD: the merged image as one layer, or as Photoshop's background
- * ("Output as background", always on paper).
- */
-export async function exportImage(format: ExportFormat, opts: { scale: number; transparent: boolean; quality: number; skipDraft: boolean; background?: boolean }): Promise<boolean> {
-  const mime = MIME[format];
-  // JPEG and a background layer have no alpha: always on paper (white if the paper is hidden).
-  const opaque = format === 'jpeg' || (format === 'psd' && Boolean(opts.background));
-  let canvas = renderMerged({ paper: !opts.transparent || opaque, skipDraft: opts.skipDraft, scale: opts.scale });
-  if (opaque && !getState().doc.paper.visible) {
-    const flat = createCanvas(canvas.width, canvas.height);
-    const f = ctx2d(flat);
-    f.fillStyle = '#ffffff';
-    f.fillRect(0, 0, flat.width, flat.height);
-    f.drawImage(canvas, 0, 0);
-    canvas = flat;
+/** Export range: the entire canvas, the selection's bounding box, or the output frame. */
+export type ExportRange = 'canvas' | 'selection' | 'output';
+
+/** File > Export (single layer): what the export settings dialog sets. */
+export interface ImageExportOptions {
+  format: ImageFormat;
+  /** JPEG, and WebP with Prioritize file size: 0…1. */
+  quality: number;
+  /** WebP: Prioritize quality (lossless). */
+  lossless: boolean;
+  /** Photoshop file settings: Output as background. */
+  background: boolean;
+  /** Output image: draft layers, text layers. */
+  drafts: boolean;
+  text: boolean;
+  range: ExportRange;
+  color: ExpressionColor;
+  /** Export transparency (PNG, WebP). */
+  transparent: boolean;
+  size: OutputSize;
+}
+
+/** The canvas rectangle an export range covers. */
+export function exportArea(range: ExportRange): FrameRect {
+  const { doc, selection } = getState();
+  const whole = { x: 0, y: 0, w: doc.width, h: doc.height };
+  if (range === 'output' && doc.outputFrame) return areaRect(doc.outputFrame, 'output', doc.width, doc.height);
+  if (range === 'selection' && selection) return maskBounds(selection) ?? whole;
+  return whole;
+}
+
+/** The image an export writes (before encoding) and its resolution. */
+export function renderExport(o: ImageExportOptions): { canvas: HTMLCanvasElement; dpi: number } {
+  const { doc } = getState();
+  const area = exportArea(o.range);
+  const out = outputSize(o.size, area.w, area.h, doc.dpi);
+  // WebP is always 72 dpi (as in the reference).
+  const dpi = o.format === 'webp' ? 72 : out.dpi;
+  const transparent = o.transparent && IMAGE_FORMATS[o.format].transparency;
+  // A Photoshop layer keeps what the canvas leaves transparent; the other formats are flat on paper.
+  const layer = (o.format === 'psd' || o.format === 'psb') && !o.background;
+  let canvas = renderMerged({ paper: !transparent, skipDraft: !o.drafts, skipText: !o.text, size: { w: out.width, h: out.height }, area });
+  if (!transparent && !layer && !getState().doc.paper.visible) canvas = onWhite(canvas);
+  if (o.color !== 'auto' && o.color !== 'rgb') {
+    const p = pixelsOf(canvas);
+    expressColors(p, o.color, dpi);
+    canvas = pixelsToCanvas(p);
   }
+  return { canvas, dpi };
+}
+
+/** The file bytes of an export. */
+export async function encodeExport(canvas: HTMLCanvasElement, dpi: number, o: ImageExportOptions): Promise<Uint8Array> {
+  switch (o.format) {
+    case 'png':
+      return pngWithDpi(await canvasToBytes(canvas, 'image/png'), dpi);
+    case 'jpeg':
+      return jpegWithDpi(await canvasToBytes(canvas, 'image/jpeg', o.quality), dpi);
+    case 'webp':
+      return webpBytes(canvas, o.lossless, o.quality);
+    case 'bmp':
+      return (await import('./imageFormats')).encodeBmp(pixelsOf(canvas), dpi);
+    case 'tiff':
+      return (await import('./imageFormats')).encodeTiff(pixelsOf(canvas), false, dpi);
+    case 'tga':
+      return (await import('./imageFormats')).encodeTga(pixelsOf(canvas), false);
+    default:
+      return (await import('./psd')).encodeFlatPsd(pixelsOf(canvas), dpi, o.background, o.format === 'psb');
+  }
+}
+
+/** Saves an export's bytes under the canvas's name. */
+export async function saveExport(bytes: Uint8Array, format: ImageFormat): Promise<boolean> {
+  const f = IMAGE_FORMATS[format];
+  const saved = await saveFile(bytes, `${getState().doc.name || 'Untitled'}.${f.ext}`, [{ name: f.name, extensions: [f.ext] }], null, f.mime);
+  if (saved) toast(`Exported ${saved.name}`);
+  return Boolean(saved);
+}
+
+/** File > Export (single layer) > format: the merged image with the export settings. */
+export async function exportImage(o: ImageExportOptions): Promise<boolean> {
   try {
-    const bytes =
-      format === 'psd'
-        ? (await import('./psd')).encodeFlatPsd(pixelsOf(canvas), getState().doc.dpi, Boolean(opts.background))
-        : await canvasToBytes(canvas, mime, format === 'png' ? undefined : opts.quality);
-    const ext = format === 'jpeg' ? 'jpg' : format;
-    const saved = await saveFile(bytes, `${getState().doc.name || 'Untitled'}.${ext}`, [{ name: format.toUpperCase(), extensions: [ext] }], null, mime);
-    if (saved) toast(`Exported ${saved.name}`);
-    return Boolean(saved);
+    const { canvas, dpi } = renderExport(o);
+    return await saveExport(await encodeExport(canvas, dpi, o), o.format);
   } catch (err) {
     toast(`Export failed: ${(err as Error).message}`, 'error');
     return false;
@@ -330,10 +397,10 @@ function frameShapes(folder: FolderLayer): { area: Pixels; border: Pixels | null
 }
 
 /**
- * File > Save duplicate > .psd: a Photoshop document with the layers (see io/psd.ts). Like the
- * reference, draft layers are left out unless "Draft layers" is ticked.
+ * File > Save duplicate > .psd / .psb: a Photoshop (big) document with the layers (see io/psd.ts).
+ * Like the reference, draft layers are left out unless "Draft layers" is ticked.
  */
-export async function exportPsd(opts: { skipDraft: boolean }): Promise<boolean> {
+export async function exportPsd(opts: { skipDraft: boolean; psb?: boolean }): Promise<boolean> {
   try {
     const { encodePsd } = await import('./psd');
     const { doc } = getState();
@@ -341,24 +408,28 @@ export async function exportPsd(opts: { skipDraft: boolean }): Promise<boolean> 
       const s = getSurface(id);
       return s ? pixelsOf(s) : null;
     };
-    const bytes = encodePsd({
-      doc,
-      frame: getState().frame,
-      composite: pixelsOf(renderMerged({ paper: true, skipDraft: opts.skipDraft })),
-      skipDraft: opts.skipDraft,
-      // A movie layer: its picture at the current frame.
-      layerPixels: (l) => (l.kind === 'movie' ? pixelsOf(engine.compositor.layerImage(doc, { ...l, mask: undefined, effects: undefined }, { frame: getState().frame })) : surface(l.id)),
-      bakedPixels: (l) => pixelsOf(engine.compositor.layerImage(doc, l, { skipDraft: opts.skipDraft })),
-      maskPixels: (m) => surface(m.id),
-      frameShapes,
-      textPixels: (_layer, part) => {
-        const c = createCanvas(doc.width, doc.height);
-        if (part === 'balloons') drawBalloons(ctx2d(c), _layer.balloons);
-        else drawTextBox(ctx2d(c), part);
-        return pixelsOf(c);
+    const bytes = encodePsd(
+      {
+        doc,
+        frame: getState().frame,
+        composite: pixelsOf(renderMerged({ paper: true, skipDraft: opts.skipDraft })),
+        skipDraft: opts.skipDraft,
+        // A movie layer: its picture at the current frame.
+        layerPixels: (l) => (l.kind === 'movie' ? pixelsOf(engine.compositor.layerImage(doc, { ...l, mask: undefined, effects: undefined }, { frame: getState().frame })) : surface(l.id)),
+        bakedPixels: (l) => pixelsOf(engine.compositor.layerImage(doc, l, { skipDraft: opts.skipDraft })),
+        maskPixels: (m) => surface(m.id),
+        frameShapes,
+        textPixels: (_layer, part) => {
+          const c = createCanvas(doc.width, doc.height);
+          if (part === 'balloons') drawBalloons(ctx2d(c), _layer.balloons);
+          else drawTextBox(ctx2d(c), part);
+          return pixelsOf(c);
+        },
       },
-    });
-    const saved = await saveFile(bytes, `${doc.name || 'Untitled'}.psd`, PSD_FILTERS, null, PSD_MIME);
+      opts.psb,
+    );
+    const ext = opts.psb ? 'psb' : 'psd';
+    const saved = await saveFile(bytes, `${doc.name || 'Untitled'}.${ext}`, opts.psb ? PSB_FILTERS : PSD_FILTERS, null, PSD_MIME);
     if (saved) toast(`Saved a copy as ${saved.name}`);
     return Boolean(saved);
   } catch (err) {

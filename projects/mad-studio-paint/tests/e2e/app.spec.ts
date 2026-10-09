@@ -1822,13 +1822,12 @@ test('Photoshop documents: Save duplicate as .psd keeps the layers, File > Open 
   expect(line).toBeGreaterThan(90);
   expect(line).toBeLessThan(170);
 
-  // File > Export (single layer) as .psd, output as background: one opaque layer.
-  await page.evaluate(() => window.__madPaint.runCommand('export'));
-  const ex = page.getByRole('dialog', { name: 'Export' });
-  await ex.getByLabel('Format').selectOption('psd');
+  // File > Export (single layer) > .psd, output as background: one opaque layer.
+  await page.evaluate(() => window.__madPaint.runCommand('export-psd'));
+  const ex = page.getByRole('dialog', { name: 'Photoshop document export settings' });
   await ex.getByLabel('Output as background').check();
-  await expect(ex.getByText('Transparent background')).toHaveCount(0);
-  const [flat] = await Promise.all([page.waitForEvent('download'), ex.getByRole('button', { name: 'Export' }).click()]);
+  await expect(ex.getByText('Export transparency')).toHaveCount(0);
+  const [flat] = await Promise.all([page.waitForEvent('download'), ex.getByRole('button', { name: 'OK' }).click()]);
   const flatBytes = [...readFileSync((await flat.path())!)];
   const opened = await page.evaluate(async (data) => {
     const m = window.__madPaint;
@@ -1837,6 +1836,121 @@ test('Photoshop documents: Save duplicate as .psd keeps the layers, File > Open 
     return { names: s.doc.layers.map((l: any) => l.name), centre: m.engine.sampleDisplayed(150, 150, '#ffffff')[0] };
   }, flatBytes);
   expect(opened).toEqual({ names: ['Background'], centre: 0 });
+  expect(errors).toEqual([]);
+});
+
+/** Tags of a little-endian baseline TIFF and the RGB(A) bytes of its pixel at x, y. */
+function tiffInfo(t: Buffer, x: number, y: number) {
+  const ifd = t.readUInt32LE(4);
+  const tags = new Map<number, number>();
+  for (let i = 0; i < t.readUInt16LE(ifd); i++) {
+    const o = ifd + 2 + i * 12;
+    const type = t.readUInt16LE(o + 2);
+    tags.set(t.readUInt16LE(o), type === 3 ? t.readUInt16LE(o + 8) : t.readUInt32LE(o + 8));
+  }
+  const w = tags.get(256)!;
+  const spp = tags.get(277)!;
+  const at = tags.get(273)! + (y * w + x) * spp;
+  return { width: w, height: tags.get(257)!, dpi: t.readUInt32LE(tags.get(282)!) / t.readUInt32LE(tags.get(282)! + 4), pixel: [...t.subarray(at, at + spp)] };
+}
+
+test('export (single layer): formats, output image, export range, expression color, output size, resolution, preview', async ({ page }) => {
+  const errors = await boot(page);
+  await page.evaluate(() => delete (window as any).showSaveFilePicker);
+  // Text at the top left; a black square (still selected) on its own layer.
+  await page.keyboard.press('t');
+  const at = await docToScreen(page, 40, 60);
+  await page.mouse.click(at.x, at.y);
+  await page.keyboard.type('Hello');
+  await page.keyboard.press('ControlOrMeta+Enter');
+  await page.evaluate(() => {
+    const m = window.__madPaint;
+    m.actions.setLayerProps(m.actions.addRasterLayer(), { name: 'Square' });
+    // Selected: x 200…299, y 100…199.
+    const data = new Uint8Array(400 * 300);
+    for (let y = 100; y < 200; y++) data.fill(255, y * 400 + 200, y * 400 + 300);
+    m.useStore.setState({ selection: { width: 400, height: 300, data } });
+  });
+  await fillBlack(page);
+  const save = async (dialog: ReturnType<Page['getByRole']>) => {
+    const [dl] = await Promise.all([page.waitForEvent('download'), dialog.getByRole('button', { name: 'OK' }).click()]);
+    return { name: dl.suggestedFilename(), bytes: readFileSync((await dl.path())!) };
+  };
+
+  // TIFF: the selection, at 144 dpi (twice the pixels), in grey.
+  await page.evaluate(() => window.__madPaint.runCommand('export-tiff'));
+  const tiff = page.getByRole('dialog', { name: 'TIFF export settings' });
+  await expect(tiff.getByText('Export transparency')).toHaveCount(0);
+  await tiff.getByLabel('Export range').selectOption('selection');
+  await expect(tiff.getByTestId('export-size')).toHaveText('100 × 100 px · 72 dpi');
+  await tiff.getByLabel('Specify resolution').check();
+  await tiff.getByLabel('Resolution', { exact: true }).fill('144');
+  await expect(tiff.getByTestId('export-size')).toHaveText('200 × 200 px · 144 dpi');
+  await tiff.getByLabel('Expression color').selectOption('gray');
+  const t = await save(tiff);
+  expect(t.name).toBe('Test.tif');
+  expect(tiffInfo(t.bytes, 100, 100)).toEqual({ width: 200, height: 200, dpi: 144, pixel: [0, 0, 0] });
+
+  // PNG: half size, without the text, duotone, transparent; Export preview first.
+  await page.evaluate(() => window.__madPaint.runCommand('export-png'));
+  const png = page.getByRole('dialog', { name: 'PNG export settings' });
+  await png.getByLabel('Scale ratio from original data').check();
+  await png.getByLabel('Scale ratio', { exact: true }).fill('50');
+  await expect(png.getByTestId('export-size')).toHaveText('200 × 150 px · 72 dpi');
+  await png.getByLabel('Text', { exact: true }).uncheck();
+  await png.getByLabel('Expression color').selectOption('threshold');
+  await png.getByLabel('Export transparency').check();
+  await png.getByLabel('Preview rendering result on output').check();
+  await png.getByRole('button', { name: 'OK' }).click();
+  const preview = page.getByRole('dialog', { name: 'Export preview' });
+  await expect(preview.getByTestId('export-file-size')).toContainText('[KByte]');
+  await expect(preview.locator('img')).toHaveCount(1);
+  const p = await save(preview);
+  expect(p.name).toBe('Test.png');
+  // pHYs: 72 dpi = 2835 pixels per metre.
+  const phys = p.bytes.indexOf(Buffer.from('pHYs'));
+  expect(phys).toBe(37);
+  expect([p.bytes.readUInt32BE(phys + 4), p.bytes[phys + 12]]).toEqual([2835, 1]);
+  const px = await page.evaluate(async (b64) => {
+    const bmp = await createImageBitmap(new Blob([Uint8Array.from(atob(b64), (c) => c.charCodeAt(0))], { type: 'image/png' }));
+    const c = new OffscreenCanvas(bmp.width, bmp.height);
+    const g = c.getContext('2d')!;
+    g.drawImage(bmp, 0, 0);
+    const pick = (x: number, y: number) => [...g.getImageData(x, y, 1, 1).data];
+    let text = 0;
+    const d = g.getImageData(15, 15, 40, 25).data;
+    for (let i = 3; i < d.length; i += 4) text = Math.max(text, d[i]);
+    return { size: [bmp.width, bmp.height], square: pick(125, 75), outside: pick(180, 140), text };
+  }, p.bytes.toString('base64'));
+  expect(px).toEqual({ size: [200, 150], square: [0, 0, 0, 255], outside: [0, 0, 0, 0], text: 0 });
+
+  // JPEG: the preview's quality changes the file size; the file says 72 dpi.
+  await page.evaluate(() => window.__madPaint.runCommand('export-jpeg'));
+  const jpeg = page.getByRole('dialog', { name: 'JPEG export settings' });
+  await jpeg.getByLabel('Quality').fill('90');
+  await expect(jpeg.getByLabel('Preview rendering result on output')).toBeChecked();
+  await jpeg.getByRole('button', { name: 'OK' }).click();
+  await expect(preview.getByTestId('export-file-size')).not.toContainText('…');
+  const big = await preview.getByTestId('export-file-size').textContent();
+  await preview.getByLabel('Quality').fill('10');
+  await expect(preview.getByTestId('export-file-size')).not.toHaveText(big!);
+  const j = await save(preview);
+  expect(j.name).toBe('Test.jpg');
+  expect([j.bytes[0], j.bytes[1], j.bytes.subarray(6, 10).toString('latin1'), j.bytes[13], j.bytes.readUInt16BE(14)]).toEqual([0xff, 0xd8, 'JFIF', 1, 72]);
+
+  // BMP and Targa without preview; Save duplicate as .psb.
+  await page.evaluate(() => window.__madPaint.runCommand('export-bmp'));
+  const bmp = page.getByRole('dialog', { name: 'BMP export settings' });
+  await bmp.getByLabel('Preview rendering result on output').uncheck();
+  const b = await save(bmp);
+  expect([b.name, b.bytes.subarray(0, 2).toString('latin1')]).toEqual(['Test.bmp', 'BM']);
+  await page.evaluate(() => window.__madPaint.runCommand('export-tga'));
+  const g = await save(page.getByRole('dialog', { name: 'Targa export settings' }));
+  expect([g.name, g.bytes[2], g.bytes.subarray(g.bytes.length - 18, g.bytes.length - 1).toString('latin1')]).toEqual(['Test.tga', 2, 'TRUEVISION-XFILE.']);
+  await page.evaluate(() => window.__madPaint.runCommand('saveDuplicatePsb'));
+  const psb = await save(page.getByRole('dialog', { name: 'Export settings' }));
+  // Signature 8BPS, version 2 (big document).
+  expect([psb.name, psb.bytes.subarray(0, 4).toString('latin1'), psb.bytes.readUInt16BE(4)]).toEqual(['Test.psb', '8BPS', 2]);
   expect(errors).toEqual([]);
 });
 

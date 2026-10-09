@@ -407,20 +407,22 @@ export function buildPsd(src: PsdSource): Psd {
  * File > Export (single layer) as .psd: the merged image as one layer, or (opaque) as Photoshop's
  * background layer.
  */
-export function encodeFlatPsd(image: Pixels, dpi: number, background: boolean): Uint8Array {
+/** The merged image as a one-layer Photoshop document (`psb`: a big document). */
+export function encodeFlatPsd(image: Pixels, dpi: number, background: boolean, psb = false): Uint8Array {
   const layer: PsdLayer = { name: background ? 'Background' : 'Layer 1', left: 0, top: 0, opacity: 1, blendMode: 'normal', imageData: image };
-  return writePsdUint8Array({ width: image.width, height: image.height, children: [layer], imageData: image, imageResources: resolution(dpi) }, { noBackground: !background });
+  return writePsdUint8Array({ width: image.width, height: image.height, children: [layer], imageData: image, imageResources: resolution(dpi) }, { noBackground: !background, psb });
 }
 
-export function encodePsd(src: PsdSource): Uint8Array {
+/** A Photoshop document with the layers (`psb`: a big document). */
+export function encodePsd(src: PsdSource, psb = false): Uint8Array {
   // Without noBackground an opaque bottom layer (the paper) would become Photoshop's locked Background.
   try {
-    return writePsdUint8Array(buildPsd(src), { noBackground: true });
+    return writePsdUint8Array(buildPsd(src), { noBackground: true, psb });
   } catch (err) {
     // Kept styles come from files: if one cannot be written, write the document without them.
     const clean = withoutKept(src.doc);
     if (clean === src.doc) throw err;
-    return writePsdUint8Array(buildPsd({ ...src, doc: clean }), { noBackground: true });
+    return writePsdUint8Array(buildPsd({ ...src, doc: clean }), { noBackground: true, psb });
   }
 }
 

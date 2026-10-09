@@ -13,6 +13,8 @@ import { cancelTransform, confirmTransform, isTransforming, startTransform } fro
 import { CORRECTIONS, correctionLabel, defaultCorrection, type CorrectionType } from '../paint/tonal';
 import { openDialog, openTonalDialog, promptDialog } from './overlays';
 import { openAssignMenu } from './palettes/TimelinePalette';
+import { openImageExport, openPsdDuplicate } from './dialogs/ExportDialog';
+import { IMAGE_FORMAT_ORDER, IMAGE_FORMATS } from '../io/imageExport';
 import { formatShortcut, normalizeShortcut } from './shortcuts';
 
 export interface Command {
@@ -130,9 +132,10 @@ export const COMMANDS: Command[] = [
   { id: 'save', label: 'Save', keys: ['Mod+s'], run: () => void saveDocument(false) },
   { id: 'saveAs', label: 'Save as…', keys: ['Mod+Shift+s', 'Mod+Alt+s'], run: () => void saveDocument(true) },
   { id: 'saveDuplicate', label: '.madpaint (MAD Studio Paint)…', run: () => void saveDuplicate() },
-  { id: 'saveDuplicatePsd', label: '.psd (Photoshop document)…', run: () => openDialog('exportPsd') },
+  { id: 'saveDuplicatePsd', label: '.psd (Photoshop Document)…', run: () => openPsdDuplicate(false) },
+  { id: 'saveDuplicatePsb', label: '.psb (Photoshop Big Document)…', run: () => openPsdDuplicate(true) },
   { id: 'importImage', label: 'Import image as layer…', run: () => importImages() },
-  { id: 'export', label: 'Export (single layer)…', run: () => openDialog('export') },
+  ...IMAGE_FORMAT_ORDER.map((f): Command => ({ id: `export-${f}`, label: `${IMAGE_FORMATS[f].menu}…`, run: () => openImageExport(f) })),
   { id: 'preferences', label: 'Preferences…', keys: ['Mod+k'], run: () => openDialog('preferences') },
   { id: 'pressureSettings', label: 'Pen pressure settings…', run: () => openDialog('pressure') },
   { id: 'renameCanvas', label: 'Canvas name…', run: () => renameCanvas() },
