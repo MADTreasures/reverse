@@ -147,6 +147,8 @@ export interface PaintState {
   lightShowGeneral: boolean;
   /** The light table layer selected in the Animation cels palette. */
   lightSelection: string | null;
+  /** Light table layers selected besides it (Ctrl/⌘-click; Move canvas to center uses two). */
+  lightPicked: string[];
   /** Lock current animation cel as editing target: that cel stays the target cel. */
   lockedCel: Id | null;
   /** Switch opacity target between All or Individual: on changes all light table layers. */
@@ -240,6 +242,7 @@ function initialState(): PaintState {
     lightShowCel: true,
     lightShowGeneral: true,
     lightSelection: null,
+    lightPicked: [],
     lockedCel: null,
     lightOpacityAll: false,
     layerDockTab: 'layer',

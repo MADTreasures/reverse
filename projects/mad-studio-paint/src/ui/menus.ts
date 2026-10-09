@@ -96,7 +96,7 @@ export const MENUS: MenuSpec[] = [
       { label: 'Show animation cels', items: ['onionSkin', 'onionSkinSettings', '-', 'cameraView'] },
       {
         label: 'Light table',
-        items: ['enableLightTable', '-', 'registerLayer', 'registerFile', 'registerOnion', '-', 'deregisterLight', 'deregisterAllLight', '-', 'lockCel'],
+        items: ['enableLightTable', '-', 'registerLayer', 'registerFile', 'registerOnion', '-', 'deregisterLight', 'deregisterAllLight', '-', 'centerCanvas', '-', 'lockCel'],
       },
       '-',
       'playStop',

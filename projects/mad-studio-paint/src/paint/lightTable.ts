@@ -9,6 +9,7 @@ import type { Id, Layer, PaintDocument } from '../model/types';
 import { type OnionMode } from './animation';
 import { placementMatrix, type Placement } from './keyframes';
 import type { Affine } from './rulers';
+import { normalizeAngle, type ViewTransformInput } from './viewMath';
 
 export type LightSource = { kind: 'layer'; layer: Id } | { kind: 'image'; image: Id; name: string; w: number; h: number };
 
@@ -78,6 +79,66 @@ export function lightMatrix(l: LightLayer, width: number, height: number): Affin
 
 /** Reset position of layers on light table. */
 export const resetLight = (l: LightLayer): LightLayer => ({ ...l, x: 0, y: 0, scale: 1, rotation: 0, flipH: false, flipV: false });
+
+/** Moves a light table layer to `index` of a list (or appends it); the others keep their order. */
+export function insertLight(list: LightLayer[], l: LightLayer, index: number): LightLayer[] {
+  const rest = list.filter((x) => x.id !== l.id);
+  const at = Math.max(0, Math.min(rest.length, index));
+  return [...rest.slice(0, at), l, ...rest.slice(at)];
+}
+
+// ------------------------------------------------------------------ Move canvas to center
+
+/** How the canvas is moved: like a light table layer (about the middle of the canvas), without flips. */
+export interface CanvasMove {
+  x: number;
+  y: number;
+  scale: number;
+  rotation: number;
+}
+
+/**
+ * Move canvas to center: the canvas between two light table layers, `t` 0 at the first, 1 at the
+ * second (0.5: in the middle). Rotation takes the shorter way.
+ */
+export function betweenLights(a: LightLayer, b: LightLayer, t: number): CanvasMove {
+  const mix = (p: number, q: number) => p + (q - p) * t;
+  return { x: mix(a.x, b.x), y: mix(a.y, b.y), scale: mix(a.scale, b.scale), rotation: a.rotation + normalizeAngle(b.rotation - a.rotation) * t };
+}
+
+/**
+ * A light table layer seen from the moved canvas: placed so that it stays where it is on screen
+ * (the move undone, then its own placement). Flips stay.
+ */
+export function rebaseLight(l: LightLayer, c: CanvasMove): LightLayer {
+  const r = (c.rotation * Math.PI) / 180;
+  const dx = l.x - c.x;
+  const dy = l.y - c.y;
+  return {
+    ...l,
+    x: (Math.cos(r) * dx + Math.sin(r) * dy) / c.scale,
+    y: (-Math.sin(r) * dx + Math.cos(r) * dy) / c.scale,
+    scale: Math.max(0.01, Math.min(100, l.scale / c.scale)),
+    rotation: normalizeAngle(l.rotation - c.rotation),
+  };
+}
+
+/** The view that shows the canvas moved by `c` (the move, then the view). */
+export function movedView<V extends ViewTransformInput>(v: V, c: CanvasMove): V {
+  const t = (v.rotation * Math.PI) / 180;
+  const sx = v.zoom * (v.flipH ? -1 : 1);
+  const sy = v.zoom * (v.flipV ? -1 : 1);
+  const dx = sx * c.x;
+  const dy = sy * c.y;
+  return {
+    ...v,
+    zoom: v.zoom * c.scale,
+    // One flip turns the canvas's rotation the other way on screen.
+    rotation: normalizeAngle(v.rotation + (v.flipH !== v.flipV ? -c.rotation : c.rotation)),
+    panX: v.panX + Math.cos(t) * dx - Math.sin(t) * dy,
+    panY: v.panY + Math.sin(t) * dx + Math.cos(t) * dy,
+  };
+}
 
 /** Every image the light tables show (for saving them with the document). */
 export function lightImages(general: LightLayer[], perCel: LightLayer[][]): Id[] {

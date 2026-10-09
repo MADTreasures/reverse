@@ -4,9 +4,11 @@
  * switched, of all), colour mode and display colour. Command bar: enable light table, lock the target
  * cel, previous / next cel, new animation cel, register a file or the selected layer, deregister,
  * Light table tool, show the cel-specific / general light table. Image files dropped on the palette
- * are registered.
+ * are registered; layers dragged from the Layer palette onto a light table are registered there;
+ * light table layers are reordered by dragging them (also from one light table to the other).
+ * Ctrl/⌘-click selects several (Move canvas to center works between two).
  */
-import { useRef } from 'react';
+import { useRef, useState, type DragEvent } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import { findLayer } from '../../model/layers';
 import type { OnionMode } from '../../paint/animation';
@@ -33,11 +35,30 @@ const MODES: [OnionMode, string][] = [
   ['mono', 'Monochrome'],
 ];
 
-function LightRow({ l, selected }: { l: LightLayer; selected: boolean }) {
+/** What is being dragged over a light table: one of its layers, or a layer from the Layer palette. */
+const LIGHT_TYPE = 'application/x-mad-light';
+const dragKind = (e: DragEvent): 'light' | 'layer' | null =>
+  e.dataTransfer.types.includes(LIGHT_TYPE) ? 'light' : e.dataTransfer.types.includes('text/plain') && !e.dataTransfer.types.includes('Files') ? 'layer' : null;
+
+type ListId = 'cel' | 'general';
+type DropAt = { list: ListId; index: number } | null;
+
+function LightRow({ l, selected, onDragOver }: { l: LightLayer; selected: boolean; onDragOver: (e: DragEvent<HTMLElement>) => void }) {
   const name = useStore((s) => (l.source.kind === 'image' ? l.source.name : (findLayer(s.doc.layers, l.source.layer)?.name ?? null)));
   if (name === null) return null;
   return (
-    <button className={`cels-row ${selected ? 'selected' : ''}`} data-testid="light-layer" aria-pressed={selected} onClick={() => light.selectLight(l.id)}>
+    <button
+      className={`cels-row ${selected ? 'selected' : ''}`}
+      data-testid="light-layer"
+      aria-pressed={selected}
+      draggable
+      onDragStart={(e) => {
+        e.dataTransfer.effectAllowed = 'move';
+        e.dataTransfer.setData(LIGHT_TYPE, l.id);
+      }}
+      onDragOver={onDragOver}
+      onClick={(e) => light.selectLight(l.id, e.ctrlKey || e.metaKey)}
+    >
       {l.source.kind === 'layer' ? <LayerThumb id={l.source.layer} /> : <LayerThumb id={l.source.image} />}
       <span className="cels-name">{name}</span>
       <span className="cels-meta">
@@ -49,17 +70,19 @@ function LightRow({ l, selected }: { l: LightLayer; selected: boolean }) {
 
 export function AnimationCelsPalette() {
   const doc = useStore((s) => s.doc);
-  const { lightOn, lightShowCel, lightShowGeneral, lightSelection, lockedCel, lightOpacityAll, tool } = useStore(
+  const { lightOn, lightShowCel, lightShowGeneral, lightSelection, lightPicked, lockedCel, lightOpacityAll, tool } = useStore(
     useShallow((s) => ({
       lightOn: s.lightOn,
       lightShowCel: s.lightShowCel,
       lightShowGeneral: s.lightShowGeneral,
       lightSelection: s.lightSelection,
+      lightPicked: s.lightPicked,
       lockedCel: s.lockedCel,
       lightOpacityAll: s.lightOpacityAll,
       tool: s.tool,
     })),
   );
+  const [dropAt, setDropAt] = useState<DropAt>(null);
   const { folder, cel } = useStore(
     useShallow((s) => {
       const t = light.targetCel(s);
@@ -71,6 +94,45 @@ export function AnimationCelsPalette() {
   const celList = target?.cel.lightTable ?? [];
   const general = doc.lightTable?.general ?? [];
   const selected = [...celList, ...general].find((l) => l.id === lightSelection) ?? null;
+  const isPicked = (id: string) => id === lightSelection || lightPicked.includes(id);
+
+  // Dragging over a row: the place above or below it; over the rest of a light table: its end.
+  const overRow = (list: ListId, index: number) => (e: DragEvent<HTMLElement>) => {
+    if (!dragKind(e) || (list === 'cel' && !target)) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const r = e.currentTarget.getBoundingClientRect();
+    setDropAt({ list, index: index + (e.clientY > r.top + r.height / 2 ? 1 : 0) });
+  };
+  const overList = (list: ListId, length: number) => (e: DragEvent<HTMLElement>) => {
+    if (!dragKind(e) || (list === 'cel' && !target)) return;
+    e.preventDefault();
+    if (dropAt?.list !== list || e.target === e.currentTarget) setDropAt({ list, index: length });
+  };
+  const dropOn = (list: ListId) => (e: DragEvent<HTMLElement>) => {
+    const kind = dragKind(e);
+    const at = dropAt?.list === list ? dropAt.index : 0;
+    setDropAt(null);
+    if (!kind || (list === 'cel' && !target)) return;
+    e.preventDefault();
+    e.stopPropagation();
+    if (kind === 'light') light.moveLight(e.dataTransfer.getData(LIGHT_TYPE), list, at);
+    else {
+      const id = e.dataTransfer.getData('text/plain');
+      if (findLayer(doc.layers, id)) light.registerLayerAt(id, list, at);
+    }
+  };
+  const rows = (list: ListId, items: LightLayer[]) => (
+    <>
+      {items.map((l, i) => (
+        <div key={l.id} className="cels-slot">
+          {dropAt?.list === list && dropAt.index === i && <div className="cels-drop" />}
+          <LightRow l={l} selected={isPicked(l.id)} onDragOver={overRow(list, i)} />
+        </div>
+      ))}
+      {dropAt?.list === list && dropAt.index === items.length && <div className="cels-drop" />}
+    </>
+  );
   const shownOpacity = selected?.opacity ?? celList[0]?.opacity ?? general[0]?.opacity ?? 0.5;
   const lightTool = tool === 'lightTable';
 
@@ -85,7 +147,12 @@ export function AnimationCelsPalette() {
       onDragOver={(e) => {
         if (e.dataTransfer.types.includes('Files')) e.preventDefault();
       }}
+      onDragLeave={(e) => {
+        if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDropAt(null);
+      }}
+      onDragEnd={() => setDropAt(null)}
       onDrop={(e) => {
+        setDropAt(null);
         if (!e.dataTransfer.files.length) return;
         e.preventDefault();
         e.stopPropagation();
@@ -150,18 +217,14 @@ export function AnimationCelsPalette() {
           <div className="cels-empty">Select a cel of an animation folder</div>
         )}
       </div>
-      <div className={`cels-section ${lightShowCel ? '' : 'off'}`} data-testid="cel-light-table">
+      <div className={`cels-section ${lightShowCel ? '' : 'off'}`} data-testid="cel-light-table" onDragOver={overList('cel', celList.length)} onDrop={dropOn('cel')}>
         <div className="cels-head">Cel-specific light table</div>
-        {celList.map((l) => (
-          <LightRow key={l.id} l={l} selected={l.id === lightSelection} />
-        ))}
+        {rows('cel', celList)}
         {target && celList.length === 0 && <div className="cels-empty">Register a layer or an image for this cel</div>}
       </div>
-      <div className={`cels-section ${lightShowGeneral ? '' : 'off'}`} data-testid="general-light-table">
+      <div className={`cels-section ${lightShowGeneral ? '' : 'off'}`} data-testid="general-light-table" onDragOver={overList('general', general.length)} onDrop={dropOn('general')}>
         <div className="cels-head">General light table</div>
-        {general.map((l) => (
-          <LightRow key={l.id} l={l} selected={l.id === lightSelection} />
-        ))}
+        {rows('general', general)}
         {general.length === 0 && <div className="cels-empty">Shown for every cel</div>}
       </div>
     </div>

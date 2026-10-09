@@ -353,6 +353,7 @@ export const COMMANDS: Command[] = [
   { id: 'registerOnion', label: 'Register onion skin images', run: () => light.registerOnionSkins(), enabled: hasTimeline },
   { id: 'deregisterLight', label: 'Deregister selected image from light table', run: () => light.deregisterSelected(), enabled: () => getState().lightSelection !== null },
   { id: 'deregisterAllLight', label: 'Deregister all images from light table', run: () => light.deregisterAll() },
+  { id: 'centerCanvas', label: 'Move canvas to center…', run: () => openDialog('centerCanvas'), enabled: () => light.centerPair() !== null },
   { id: 'lockCel', label: 'Lock current animation cel as editing target', run: () => light.toggleCelLock(), checked: () => getState().lockedCel !== null },
   { id: 'animationCels', label: 'Animation cels', run: () => light.showCelsPalette(), checked: () => getState().layerDockTab === 'cels' },
   { id: 'selectPrevCel', label: 'Select previous cel', run: () => anim.selectNeighbourCel(-1), enabled: () => anim.activeTrack() !== null },

@@ -4,6 +4,7 @@ import { BRUSH_SIZE_PRESETS } from '../../store/actions';
 import * as actions from '../../store/actions';
 import * as anim from '../../store/animationActions';
 import * as sound from '../../store/soundActions';
+import * as light from '../../store/lightTableActions';
 import { isCameraFolder, maskTrackId } from '../../model/animation';
 import type { Layer } from '../../model/types';
 import type { Interp, Placement, PlacementChannel } from '../../paint/keyframes';
@@ -286,6 +287,7 @@ export function ToolProperty() {
       )}
       {sub.tool === 'eraser' && b && <VectorEraserRow sub={sub} update={update} />}
       {sub.tool === 'object' && <ObjectSettings sub={sub} update={update} />}
+      {sub.tool === 'lightTable' && <LightTableSettings />}
       {sub.tool === 'text' && <TextSettings />}
       {sub.tool === 'balloon' && sub.balloon && <BalloonToolSettings sub={sub} update={update} />}
       {sub.tool === 'balloon' && sub.tail && <TailSettings sub={sub} update={update} />}
@@ -397,6 +399,36 @@ function VectorEraserRow({ sub, update }: { sub: SubTool; update: (patch: Partia
         </label>
       )}
     </div>
+  );
+}
+
+/**
+ * Light table tool: the selected light table layer's position, scale and angle as numbers, flips
+ * and reset (it turns and scales about the middle of the canvas).
+ */
+function LightTableSettings() {
+  const l = useStore((s) => light.shownLightLayers(s)?.layers.find((x) => x.id === s.lightSelection) ?? null);
+  const span = useStore((s) => Math.max(s.doc.width, s.doc.height) * 2);
+  if (!l) return <div className="prop-note">Select a light table layer in the Animation cels palette.</div>;
+  const set = (patch: Partial<typeof l>, label: string, key: string) => light.updateLight(l.id, (x) => ({ ...x, ...patch }), label, `light:${key}:${l.id}`);
+  return (
+    <>
+      <PropSlider label="Position X" unit="px" value={round2(l.x)} min={-span} max={span} step={1} decimals={1} onChange={(v) => set({ x: v }, 'Move light table layer', 'x')} />
+      <PropSlider label="Position Y" unit="px" value={round2(l.y)} min={-span} max={span} step={1} decimals={1} onChange={(v) => set({ y: v }, 'Move light table layer', 'y')} />
+      <PropSlider label="Scale ratio" unit="%" value={round2(l.scale * 100)} min={1} max={1000} log step={0.1} decimals={1} onChange={(v) => set({ scale: v / 100 }, 'Scale light table layer', 'scale')} />
+      <PropSlider label="Rotation angle" unit="°" value={round2(l.rotation)} min={-360} max={360} step={1} decimals={1} onChange={(v) => set({ rotation: v }, 'Rotate light table layer', 'rotate')} />
+      <div className="prop-row">
+        <button className={`btn small ${l.flipH ? 'on' : ''}`} aria-pressed={l.flipH} onClick={() => light.flipLight('h')}>
+          Flip horizontal
+        </button>
+        <button className={`btn small ${l.flipV ? 'on' : ''}`} aria-pressed={l.flipV} onClick={() => light.flipLight('v')}>
+          Flip vertical
+        </button>
+        <button className="btn small" onClick={light.resetLightPosition}>
+          Reset
+        </button>
+      </div>
+    </>
   );
 }
 

@@ -1503,6 +1503,10 @@
   z-index: 100;
 }
 
+.modal-backdrop.clear {
+  background: transparent;
+}
+
 .modal {
   background: var(--bg-1);
   border: 1px solid var(--line);
@@ -1583,6 +1587,26 @@
 
 .modal fieldset.group .indent {
   padding-left: 22px;
+}
+
+/* Move canvas to center: the light table layers' names at both ends of the slider */
+.center-slider {
+  display: grid;
+  grid-template-columns: minmax(60px, auto) 1fr minmax(60px, auto);
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.center-slider span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-dim);
+}
+
+.center-slider span:last-child {
+  text-align: right;
 }
 
 .modal .checks {
@@ -2969,6 +2993,18 @@
 
 .cels-row.selected {
   background: var(--select-row);
+}
+
+/* Reordering light table layers: where the dragged one goes */
+.cels-slot {
+  position: relative;
+}
+
+.cels-drop {
+  height: 2px;
+  margin: 1px 0;
+  border-radius: 1px;
+  background: var(--accent-strong);
 }
 
 .cels-name {

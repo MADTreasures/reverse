@@ -7,7 +7,7 @@ import { GradientDialog } from './dialogs/GradientDialog';
 import { TonalDialog } from './dialogs/TonalDialog';
 import { PreferencesDialog } from './dialogs/PreferencesDialog';
 import { ExportDialog, PsdExportDialog } from './dialogs/ExportDialog';
-import { AnimationExportDialog, CameraFolderDialog, FrameRateDialog, ManageTimelinesDialog, MovieExportDialog, NewTimelineDialog, OnionSkinDialog, TimelineSettingsDialog } from './dialogs/AnimationDialogs';
+import { AnimationExportDialog, CameraFolderDialog, CenterCanvasDialog, FrameRateDialog, ManageTimelinesDialog, MovieExportDialog, NewTimelineDialog, OnionSkinDialog, TimelineSettingsDialog } from './dialogs/AnimationDialogs';
 import { AboutDialog, ShortcutsDialog } from './dialogs/InfoDialogs';
 import { NewCanvasDialog } from './dialogs/NewCanvasDialog';
 import { closeDialog, closeMenu, useOverlays, type MenuItem } from './overlays';
@@ -34,7 +34,8 @@ export function OverlayHost() {
     <>
       {menu && <ContextMenu x={menu.x} y={menu.y} items={menu.items} />}
       {dialog && (
-        <div className="modal-backdrop" onPointerDown={(e) => e.target === e.currentTarget && closeDialog()}>
+        // Dialogs that preview on the canvas leave it undimmed.
+        <div className={`modal-backdrop ${dialog.kind === 'tonal' || (dialog.kind === 'custom' && (dialog.id === 'centerCanvas' || dialog.id === 'gaussianBlur')) ? 'clear' : ''}`} onPointerDown={(e) => e.target === e.currentTarget && closeDialog()}>
           {dialog.kind === 'prompt' && <PromptDialog title={dialog.title} value={dialog.value} onDone={dialog.resolve} />}
           {dialog.kind === 'confirm' && (
             <div className="modal small" role="dialog" aria-label={dialog.title}>
@@ -56,6 +57,7 @@ export function OverlayHost() {
           {dialog.kind === 'custom' && dialog.id === 'timelineSettings' && <TimelineSettingsDialog />}
           {dialog.kind === 'custom' && dialog.id === 'onionSkin' && <OnionSkinDialog />}
           {dialog.kind === 'custom' && dialog.id === 'cameraFolder' && <CameraFolderDialog />}
+          {dialog.kind === 'custom' && dialog.id === 'centerCanvas' && <CenterCanvasDialog />}
           {dialog.kind === 'custom' && dialog.id === 'newTimeline' && <NewTimelineDialog />}
           {dialog.kind === 'custom' && dialog.id === 'frameRate' && <FrameRateDialog />}
           {dialog.kind === 'custom' && dialog.id === 'manageTimelines' && <ManageTimelinesDialog />}

@@ -1,18 +1,19 @@
 /**
  * Light table (Animation cels palette, Animation > Light table): registering layers, image files
  * and onion skin images as light table layers of the target cel or the general light table, their
- * colour mode, opacity, flips and position, and locking the target cel.
+ * order, colour mode, opacity, flips and position, Move canvas to center, and locking the target
+ * cel.
  */
 import { animationFolders, celOf, type AnimationFolder } from '../model/animation';
-import { findLayer, flatten } from '../model/layers';
+import { cloneDocument, findLayer, flatten } from '../model/layers';
 import type { Id, Layer, PaintDocument } from '../model/types';
 import { onionCels, type OnionMode } from '../paint/animation';
-import { newLightLayer, resetLight, type LightLayer } from '../paint/lightTable';
+import { betweenLights, insertLight, movedView, newLightLayer, rebaseLight, resetLight, type CanvasMove, type LightLayer } from '../paint/lightTable';
 import { createCanvas, ctx2d } from '../engine/canvas';
 import { setSurface } from '../engine/surfaces';
 import * as actions from './actions';
 import * as anim from './animationActions';
-import { getState, setState, type PaintState } from './store';
+import { getState, setState, type PaintState, type ViewState } from './store';
 
 /** Largest side of an image registered from a file (px). */
 const MAX_IMAGE = 4096;
@@ -71,7 +72,63 @@ function register(layers: LightLayer[], label: string, general = false): void {
     if (cel) cel.lightTable = [...layers, ...(cel.lightTable ?? [])];
     else doc.lightTable = { general: [...layers, ...(doc.lightTable?.general ?? [])] };
   });
-  setState({ lightSelection: layers[0].id, lightOn: true, ...(target ? { lightShowCel: true } : { lightShowGeneral: true }) });
+  setState({ lightSelection: layers[0].id, lightPicked: [], lightOn: true, ...(target ? { lightShowCel: true } : { lightShowGeneral: true }) });
+}
+
+/** Adds a light table layer at a place of the target cel's light table or the general one. */
+function putLight(doc: PaintDocument, l: LightLayer, to: 'cel' | 'general', celId: Id | null, index: number): void {
+  const cel = to === 'cel' && celId ? findLayer(doc.layers, celId) : null;
+  if (cel) cel.lightTable = insertLight(cel.lightTable ?? [], l, index);
+  else doc.lightTable = { general: insertLight(doc.lightTable?.general ?? [], l, index) };
+}
+
+/**
+ * A layer dragged from the Layer palette onto the cel-specific or the general light table (at a
+ * place in it). The cel-specific one needs a target cel; the target cel itself goes to the general one.
+ */
+export function registerLayerAt(id: Id, to: 'cel' | 'general', index = 0): void {
+  const s = getState();
+  const layer = findLayer(s.doc.layers, id);
+  if (!layer) return;
+  if (layer.kind === 'audio') {
+    setState({ hint: 'Audio layers cannot be registered on the light table' });
+    return;
+  }
+  const target = targetCel(s);
+  if (to === 'cel' && !target) {
+    setState({ hint: 'Select a cel of an animation folder first' });
+    return;
+  }
+  const own = target && (target.cel.id === id || findLayer([target.cel], id));
+  const where = own ? 'general' : to;
+  const l = newLightLayer({ kind: 'layer', layer: id });
+  actions.changeDoc('Register layer on light table', (doc) => putLight(doc, l, where, target?.cel.id ?? null, where === to ? index : 0));
+  setState({ lightSelection: l.id, lightPicked: [], lightOn: true, ...(where === 'cel' ? { lightShowCel: true } : { lightShowGeneral: true }) });
+}
+
+/**
+ * Reorder light table layers: one dragged to a place (`index` among the rows shown, itself
+ * included) of the cel-specific or the general light table. One that shows the target cel cannot
+ * go to the general light table.
+ */
+export function moveLight(id: string, to: 'cel' | 'general', index: number): void {
+  const s = getState();
+  const target = targetCel(s);
+  const at = locateLight(s.doc, id);
+  if (!at || (to === 'cel' && !target)) return;
+  if (to === 'general' && target && at.layer.source.kind === 'layer' && at.layer.source.layer === target.cel.id) {
+    setState({ hint: 'A light table layer showing the target cel cannot move to the general light table' });
+    return;
+  }
+  // Within one list, the rows after it move up by one when it leaves.
+  const list = to === 'cel' ? (target?.cel.lightTable ?? []) : (s.doc.lightTable?.general ?? []);
+  const from = list.findIndex((l) => l.id === id);
+  const place = from >= 0 && from < index ? index - 1 : index;
+  if (from === place) return;
+  actions.changeDoc('Reorder light table layers', (doc) => {
+    editLight(doc, id, () => null);
+    putLight(doc, at.layer, to, target?.cel.id ?? null, place);
+  });
 }
 
 /**
@@ -126,12 +183,12 @@ export function registerOnionSkins(): void {
   register(layers, 'Register onion skin images');
 }
 
-/** Deregister selected image from light table. */
+/** Deregister selected image from light table (every selected one). */
 export function deregisterSelected(): void {
-  const id = getState().lightSelection;
-  if (!id) return;
-  actions.changeDoc('Deregister from light table', (doc) => editLight(doc, id, () => null));
-  setState({ lightSelection: null });
+  const ids = selectedLights();
+  if (ids.length === 0) return;
+  actions.changeDoc('Deregister from light table', (doc) => ids.forEach((id) => editLight(doc, id, () => null)));
+  setState({ lightSelection: null, lightPicked: [] });
 }
 
 /** Deregister all images from light table: the target cel's and the general ones. */
@@ -142,21 +199,35 @@ export function deregisterAll(): void {
     if (cel) delete cel.lightTable;
     delete doc.lightTable;
   });
-  setState({ lightSelection: null });
+  setState({ lightSelection: null, lightPicked: [] });
 }
 
-export const selectLight = (id: string | null) => setState({ lightSelection: id });
+/** Every selected light table layer, the one clicked last at the end. */
+export const selectedLights = (s: PaintState = getState()): string[] => [...s.lightPicked.filter((id) => id !== s.lightSelection), ...(s.lightSelection ? [s.lightSelection] : [])];
+
+/** Selects a light table layer; `add` (Ctrl/⌘-click) adds it to the selection or takes it out. */
+export function selectLight(id: string | null, add = false): void {
+  if (!add || id === null) {
+    setState({ lightSelection: id, lightPicked: [] });
+    return;
+  }
+  const all = selectedLights();
+  if (all.includes(id)) {
+    const rest = all.filter((x) => x !== id);
+    setState({ lightSelection: rest[rest.length - 1] ?? null, lightPicked: rest.slice(0, -1) });
+  } else setState({ lightSelection: id, lightPicked: all });
+}
 
 /** Changes a light table layer (one undo step per label and key). */
 export function updateLight(id: string, fn: (l: LightLayer) => LightLayer, label: string, key?: string): void {
   actions.changeDoc(label, (doc) => editLight(doc, id, fn), key ? { key } : {});
 }
 
-/** The selected light table layer, or (when `all`) every one shown. */
+/** The selected light table layers, or (when `all`) every one shown. */
 function targets(all: boolean): string[] {
   const s = getState();
   if (all) return shownLightLayers({ ...s, lightOn: true })?.layers.map((l) => l.id) ?? [];
-  return s.lightSelection ? [s.lightSelection] : [];
+  return selectedLights(s);
 }
 
 function editMany(ids: string[], fn: (l: LightLayer) => LightLayer, label: string, key?: string): void {
@@ -167,10 +238,10 @@ function editMany(ids: string[], fn: (l: LightLayer) => LightLayer, label: strin
   actions.changeDoc(label, (doc) => ids.forEach((id) => editLight(doc, id, fn)), key ? { key } : {});
 }
 
-/** Reset position of layers on light table: the selected one (none selected: all). */
+/** Reset position of layers on light table: the selected ones (none selected: all). */
 export function resetLightPosition(): void {
-  const s = getState();
-  editMany(s.lightSelection ? [s.lightSelection] : targets(true), resetLight, 'Reset light table position');
+  const picked = targets(false);
+  editMany(picked.length ? picked : targets(true), resetLight, 'Reset light table position');
 }
 
 /** Reverse layers horizontally / vertically on light table. */
@@ -217,6 +288,68 @@ export function selectNeighbourCel(dir: -1 | 1): void {
   if (!s.lockedCel) return;
   const c = celOf(getState().doc.layers, getState().activeLayerId);
   if (c) setState({ lockedCel: c.cel.id });
+}
+
+// ------------------------------------------------------------------ Move canvas to center
+
+/**
+ * The two light table layers Move canvas to center works between: the two selected ones, else
+ * the first two of the target cel's light table.
+ */
+export function centerPair(s: PaintState = getState()): [LightLayer, LightLayer] | null {
+  const target = targetCel(s);
+  const cel = target?.cel.lightTable ?? [];
+  const shown = [...cel, ...(s.doc.lightTable?.general ?? [])];
+  const picked = selectedLights(s)
+    .map((id) => shown.find((l) => l.id === id))
+    .filter((l): l is LightLayer => Boolean(l));
+  if (picked.length === 2) return [picked[0], picked[1]];
+  return cel.length >= 2 ? [cel[0], cel[1]] : null;
+}
+
+/** The light table layers of the target cel and the general ones, seen from the moved canvas. */
+function rebaseLights(doc: PaintDocument, celId: Id | null, c: CanvasMove): void {
+  const cel = celId ? findLayer(doc.layers, celId) : null;
+  if (cel?.lightTable) cel.lightTable = cel.lightTable.map((l) => rebaseLight(l, c));
+  if (doc.lightTable) doc.lightTable = { general: doc.lightTable.general.map((l) => rebaseLight(l, c)) };
+}
+
+let centering: { doc: PaintDocument; view: ViewState; cel: Id | null; pair: [LightLayer, LightLayer] } | null = null;
+
+/**
+ * Animation > Light table > Move canvas to center, while its slider moves: the canvas (the view)
+ * at `t` (0…1) between the two light table layers, which stay where they are on screen. A preview
+ * (no undo step) until finishCanvasCenter.
+ */
+export function previewCanvasCenter(t: number): void {
+  const s = getState();
+  if (!centering) {
+    const pair = centerPair(s);
+    if (!pair) return;
+    centering = { doc: s.doc, view: s.view, cel: targetCel(s)?.cel.id ?? null, pair };
+  }
+  const c = betweenLights(centering.pair[0], centering.pair[1], t);
+  const doc = cloneDocument(centering.doc);
+  rebaseLights(doc, centering.cel, c);
+  setState({ doc, view: movedView(centering.view, c) });
+}
+
+/** OK (`t`): the canvas stays there, the light table layers change in one undo step. Cancel (null): back as it was. */
+export function finishCanvasCenter(t: number | null): void {
+  const start = centering;
+  centering = null;
+  if (!start) {
+    if (t !== null && centerPair()) {
+      previewCanvasCenter(t);
+      finishCanvasCenter(t);
+    }
+    return;
+  }
+  setState({ doc: start.doc, view: start.view });
+  if (t === null) return;
+  const c = betweenLights(start.pair[0], start.pair[1], t);
+  actions.changeDoc('Move canvas to center', (doc) => rebaseLights(doc, start.cel, c));
+  setState({ view: movedView(start.view, c) });
 }
 
 /** Window > Animation cels. */

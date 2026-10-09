@@ -165,6 +165,7 @@ export function loadDocument(doc: PaintDocument, images: Map<Id, HTMLCanvasEleme
     clipSelection: [],
     keySelection: [],
     lightSelection: null,
+    lightPicked: [],
     lockedCel: null,
     graphSelection: [],
     ...(doc.timeline ? { timelineShown: true } : {}),

@@ -7,7 +7,7 @@ import { buildDocumentBytes, listenForNativeOpen, openFileBytes, restoreAutosave
 import { native, isElectron, isMac } from './platform/platform';
 import { keyedTrackOf } from './model/animation';
 import { sanitizeOnion } from './paint/animation';
-import { shownLightLayers } from './store/lightTableActions';
+import * as light from './store/lightTableActions';
 import * as actions from './store/actions';
 import * as anim from './store/animationActions';
 import { getState, useStore } from './store/store';
@@ -76,7 +76,7 @@ function connectEngine(): void {
     if (s.onionSkin !== prev.onionSkin || s.onion !== prev.onion) engine.setOnion(s.onionSkin ? s.onion : null);
     if (s.cameraView !== prev.cameraView) engine.setCameraView(s.cameraView);
     const lightKeys = ['doc', 'activeLayerId', 'lockedCel', 'lightOn', 'lightShowCel', 'lightShowGeneral'] as const;
-    if (lightKeys.some((k) => s[k] !== prev[k])) engine.setLightTable(shownLightLayers(s));
+    if (lightKeys.some((k) => s[k] !== prev[k])) engine.setLightTable(light.shownLightLayers(s));
     // Edit layers with active keyframes: the current track is drawn as it is; another track turns it off.
     if (s.editKeyed !== prev.editKeyed || s.activeLayerId !== prev.activeLayerId || s.doc !== prev.doc) {
       const track = s.editKeyed ? (keyedTrackOf(s.doc.layers, s.activeLayerId)?.id ?? null) : null;
@@ -126,7 +126,7 @@ async function boot(): Promise<void> {
 
   // Automation hooks for tests and power users.
   Object.assign(window, {
-    __madPaint: { useStore, actions, anim, engine, controller, runCommand, buildDocumentBytes, openFileBytes },
+    __madPaint: { useStore, actions, anim, light, engine, controller, runCommand, buildDocumentBytes, openFileBytes },
   });
   native?.ready();
 }

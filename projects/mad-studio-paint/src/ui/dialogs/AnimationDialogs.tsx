@@ -2,16 +2,17 @@
  * Animation dialogs: Animation > Timeline > New timeline / Change settings, Show animation cels >
  * Onion skin settings, and File > Export animation (image sequence, animated GIF, APNG, WebP, movie).
  */
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { exportAnimation, exportMovie, type AnimationFormat } from '../../io/documentIO';
 import { SEQUENCE_EXT, sequenceNames, type SequenceType } from '../../io/sequence';
 import { hasSound, isCameraFolder, outputRect } from '../../model/animation';
-import { flatten } from '../../model/layers';
+import { findLayer, flatten } from '../../model/layers';
 import { DEFAULT_TIMELINE, endOf, MAX_FPS, MAX_FRAMES, startOf, type OnionMode, type Timeline } from '../../paint/animation';
 import { nextTimelineName, timelineIndex, timelineList, timelineName } from '../../model/timelines';
 import { areaRect, type DrawingArea } from '../../paint/outputFrame';
 import type { PaintDocument } from '../../model/types';
 import * as anim from '../../store/animationActions';
+import * as light from '../../store/lightTableActions';
 import { getState, useStore } from '../../store/store';
 import { closeDialog, openDialog } from '../overlays';
 
@@ -746,6 +747,51 @@ export function MovieExportDialog() {
       </div>
       {progress && <p className="muted" data-testid="movie-progress">Encoding frame {progress}</p>}
       <Actions ok={busy ? 'Exporting…' : 'OK'} busy={busy} />
+    </form>
+  );
+}
+
+/**
+ * Animation > Light table > Move canvas to center: a slider between two light table layers (their
+ * names at its ends) moves and turns the canvas towards either; 50 puts it in the middle. The
+ * canvas follows while the slider moves; Cancel puts it back.
+ */
+export function CenterCanvasDialog() {
+  const pair = useMemo(() => light.centerPair(), []);
+  const layers = useStore((s) => s.doc.layers);
+  const names = pair?.map((l) => (l.source.kind === 'image' ? l.source.name : (findLayer(layers, l.source.layer)?.name ?? ''))) ?? ['', ''];
+  const [value, setValue] = useState(50);
+  useEffect(() => {
+    light.previewCanvasCenter(0.5);
+    // Closed without OK: the canvas goes back.
+    return () => light.finishCanvasCenter(null);
+  }, []);
+  const set = (v: number) => {
+    setValue(v);
+    light.previewCanvasCenter(v / 100);
+  };
+  return (
+    <form
+      className="modal small"
+      role="dialog"
+      aria-label="Move canvas to center"
+      onSubmit={(e) => {
+        e.preventDefault();
+        light.finishCanvasCenter(value / 100);
+        closeDialog();
+      }}
+    >
+      <h2>Move canvas to center</h2>
+      <div className="center-slider">
+        <span data-testid="center-from">{names[0]}</span>
+        <input type="range" aria-label="Canvas position between the light table layers" min={0} max={100} value={value} onChange={(e) => set(Number(e.target.value))} />
+        <span data-testid="center-to">{names[1]}</span>
+      </div>
+      <div className="form-grid">
+        <label htmlFor="center-value">Position</label>
+        <input id="center-value" type="number" min={0} max={100} value={value} onChange={(e) => set(clampInt(e.target.value, 0, 100, value))} />
+      </div>
+      <Actions />
     </form>
   );
 }

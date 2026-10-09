@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from 'react';
+import { useRef, useState, type ReactNode } from 'react';
 
 export interface PaletteTab {
   id: string;
@@ -24,6 +24,7 @@ export function Palette({
 }) {
   const [own, setOwn] = useState(tabs[0].id);
   const [collapsed, setCollapsed] = useState(false);
+  const spring = useRef<ReturnType<typeof setTimeout> | null>(null);
   const active = chosen ?? own;
   const setActive = (id: string) => (onSelect ? onSelect(id) : setOwn(id));
   const tab = tabs.find((t) => t.id === active) ?? tabs[0];
@@ -31,7 +32,17 @@ export function Palette({
     <section className={`palette ${grow ? 'grow' : ''} ${collapsed ? 'collapsed' : ''} ${className}`} data-testid={testId}>
       <header className="palette-tabs" onDoubleClick={() => setCollapsed((c) => !c)}>
         {tabs.map((t) => (
-          <button key={t.id} className={`palette-tab ${t.id === tab.id ? 'active' : ''}`} onClick={() => setActive(t.id)}>
+          <button
+            key={t.id}
+            className={`palette-tab ${t.id === tab.id ? 'active' : ''}`}
+            onClick={() => setActive(t.id)}
+            // Dragging something over a tab opens it after a moment (e.g. a layer onto the Animation cels palette).
+            onDragEnter={() => {
+              if (spring.current) clearTimeout(spring.current);
+              if (t.id !== tab.id) spring.current = setTimeout(() => setActive(t.id), 350);
+            }}
+            onDragLeave={() => spring.current && clearTimeout(spring.current)}
+          >
             {t.label}
           </button>
         ))}

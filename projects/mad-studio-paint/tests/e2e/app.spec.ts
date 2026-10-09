@@ -2885,6 +2885,139 @@ test('light table: a cel and an image on the target cel, colour mode, Light tabl
   expect(errors).toEqual([]);
 });
 
+test('light table: layers dragged from the Layer palette, reordering, two selected, Move canvas to center', async ({ page }) => {
+  const errors = await boot(page);
+  await page.evaluate(() => void window.__madPaint.runCommand('new'));
+  const dlg = page.getByRole('dialog', { name: 'New canvas' });
+  await dlg.getByLabel('Width').fill('400');
+  await dlg.getByLabel('Height').fill('300');
+  await dlg.getByText('Create animated illustration').click();
+  await dlg.getByLabel('Number of cels').fill('4');
+  await dlg.getByLabel('Frame rate').fill('4');
+  await dlg.getByRole('button', { name: 'OK' }).click();
+  // Keys: cel 1 (a line at y = 100) and cel 2 (y = 200); cel 3 is the inbetween, the locked target cel.
+  await thinPen(page);
+  await drag(page, [50, 100], [350, 100]);
+  await page.getByRole('button', { name: 'New animation cel' }).first().click();
+  await drag(page, [50, 200], [350, 200]);
+  await page.getByRole('button', { name: 'New animation cel' }).first().click();
+  await page.locator('[data-testid=layer-panel] .palette-tab', { hasText: 'Animation cels' }).click();
+  const cels = page.getByTestId('animation-cels');
+  await cels.getByRole('button', { name: 'Lock current animation cel as editing target' }).click();
+  await expect(cels.getByTestId('target-cel')).toContainText('A / 3');
+  const lists = () =>
+    page.evaluate(() => {
+      const s = window.__madPaint.useStore.getState();
+      const a = s.doc.layers[0];
+      const name = (l: any) => a.children.find((c: any) => c.id === l.source.layer)?.name;
+      const cel = a.children.find((c: any) => c.name === '3');
+      return { cel: (cel.lightTable ?? []).map(name), general: (s.doc.lightTable?.general ?? []).map(name) };
+    });
+  // A layer dragged from the Layer palette: over the Animation cels tab (it opens), onto the cel-specific light table.
+  const dragLayer = async (name: string, to: string) => {
+    await page.locator('[data-testid=layer-panel] .palette-tab', { hasText: /^Layer$/ }).click();
+    const row = page.locator('.layer-row', { hasText: new RegExp(`^.*${name}$`) }).first();
+    const from = (await row.boundingBox())!;
+    await page.mouse.move(from.x + from.width / 2, from.y + from.height / 2);
+    await page.mouse.down();
+    const tab = (await page.locator('[data-testid=layer-panel] .palette-tab', { hasText: 'Animation cels' }).boundingBox())!;
+    await page.mouse.move(tab.x + tab.width / 2, tab.y + tab.height / 2, { steps: 5 });
+    await expect(cels).toBeVisible();
+    const target = (await cels.getByTestId(to).boundingBox())!;
+    await page.mouse.move(target.x + target.width / 2, target.y + target.height - 4, { steps: 5 });
+    await page.mouse.up();
+  };
+  await dragLayer('1', 'cel-light-table');
+  expect(await lists()).toEqual({ cel: ['1'], general: [] });
+  await dragLayer('2', 'cel-light-table');
+  expect(await lists()).toEqual({ cel: ['1', '2'], general: [] });
+  // Reordering: 2 above 1; 1 to the general light table and back below 2.
+  const rowOf = (list: string, name: string) => cels.getByTestId(list).getByTestId('light-layer').filter({ hasText: name });
+  await rowOf('cel-light-table', '2').dragTo(rowOf('cel-light-table', '1'), { targetPosition: { x: 20, y: 2 } });
+  expect(await lists()).toEqual({ cel: ['2', '1'], general: [] });
+  await rowOf('cel-light-table', '1').dragTo(cels.getByTestId('general-light-table'));
+  expect(await lists()).toEqual({ cel: ['2'], general: ['1'] });
+  await rowOf('general-light-table', '1').dragTo(cels.getByTestId('cel-light-table'), { targetPosition: { x: 40, y: 50 } });
+  expect(await lists()).toEqual({ cel: ['2', '1'], general: [] });
+  // The keys placed with the Light table tool: 2 moved 60 px right, 1 moved 20 px right and turned 20°.
+  await page.evaluate(() => {
+    const m = window.__madPaint;
+    const cel = m.useStore.getState().doc.layers[0].children.find((c: any) => c.name === '3');
+    const [two, one] = cel.lightTable;
+    m.light.updateLight(two.id, (l: any) => ({ ...l, x: 60 }), 'Light table tool');
+    m.light.updateLight(one.id, (l: any) => ({ ...l, x: 20, rotation: 20 }), 'Light table tool');
+  });
+  // Ctrl/⌘-click selects both.
+  await rowOf('cel-light-table', '2').click();
+  await rowOf('cel-light-table', '1').click({ modifiers: ['ControlOrMeta'] });
+  await expect(cels.locator('[data-testid=light-layer][aria-pressed=true]')).toHaveCount(2);
+  const view = () => page.evaluate(() => window.__madPaint.useStore.getState().view);
+  const placements = () =>
+    page.evaluate(() => {
+      const cel = window.__madPaint.useStore.getState().doc.layers[0].children.find((c: any) => c.name === '3');
+      return cel.lightTable.map((l: any) => [Math.round(l.x * 10) / 10, Math.round(l.y * 10) / 10, Math.round(l.rotation * 10) / 10]);
+    });
+  const before = await view();
+  // Animation > Light table > Move canvas to center: Cancel leaves the canvas where it was.
+  await page.evaluate(() => window.__madPaint.runCommand('centerCanvas'));
+  const center = page.getByRole('dialog', { name: 'Move canvas to center' });
+  await expect(center.getByTestId('center-from')).toHaveText('2');
+  await expect(center.getByTestId('center-to')).toHaveText('1');
+  await center.getByLabel('Position', { exact: true }).fill('0');
+  expect((await view()).panX).not.toBeCloseTo(before.panX, 3);
+  await center.getByRole('button', { name: 'Cancel' }).click();
+  expect(await view()).toEqual(before);
+  expect(await placements()).toEqual([
+    [60, 0, 0],
+    [20, 0, 20],
+  ]);
+  // 50: the canvas in the middle (40 px right, turned 10°); the keys stay where they are on screen.
+  const screenOf = () =>
+    page.evaluate(() => {
+      const m = window.__madPaint;
+      const s = m.useStore.getState();
+      const cel = s.doc.layers[0].children.find((c: any) => c.name === '3');
+      const [a, b, c, d, e, f] = m.controller.view.matrix;
+      // Where the middle of light table layer "2" is on screen (it turns about the middle of the canvas).
+      const l = cel.lightTable[0];
+      const px = 200 + l.x;
+      const py = 150 + l.y;
+      return [Math.round(a * px + c * py + e), Math.round(b * px + d * py + f)];
+    });
+  const keyOnScreen = await screenOf();
+  await page.evaluate(() => window.__madPaint.runCommand('centerCanvas'));
+  await center.getByRole('button', { name: 'OK' }).click();
+  const after = await view();
+  expect(after.rotation).toBeCloseTo(before.rotation + 10, 6);
+  expect(await placements()).toEqual([
+    [19.7, -3.5, -10],
+    [-19.7, 3.5, 10],
+  ]);
+  await page.waitForTimeout(50);
+  expect(await screenOf()).toEqual(keyOnScreen);
+  // One undo step for the light table layers.
+  await page.evaluate(() => window.__madPaint.actions.undo());
+  expect(await placements()).toEqual([
+    [60, 0, 0],
+    [20, 0, 20],
+  ]);
+  // Light table tool settings: the selected light table layer's numbers, flips.
+  await rowOf('cel-light-table', '1').click();
+  await cels.getByRole('button', { name: 'Light table tool' }).click();
+  await page.getByRole('button', { name: 'Tool Settings', exact: true }).click();
+  await expect(page.getByRole('spinbutton', { name: 'Rotation angle' })).toHaveValue('20');
+  await page.getByRole('spinbutton', { name: 'Rotation angle' }).fill('35');
+  await page.getByTestId('tool-property').getByRole('button', { name: 'Flip horizontal' }).click();
+  expect(await placements()).toEqual([
+    [60, 0, 0],
+    [20, 0, 35],
+  ]);
+  expect(
+    await page.evaluate(() => window.__madPaint.useStore.getState().doc.layers[0].children.find((c: any) => c.name === '3').lightTable.map((l: any) => l.flipH)),
+  ).toEqual([false, true]);
+  expect(errors).toEqual([]);
+});
+
 /** A stereo 16-bit WAV file with a sine tone. */
 function sineWav(seconds: number, rate: number, freq: number): Buffer {
   const n = Math.round(seconds * rate);
