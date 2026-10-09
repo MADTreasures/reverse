@@ -6,7 +6,7 @@ import * as anim from '../../store/animationActions';
 import * as sound from '../../store/soundActions';
 import { isCameraFolder } from '../../model/animation';
 import type { Layer } from '../../model/types';
-import type { Interp, Placement } from '../../paint/keyframes';
+import type { Interp, Placement, PlacementChannel } from '../../paint/keyframes';
 import { currentSubTool, drawingColor, getState, setState, useStore } from '../../store/store';
 import { pxToPt, setTextStyle, setTextWrap, textToolStyle } from '../../store/textActions';
 import { setFrameProps } from '../../store/frameActions';
@@ -451,7 +451,8 @@ function KeyframeSettings({ track }: { track: Layer }) {
   const p = anim.placementNow(track, frame);
   const camera = isCameraFolder(track);
   const atKey = Boolean(track.keys?.frames.some((k) => k.frame === frame));
-  const set = (patch: Partial<Placement>, what: string) => anim.setKeyframe(track.id, frame, { ...p, ...patch }, `Keyframe: ${what}`, `key:${track.id}:${frame}:${what}`);
+  // A change records the properties it sets.
+  const set = (patch: Partial<Placement>, what: string) => anim.setKeyframe(track.id, frame, { ...p, ...patch }, `Keyframe: ${what}`, `key:${track.id}:${frame}:${what}`, false, Object.keys(patch) as PlacementChannel[]);
   const span = Math.max(width, height) * 2;
   return (
     <>

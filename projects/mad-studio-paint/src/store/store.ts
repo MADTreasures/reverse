@@ -6,7 +6,7 @@ import { LINEAR, type CurvePoint } from '../paint/curve';
 import { DEFAULT_SUB_TOOLS, type SubTool, type ToolId, type WorkspaceId } from '../paint/tools';
 import type { TextBox } from '../paint/text';
 import { DEFAULT_ONION, type OnionSkin } from '../paint/animation';
-import type { Interp } from '../paint/keyframes';
+import type { ChannelGroup, Interp } from '../paint/keyframes';
 
 export interface ViewState {
   /** Screen pixels per document pixel. */
@@ -121,6 +121,9 @@ export interface PaintState {
   keyInterp: Interp;
   /** Edit layers with active keyframes: the current track is drawn as it is and can be drawn on. */
   editKeyed: boolean;
+  /** Timeline palette: tracks with Details (+) open (their property rows), and those with Transform opened (>). */
+  keyDetails: Id[];
+  transformDetails: Id[];
   /** Show camera's field of view: the display applies 2D camera effects. */
   cameraView: boolean;
   /** Animation cels palette: Enable light table, Show cel-specific / general light table. */
@@ -139,10 +142,11 @@ export interface PaintState {
   activeSound: Id | null;
 }
 
-/** A keyframe in the Timeline palette: the track (layer) and its frame. */
+/** A keyframe in the Timeline palette: the track (layer) and its frame (on a property row: `group`). */
 export interface KeyRef {
   track: Id;
   frame: number;
+  group?: ChannelGroup;
 }
 
 /** A clip in the Timeline palette: the track (layer) and the clip's first frame. */
@@ -200,6 +204,8 @@ function initialState(): PaintState {
     keySelection: [],
     keyInterp: 'linear',
     editKeyed: false,
+    keyDetails: [],
+    transformDetails: [],
     cameraView: false,
     lightOn: true,
     lightShowCel: true,

@@ -2,22 +2,32 @@ import { describe, expect, it } from 'vitest';
 import {
   applyAffine,
   cameraMatrix,
+  changedChannels,
+  channelAt,
   ease,
   invert,
   isRest,
+  moveCurvePoint,
   moveKeys,
   movePivot,
   placedCorners,
   placementAt,
   placementMatrix,
+  recordKey,
+  records,
+  removeChannels,
   restPlacement,
   sanitizeKeyTrack,
-  setKey,
+  segmentHandles,
+  setHandle,
+  setInterp,
+  toggleUnpaired,
+  touches,
   type Keyframe,
 } from './keyframes';
 
 const rest = restPlacement(200, 100);
-const key = (frame: number, patch: Partial<Keyframe> = {}): Keyframe => ({ ...rest, frame, interp: 'linear', ...patch });
+const key = (frame: number, values: Keyframe['values'], interp: Keyframe['interp'] = 'linear'): Keyframe => ({ frame, interp, values });
 
 describe('keyframes', () => {
   it('eases: hold jumps, linear is steady, smooth speeds up and slows down', () => {
@@ -30,15 +40,100 @@ describe('keyframes', () => {
   });
 
   it('interpolates between keyframes as the earlier one says', () => {
-    const keys = [key(1, { x: 0 }), key(5, { x: 100, interp: 'hold' }), key(9, { x: 0, opacity: 0 })];
-    expect(placementAt([], 3)).toBeNull();
-    expect(placementAt(keys, 0)!.x).toBe(0);
-    expect(placementAt(keys, 3)!.x).toBe(50);
+    const keys = [key(1, { x: 0, opacity: 1 }), key(5, { x: 100 }, 'hold'), key(9, { x: 0, opacity: 0 })];
+    expect(placementAt([], 3, rest)).toBeNull();
+    expect(placementAt(keys, 0, rest)!.x).toBe(0);
+    expect(placementAt(keys, 3, rest)!.x).toBe(50);
     // Hold: the value stays until the next keyframe.
-    expect(placementAt(keys, 8)!.x).toBe(100);
-    expect(placementAt(keys, 9)!.x).toBe(0);
-    expect(placementAt(keys, 20)!.opacity).toBe(0);
-    expect(placementAt(keys, 3)).not.toHaveProperty('frame');
+    expect(placementAt(keys, 8, rest)!.x).toBe(100);
+    expect(placementAt(keys, 9, rest)!.x).toBe(0);
+    expect(placementAt(keys, 20, rest)!.opacity).toBe(0);
+    expect(placementAt(keys, 3, rest)).not.toHaveProperty('frame');
+  });
+
+  it('each property changes between the keyframes that record it', () => {
+    // Opacity is recorded at 1 and 9 only: frame 5's keyframe (position only) does not stop it.
+    const keys = [key(1, { x: 0, opacity: 1 }), key(5, { x: 100 }), key(9, { opacity: 0 })];
+    expect(placementAt(keys, 5, rest)!.opacity).toBeCloseTo(0.5);
+    expect(placementAt(keys, 7, rest)!.x).toBe(100);
+    // What no keyframe records rests: the centre of rotation stays in the middle of the canvas.
+    expect(placementAt(keys, 3, rest)!.pivotX).toBe(100);
+    expect(placementAt(keys, 3, rest)!.scaleY).toBe(1);
+    expect(channelAt(keys, 'rotation', 3)).toBeUndefined();
+    expect(records(keys[0], ['x', 'y'])).toBe(false);
+    expect(touches(keys[0], ['x', 'y'])).toBe(true);
+  });
+
+  it('records, removes and moves single properties', () => {
+    let keys = recordKey([], 5, { x: 10, y: 20 }, 'smooth');
+    keys = recordKey(keys, 1, { opacity: 0.5 }, 'linear');
+    expect(keys.map((k) => k.frame)).toEqual([1, 5]);
+    // Recording into a keyframe adds the values; its interpolation stays.
+    keys = recordKey(keys, 5, { rotation: 45 }, 'hold');
+    expect(keys[1]).toEqual({ frame: 5, interp: 'smooth', values: { x: 10, y: 20, rotation: 45 } });
+    // Removing position leaves rotation; removing the last value removes the keyframe.
+    expect(removeChannels(keys, 5, ['x', 'y'])[1].values).toEqual({ rotation: 45 });
+    expect(removeChannels(keys, 1, ['opacity']).map((k) => k.frame)).toEqual([5]);
+    expect(removeChannels(keys, 5).map((k) => k.frame)).toEqual([1]);
+    // Moving the position of frame 5 to frame 1: it joins that keyframe, rotation stays behind.
+    const moved = moveKeys(keys, [5], -4, false, ['x', 'y']);
+    expect(moved).toEqual([
+      { frame: 1, interp: 'linear', values: { opacity: 0.5, x: 10, y: 20 } },
+      { frame: 5, interp: 'smooth', values: { rotation: 45 } },
+    ]);
+    // Whole keyframes replace those where they land; copies leave the originals.
+    expect(moveKeys(keys, [1], 2).map((k) => k.frame)).toEqual([3, 5]);
+    expect(moveKeys(keys, [1], 4).map((k) => k.frame)).toEqual([5]);
+    expect(moveKeys(keys, [5], 1, true).map((k) => k.frame)).toEqual([1, 5, 6]);
+    expect(moveKeys(keys, [5], 0)).toBe(keys);
+  });
+
+  it('sets the interpolation of keyframes or single curves', () => {
+    const keys = [key(1, { x: 0, y: 0 }), key(11, { x: 100, y: 100 })];
+    const hold = setInterp(keys, [1], 'hold', ['x']);
+    expect(placementAt(hold, 6, rest)!.x).toBe(0);
+    expect(placementAt(hold, 6, rest)!.y).toBe(50);
+    // The whole keyframe: per-curve choices give way.
+    const all = setInterp(hold, [1], 'smooth');
+    expect(all[0].interp).toBe('smooth');
+    expect(all[0].curves!.x!.interp).toBeUndefined();
+    expect(placementAt(all, 6, rest)!.x).toBeCloseTo(50);
+    expect(placementAt(all, 3, rest)!.x).toBeLessThan(20);
+  });
+
+  it('slope handles bend a stretch (Graph Editor)', () => {
+    const keys = [key(1, { x: 0 }), key(11, { x: 100 })];
+    // Linear without handles: a straight line, the handles a third of the way along it.
+    expect(segmentHandles(keys[0], keys[1], 'x').out).toEqual([10 / 3, 100 / 3]);
+    // A flat out handle with a long reach: slow start, linear turns into a curve.
+    const bent = setHandle(keys, 1, 'x', 'out', [8, 0]);
+    expect(bent[0].curves!.x!.interp).toBe('smooth');
+    expect(bent[0].curves!.x!.in![0]).toBeLessThan(0);
+    expect(channelAt(bent, 'x', 3)!).toBeLessThan(10);
+    expect(channelAt(bent, 'x', 11)).toBe(100);
+    // The curve stays a function of time: handles never reach past the other keyframe.
+    const far = setHandle(keys, 1, 'x', 'out', [50, 10]);
+    expect(segmentHandles(far[0], far[1], 'x').out[0]).toBe(10);
+    // Paired handles mirror; unpaired, each side keeps its own direction.
+    const paired = setHandle(keys, 11, 'x', 'in', [-3, -4]);
+    expect(paired[1].curves!.x!.out![0]).toBeCloseTo(3);
+    expect(paired[1].curves!.x!.out![1]).toBeCloseTo(4);
+    const broken = setHandle(toggleUnpaired(paired, 11, 'x'), 11, 'x', 'in', [-1, 5]);
+    expect(broken[1].curves!.x!.broken).toBe(true);
+    expect(broken[1].curves!.x!.out![0]).toBeCloseTo(3);
+    // Pairing again resets the handles.
+    expect(toggleUnpaired(broken, 11, 'x')[1].curves!.x).toEqual({ interp: 'smooth' });
+  });
+
+  it('moves a curve point to another frame and value (Graph Editor)', () => {
+    const keys = [key(1, { x: 0, y: 5 }), key(11, { x: 100 })];
+    const moved = moveCurvePoint(keys, 1, 'x', 3, 20);
+    expect(moved).toEqual([
+      { frame: 1, interp: 'linear', values: { y: 5 } },
+      { frame: 3, interp: 'linear', values: { x: 20 } },
+      { frame: 11, interp: 'linear', values: { x: 100 } },
+    ]);
+    expect(moveCurvePoint(keys, 1, 'rotation', 3, 20)).toBe(keys);
   });
 
   it('places about the centre of rotation', () => {
@@ -54,6 +149,9 @@ describe('keyframes', () => {
     expect(applyAffine(placementMatrix(big), 100, 50)).toEqual({ x: 110, y: 70 });
     expect(placedCorners(big, 200, 100)[0]).toEqual({ x: -90, y: -30 });
     expect(isRest(big)).toBe(false);
+    expect(changedChannels(rest, big)).toEqual(['x', 'y', 'scaleX', 'scaleY']);
+    // A setting is recorded whole: moving sideways records the position (X and Y).
+    expect(changedChannels(rest, { ...rest, x: 5, rotation: 3 })).toEqual(['x', 'y', 'rotation']);
   });
 
   it('a camera frame zoomed in shows its part of the canvas over the whole output', () => {
@@ -79,26 +177,18 @@ describe('keyframes', () => {
     expect(q.pivotX).toBe(20);
   });
 
-  it('sets and moves keyframes', () => {
-    const keys = setKey(setKey([], key(5)), key(1));
-    expect(keys.map((k) => k.frame)).toEqual([1, 5]);
-    expect(setKey(keys, key(5, { x: 3 })).find((k) => k.frame === 5)!.x).toBe(3);
-    expect(moveKeys(keys, [1], 2).map((k) => k.frame)).toEqual([3, 5]);
-    expect(moveKeys(keys, [1], 4).map((k) => k.frame)).toEqual([5]);
-    expect(moveKeys(keys, [5], 1, true).map((k) => k.frame)).toEqual([1, 5, 6]);
-  });
-
   it('reads keyframes from files safely', () => {
     expect(sanitizeKeyTrack(null)).toBeUndefined();
-    const t = sanitizeKeyTrack({ enabled: false, frames: [{ frame: 3, interp: 'smooth', x: 5, scaleX: 0, opacity: 3 }, { frame: 'x' }, { frame: 1 }, { frame: 3, x: 9 }] })!;
+    const t = sanitizeKeyTrack({
+      enabled: false,
+      frames: [{ frame: 3, interp: 'smooth', values: { x: 5, scaleX: 0, opacity: 3, bogus: 1 } }, { frame: 'x' }, { frame: 1, values: {} }, { frame: 3, interp: 'zigzag', values: { x: 9 } }],
+    })!;
     expect(t.enabled).toBe(false);
-    expect(t.frames.map((k) => [k.frame, k.x, k.interp])).toEqual([
-      [1, 0, 'linear'],
-      [3, 9, 'linear'],
-    ]);
-    const s = sanitizeKeyTrack({ frames: [{ frame: 2, scaleX: 0, opacity: 3, interp: 'hold' }] })!;
-    expect(s.frames[0].scaleX).toBe(0.001);
-    expect(s.frames[0].opacity).toBe(1);
-    expect(s.frames[0].interp).toBe('hold');
+    expect(t.frames).toEqual([{ frame: 3, interp: 'linear', values: { x: 9 } }]);
+    const s = sanitizeKeyTrack({ frames: [{ frame: 2, interp: 'hold', values: { scaleX: 0, opacity: 3 }, curves: { scaleX: { in: [-1, 2], out: 'x', broken: true }, rotation: { in: [1, 1] } } }] })!;
+    expect(s.frames[0]).toEqual({ frame: 2, interp: 'hold', values: { scaleX: 0.001, opacity: 1 }, curves: { scaleX: { in: [-1, 2], broken: true } } });
+    // The earlier format kept the values beside the frame.
+    const old = sanitizeKeyTrack({ frames: [{ frame: 4, interp: 'smooth', x: 7, y: 0, scaleX: 1, scaleY: 1, rotation: 0, pivotX: 100, pivotY: 50, opacity: 0.5 }] })!;
+    expect(old.frames[0]).toEqual({ frame: 4, interp: 'smooth', values: { x: 7, y: 0, scaleX: 1, scaleY: 1, rotation: 0, pivotX: 100, pivotY: 50, opacity: 0.5 } });
   });
 });

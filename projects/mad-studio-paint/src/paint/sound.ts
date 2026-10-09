@@ -5,7 +5,7 @@
  * unit tested.
  */
 import { sanitizeClips, type Clip } from './clips';
-import { ease, type Interp } from './keyframes';
+import { channelAt, recordKey, sanitizeKeyframes, type Interp, type Keyframe } from './keyframes';
 
 /** A sound file kept with the document. */
 export interface SoundFile {
@@ -17,12 +17,8 @@ export interface SoundFile {
   duration: number;
 }
 
-/** A volume keyframe (0..1). */
-export interface VolumeKey {
-  frame: number;
-  interp: Interp;
-  volume: number;
-}
+/** Volume keyframes are keyframes recording `volume` (0..1). */
+export type VolumeKey = Keyframe;
 
 export interface SoundTrack {
   id: string;
@@ -53,19 +49,12 @@ export function newSoundTrack(name: string): SoundTrack {
 
 /** The volume at `frame`: the keyframes' (interpolated as the earlier one says), else the track's. */
 export function volumeAt(track: Pick<SoundTrack, 'volume' | 'keys'>, frame: number): number {
-  const k = track.keys;
-  if (k.length === 0) return track.volume;
-  if (frame <= k[0].frame) return k[0].volume;
-  for (let i = 0; i < k.length - 1; i++) {
-    if (frame >= k[i + 1].frame) continue;
-    return k[i].volume + (k[i + 1].volume - k[i].volume) * ease((frame - k[i].frame) / (k[i + 1].frame - k[i].frame), k[i].interp);
-  }
-  return k[k.length - 1].volume;
+  return channelAt(track.keys, 'volume', frame) ?? track.volume;
 }
 
-/** Sets a volume keyframe at its frame (replacing one there), sorted. */
-export function setVolumeKey(keys: VolumeKey[], key: VolumeKey): VolumeKey[] {
-  return [...keys.filter((k) => k.frame !== key.frame), key].sort((a, b) => a.frame - b.frame);
+/** Records a volume keyframe at a frame (into a keyframe there, or a new one). */
+export function setVolumeKey(keys: VolumeKey[], frame: number, volume: number, interp: Interp): VolumeKey[] {
+  return recordKey(keys, frame, { volume }, interp);
 }
 
 /** A stretch of sound to play: `when` seconds after the start, from `offset` seconds into the file, for `duration` seconds. */
@@ -195,13 +184,7 @@ export function sanitizeSound(raw: unknown): DocSound | undefined {
   for (const t of Array.isArray(r.tracks) ? r.tracks.slice(0, 64) : []) {
     if (!t || typeof t !== 'object') continue;
     const x = t as Record<string, unknown>;
-    const keys = (Array.isArray(x.keys) ? x.keys.slice(0, 10000) : []).flatMap((k): VolumeKey[] => {
-      if (!k || typeof k !== 'object') return [];
-      const y = k as Record<string, unknown>;
-      const frame = typeof y.frame === 'number' && Number.isFinite(y.frame) ? Math.round(y.frame) : NaN;
-      if (!(frame >= 1 && frame <= 100000)) return [];
-      return [{ frame, interp: y.interp === 'hold' || y.interp === 'smooth' ? y.interp : 'linear', volume: num(y.volume, 1, 0, 1) }];
-    });
+    const keys = sanitizeKeyframes(x.keys).filter((k) => k.values.volume !== undefined);
     tracks.push({
       id: typeof x.id === 'string' && ID.test(x.id) && !tracks.some((e) => e.id === x.id) ? x.id : newSoundId('s'),
       name: typeof x.name === 'string' && x.name ? x.name.slice(0, 120) : 'Audio',
@@ -209,7 +192,7 @@ export function sanitizeSound(raw: unknown): DocSound | undefined {
       volume: num(x.volume, 1, 0, 1),
       // Clips play files the document has.
       clips: (sanitizeClips(x.clips) ?? []).filter((c) => c.sound !== undefined && files.some((f) => f.id === c.sound)),
-      keys: [...new Map(keys.map((k) => [k.frame, k])).values()].sort((a, b) => a.frame - b.frame),
+      keys,
     });
   }
   return tracks.length || files.length ? { tracks, files } : undefined;

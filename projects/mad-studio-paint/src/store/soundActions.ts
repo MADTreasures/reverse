@@ -114,8 +114,7 @@ export function setVolumeNow(volume: number): void {
     (doc) => {
       const x = doc.sound?.tracks.find((y) => y.id === t.id);
       if (!x) return;
-      const old = x.keys.find((k) => k.frame === frame);
-      x.keys = setVolumeKey(x.keys, { frame, interp: old?.interp ?? s.keyInterp, volume });
+      x.keys = setVolumeKey(x.keys, frame, volume, s.keyInterp);
     },
     { key: `volkey:${t.id}:${frame}` },
   );

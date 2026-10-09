@@ -7,7 +7,7 @@ import { nativeOp } from '../model/blend';
 import { hexToRgb } from '../model/color';
 import { celAt, onionCels, onionOpacity, tintOnion, type OnionSkin } from '../paint/animation';
 import { inClips } from '../paint/clips';
-import { cameraMatrix, invert, isRest, placementAt, placementMatrix, type Placement } from '../paint/keyframes';
+import { cameraMatrix, invert, isRest, placementAt, placementMatrix, restPlacement, type Placement } from '../paint/keyframes';
 import type { Affine } from '../paint/rulers';
 import { lightMatrix, type LightLayer } from '../paint/lightTable';
 import { clipGroups, findLayer, flatten } from '../model/layers';
@@ -202,6 +202,7 @@ export class Compositor {
     this.inCel = 0;
     this.applyCamera = Boolean(opts.camera);
     this.anim = { frame: doc.timeline?.enabled ? (opts.frame ?? this.frame) : null, onion: null };
+    this.doc = doc;
     const out = createCanvas(this.canvas.width, this.canvas.height);
     this.drawContent(layer, ctx2d(out), this.bounds, opts);
     return out;
@@ -220,7 +221,8 @@ export class Compositor {
     if (this.anim.frame === null || this.inCel > 0 || layer.kind === 'correction') return null;
     const camera = layer.kind === 'folder' && Boolean(layer.camera);
     if (camera ? !this.applyCamera : !layer.keys?.enabled || layer.id === this.unkeyed) return null;
-    const p = this.keyPreview.get(layer.id) ?? placementAt(layer.keys?.frames ?? [], this.anim.frame);
+    const rest = restPlacement(this.doc?.width ?? this.canvas.width, this.doc?.height ?? this.canvas.height);
+    const p = this.keyPreview.get(layer.id) ?? placementAt(layer.keys?.frames ?? [], this.anim.frame, rest);
     if (!p || isRest(p)) return null;
     return { m: camera ? cameraMatrix(p) : placementMatrix(p), opacity: p.opacity };
   }

@@ -6,6 +6,11 @@
  * Clips: click the strip at a clip's top to select it (Ctrl/⌘-click: several), drag it to move the
  * clips, drag its ends to trim them (Alt: time stretch). Right-click or double-click a frame for
  * the track's pop-up menu (assign a cel, clip commands).
+ *
+ * Keyframes: Details (+) in front of a track name shows its property rows (Transform, whose > opens
+ * Position, Scale ratio, Rotate and Center of rotation; Opacity). A keyframe that records only some
+ * of a row's properties shows small. Click selects (Ctrl/⌘: several), dragging around keyframes
+ * selects them (Shift: adds, Ctrl/⌘: takes out); drag to move, Alt+drag to duplicate.
  */
 import { memo, useCallback, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { useShallow } from 'zustand/react/shallow';
@@ -13,7 +18,7 @@ import { isAnimationFolder, isCameraFolder, keysOn, timelineTracks, trackContent
 import type { Id, Layer } from '../../model/types';
 import { assignmentAt, entryAt } from '../../paint/animation';
 import { clipIndexAt, type ClipEdge, type Timed, type TrackContent } from '../../paint/clips';
-import { moveKeys, type Interp, type Keyframe } from '../../paint/keyframes';
+import { GROUPS, groupInterp, PLACEMENT_CHANNELS, records, touches, TRANSFORM_GROUPS, type Channel, type ChannelGroup, type Interp, type Keyframe } from '../../paint/keyframes';
 import type { SoundFile, SoundTrack } from '../../paint/sound';
 import { soundPeaks, soundsVersion, subscribeSounds } from '../../engine/sounds';
 import * as sound from '../../store/soundActions';
@@ -109,42 +114,83 @@ interface RowProps {
   active: boolean;
   /** First frames of this track's selected clips. */
   selected: string;
-  /** Frames of this track's selected keyframes. */
+  /** This track's selected keyframes as "row:frame" ("*": whole keyframes). */
   selectedKeys: string;
   /** What the track shows while a clip is dragged. */
   preview: TrackContent<Timed> | null;
+  /** Details (+) open: the property rows show; `transformOpen`: with the parts of Transform. */
+  details: boolean;
+  transformOpen: boolean;
   onGrip: (e: React.PointerEvent<HTMLDivElement>, track: Id, start: number, lane: HTMLElement) => void;
-  onKey: (e: React.PointerEvent<HTMLDivElement>, track: Id, frame: number) => void;
+  onKey: (e: React.PointerEvent<HTMLDivElement>, track: Id, frame: number, group?: ChannelGroup) => void;
 }
 
-/** Keyframe marks of a lane. */
-function KeyMarks({ keys, frames, selected, onKey, track, menu }: { keys: { frame: number; interp: Interp }[]; frames: number; selected: Set<number>; track: Id; onKey: RowProps['onKey']; menu: (e: React.MouseEvent, f: number) => void }) {
+/** Selected keyframes of a row: whole keyframes, and "group:frame" of property rows. */
+interface KeySel {
+  whole: Set<number>;
+  parts: Set<string>;
+}
+
+function parseKeySel(text: string): KeySel {
+  const whole = new Set<number>();
+  const parts = new Set<string>();
+  for (const e of text ? text.split(',') : []) {
+    const [g, f] = e.split(':');
+    if (g === '*') whole.add(Number(f));
+    else parts.add(`${g}:${f}`);
+  }
+  return { whole, parts };
+}
+
+/** Frame under the pointer in a lane. */
+const frameIn = (e: React.MouseEvent<HTMLElement>) => Math.floor((e.clientX - e.currentTarget.getBoundingClientRect().left) / CELL) + 1;
+
+/**
+ * Keyframe marks of a lane: of a property row (`group`), or of the whole track (`full`: what a
+ * keyframe records to show full size there).
+ */
+function KeyMarks({ keys, frames, sel, onKey, track, menu, group, full }: { keys: Keyframe[]; frames: number; sel: KeySel; track: Id; group?: ChannelGroup; full: readonly Channel[]; onKey: RowProps['onKey']; menu: (e: React.MouseEvent, f: number) => void }) {
+  const channels = group ? GROUPS[group].channels : full;
   return (
     <>
       {keys
-        .filter((k) => k.frame <= frames)
-        .map((k) => (
-          <div
-            key={`k${k.frame}`}
-            className={`tl-key ${k.interp} ${selected.has(k.frame) ? 'selected' : ''}`}
-            data-testid="timeline-key"
-            data-frame={k.frame}
-            title={`Keyframe on frame ${k.frame} (${INTERP_LABELS[k.interp]}): drag to move, Alt+drag to duplicate`}
-            style={{ left: (k.frame - 0.5) * CELL }}
-            onPointerDown={(e) => onKey(e, track, k.frame)}
-            onClick={(e) => e.stopPropagation()}
-            onContextMenu={(e) => menu(e, k.frame)}
-          />
-        ))}
+        .filter((k) => k.frame <= frames && touches(k, channels))
+        .map((k) => {
+          const interp = group ? groupInterp(k, channels) : k.interp;
+          const partial = !records(k, channels);
+          const selected = sel.whole.has(k.frame) || (group ? sel.parts.has(`${group}:${k.frame}`) : [...sel.parts].some((p) => p.endsWith(`:${k.frame}`)));
+          return (
+            <div
+              key={`k${k.frame}`}
+              className={`tl-key ${interp} ${partial ? 'partial' : ''} ${selected ? 'selected' : ''}`}
+              data-testid="timeline-key"
+              data-frame={k.frame}
+              data-key-track={track}
+              data-group={group ?? ''}
+              title={`Keyframe on frame ${k.frame} (${INTERP_LABELS[interp]}${partial ? ', some properties' : ''}): drag to move, Alt+drag to duplicate`}
+              style={{ left: (k.frame - 0.5) * CELL }}
+              onPointerDown={(e) => onKey(e, track, k.frame, group)}
+              onClick={(e) => e.stopPropagation()}
+              onContextMenu={(e) => menu(e, k.frame)}
+            />
+          );
+        })}
     </>
   );
 }
 
-const TrackRow = memo(function TrackRow({ row, frames, active, selected, selectedKeys, preview, onGrip, onKey }: RowProps) {
+/** The property rows of a track with Details (+) open. */
+function detailRows(transformOpen: boolean): { group: ChannelGroup; indent: number }[] {
+  return [...(transformOpen ? TRANSFORM_GROUPS.map((group) => ({ group, indent: 2 })) : []), { group: 'opacity', indent: 1 }];
+}
+
+const TrackRow = memo(function TrackRow({ row, frames, active, selected, selectedKeys, preview, details, transformOpen, onGrip, onKey }: RowProps) {
   const track = row.layer;
   const content = preview ?? trackContent(track, frames);
-  const keys = keysOn(track) ? ((content.keys ?? []) as Keyframe[]) : [];
-  const keySel = new Set(selectedKeys ? selectedKeys.split(',').map(Number) : []);
+  const keyed = keysOn(track);
+  const keys = keyed ? ((content.keys ?? []) as Keyframe[]) : [];
+  const keySel = parseKeySel(selectedKeys);
+  const open = keyed && details;
   const animation = isAnimationFolder(track) ? (content.cels ? { cels: content.cels } : track.animation) : null;
   const starts = new Set(selected ? selected.split(',').map(Number) : []);
   const lane = useRef<HTMLDivElement>(null);
@@ -184,69 +230,91 @@ const TrackRow = memo(function TrackRow({ row, frames, active, selected, selecte
     }
   }
 
+  const laneClick = (f: number) => {
+    anim.clearClipSelection();
+    anim.clearKeySelection();
+    anim.selectTrackFrame(track.id, f);
+  };
+
   return (
-    <div className={`tl-row ${active ? 'active' : ''}`} data-testid="timeline-track" data-track={track.name} data-track-id={track.id}>
-      <div className="tl-name" style={{ paddingLeft: 4 + row.depth * 12 }}>
-        {track.kind === 'folder' && !track.animation ? (
-          <button className="tl-twisty" aria-label={track.expanded ? 'Close folder' : 'Open folder'} onClick={() => actions.setLayerProps(track.id, { expanded: !track.expanded }, 'Expand folder', `expand:${track.id}`)}>
-            <Icon name={track.expanded ? 'chevronDown' : 'chevronRight'} size={12} />
+    <>
+      <div className={`tl-row ${active ? 'active' : ''}`} data-testid="timeline-track" data-track={track.name} data-track-id={track.id}>
+        <div className="tl-name" style={{ paddingLeft: 4 + row.depth * 12 }}>
+          {track.kind === 'folder' && !track.animation ? (
+            <button className="tl-twisty" aria-label={track.expanded ? 'Close folder' : 'Open folder'} onClick={() => actions.setLayerProps(track.id, { expanded: !track.expanded }, 'Expand folder', `expand:${track.id}`)}>
+              <Icon name={track.expanded ? 'chevronDown' : 'chevronRight'} size={12} />
+            </button>
+          ) : (
+            <span className="tl-twisty" />
+          )}
+          <button className={`eye ${track.visible ? 'on' : ''}`} aria-label={track.visible ? 'Hide track' : 'Show track'} onClick={() => actions.setLayerProps(track.id, { visible: !track.visible }, 'Show/hide track')}>
+            <Icon name="eye" size={14} />
           </button>
-        ) : (
-          <span className="tl-twisty" />
-        )}
-        <button className={`eye ${track.visible ? 'on' : ''}`} aria-label={track.visible ? 'Hide track' : 'Show track'} onClick={() => actions.setLayerProps(track.id, { visible: !track.visible }, 'Show/hide track')}>
-          <Icon name="eye" size={14} />
-        </button>
-        <span className="tl-track-icon">
-          <Icon name={trackIcon(track)} size={14} />
-        </span>
-        <button className="tl-track-name" title={track.name} onClick={() => anim.selectTrackFrame(track.id, getState().frame)}>
-          {track.name}
-        </button>
-        {track.keys?.enabled && !isCameraFolder(track) && (
-          <span className="tl-keyed" title="Keyframes are on for this layer">
-            <Icon name="keyEnable" size={12} />
+          <span className="tl-track-icon">
+            <Icon name={trackIcon(track)} size={14} />
           </span>
-        )}
-      </div>
-      <div
-        ref={lane}
-        className={`tl-lane ${animation ? 'cels' : ''}`}
-        onClick={
-          animation
-            ? undefined
-            : (e) => {
-                anim.clearClipSelection();
-                anim.clearKeySelection();
-                anim.selectTrackFrame(track.id, frameAt(e.clientX));
-              }
-        }
-        onContextMenu={animation ? undefined : (e) => menu(e, frameAt(e.clientX))}
-      >
-        {content.clips
-          .filter((c) => c.start <= frames)
-          .map((c) => (
-            <div
-              key={c.start}
-              className={`tl-clip ${starts.has(c.start) ? 'selected' : ''}`}
-              data-testid="timeline-clip"
-              data-start={c.start}
-              data-end={c.end}
-              style={{ left: (c.start - 1) * CELL, width: (Math.min(c.end, frames) - c.start + 1) * CELL }}
-            >
+          {keyed && (
+            <button className="tl-details" title={open ? 'Hide details' : 'Details: the rows of the properties keyframes record'} aria-label={open ? 'Hide details' : 'Details'} aria-expanded={open} onClick={() => anim.toggleKeyDetails(track.id)}>
+              {open ? '−' : '+'}
+            </button>
+          )}
+          {open && (
+            <button className="tl-twisty" aria-label={transformOpen ? 'Close Transform' : 'Open Transform'} aria-expanded={transformOpen} onClick={() => anim.toggleTransformDetails(track.id)}>
+              <Icon name={transformOpen ? 'chevronDown' : 'chevronRight'} size={12} />
+            </button>
+          )}
+          <button className="tl-track-name" title={track.name} onClick={() => anim.selectTrackFrame(track.id, getState().frame)}>
+            {track.name}
+            {open && <span className="tl-prop"> : Transform</span>}
+          </button>
+          {track.keys?.enabled && !isCameraFolder(track) && (
+            <span className="tl-keyed" title="Keyframes are on for this layer">
+              <Icon name="keyEnable" size={12} />
+            </span>
+          )}
+        </div>
+        <div
+          ref={lane}
+          className={`tl-lane ${animation ? 'cels' : ''}`}
+          onClick={animation ? undefined : (e) => laneClick(frameAt(e.clientX))}
+          onContextMenu={animation ? undefined : (e) => menu(e, frameAt(e.clientX))}
+        >
+          {content.clips
+            .filter((c) => c.start <= frames)
+            .map((c) => (
               <div
-                className="tl-clip-grip"
-                title="Clip: drag to move, drag an end to trim (Alt: stretch); Ctrl/⌘-click selects several"
-                onPointerDown={(e) => lane.current && onGrip(e, track.id, c.start, lane.current)}
-                onClick={(e) => e.stopPropagation()}
-                onContextMenu={(e) => menu(e, c.start)}
-              />
-            </div>
-          ))}
-        {animation && <div className="tl-cells">{cells}</div>}
-        <KeyMarks keys={keys} frames={frames} selected={keySel} track={track.id} onKey={onKey} menu={menu} />
+                key={c.start}
+                className={`tl-clip ${starts.has(c.start) ? 'selected' : ''}`}
+                data-testid="timeline-clip"
+                data-start={c.start}
+                data-end={c.end}
+                style={{ left: (c.start - 1) * CELL, width: (Math.min(c.end, frames) - c.start + 1) * CELL }}
+              >
+                <div
+                  className="tl-clip-grip"
+                  title="Clip: drag to move, drag an end to trim (Alt: stretch); Ctrl/⌘-click selects several"
+                  onPointerDown={(e) => lane.current && onGrip(e, track.id, c.start, lane.current)}
+                  onClick={(e) => e.stopPropagation()}
+                  onContextMenu={(e) => menu(e, c.start)}
+                />
+              </div>
+            ))}
+          {animation && <div className="tl-cells">{cells}</div>}
+          <KeyMarks keys={keys} frames={frames} sel={keySel} track={track.id} group={open ? 'transform' : undefined} full={PLACEMENT_CHANNELS} onKey={onKey} menu={menu} />
+        </div>
       </div>
-    </div>
+      {open &&
+        detailRows(transformOpen).map(({ group, indent }) => (
+          <div key={group} className={`tl-row tl-sub ${active ? 'active' : ''}`} data-testid="timeline-subtrack" data-track-id={track.id} data-group={group}>
+            <div className="tl-name" style={{ paddingLeft: 4 + row.depth * 12 + 24 + indent * 10 }}>
+              <span className="tl-prop-name">{GROUPS[group].label}</span>
+            </div>
+            <div className="tl-lane" onClick={(e) => laneClick(frameIn(e))} onContextMenu={(e) => menu(e, frameIn(e))}>
+              <KeyMarks keys={keys} frames={frames} sel={keySel} track={track.id} group={group} full={PLACEMENT_CHANNELS} onKey={onKey} menu={menu} />
+            </div>
+          </div>
+        ))}
+    </>
   );
 });
 
@@ -287,7 +355,7 @@ const SoundRow = memo(function SoundRow({ track, files, frames, fps, active, sel
   const clips = preview?.clips ?? track.clips;
   const keys = (preview?.keys ?? track.keys) as SoundTrack['keys'];
   const starts = new Set(selected ? selected.split(',').map(Number) : []);
-  const keySel = new Set(selectedKeys ? selectedKeys.split(',').map(Number) : []);
+  const keySel = parseKeySel(selectedKeys);
   const lane = useRef<HTMLDivElement>(null);
   const frameAt = (clientX: number) => Math.floor((clientX - (lane.current?.getBoundingClientRect().left ?? 0)) / CELL) + 1;
   const menu = (e: React.MouseEvent, f: number) => {
@@ -307,6 +375,7 @@ const SoundRow = memo(function SoundRow({ track, files, frames, fps, active, sel
         </span>
         <button className="tl-track-name" title={track.name} onClick={() => sound.selectSoundTrack(track.id)}>
           {track.name}
+          <span className="tl-prop"> : Volume</span>
         </button>
       </div>
       <div
@@ -345,11 +414,13 @@ const SoundRow = memo(function SoundRow({ track, files, frames, fps, active, sel
               </div>
             );
           })}
-        <KeyMarks keys={keys} frames={frames} selected={keySel} track={track.id} onKey={onKey} menu={menu} />
+        <KeyMarks keys={keys} frames={frames} sel={keySel} track={track.id} full={VOLUME} onKey={onKey} menu={menu} />
       </div>
     </div>
   );
 });
+
+const VOLUME: Channel[] = ['volume'];
 
 /** Selects a frame of a track: a layer's (and the cel shown there) or an audio track's. */
 function selectAt(track: Id, frame: number): void {
@@ -369,17 +440,20 @@ export function TimelinePalette() {
   const activeId = useStore((s) => anim.currentTrackId(s));
   const soundDoc = useStore((s) => s.doc.sound);
   const hasCels = useStore((s) => anim.activeTrack(s) !== null);
-  const { keySelection, editKeyed } = useStore(useShallow((s) => ({ keySelection: s.keySelection, editKeyed: s.editKeyed })));
+  const { keySelection, editKeyed, keyDetails, transformDetails } = useStore(
+    useShallow((s) => ({ keySelection: s.keySelection, editKeyed: s.editKeyed, keyDetails: s.keyDetails, transformDetails: s.transformDetails })),
+  );
   const keyOn = useStore((s) => {
     if (sound.activeSoundTrack(s)) return true;
     const t = anim.currentTrack(s);
     return Boolean(t && keysOn(t));
   });
-  // The interpolation shown: the selected keyframe's, else the one for new keyframes.
+  // The interpolation shown: the selected keyframe's (on a property row: that property's), else the one for new keyframes.
   const shownInterp = useStore((s) => {
-    const k = s.keySelection[0];
-    const keys = k ? (anim.trackContentOf(k.track, s)?.keys as { frame: number; interp: Interp }[] | undefined) : undefined;
-    return keys?.find((x) => x.frame === k!.frame)?.interp ?? s.keyInterp;
+    const ref = s.keySelection[0];
+    const k = ref ? anim.trackKeys(ref.track, s).find((x) => x.frame === ref.frame) : undefined;
+    if (!k) return s.keyInterp;
+    return ref.group ? groupInterp(k, GROUPS[ref.group].channels) : k.interp;
   });
   const rows = useMemo(() => timelineTracks(layers), [layers]);
   const scrub = useRef(false);
@@ -452,12 +526,12 @@ export function TimelinePalette() {
       return delta === cur.delta ? cur : { ...cur, delta };
     });
   };
-  const onKey = (e: React.PointerEvent<HTMLDivElement>, track: Id, frame: number) => {
+  const onKey = (e: React.PointerEvent<HTMLDivElement>, track: Id, frame: number, group?: ChannelGroup) => {
     if (e.button !== 0) return;
     e.stopPropagation();
     e.preventDefault();
     const add = e.ctrlKey || e.metaKey;
-    if (add || !getState().keySelection.some((k) => k.track === track && k.frame === frame)) anim.selectKeyframe(track, frame, add);
+    if (add || !getState().keySelection.some((k) => k.track === track && k.frame === frame && k.group === group)) anim.selectKeyframe(track, frame, add, group);
     else selectAt(track, frame);
     if (add) return;
     const x0 = e.clientX;
@@ -493,10 +567,9 @@ export function TimelinePalette() {
     if (drag.kind === 'keys') {
       if (!drag.delta) return out;
       for (const id of ids) {
-        const frames0 = keySelection.filter((k) => k.track === id).map((k) => k.frame);
-        const t = frames0.length ? anim.trackContentOf(id, s) : null;
-        if (!t?.keys) continue;
-        out.set(id, { ...t, keys: moveKeys(t.keys as Keyframe[], frames0, drag.delta, drag.copy) });
+        const t = keySelection.some((k) => k.track === id) ? anim.trackContentOf(id, s) : null;
+        const keys = t ? anim.movedKeys(id, drag.delta, drag.copy, s) : null;
+        if (t && keys) out.set(id, { ...t, keys });
       }
       return out;
     }
@@ -514,7 +587,7 @@ export function TimelinePalette() {
   const keysOf = (id: Id) =>
     keySelection
       .filter((k: KeyRef) => k.track === id)
-      .map((k) => Math.max(1, k.frame + (drag?.kind === 'keys' ? drag.delta : 0)))
+      .map((k) => `${k.group ?? '*'}:${Math.max(1, k.frame + (drag?.kind === 'keys' ? drag.delta : 0))}`)
       .join(',');
 
   const selectedOf = (id: Id) =>
@@ -522,6 +595,47 @@ export function TimelinePalette() {
       .filter((c: ClipRef) => c.track === id)
       .map((c) => c.start + (drag?.kind === 'move' ? anim.clipMoveDelta(drag.delta) : 0))
       .join(',');
+
+  // Dragging around keyframes selects them (Shift: adds, Ctrl/⌘: takes out).
+  const rowsRef = useRef<HTMLDivElement>(null);
+  const [marquee, setMarquee] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
+  const swallowClick = useRef(false);
+  const onRowsDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    const target = e.target as HTMLElement;
+    const rowsEl = rowsRef.current;
+    if (e.button !== 0 || !rowsEl || !target.closest('.tl-lane') || target.closest('.tl-key, .tl-clip-grip')) return;
+    const x0 = e.clientX;
+    const y0 = e.clientY;
+    const mode = e.shiftKey ? 'add' : e.ctrlKey || e.metaKey ? 'remove' : 'set';
+    let moved = false;
+    const rect = (ev: PointerEvent) => ({ left: Math.min(x0, ev.clientX), top: Math.min(y0, ev.clientY), right: Math.max(x0, ev.clientX), bottom: Math.max(y0, ev.clientY) });
+    const move = (ev: PointerEvent) => {
+      if (!moved && Math.hypot(ev.clientX - x0, ev.clientY - y0) < 5) return;
+      moved = true;
+      const r = rect(ev);
+      const box = rowsEl.getBoundingClientRect();
+      setMarquee({ x: r.left - box.left, y: r.top - box.top, w: r.right - r.left, h: r.bottom - r.top });
+    };
+    const up = (ev: PointerEvent) => {
+      window.removeEventListener('pointermove', move);
+      setMarquee(null);
+      if (!moved) return;
+      // The click that ends the drag does not select a frame.
+      swallowClick.current = true;
+      setTimeout(() => (swallowClick.current = false), 0);
+      const r = rect(ev);
+      const refs: KeyRef[] = [];
+      rowsEl.querySelectorAll<HTMLElement>('.tl-key').forEach((el) => {
+        const b = el.getBoundingClientRect();
+        if (b.right < r.left || b.left > r.right || b.bottom < r.top || b.top > r.bottom) return;
+        const group = el.dataset.group as ChannelGroup | '';
+        refs.push({ track: el.dataset.keyTrack!, frame: Number(el.dataset.frame), ...(group ? { group } : {}) });
+      });
+      anim.selectKeyframes(refs, mode);
+    };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up, { once: true });
+  };
 
   // Dragging the top edge makes the palette taller or lower.
   const resize = (e: React.PointerEvent<HTMLDivElement>) => {
@@ -579,7 +693,16 @@ export function TimelinePalette() {
         <div className="timeline-empty">This canvas has no timeline. New animation folder makes one (with a track); Animation &gt; Timeline &gt; New timeline sets its frame rate and length.</div>
       ) : (
         <div className={`timeline-body ${enabled ? '' : 'disabled'} ${drag ? 'dragging' : ''}`} style={{ ['--cell' as string]: `${CELL}px`, ['--frames' as string]: frames }}>
-          <div className="tl-rows">
+          <div
+            ref={rowsRef}
+            className="tl-rows"
+            onPointerDown={onRowsDown}
+            onClickCapture={(e) => {
+              if (!swallowClick.current) return;
+              swallowClick.current = false;
+              e.stopPropagation();
+            }}
+          >
             <div className="tl-row tl-head">
               <div className="tl-name">Frame</div>
               <div
@@ -611,6 +734,8 @@ export function TimelinePalette() {
                 selected={selectedOf(r.layer.id)}
                 selectedKeys={keysOf(r.layer.id)}
                 preview={previews.get(r.layer.id) ?? null}
+                details={keyDetails.includes(r.layer.id)}
+                transformOpen={transformDetails.includes(r.layer.id)}
                 onGrip={stableGrip}
                 onKey={stableKey}
               />
@@ -631,6 +756,7 @@ export function TimelinePalette() {
               />
             ))}
             <div className="tl-now" style={{ left: `calc(var(--name-w) + ${(frame - 1) * CELL}px)` }} aria-hidden="true" />
+            {marquee && <div className="tl-marquee" data-testid="timeline-marquee" style={{ left: marquee.x, top: marquee.y, width: marquee.w, height: marquee.h }} aria-hidden="true" />}
           </div>
         </div>
       )}

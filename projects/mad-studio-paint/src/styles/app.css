@@ -2367,6 +2367,77 @@
   outline-offset: 1px;
 }
 
+/* a keyframe that records only some of the row's properties */
+.tl-key.partial {
+  top: 16px;
+  width: 6px;
+  height: 6px;
+  margin-left: -3px;
+}
+
+.tl-lane.cels .tl-key.partial {
+  bottom: 3px;
+  width: 5px;
+  height: 5px;
+  margin-left: -2.5px;
+}
+
+/* Details (+): a track's property rows */
+.tl-details {
+  display: inline-flex;
+  flex: 0 0 14px;
+  align-items: center;
+  justify-content: center;
+  height: 14px;
+  padding: 0;
+  border: 1px solid var(--line-soft);
+  border-radius: 2px;
+  background: var(--bg-3);
+  color: var(--text);
+  font-size: 11px;
+  line-height: 1;
+}
+
+.tl-details[aria-expanded='true'] {
+  border-color: var(--accent-strong);
+}
+
+.tl-prop {
+  color: var(--text-dim);
+}
+
+.tl-row.tl-sub {
+  height: 22px;
+}
+
+.tl-sub .tl-name {
+  overflow: hidden;
+  font-size: 12px;
+}
+
+.tl-sub .tl-key {
+  top: 6px;
+}
+
+.tl-sub .tl-key.partial {
+  top: 8px;
+}
+
+.tl-prop-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tl-marquee {
+  position: absolute;
+  z-index: 6;
+  border: 1px dashed var(--accent-strong);
+  background: var(--accent-soft);
+  pointer-events: none;
+}
+
 .tl-keyed {
   display: inline-flex;
   color: var(--accent-strong);

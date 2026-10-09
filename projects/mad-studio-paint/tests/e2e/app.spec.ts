@@ -2078,7 +2078,7 @@ test('keyframes move a track over time; a 2D camera folder frames the output', a
       const s = window.__madPaint.useStore.getState();
       const find = (ls: any[]): any[] => ls.flatMap((l) => [l, ...(l.children && !l.animation ? find(l.children) : [])]);
       const track = find(s.doc.layers).filter((l) => l.keys)[n];
-      return track ? { enabled: track.keys.enabled, frames: track.keys.frames.map((k: any) => [k.frame, Math.round(k.x), k.interp]) } : null;
+      return track ? { enabled: track.keys.enabled, frames: track.keys.frames.map((k: any) => [k.frame, Math.round(k.values.x), k.interp]) } : null;
     }, i);
   // A short thick line at x 30 … 90 on cel 1.
   await thinPen(page);
@@ -2160,9 +2160,114 @@ test('keyframes move a track over time; a 2D camera folder frames the output', a
     const m = window.__madPaint;
     await m.openFileBytes({ name: 'keys.madpaint', data: await m.buildDocumentBytes() });
     const cam = m.useStore.getState().doc.layers.find((l: any) => l.camera);
-    return { camera: cam.keys.frames.map((k: any) => [k.frame, k.x, k.scaleX]), a: cam.children[0].keys.frames.map((k: any) => [k.frame, Math.round(k.x), k.interp]) };
+    return { camera: cam.keys.frames.map((k: any) => [k.frame, k.values.x, k.values.scaleX]), a: cam.children[0].keys.frames.map((k: any) => [k.frame, Math.round(k.values.x), k.interp]) };
   });
   expect(back).toEqual({ camera: [[1, -100, 0.5]], a: [[1, 0, 'hold'], [8, 200, 'linear']] });
+  expect(errors).toEqual([]);
+});
+
+test('keyframes record each setting: Details rows, small keyframes, selecting by dragging', async ({ page }) => {
+  const errors = await boot(page);
+  await page.evaluate(() => void window.__madPaint.runCommand('new'));
+  const dlg = page.getByRole('dialog', { name: 'New canvas' });
+  await dlg.getByLabel('Width').fill('400');
+  await dlg.getByLabel('Height').fill('300');
+  await dlg.getByText('Create animated illustration').click();
+  await dlg.getByLabel('Number of cels').fill('8');
+  await dlg.getByLabel('Frame rate').fill('8');
+  await dlg.getByRole('button', { name: 'OK' }).click();
+  const ruler = (f: number) => page.getByTestId('timeline-ruler').locator('.tl-cell').nth(f - 1).click();
+  const keys = () => page.evaluate(() => window.__madPaint.useStore.getState().doc.layers[0].keys.frames.map((k: any) => [k.frame, Object.keys(k.values).sort().join(' ')]));
+  await thinPen(page);
+  await drag(page, [40, 150], [80, 150]);
+  await page.getByRole('button', { name: 'Add keyframe' }).click();
+  // Frame 5: moving with the Object tool records the position only; the keyframe shows small.
+  await ruler(5);
+  await selectTool(page, 'object');
+  await drag(page, [200, 100], [300, 100], 8);
+  expect(await keys()).toEqual([
+    [1, 'opacity pivotX pivotY rotation scaleX scaleY x y'],
+    [5, 'x y'],
+  ]);
+  const track = page.locator('[data-testid=timeline-track][data-track="A"]');
+  await expect(track.locator('[data-testid=timeline-key][data-frame="5"]')).toHaveClass(/partial/);
+  await expect(track.locator('[data-testid=timeline-key][data-frame="1"]')).not.toHaveClass(/partial/);
+  // Details (+): Transform and Opacity; > opens Position, Scale ratio, Rotate and Center of rotation.
+  await track.getByRole('button', { name: 'Details' }).click();
+  await expect(track).toContainText('A : Transform');
+  const rows = page.getByTestId('timeline-subtrack');
+  await expect(rows).toHaveText(['Opacity']);
+  await track.getByRole('button', { name: 'Open Transform' }).click();
+  await expect(rows).toHaveText(['Position', 'Scale ratio', 'Rotate', 'Center of rotation', 'Opacity']);
+  const row = (g: string) => page.locator(`[data-testid=timeline-subtrack][data-group="${g}"]`);
+  await expect(row('position').getByTestId('timeline-key')).toHaveCount(2);
+  await expect(row('position').locator('[data-testid=timeline-key][data-frame="5"]')).not.toHaveClass(/partial/);
+  await expect(row('rotation').getByTestId('timeline-key')).toHaveCount(1);
+  // Opacity at frame 5 (Tool Settings) goes into that keyframe.
+  await page.getByRole('button', { name: 'Tool Settings', exact: true }).click();
+  await page.getByTestId('tool-property').getByRole('spinbutton', { name: 'Opacity' }).fill('50');
+  expect((await keys())[1]).toEqual([5, 'opacity x y']);
+  await expect(row('opacity').getByTestId('timeline-key')).toHaveCount(2);
+  // Delete keyframe on the Opacity row takes out the opacity only.
+  await row('opacity').locator('[data-testid=timeline-key][data-frame="5"]').click();
+  await page.getByRole('button', { name: 'Delete keyframe' }).click();
+  expect((await keys())[1]).toEqual([5, 'x y']);
+  // Dragging around the keyframes of the Position row selects them …
+  const lane = (await row('position').locator('.tl-lane').boundingBox())!;
+  await page.mouse.move(lane.x + 2, lane.y + 2);
+  await page.mouse.down();
+  await page.mouse.move(lane.x + 60, lane.y + 12, { steps: 4 });
+  await expect(page.getByTestId('timeline-marquee')).toBeVisible();
+  await page.mouse.move(lane.x + 130, lane.y + lane.height - 2, { steps: 4 });
+  await page.mouse.up();
+  const selection = () => page.evaluate(() => window.__madPaint.useStore.getState().keySelection.map((k: any) => [k.frame, k.group ?? '']));
+  expect(await selection()).toEqual([
+    [1, 'position'],
+    [5, 'position'],
+  ]);
+  await expect(row('position').locator('.tl-key.selected')).toHaveCount(2);
+  await expect(row('rotation').locator('.tl-key.selected')).toHaveCount(0);
+  // … and dragging one moves both positions two frames on; the other settings stay.
+  const key5 = (await row('position').locator('[data-testid=timeline-key][data-frame="5"]').boundingBox())!;
+  await page.mouse.move(key5.x + key5.width / 2, key5.y + key5.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(key5.x + key5.width / 2 + 48, key5.y + key5.height / 2, { steps: 6 });
+  await page.mouse.up();
+  expect(await keys()).toEqual([
+    [1, 'opacity pivotX pivotY rotation scaleX scaleY'],
+    [3, 'x y'],
+    [7, 'x y'],
+  ]);
+  // Shift adds to the selection, Ctrl/⌘ takes out.
+  const rot = (await row('rotation').locator('.tl-lane').boundingBox())!;
+  await page.keyboard.down('Shift');
+  await page.mouse.move(rot.x + 2, rot.y + 2);
+  await page.mouse.down();
+  await page.mouse.move(rot.x + 40, rot.y + rot.height - 2, { steps: 4 });
+  await page.mouse.up();
+  await page.keyboard.up('Shift');
+  expect(await selection()).toEqual([
+    [3, 'position'],
+    [7, 'position'],
+    [1, 'rotation'],
+  ]);
+  await page.keyboard.down('ControlOrMeta');
+  const pos = (await row('position').locator('.tl-lane').boundingBox())!;
+  await page.mouse.move(pos.x + 30, pos.y + 2);
+  await page.mouse.down();
+  await page.mouse.move(pos.x + 100, pos.y + pos.height - 2, { steps: 4 });
+  await page.mouse.up();
+  await page.keyboard.up('ControlOrMeta');
+  expect(await selection()).toEqual([
+    [7, 'position'],
+    [1, 'rotation'],
+  ]);
+  // One undo step brings the positions back.
+  await page.evaluate(() => window.__madPaint.runCommand('undo'));
+  expect(await keys()).toEqual([
+    [1, 'opacity pivotX pivotY rotation scaleX scaleY x y'],
+    [5, 'x y'],
+  ]);
   expect(errors).toEqual([]);
 });
 
@@ -2322,7 +2427,7 @@ test('sound: audio as a clip, volume keyframes, mute; movies as MP4 and MOV; sav
   await page.getByTestId('timeline-ruler').locator('.tl-cell').nth(5).click();
   await page.getByRole('spinbutton', { name: 'Volume' }).fill('0');
   snd = (await sound())!;
-  expect(snd.tracks[0].keys.map((k: any) => [k.frame, k.volume])).toEqual([
+  expect(snd.tracks[0].keys.map((k: any) => [k.frame, k.values.volume])).toEqual([
     [1, 0.5],
     [6, 0],
   ]);

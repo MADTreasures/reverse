@@ -29,8 +29,8 @@ describe('sound', () => {
     const t = track({
       volume: 0.8,
       keys: [
-        { frame: 5, interp: 'linear', volume: 0 },
-        { frame: 15, interp: 'hold', volume: 1 },
+        { frame: 5, interp: 'linear', values: { volume: 0 } },
+        { frame: 15, interp: 'hold', values: { volume: 1 } },
       ],
     });
     expect(volumeAt({ ...t, keys: [] }, 9)).toBe(0.8);
@@ -74,6 +74,6 @@ describe('sound', () => {
       ['snd1', 'audio/mpeg'],
       ['snd2', 'audio/wav'],
     ]);
-    expect(s.tracks[0]).toMatchObject({ id: 's1', volume: 1, clips: [{ start: 1, end: 9, sound: 'snd1', offset: 0.5 }], keys: [{ frame: 3, interp: 'linear', volume: 0.5 }] });
+    expect(s.tracks[0]).toMatchObject({ id: 's1', volume: 1, clips: [{ start: 1, end: 9, sound: 'snd1', offset: 0.5 }], keys: [{ frame: 3, interp: 'linear', values: { volume: 0.5 } }] });
   });
 });

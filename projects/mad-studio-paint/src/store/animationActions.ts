@@ -28,11 +28,28 @@ import {
   type TrackContent,
 } from '../paint/clips';
 import { setVolumeKey, volumeAt, type SoundTrack, type VolumeKey } from '../paint/sound';
-import { moveKeys, placementAt, placementOf, restPlacement, setKey, type Interp, type Keyframe, type Placement } from '../paint/keyframes';
+import {
+  GROUPS,
+  moveKeys,
+  placementAt,
+  PLACEMENT_CHANNELS,
+  recordKey,
+  removeChannels,
+  restPlacement,
+  setInterp,
+  TRANSFORM_GROUPS,
+  withSettings,
+  type Channel,
+  type ChannelGroup,
+  type Interp,
+  type Keyframe,
+  type Placement,
+  type PlacementChannel,
+} from '../paint/keyframes';
 import { ensureSurface } from '../engine/surfaces';
 import { startSound, stopSound } from '../engine/sounds';
 import * as actions from './actions';
-import { getState, setState, type ClipRef, type PaintState } from './store';
+import { getState, setState, type ClipRef, type KeyRef, type PaintState } from './store';
 
 /** A track's content: clips, cel assignments, keyframes (placements, or volumes on audio tracks). */
 type Content = TrackContent<Timed>;
@@ -568,7 +585,8 @@ export function keyTrack(s: PaintState = getState()): Layer | null {
 
 /** A track's placement at a frame: from its keyframes, else as it is. */
 export function placementNow(track: Layer, frame = getState().frame, s: PaintState = getState()): Placement {
-  return placementAt(track.keys?.frames ?? [], frame) ?? restPlacement(s.doc.width, s.doc.height);
+  const rest = restPlacement(s.doc.width, s.doc.height);
+  return placementAt(track.keys?.frames ?? [], frame, rest) ?? rest;
 }
 
 /** Animation > Edit track > Enable keyframes on this layer (the keyframes stay when turned off). */
@@ -595,11 +613,16 @@ export function toggleKeyframes(): void {
   if (!on) setState({ keySelection: [], editKeyed: false });
 }
 
-/** Records a placement as the keyframe at `frame` of a track (a clip is made there if needed; `enable` turns keyframes on). */
-export function setKeyframe(trackId: Id, frame: number, p: Placement, label = 'Keyframe', key?: string, enable = false): void {
+/**
+ * Records a placement at `frame` of a track: the settings of the given properties (all when left
+ * out; X records the position) go into the keyframe there, or a new one (a clip is made there if
+ * needed; `enable` turns keyframes on).
+ */
+export function setKeyframe(trackId: Id, frame: number, p: Placement, label = 'Keyframe', key?: string, enable = false, channels: readonly PlacementChannel[] = PLACEMENT_CHANNELS): void {
   const s = getState();
-  const old = findLayer(s.doc.layers, trackId)?.keys?.frames.find((k) => k.frame === frame);
-  const interp = old?.interp ?? s.keyInterp;
+  if (channels.length === 0) return;
+  const interp = s.keyInterp;
+  const values = Object.fromEntries(withSettings(channels).map((c) => [c, p[c]]));
   actions.changeDoc(
     label,
     (doc) => {
@@ -607,7 +630,7 @@ export function setKeyframe(trackId: Id, frame: number, p: Placement, label = 'K
       if (!l || !doc.timeline) return;
       if (!l.keys) l.keys = { enabled: true, frames: [] };
       if (l.clips) setTrackContent(l, ensureClipAt(trackContent(l, doc.timeline.frames), frame, doc.timeline.frames, true));
-      l.keys = { enabled: l.keys.enabled || enable, frames: setKey(l.keys.frames, { ...placementOf(p), frame, interp }) };
+      l.keys = { enabled: l.keys.enabled || enable, frames: recordKey(l.keys.frames, frame, values, interp) };
     },
     key ? { key } : {},
   );
@@ -621,7 +644,7 @@ export function addKeyframe(): void {
     const volume = volumeAt(sound, s.frame);
     actions.changeDoc('Add keyframe', (doc) => {
       const t = doc.sound?.tracks.find((x) => x.id === sound.id);
-      if (t) t.keys = setVolumeKey(t.keys, { frame: s.frame, interp: t.keys.find((k) => k.frame === s.frame)?.interp ?? s.keyInterp, volume });
+      if (t) t.keys = setVolumeKey(t.keys, s.frame, volume, s.keyInterp);
     });
     setState({ keySelection: [{ track: sound.id, frame: s.frame }] });
     return;
@@ -637,42 +660,61 @@ export function addKeyframe(): void {
 }
 
 /** The keyframes of a track (a document copy's, to change them), as a list and a way to replace it. */
-function keysOfTrack(doc: PaintDocument, id: Id): { list: Timed[]; set: (list: Timed[]) => void } | null {
+function keysOfTrack(doc: PaintDocument, id: Id): { list: Keyframe[]; set: (list: Keyframe[]) => void } | null {
   const t = trackById(doc, id);
   if (t?.layer?.keys) {
     const l = t.layer;
-    return { list: l.keys!.frames, set: (list) => (l.keys = { ...l.keys!, frames: list as Keyframe[] }) };
+    return { list: l.keys!.frames, set: (list) => (l.keys = { ...l.keys!, frames: list }) };
   }
   if (t?.sound) {
     const sound = t.sound;
-    return { list: sound.keys, set: (list) => (sound.keys = list as VolumeKey[]) };
+    return { list: sound.keys, set: (list) => (sound.keys = list) };
   }
   return null;
 }
 
-/** The selected keyframes by track, or the current track's keyframe at the current frame. */
-function keyTargets(s: PaintState): Map<Id, number[]> {
-  const out = new Map<Id, number[]>();
-  for (const k of s.keySelection) out.set(k.track, [...(out.get(k.track) ?? []), k.frame]);
-  if (out.size === 0) {
-    const id = currentTrackId(s);
-    if (id && keysOfTrack(s.doc, id)?.list.some((k) => k.frame === s.frame)) out.set(id, [s.frame]);
-  }
-  return out;
+/** Selected keyframes grouped by track and property row (`channels` undefined: whole keyframes). */
+interface KeyTarget {
+  track: Id;
+  frames: number[];
+  channels?: Channel[];
 }
 
-/** Delete keyframe: the selected keyframes (or the one at the current frame). */
+/** The selected keyframes, or the current track's keyframe at the current frame. */
+function keyTargets(s: PaintState): KeyTarget[] {
+  const out = new Map<string, KeyTarget>();
+  // A whole keyframe (or its Transform) selected covers its rows' selections at that frame.
+  const has = (track: Id, frame: number, group?: ChannelGroup) => s.keySelection.some((k) => k.track === track && k.frame === frame && k.group === group);
+  const covered = (k: KeyRef) => k.group !== undefined && (has(k.track, k.frame) || (TRANSFORM_GROUPS.includes(k.group) && has(k.track, k.frame, 'transform')));
+  for (const k of s.keySelection) {
+    if (covered(k)) continue;
+    const id = `${k.track}|${k.group ?? ''}`;
+    const t = out.get(id) ?? { track: k.track, frames: [], ...(k.group ? { channels: GROUPS[k.group].channels } : {}) };
+    t.frames.push(k.frame);
+    out.set(id, t);
+  }
+  if (out.size === 0) {
+    const id = currentTrackId(s);
+    if (id && keysOfTrack(s.doc, id)?.list.some((k) => k.frame === s.frame)) return [{ track: id, frames: [s.frame] }];
+  }
+  return [...out.values()];
+}
+
+/** Delete keyframe: the selected keyframes (on a property row: that property only), or the one at the current frame. */
 export function deleteKeyframes(): void {
   const s = getState();
   const targets = keyTargets(s);
-  if (targets.size === 0) {
+  if (targets.length === 0) {
     setState({ hint: 'Select a keyframe in the Timeline palette' });
     return;
   }
   actions.changeDoc('Delete keyframe', (doc) => {
-    for (const [id, frames] of targets) {
-      const k = keysOfTrack(doc, id);
-      k?.set(k.list.filter((x) => !frames.includes(x.frame)));
+    for (const t of targets) {
+      const k = keysOfTrack(doc, t.track);
+      if (!k) continue;
+      let list = k.list;
+      for (const f of t.frames) list = removeChannels(list, f, t.channels);
+      k.set(list);
     }
   });
   setState({ keySelection: [] });
@@ -695,45 +737,91 @@ export function setKeyInterp(interp: Interp): void {
   const s = getState();
   setState({ keyInterp: interp });
   const targets = keyTargets(s);
-  if (targets.size === 0) return;
+  if (targets.length === 0) return;
   actions.changeDoc(`Switch keyframe to ${interp} interpolation`, (doc) => {
-    for (const [id, frames] of targets) {
-      const k = keysOfTrack(doc, id);
-      k?.set(k.list.map((x) => (frames.includes(x.frame) ? { ...x, interp } : x)));
+    for (const t of targets) {
+      const k = keysOfTrack(doc, t.track);
+      k?.set(setInterp(k.list, t.frames, interp, t.channels));
     }
   });
 }
 
-/** Selects a keyframe (`add`: Ctrl/⌘-click adds it or takes it out) and goes to its frame. */
-export function selectKeyframe(track: Id, frame: number, add = false): void {
+/** Selects a keyframe (`add`: Ctrl/⌘-click adds it or takes it out; `group`: on a property row) and goes to its frame. */
+export function selectKeyframe(track: Id, frame: number, add = false, group?: ChannelGroup): void {
   const s = getState();
-  const has = s.keySelection.some((k) => k.track === track && k.frame === frame);
-  const keySelection = !add ? [{ track, frame }] : has ? s.keySelection.filter((k) => !(k.track === track && k.frame === frame)) : [...s.keySelection, { track, frame }];
+  const same = (k: KeyRef) => k.track === track && k.frame === frame && k.group === group;
+  const ref: KeyRef = { track, frame, ...(group ? { group } : {}) };
+  const keySelection = !add ? [ref] : s.keySelection.some(same) ? s.keySelection.filter((k) => !same(k)) : [...s.keySelection, ref];
   setState({ keySelection, clipSelection: [] });
   if (getState().doc.sound?.tracks.some((t) => t.id === track)) setState({ activeSound: track, frame });
   else selectTrackFrame(track, frame);
+}
+
+/** Selects the keyframes inside a rectangle dragged on the Timeline palette (Shift: adds, Ctrl/⌘: takes out). */
+export function selectKeyframes(refs: KeyRef[], mode: 'set' | 'add' | 'remove' = 'set'): void {
+  const s = getState();
+  const id = (k: KeyRef) => `${k.track}|${k.frame}|${k.group ?? ''}`;
+  const these = new Set(refs.map(id));
+  const rest = s.keySelection.filter((k) => !these.has(id(k)));
+  setState({ keySelection: mode === 'set' ? refs : mode === 'add' ? [...rest, ...refs] : rest, clipSelection: [] });
 }
 
 export const clearKeySelection = () => {
   if (getState().keySelection.length) setState({ keySelection: [] });
 };
 
-/** Drags the selected keyframes by `delta` frames (Alt: copies them). */
+/** Drags the selected keyframes by `delta` frames (Alt: copies them; on a property row: that property only). */
 export function moveSelectedKeys(delta: number, copy = false): void {
   const s = getState();
   if (!delta || s.keySelection.length === 0) return;
   const targets = keyTargets(s);
   actions.changeDoc(copy ? 'Duplicate keyframe' : 'Move keyframe', (doc) => {
-    for (const [id, frames] of targets) {
-      const k = keysOfTrack(doc, id);
+    for (const t of targets) {
+      const k = keysOfTrack(doc, t.track);
       if (!k || !doc.timeline) continue;
-      k.set(moveKeys(k.list as Keyframe[], frames, delta, copy));
+      k.set(moveKeys(k.list, t.frames, delta, copy, t.channels));
       // Keyframes need a clip where they land (audio tracks: only where a sound plays).
-      const l = findLayer(doc.layers, id);
-      if (l?.clips) for (const f of frames) setTrackContent(l, ensureClipAt(trackContent(l, doc.timeline.frames), Math.max(1, f + delta), doc.timeline.frames, true));
+      const l = findLayer(doc.layers, t.track);
+      if (l?.clips) for (const f of t.frames) setTrackContent(l, ensureClipAt(trackContent(l, doc.timeline.frames), Math.max(1, f + delta), doc.timeline.frames, true));
     }
   });
   setState({ keySelection: s.keySelection.map((k) => ({ ...k, frame: Math.max(1, k.frame + delta) })) });
+}
+
+/** A track's keyframes as they would be after dragging the selected ones (Timeline palette preview). */
+export function movedKeys(id: Id, delta: number, copy: boolean, s: PaintState = getState()): Keyframe[] | null {
+  const list = keysOfTrack(s.doc, id)?.list;
+  if (!list) return null;
+  let out = list;
+  for (const t of keyTargets(s)) if (t.track === id) out = moveKeys(out, t.frames, delta, copy, t.channels);
+  return out;
+}
+
+/** Timeline palette: Details (+) shows a track's property rows (Transform, Opacity). */
+export function toggleKeyDetails(id: Id): void {
+  setState((s) => ({ keyDetails: s.keyDetails.includes(id) ? s.keyDetails.filter((x) => x !== id) : [...s.keyDetails, id] }));
+}
+
+/** Timeline palette: > on a track's Transform row shows Position, Scale ratio, Rotate and Center of rotation. */
+export function toggleTransformDetails(id: Id): void {
+  setState((s) => ({ transformDetails: s.transformDetails.includes(id) ? s.transformDetails.filter((x) => x !== id) : [...s.transformDetails, id] }));
+}
+
+/** The keyframes of a track (for the Timeline palette and the Graph Editor). */
+export function trackKeys(id: Id, s: PaintState = getState()): Keyframe[] {
+  return keysOfTrack(s.doc, id)?.list ?? [];
+}
+
+/** Changes a track's keyframes (Graph Editor edits), one undo step per `key`. */
+export function editTrackKeys(id: Id, fn: (keys: Keyframe[]) => Keyframe[], label: string, key?: string): void {
+  actions.changeDoc(
+    label,
+    (doc) => {
+      const k = keysOfTrack(doc, id);
+      if (k) k.set(fn(k.list));
+    },
+    key ? { key } : {},
+  );
 }
 
 /** Animation > Edit track > Edit layers with active keyframes: the current track is drawn as it is and can be drawn on. */

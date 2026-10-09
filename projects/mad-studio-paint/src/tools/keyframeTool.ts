@@ -1,10 +1,11 @@
 /**
  * Object tool on a track with keyframes (or a 2D camera folder): a box over the output frame (the
- * canvas) as placed at the current frame (see placementBox.ts for its handles). Releasing records a
- * keyframe at the current frame. For a 2D camera folder the box is the camera frame (field guides).
+ * canvas) as placed at the current frame (see placementBox.ts for its handles). Releasing records
+ * what changed (moving: the position; a corner: the scale ratio; …) in the keyframe at the current
+ * frame. For a 2D camera folder the box is the camera frame (field guides).
  */
 import { isCameraFolder } from '../model/animation';
-import type { Placement } from '../paint/keyframes';
+import { changedChannels, type Placement } from '../paint/keyframes';
 import { apply as applyMatrix } from '../paint/viewMath';
 import { engine } from '../engine/engine';
 import * as anim from '../store/animationActions';
@@ -63,7 +64,7 @@ class KeyframeSession implements ToolSession {
     engine.setKeyPreview(this.track.id, null);
     if (!this.moved) return;
     const label = this.handle.kind === 'move' ? 'Move' : this.handle.kind === 'rotate' ? 'Rotate' : this.handle.kind === 'pivot' ? 'Center of rotation' : 'Scale';
-    anim.setKeyframe(this.track.id, getState().frame, this.placement, `Keyframe: ${label}`);
+    anim.setKeyframe(this.track.id, getState().frame, this.placement, `Keyframe: ${label}`, undefined, false, changedChannels(this.base, this.placement));
     setState({ keySelection: [{ track: this.track.id, frame: getState().frame }] });
   }
 
