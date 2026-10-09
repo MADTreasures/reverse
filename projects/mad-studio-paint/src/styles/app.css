@@ -1561,6 +1561,38 @@
   color: var(--text-dim);
 }
 
+/* New dialog: margins (top, bottom, left, right) and the overflow frame's reference point */
+.margin-inputs {
+  display: grid;
+  grid-template-columns: repeat(2, auto);
+  gap: 4px 12px;
+  justify-content: start;
+}
+
+.margin-inputs .with-unit input {
+  width: 70px;
+}
+
+.ref-point {
+  display: grid;
+  grid-template-columns: repeat(3, 14px);
+  gap: 6px;
+}
+
+.ref-point button {
+  width: 14px;
+  height: 14px;
+  padding: 0;
+  border: 1px solid var(--line-soft);
+  border-radius: 2px;
+  background: var(--bg-3);
+}
+
+.ref-point button.on {
+  border-color: var(--accent-strong);
+  background: var(--text);
+}
+
 .with-unit input {
   width: 90px;
 }

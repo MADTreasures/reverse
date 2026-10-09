@@ -124,6 +124,8 @@ export interface PaintState {
   /** Timeline palette: tracks with Details (+) open (their property rows), and those with Transform opened (>). */
   keyDetails: Id[];
   transformDetails: Id[];
+  /** View > Crop marks/Inner border: the animation frame lines show on the canvas. */
+  showFrameLines: boolean;
   /** The Timeline palette shows the Graph Editor: the current track's settings as curves. */
   graphEditor: boolean;
   /** Graph Editor: the selected points of curves. */
@@ -224,6 +226,7 @@ function initialState(): PaintState {
     editKeyed: false,
     keyDetails: [],
     transformDetails: [],
+    showFrameLines: true,
     graphEditor: false,
     graphSelection: [],
     graphAxes: { x: true, y: true, other: true },

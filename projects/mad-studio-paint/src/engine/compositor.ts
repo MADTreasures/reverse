@@ -6,7 +6,7 @@
 import { nativeOp } from '../model/blend';
 import { hexToRgb } from '../model/color';
 import { celAt, onionCels, onionOpacity, tintOnion, type OnionSkin } from '../paint/animation';
-import { maskTrackId } from '../model/animation';
+import { maskTrackId, restOf } from '../model/animation';
 import { inClips } from '../paint/clips';
 import { cameraMatrix, invert, isRest, placementAt, placementMatrix, placedCorners, restPlacement, type Placement } from '../paint/keyframes';
 import type { Affine } from '../paint/rulers';
@@ -240,7 +240,7 @@ export class Compositor {
     const mask = layer.mask;
     const surface = mask?.enabled ? (getSurface(mask.id) ?? null) : null;
     if (!mask || !surface || this.anim.frame === null || !layer.keys?.enabled || layer.id === this.unkeyed) return surface;
-    const rest = restPlacement(this.doc?.width ?? surface.width, this.doc?.height ?? surface.height);
+    const rest = this.doc ? restOf(this.doc) : restPlacement(surface.width, surface.height);
     const p = this.keyPreview.get(maskTrackId(layer.id)) ?? (mask.keys?.length ? placementAt(mask.keys, this.anim.frame, rest) : null);
     if (!p || isRest(p)) return surface;
     let out = this.placedMasks.get(layer.id);
@@ -272,7 +272,7 @@ export class Compositor {
     if (this.anim.frame === null || this.inCel > 0 || layer.kind === 'correction') return null;
     const camera = layer.kind === 'folder' && Boolean(layer.camera);
     if (camera ? !this.applyCamera : !layer.keys?.enabled || layer.id === this.unkeyed) return null;
-    const rest = restPlacement(this.doc?.width ?? this.canvas.width, this.doc?.height ?? this.canvas.height);
+    const rest = this.doc ? restOf(this.doc) : restPlacement(this.canvas.width, this.canvas.height);
     const p = this.keyPreview.get(layer.id) ?? placementAt(layer.keys?.frames ?? [], this.anim.frame, rest);
     if (!p || isRest(p)) return null;
     return { m: camera ? cameraMatrix(p) : placementMatrix(p), opacity: p.opacity };

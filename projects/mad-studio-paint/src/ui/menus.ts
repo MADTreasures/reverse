@@ -164,6 +164,7 @@ export const MENUS: MenuSpec[] = [
       '-',
       { label: 'Snap', items: ['snapRuler', 'snapSpecial'] },
       '-',
+      'frameLines',
       'selectionLauncher',
       'selectionBorder',
     ],

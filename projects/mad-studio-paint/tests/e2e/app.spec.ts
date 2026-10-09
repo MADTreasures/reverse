@@ -2122,9 +2122,12 @@ test('keyframes move a track over time; a 2D camera folder frames the output', a
   await page.getByRole('button', { name: 'Edit layers with active keyframes' }).click();
   expect(await shown(page, 60, 150)).toBe(255);
   // 2D camera folder around A: at frame 1 the camera frame is half the size, centred on (100, 150).
+  await page.evaluate(() => window.__madPaint.runCommand('newCameraFolder'));
+  const camDialog = page.getByRole('dialog', { name: '2D camera folder' });
+  await expect(camDialog.getByLabel('Output frame width')).toHaveValue('400');
+  await camDialog.getByRole('button', { name: 'OK' }).click();
   await page.evaluate(() => {
     const m = window.__madPaint;
-    m.runCommand('newCameraFolder');
     const s = m.useStore.getState();
     const cam = s.doc.layers.find((l: any) => l.camera);
     const a = s.doc.layers.find((l: any) => l.animation);
@@ -2452,6 +2455,82 @@ test('mask keyframes: the Mask row and the Object tool move a layer mask over ti
     m.runCommand('enableKeyframes');
   });
   expect(await shown(page, 50, 150)).toBeLessThan(60);
+  expect(errors).toEqual([]);
+});
+
+test('animation frame lines: output frame, title-safe area, overflow frame and blank space; camera and exports use them', async ({ page }) => {
+  const errors = await boot(page);
+  await page.evaluate(() => delete (window as any).showSaveFilePicker);
+  await page.evaluate(() => void window.__madPaint.runCommand('new'));
+  const dlg = page.getByRole('dialog', { name: 'New canvas' });
+  await dlg.getByLabel('Width').fill('400');
+  await dlg.getByLabel('Height').fill('300');
+  await dlg.getByText('Create animated illustration').click();
+  await dlg.getByLabel('Number of cels').fill('4');
+  await dlg.getByText('Animation frame settings').click();
+  // Defaults: a title-safe area and blank space of about a tenth; the canvas grows by the blank space.
+  await expect(dlg.getByLabel('Title-safe area top')).toHaveValue('28');
+  await expect(dlg.getByLabel('Blank space left')).toHaveValue('40');
+  await expect(dlg.getByTestId('new-canvas-size')).toContainText('480 × 360');
+  // An overflow frame twice as wide, the output frame on its left.
+  await dlg.getByText('Overflow frame').click();
+  await expect(dlg.getByRole('radio', { name: 'Reference point middle left' })).toHaveAttribute('aria-checked', 'true');
+  await expect(dlg.getByTestId('new-canvas-size')).toContainText('880 × 360');
+  await dlg.getByRole('button', { name: 'OK' }).click();
+  const doc = () => page.evaluate(() => window.__madPaint.useStore.getState().doc);
+  let d = await doc();
+  expect([d.width, d.height]).toEqual([880, 360]);
+  expect(d.outputFrame).toEqual({ x: 40, y: 30, w: 400, h: 300, safe: { top: 28, bottom: 28, left: 28, right: 28 }, overflow: { x: 40, y: 30, w: 800, h: 300 } });
+  // View > Crop marks/Inner border shows and hides the lines.
+  expect(await page.evaluate(() => window.__madPaint.useStore.getState().showFrameLines)).toBe(true);
+  await page.evaluate(() => window.__madPaint.runCommand('frameLines'));
+  expect(await page.evaluate(() => window.__madPaint.useStore.getState().showFrameLines)).toBe(false);
+  await page.evaluate(() => window.__madPaint.runCommand('frameLines'));
+  // A 2D camera folder frames the output frame: its centre of rotation is the output frame's middle.
+  await page.evaluate(() => window.__madPaint.runCommand('newCameraFolder'));
+  const cam = page.getByRole('dialog', { name: '2D camera folder' });
+  await expect(cam.getByLabel('Output frame width')).toHaveValue('400');
+  await cam.getByLabel('Output frame width').fill('320');
+  await cam.getByLabel('Output frame height').fill('240');
+  await cam.getByRole('button', { name: 'OK' }).click();
+  d = await doc();
+  expect([d.outputFrame.x, d.outputFrame.y, d.outputFrame.w, d.outputFrame.h]).toEqual([80, 60, 320, 240]);
+  const pivot = await page.evaluate(() => {
+    const m = window.__madPaint;
+    const p = m.anim.placementNow(m.useStore.getState().doc.layers.find((l: any) => l.camera));
+    return [p.pivotX, p.pivotY];
+  });
+  expect(pivot).toEqual([240, 180]);
+  // Once a camera folder uses it, the output frame keeps its size.
+  await page.evaluate(() => window.__madPaint.runCommand('newCameraFolder'));
+  await expect(cam.getByLabel('Output frame width')).toBeDisabled();
+  await cam.getByRole('button', { name: 'Cancel' }).click();
+  // Exports: Drawing area output frame (default), overflow frame or entire canvas.
+  await page.evaluate(() => window.__madPaint.runCommand('exportGif'));
+  const ex = page.getByRole('dialog', { name: 'Animated GIF export settings' });
+  await expect(ex.getByLabel('Drawing area')).toHaveValue('output');
+  await expect(ex.getByLabel('Width')).toHaveValue('320');
+  await expect(ex).toContainText('× 240 px');
+  await ex.getByLabel('Drawing area').selectOption('overflow');
+  await expect(ex.getByLabel('Width')).toHaveValue('800');
+  await ex.getByLabel('Drawing area').selectOption('canvas');
+  await expect(ex).toContainText('× 360 px');
+  await ex.getByLabel('Drawing area').selectOption('output');
+  const [dl] = await Promise.all([page.waitForEvent('download'), ex.getByRole('button', { name: 'OK' }).click()]);
+  const gif = readFileSync((await dl.path())!);
+  expect(gif.subarray(0, 6).toString('latin1')).toBe('GIF89a');
+  expect([gif.readUInt16LE(6), gif.readUInt16LE(8)]).toEqual([320, 240]);
+  // The frame lines follow the canvas when it changes size.
+  await page.evaluate(() => window.__madPaint.actions.changeCanvasSize(980, 360));
+  d = await doc();
+  expect([d.outputFrame.x, d.outputFrame.overflow.x]).toEqual([130, 90]);
+  // Saved and opened again.
+  const back = await page.evaluate(async () => {
+    const m = window.__madPaint;
+    await m.openFileBytes({ name: 'frames.madpaint', data: await m.buildDocumentBytes() });
+    return m.useStore.getState().doc.outputFrame;
+  });
+  expect(back).toEqual(d.outputFrame);
   expect(errors).toEqual([]);
 });
 

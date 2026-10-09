@@ -19,6 +19,7 @@ import { hasSound, soundMix } from '../model/animation';
 import { usedSoundFiles } from '../store/soundActions';
 // Type only: the PSD code (and ag-psd) loads when a PSD is opened or saved.
 import type { Pixels } from './psd';
+import { areaRect, safeRect, type DrawingArea, type FrameRect, type OutputFrame } from '../paint/outputFrame';
 
 const DOC_FILTERS = [{ name: 'MAD Studio Paint Document', extensions: [EXTENSION] }];
 const OPEN_FILTERS = [{ name: 'Documents and images', extensions: [EXTENSION, ...PSD_EXTENSIONS, ...IMAGE_EXTENSIONS] }];
@@ -38,19 +39,39 @@ export async function confirmDiscard(): Promise<boolean> {
 // ------------------------------------------------------------------ saving
 
 /** Merged image of the document (optionally on paper, without draft layers; a frame of the timeline). */
-export function renderMerged(opts: { paper: boolean; skipDraft: boolean; scale?: number; frame?: number; camera?: boolean } = { paper: true, skipDraft: true }): HTMLCanvasElement {
+export function renderMerged(
+  opts: { paper: boolean; skipDraft: boolean; scale?: number; frame?: number; camera?: boolean; area?: FrameRect; frameLines?: boolean } = { paper: true, skipDraft: true },
+): HTMLCanvasElement {
   const { doc } = getState();
   const full = createCanvas(doc.width, doc.height);
   // The paper is part of the stack (blend modes and correction layers see it), unless left out.
   const paper = opts.paper && doc.paper.visible ? doc.paper.color : null;
   engine.compositor.compose(doc, ctx2d(full), { x: 0, y: 0, w: doc.width, h: doc.height }, { skipDraft: opts.skipDraft, paper, frame: opts.frame, camera: opts.camera });
+  if (opts.frameLines && doc.outputFrame) drawExportFrameLines(ctx2d(full), doc.outputFrame);
+  // Drawing area: part of the canvas (the output frame or the overflow frame), scaled.
+  const area = opts.area ?? { x: 0, y: 0, w: doc.width, h: doc.height };
   const scale = opts.scale ?? 1;
-  if (scale === 1) return full;
-  const out = createCanvas(Math.max(1, Math.round(doc.width * scale)), Math.max(1, Math.round(doc.height * scale)));
+  if (scale === 1 && area.x === 0 && area.y === 0 && area.w === doc.width && area.h === doc.height) return full;
+  const out = createCanvas(Math.max(1, Math.round(area.w * scale)), Math.max(1, Math.round(area.h * scale)));
   const o = ctx2d(out);
   o.imageSmoothingQuality = 'high';
-  o.drawImage(full, 0, 0, out.width, out.height);
+  o.drawImage(full, area.x, area.y, area.w, area.h, 0, 0, out.width, out.height);
   return out;
+}
+
+/** Export frames: the overflow and output frames in black, the title-safe area in grey. */
+function drawExportFrameLines(ctx: CanvasRenderingContext2D, f: OutputFrame): void {
+  ctx.save();
+  ctx.lineWidth = 1;
+  const line = (r: FrameRect, color: string) => {
+    ctx.strokeStyle = color;
+    ctx.strokeRect(r.x + 0.5, r.y + 0.5, r.w - 1, r.h - 1);
+  };
+  if (f.overflow) line(f.overflow, '#000000');
+  line(f, '#000000');
+  const safe = safeRect(f);
+  if (safe) line(safe, '#808080');
+  ctx.restore();
 }
 
 export async function buildDocumentBytes(): Promise<Uint8Array> {
@@ -333,6 +354,10 @@ export interface AnimationExportOptions {
   drafts: boolean;
   /** Apply 2D camera effects. */
   camera: boolean;
+  /** Drawing area: the output frame, the overflow frame or the entire canvas. */
+  area: DrawingArea;
+  /** Image sequence: draw the frame lines (Export frames). */
+  frameLines?: boolean;
   /** Image sequence: file names and type. */
   sequence: { prefix: string; suffix: string; separator: string; startNumber: number; type: 'png' | 'jpeg' };
 }
@@ -359,13 +384,14 @@ export async function exportAnimation(o: AnimationExportOptions): Promise<boolea
     const { encodeApng, encodeGif, exportFrames, frameDelays, sequenceNames, zipSequence } = await import('./animationExport');
     const frames = exportFrames(o.start, o.end, t.fps, o.fps);
     const transparent = o.transparent && !(o.format === 'sequence' && o.sequence.type === 'jpeg');
-    const scale = o.width / doc.width;
+    const area = areaRect(doc.outputFrame, o.area, doc.width, doc.height);
+    const scale = o.width / area.w;
     // Each timeline frame is drawn once, even when it is shown several times.
     const drawn = new Map<number, HTMLCanvasElement>();
     const draw = (f: number) => {
       let c = drawn.get(f);
       if (!c) {
-        c = renderMerged({ paper: !transparent, skipDraft: !o.drafts, scale, frame: f, camera: o.camera });
+        c = renderMerged({ paper: !transparent, skipDraft: !o.drafts, scale, frame: f, camera: o.camera, area, frameLines: o.format === 'sequence' && o.frameLines });
         if (!transparent && !doc.paper.visible) c = onWhite(c);
         drawn.set(f, c);
       }
@@ -410,8 +436,10 @@ export async function exportAnimation(o: AnimationExportOptions): Promise<boolea
 
 export interface MovieOptions {
   format: 'mp4' | 'mov';
-  /** Width of the movie (the height keeps the canvas's aspect ratio; both even). */
+  /** Width of the movie (the height keeps the drawing area's aspect ratio; both even). */
   width: number;
+  /** Drawing area: the output frame, the overflow frame or the entire canvas. */
+  area: DrawingArea;
   start: number;
   end: number;
   fps: number;
@@ -432,19 +460,20 @@ export async function exportMovie(o: MovieOptions, progress?: (done: number, tot
   try {
     const { exportFrames } = await import('./animationExport');
     const { chooseCodecs, encodeMovie, evenSize } = await import('./movie');
+    const area = areaRect(doc.outputFrame, o.area, doc.width, doc.height);
     const w = evenSize(o.width);
-    const h = evenSize(Math.round((o.width * doc.height) / doc.width));
+    const h = evenSize(Math.round((o.width * area.h) / area.w));
     const sound = hasSound(doc) ? soundMix(doc) : undefined;
     const codecs = await chooseCodecs(o.format, w, h, o.fps, o.sampleRate, o.channels, Boolean(sound));
     if (!codecs) {
       toast('This system cannot encode MP4 video: export a MOV movie instead', 'error');
       return false;
     }
-    const scale = w / doc.width;
+    const scale = w / area.w;
     // Frames shown several times in a row are drawn once.
     let last: { frame: number; canvas: HTMLCanvasElement } | null = null;
     const render = (frame: number) => {
-      if (last?.frame !== frame) last = { frame, canvas: renderMerged({ paper: true, skipDraft: true, scale, frame, camera: o.camera }) };
+      if (last?.frame !== frame) last = { frame, canvas: renderMerged({ paper: true, skipDraft: true, scale, frame, camera: o.camera, area }) };
       return last.canvas;
     };
     const bytes = await encodeMovie({
@@ -515,9 +544,9 @@ export async function restoreAutosave(): Promise<boolean> {
   }
 }
 
-export async function newCanvas(name: string, width: number, height: number, dpi: number, paper: string, animation?: { cels: number; fps: number }): Promise<void> {
+export async function newCanvas(name: string, width: number, height: number, dpi: number, paper: string, animation?: { cels: number; fps: number }, outputFrame?: OutputFrame): Promise<void> {
   if (!(await confirmDiscard())) return;
-  actions.newDocument(name, width, height, dpi, paper, animation);
+  actions.newDocument(name, width, height, dpi, paper, animation, outputFrame);
   currentFile = null;
   void idbDelete(AUTOSAVE_KEY);
 }

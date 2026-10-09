@@ -26,6 +26,7 @@ import { sanitizeClips } from '../paint/clips';
 import { PLACEMENT_CHANNELS, removeChannels, sanitizeKeyframes, sanitizeKeyTrack } from '../paint/keyframes';
 import { sanitizeLightLayers } from '../paint/lightTable';
 import { sanitizeSound } from '../paint/sound';
+import { sanitizeOutputFrame } from '../paint/outputFrame';
 
 export const FORMAT = 'mad-studio-paint';
 /**
@@ -208,17 +209,21 @@ export function sanitizeDocument(raw: unknown): PaintDocument {
   const paper = (r.paper && typeof r.paper === 'object' ? r.paper : {}) as Record<string, unknown>;
   const timeline = sanitizeTimeline(r.timeline);
   const general = sanitizeLightLayers((r.lightTable as Record<string, unknown> | undefined)?.general);
+  const width = clampCanvasSide(num(r.width, 1000, 1, 1e6));
+  const height = clampCanvasSide(num(r.height, 1000, 1, 1e6));
+  const outputFrame = sanitizeOutputFrame(r.outputFrame, width, height);
   return {
     id: str(r.id, 'd-imported', 64),
     name: str(r.name, 'Untitled', 120),
-    width: clampCanvasSide(num(r.width, 1000, 1, 1e6)),
-    height: clampCanvasSide(num(r.height, 1000, 1, 1e6)),
+    width,
+    height,
     dpi: Math.round(num(r.dpi, 72, 1, 2400)),
     paper: { visible: bool(paper.visible, true), color: color(paper.color, '#ffffff') },
     layers: layers.length ? layers : [createRasterLayer('Layer 1')],
     ...(timeline ? { timeline } : {}),
     ...(general ? { lightTable: { general } } : {}),
     ...(sound?.files.length ? { sound: { files: sound.files } } : {}),
+    ...(outputFrame ? { outputFrame } : {}),
   };
 }
 

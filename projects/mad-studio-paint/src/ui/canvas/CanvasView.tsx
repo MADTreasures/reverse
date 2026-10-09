@@ -261,7 +261,8 @@ export function CanvasView() {
           s.selectedObjects !== prev.selectedObjects ||
           s.textEdit !== prev.textEdit ||
           s.snapRuler !== prev.snapRuler ||
-          s.snapSpecial !== prev.snapSpecial
+          s.snapSpecial !== prev.snapSpecial ||
+          s.showFrameLines !== prev.showFrameLines
         )
           schedule();
       }),

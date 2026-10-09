@@ -1,6 +1,7 @@
 /** Document operations. Every change that should be undoable goes through `commit`. */
 import { celBlocker, celOf, isAnimationFolder, keyedTrackOf, nearestFrameOf, pruneTracks } from '../model/animation';
 import { celAt } from '../paint/animation';
+import { mapOutputFrame, type OutputFrame } from '../paint/outputFrame';
 import { docLightImages } from '../paint/lightTable';
 import { pruneSounds } from '../engine/sounds';
 import { pushHistory } from '../model/color';
@@ -175,9 +176,10 @@ export function loadDocument(doc: PaintDocument, images: Map<Id, HTMLCanvasEleme
  * File > New. An animated illustration gets a timeline (number of cels = frames, frame rate) and an
  * animation folder "A" with cel "1" on the first frame.
  */
-export function newDocument(name: string, width: number, height: number, dpi: number, paperColor = '#ffffff', animation?: { cels: number; fps: number }): void {
+export function newDocument(name: string, width: number, height: number, dpi: number, paperColor = '#ffffff', animation?: { cels: number; fps: number }, outputFrame?: OutputFrame): void {
   const doc = createDocument(name, width, height, dpi);
   doc.paper.color = paperColor;
+  if (outputFrame) doc.outputFrame = outputFrame;
   if (animation) {
     const cel = createRasterLayer('1');
     doc.layers = [createFolder('A', [cel], { animation: { cels: [{ frame: 1, cel: cel.id }] } })];
@@ -1489,6 +1491,7 @@ function resizeDocument(
   engine.compositor.resize(w, h);
   const doc = { ...cloneDocument(s.doc), width: w, height: h, ...(dpi ? { dpi } : {}) };
   transformVectorLayers(doc, vectorMap);
+  transformFrameLines(doc, vectorMap);
   const selectionBefore = s.selection;
   setState({ doc, selection: null });
   commit({
@@ -1500,6 +1503,14 @@ function resizeDocument(
     canvasSize: { before: { w: s.doc.width, h: s.doc.height }, after: { w, h } },
   });
   fitToWindow();
+}
+
+/** The animation frame lines follow the canvas (scaled and moved like vector lines). */
+function transformFrameLines(doc: PaintDocument, m: Affine): void {
+  if (!doc.outputFrame) return;
+  const f = mapOutputFrame(doc.outputFrame, m[0], m[3], m[4], m[5], doc.width, doc.height);
+  if (f) doc.outputFrame = f;
+  else delete doc.outputFrame;
 }
 
 /** Crops the canvas to a rectangle (Selection launcher → Crop). */
@@ -1525,6 +1536,7 @@ export function cropCanvas(r: { x: number; y: number; w: number; h: number }): v
   }
   const doc = { ...cloneDocument(s.doc), width: w, height: h };
   transformVectorLayers(doc, [1, 0, 0, 1, -Math.round(r.x), -Math.round(r.y)]);
+  transformFrameLines(doc, [1, 0, 0, 1, -Math.round(r.x), -Math.round(r.y)]);
   const selectionBefore = s.selection;
   setState({ doc, selection: null });
   commit({

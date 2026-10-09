@@ -4,8 +4,11 @@
  */
 import { useEffect, useState } from 'react';
 import { exportAnimation, exportMovie, type AnimationFormat } from '../../io/documentIO';
-import { hasSound } from '../../model/animation';
+import { hasSound, isCameraFolder, outputRect } from '../../model/animation';
+import { flatten } from '../../model/layers';
 import { DEFAULT_TIMELINE, MAX_FPS, MAX_FRAMES, type OnionMode } from '../../paint/animation';
+import { areaRect, type DrawingArea } from '../../paint/outputFrame';
+import type { PaintDocument } from '../../model/types';
 import * as anim from '../../store/animationActions';
 import { getState, useStore } from '../../store/store';
 import { closeDialog } from '../overlays';
@@ -66,6 +69,44 @@ export function TimelineSettingsDialog() {
   );
 }
 
+/**
+ * Animation > New animation layer > 2D camera folder: its name and the size of the output frame
+ * (added to a canvas without one; fixed once a camera folder uses it).
+ */
+export function CameraFolderDialog() {
+  const doc = useStore((s) => s.doc);
+  const fixed = flatten(doc.layers).some(isCameraFolder);
+  const current = outputRect(doc);
+  const [name, setName] = useState('2D camera folder');
+  const [w, setW] = useState(current.w);
+  const [h, setH] = useState(current.h);
+  return (
+    <form
+      className="modal"
+      role="dialog"
+      aria-label="2D camera folder"
+      onSubmit={(e) => {
+        e.preventDefault();
+        closeDialog();
+        anim.newCameraFolder(name.trim() || '2D camera folder', fixed ? undefined : { w, h });
+      }}
+    >
+      <h2>2D camera folder</h2>
+      <div className="form-grid">
+        <label htmlFor="cam-name">Name</label>
+        <input id="cam-name" value={name} onChange={(e) => setName(e.target.value.slice(0, 120))} autoFocus />
+        <label>Size of output frame</label>
+        <span className="with-unit">
+          <input type="number" aria-label="Output frame width" min={1} max={doc.width} value={w} disabled={fixed} onChange={(e) => setW(clampInt(e.target.value, 1, doc.width, w))} /> ×
+          <input type="number" aria-label="Output frame height" min={1} max={doc.height} value={h} disabled={fixed} onChange={(e) => setH(clampInt(e.target.value, 1, doc.height, h))} /> px
+        </span>
+      </div>
+      <p className="muted">{fixed ? 'Another 2D camera folder uses the output frame: its size stays.' : doc.outputFrame ? 'The output frame keeps its middle.' : 'The canvas gets an output frame in its middle.'}</p>
+      <Actions />
+    </form>
+  );
+}
+
 /** Animation > Show animation cels > Onion skin settings. */
 export function OnionSkinDialog() {
   const initial = useStore((s) => s.onion);
@@ -113,13 +154,31 @@ export function OnionSkinDialog() {
   );
 }
 
+/** Drawing area (canvases with animation frame lines): the output frame, the overflow frame or the entire canvas. */
+function DrawingAreaField({ doc, value, onChange }: { doc: PaintDocument; value: DrawingArea; onChange: (a: DrawingArea) => void }) {
+  if (!doc.outputFrame) return null;
+  return (
+    <>
+      <label htmlFor="ex-area">Drawing area</label>
+      <select id="ex-area" value={value} onChange={(e) => onChange(e.target.value as DrawingArea)}>
+        <option value="output">Output frame</option>
+        {doc.outputFrame.overflow && <option value="overflow">Overflow frame</option>}
+        <option value="canvas">Entire canvas</option>
+      </select>
+    </>
+  );
+}
+
 const TITLES: Record<AnimationFormat, string> = { gif: 'Animated GIF export settings', apng: 'Animated sticker (APNG) export settings', sequence: 'Image sequence export settings' };
 
 /** File > Export animation > Animated GIF / Animated sticker (APNG) / Image sequence. */
 export function AnimationExportDialog({ format }: { format: AnimationFormat }) {
   const doc = useStore((s) => s.doc);
   const t = doc.timeline ?? DEFAULT_TIMELINE;
-  const [width, setWidth] = useState(doc.width);
+  const [area, setArea] = useState<DrawingArea>('output');
+  const rect = areaRect(doc.outputFrame, area, doc.width, doc.height);
+  const [width, setWidth] = useState(rect.w);
+  const [frameLines, setFrameLines] = useState(false);
   const [start, setStart] = useState(1);
   const [end, setEnd] = useState(t.frames);
   const [fps, setFps] = useState(t.fps);
@@ -133,7 +192,7 @@ export function AnimationExportDialog({ format }: { format: AnimationFormat }) {
   const [startNumber, setStartNumber] = useState(1);
   const [type, setType] = useState<'png' | 'jpeg'>('png');
   const [busy, setBusy] = useState(false);
-  const height = Math.max(1, Math.round((width * doc.height) / doc.width));
+  const height = Math.max(1, Math.round((width * rect.h) / rect.w));
   const seconds = (end - start + 1) / t.fps;
   const images = Math.max(1, Math.round(seconds * fps));
   const run = async () => {
@@ -152,6 +211,8 @@ export function AnimationExportDialog({ format }: { format: AnimationFormat }) {
       transparent,
       drafts,
       camera,
+      area,
+      frameLines,
       sequence: { prefix, suffix: '', separator: '_', startNumber, type },
     });
     setBusy(false);
@@ -169,6 +230,14 @@ export function AnimationExportDialog({ format }: { format: AnimationFormat }) {
     >
       <h2>{TITLES[format]}</h2>
       <div className="form-grid">
+        <DrawingAreaField
+          doc={doc}
+          value={area}
+          onChange={(a) => {
+            setArea(a);
+            setWidth(areaRect(doc.outputFrame, a, doc.width, doc.height).w);
+          }}
+        />
         <label htmlFor="ex-width">Width</label>
         <span className="with-unit">
           <input id="ex-width" type="number" min={1} max={doc.width * 4} value={width} onChange={(e) => setWidth(clampInt(e.target.value, 1, doc.width * 4, width))} /> × {height} px
@@ -216,6 +285,14 @@ export function AnimationExportDialog({ format }: { format: AnimationFormat }) {
               <option value="png">PNG</option>
               <option value="jpeg">JPEG</option>
             </select>
+            {doc.outputFrame && (
+              <>
+                <label />
+                <label className="check">
+                  <input type="checkbox" checked={frameLines} onChange={(e) => setFrameLines(e.target.checked)} /> Export frames
+                </label>
+              </>
+            )}
           </>
         )}
         {!(format === 'sequence' && type === 'jpeg') && (
@@ -246,7 +323,9 @@ export function MovieExportDialog() {
   const doc = useStore((s) => s.doc);
   const t = doc.timeline ?? DEFAULT_TIMELINE;
   const [format, setFormat] = useState<'mp4' | 'mov'>('mp4');
-  const [width, setWidth] = useState(Math.min(doc.width, 1920));
+  const [area, setArea] = useState<DrawingArea>('output');
+  const rect = areaRect(doc.outputFrame, area, doc.width, doc.height);
+  const [width, setWidth] = useState(Math.min(rect.w, 1920));
   const [start, setStart] = useState(1);
   const [end, setEnd] = useState(t.frames);
   const [fps, setFps] = useState(t.fps);
@@ -257,7 +336,7 @@ export function MovieExportDialog() {
   const [progress, setProgress] = useState('');
   const [codecs, setCodecs] = useState('…');
   const evenW = Math.max(2, Math.floor(width / 2) * 2);
-  const height = Math.max(2, Math.floor(Math.round((width * doc.height) / doc.width) / 2) * 2);
+  const height = Math.max(2, Math.floor(Math.round((width * rect.h) / rect.w) / 2) * 2);
   const sound = hasSound(doc);
   useEffect(() => {
     let live = true;
@@ -272,7 +351,7 @@ export function MovieExportDialog() {
   const run = async () => {
     setBusy(true);
     await new Promise((r) => setTimeout(r, 30));
-    const ok = await exportMovie({ format, width, start, end, fps, camera, sampleRate, channels }, (done, total) => setProgress(`${done} / ${total}`));
+    const ok = await exportMovie({ format, width, area, start, end, fps, camera, sampleRate, channels }, (done, total) => setProgress(`${done} / ${total}`));
     setBusy(false);
     setProgress('');
     if (ok) closeDialog();
@@ -298,6 +377,14 @@ export function MovieExportDialog() {
         <span className="muted" data-testid="movie-codecs">
           {codecs}
         </span>
+        <DrawingAreaField
+          doc={doc}
+          value={area}
+          onChange={(a) => {
+            setArea(a);
+            setWidth(Math.min(areaRect(doc.outputFrame, a, doc.width, doc.height).w, 1920));
+          }}
+        />
         <label htmlFor="mv-width">Width</label>
         <span className="with-unit">
           <input id="mv-width" type="number" min={16} max={doc.width * 4} value={width} onChange={(e) => setWidth(clampInt(e.target.value, 16, doc.width * 4, width))} /> × {height} px

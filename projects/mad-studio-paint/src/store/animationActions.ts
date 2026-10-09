@@ -10,6 +10,7 @@ import {
   keysOn,
   maskOwner,
   maskTrackId,
+  restOf,
   setTrackContent,
   soundMix,
   trackContent,
@@ -42,6 +43,7 @@ import {
   type TrackContent,
 } from '../paint/clips';
 import { setVolumeKey, volumeAt } from '../paint/sound';
+import { resizeOutputFrame } from '../paint/outputFrame';
 import {
   GROUPS,
   moveKeys,
@@ -49,7 +51,6 @@ import {
   PLACEMENT_CHANNELS,
   recordKey,
   removeChannels,
-  restPlacement,
   setInterp,
   toggleUnpaired,
   TRANSFORM_GROUPS,
@@ -601,7 +602,7 @@ export function keyTrack(s: PaintState = getState()): Layer | null {
 
 /** A track's placement at a frame: from its keyframes, else as it is. */
 export function placementNow(track: Layer, frame = getState().frame, s: PaintState = getState()): Placement {
-  const rest = restPlacement(s.doc.width, s.doc.height);
+  const rest = restOf(s.doc);
   return placementAt(track.keys?.frames ?? [], frame, rest) ?? rest;
 }
 
@@ -650,7 +651,7 @@ export function keyTrackId(s: PaintState = getState()): Id | null {
 
 /** A layer mask's placement at a frame (within the layer). */
 export function maskPlacementNow(layer: Layer, frame = getState().frame, s: PaintState = getState()): Placement {
-  const rest = restPlacement(s.doc.width, s.doc.height);
+  const rest = restOf(s.doc);
   return placementAt(layer.mask?.keys ?? [], frame, rest) ?? rest;
 }
 
@@ -958,10 +959,12 @@ export function toggleEditKeyed(): void {
 export const toggleCameraView = () => setState((s) => ({ cameraView: !s.cameraView }));
 
 /** Animation > New animation layer > 2D camera folder: its keyframes move a camera over the layers put in it. */
-export function newCameraFolder(name = '2D camera folder'): Id {
+export function newCameraFolder(name = '2D camera folder', output?: { w: number; h: number }): Id {
   const folder = createFolder(name, [], { camera: true, blend: 'normal', keys: { enabled: true, frames: [] } });
   actions.changeDoc('New 2D camera folder', (doc, st) => {
     if (!doc.timeline) doc.timeline = { ...DEFAULT_TIMELINE };
+    // The output frame: added when the canvas has none; resized (about its middle) unless another camera folder uses it.
+    if (output && !flatten(doc.layers).some(isCameraFolder)) doc.outputFrame = resizeOutputFrame(doc.outputFrame, output.w, output.h, doc.width, doc.height);
     // Above the current track, never inside an animation folder.
     const anchor = tracksOf(doc.layers, st.activeLayerId)[0]?.id ?? st.activeLayerId;
     const loc = locate(doc.layers, anchor);

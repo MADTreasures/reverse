@@ -77,8 +77,8 @@ export interface KeyTrack {
   frames: Keyframe[];
 }
 
-/** The placement that changes nothing (centre of rotation: the middle of the canvas). */
-export const restPlacement = (width: number, height: number): Placement => ({ x: 0, y: 0, scaleX: 1, scaleY: 1, rotation: 0, pivotX: width / 2, pivotY: height / 2, opacity: 1 });
+/** The placement that changes nothing (centre of rotation: the middle of the output frame, x/y its corner). */
+export const restPlacement = (width: number, height: number, x = 0, y = 0): Placement => ({ x: 0, y: 0, scaleX: 1, scaleY: 1, rotation: 0, pivotX: x + width / 2, pivotY: y + height / 2, opacity: 1 });
 
 /** Whether a placement leaves the layer as it is. */
 export const isRest = (p: Placement): boolean => p.x === 0 && p.y === 0 && p.scaleX === 1 && p.scaleY === 1 && p.rotation === 0 && p.opacity >= 1;

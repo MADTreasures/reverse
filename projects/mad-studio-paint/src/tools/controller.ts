@@ -31,6 +31,7 @@ import { CurveInput } from './curveInput';
 import { correctSession, drawCorrectHover, drawSelectedControlPoints } from './correctTool';
 import { drawGradientHandles, drawLineSelection, lineHandleCursor, objectSession } from './objectTool';
 import { drawCameraGuides, drawKeyBox, keyframeTarget, keyHandleCursor } from './keyframeTool';
+import { drawFrameLines } from './frameLines';
 import { drawLightBox, lightHandleCursor, lightTableSession } from './lightTableTool';
 import { isCameraFolder, tracksOf } from '../model/animation';
 import { balloonSession, textSession } from './textTool';
@@ -216,9 +217,11 @@ class Controller {
 
   /** Draws tool feedback (brush outline, selection preview, transform box) in viewport space. */
   overlay(ctx: CanvasRenderingContext2D): void {
+    const s = getState();
+    // Animation frame lines (output frame, title-safe area, overflow frame) under the rest.
+    if (s.doc.outputFrame && s.showFrameLines) drawFrameLines(ctx, this.view, s.doc.outputFrame);
     drawRulers(ctx, this.view);
     // 2D camera folders around the current layer: their camera frames (field guides).
-    const s = getState();
     if (s.doc.timeline?.enabled && !s.cameraView) drawCameraGuides(ctx, this.view, tracksOf(s.doc.layers, s.activeLayerId).filter(isCameraFolder));
     // The Object tool on a track with keyframes: its placed box; else the selected vector lines and their control points.
     const keyed = this.current() === 'object' ? keyframeTarget() : null;

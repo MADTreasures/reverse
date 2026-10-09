@@ -4,7 +4,8 @@
  */
 import { celAt, framesOf, pruneTrack, type AnimationTrack } from '../paint/animation';
 import { clipsOf, inClips, type TrackContent } from '../paint/clips';
-import type { Keyframe } from '../paint/keyframes';
+import { restPlacement, type Keyframe, type Placement } from '../paint/keyframes';
+import { areaRect, type FrameRect } from '../paint/outputFrame';
 import type { SoundMix, SoundTrack } from '../paint/sound';
 import { findLayer, flatten, locate } from './layers';
 import type { FolderLayer, Id, Layer, PaintDocument } from './types';
@@ -114,6 +115,15 @@ export function soundMix(doc: PaintDocument): SoundMix {
 
 /** Whether any audio layer plays a clip. */
 export const hasSound = (doc: PaintDocument): boolean => soundMix(doc).tracks.some((t) => t.visible && t.clips.length > 0);
+
+/** The output frame (animation frame lines), else the whole canvas: keyframe boxes and the 2D camera frame lie over it. */
+export const outputRect = (doc: Pick<PaintDocument, 'width' | 'height' | 'outputFrame'>): FrameRect => areaRect(doc.outputFrame, 'output', doc.width, doc.height);
+
+/** The placement that changes nothing, turning about the middle of the output frame. */
+export function restOf(doc: Pick<PaintDocument, 'width' | 'height' | 'outputFrame'>): Placement {
+  const r = outputRect(doc);
+  return restPlacement(r.w, r.h, r.x, r.y);
+}
 
 const MASK = '#mask';
 /** The id under which a layer mask's keyframes appear in the Timeline palette and the Graph Editor. */

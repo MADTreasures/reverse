@@ -4,6 +4,7 @@ import type { Clip } from '../paint/clips';
 import type { Keyframe, KeyTrack } from '../paint/keyframes';
 import type { LightLayer, LightTable } from '../paint/lightTable';
 import type { DocSound } from '../paint/sound';
+import type { OutputFrame } from '../paint/outputFrame';
 import type { LayerEffects } from '../paint/effects';
 import type { Ruler } from '../paint/rulers';
 import type { Correction } from '../paint/tonal';
@@ -207,6 +208,8 @@ export interface PaintDocument {
   timeline?: Timeline;
   /** The general light table (shown for every cel). */
   lightTable?: LightTable;
-  /** Audio tracks of the timeline and the sound files they play. */
+  /** The sound files the audio layers play. */
   sound?: DocSound;
+  /** Animation frame lines: the output frame (what exports show), title-safe area and overflow frame. */
+  outputFrame?: OutputFrame;
 }

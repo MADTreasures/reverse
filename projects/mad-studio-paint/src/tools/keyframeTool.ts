@@ -5,7 +5,7 @@
  * frame. For a 2D camera folder the box is the camera frame (field guides); with the track's layer
  * mask selected, the box places the mask within the (placed) layer.
  */
-import { isCameraFolder, maskTrackId } from '../model/animation';
+import { isCameraFolder, maskTrackId, outputRect } from '../model/animation';
 import { applyAffine, changedChannels, invert, placementMatrix, type Placement } from '../paint/keyframes';
 import type { Affine } from '../paint/rulers';
 import { apply as applyMatrix } from '../paint/viewMath';
@@ -26,7 +26,8 @@ export function keyframeTarget(): Layer | null {
   return anim.keyTrack(s);
 }
 
-const canvasRect = () => ({ x: 0, y: 0, w: getState().doc.width, h: getState().doc.height });
+/** The output frame the boxes lie over (the whole canvas without animation frame lines). */
+const canvasRect = () => outputRect(getState().doc);
 
 /** What the Object tool places on a track: the track itself, or its layer mask within the placed layer. */
 interface Target {
