@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { expect, test, type Page } from '@playwright/test';
+import { unzipSync } from 'fflate';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 declare global {
@@ -1911,7 +1912,7 @@ test('animation: animated illustration, a cel per frame, onion skin, playback, G
   // File > Export animation > Animated GIF: one image per frame.
   await page.evaluate(() => window.__madPaint.runCommand('exportGif'));
   const ex = page.getByRole('dialog', { name: 'Animated GIF export settings' });
-  await expect(ex.getByTestId('export-playback')).toHaveText('1.00 s · 4 images');
+  await expect(ex.getByTestId('export-playback')).toHaveText('Playback time: 1.0 s ( Image number: 4 )');
   const [gif] = await Promise.all([page.waitForEvent('download'), ex.getByRole('button', { name: 'OK' }).click()]);
   expect(gif.suggestedFilename()).toBe('Illustration.gif');
   const bytes = readFileSync((await gif.path())!);
@@ -1928,6 +1929,124 @@ test('animation: animated illustration, a cel per frame, onion skin, playback, G
     return { timeline: s.doc.timeline, cels: a.animation.cels.map((x: any) => [x.frame, a.children.find((c: any) => c.id === x.cel)?.name]) };
   });
   expect(back).toEqual({ timeline: { enabled: true, fps: 4, frames: 4 }, cels: [[1, '1'], [2, '2'], [4, '1']] });
+  expect(errors).toEqual([]);
+});
+
+/** The top-level chunks of a RIFF file (WebP). */
+function riffChunks(b: Buffer, from = 12, to = b.length): { fourcc: string; data: Buffer }[] {
+  const out: { fourcc: string; data: Buffer }[] = [];
+  for (let p = from; p + 8 <= to; ) {
+    const size = b.readUInt32LE(p + 4);
+    out.push({ fourcc: b.subarray(p, p + 4).toString('latin1'), data: b.subarray(p + 8, p + 8 + size) });
+    p += 8 + size + (size % 2);
+  }
+  return out;
+}
+
+test('animation exports: animated WebP, APNG sticker options, image sequence types', async ({ page }) => {
+  const errors = await boot(page);
+  await page.evaluate(() => delete (window as any).showSaveFilePicker);
+  await page.evaluate(() => void window.__madPaint.runCommand('new'));
+  const dlg = page.getByRole('dialog', { name: 'New canvas' });
+  await dlg.getByLabel('Width').fill('200');
+  await dlg.getByLabel('Height').fill('100');
+  await dlg.getByText('Create animated illustration').click();
+  await dlg.getByLabel('Number of cels').fill('4');
+  await dlg.getByLabel('Frame rate').fill('4');
+  await dlg.getByRole('button', { name: 'OK' }).click();
+  // Cel 1 (frame 1): a line on the left; cel 2 (frames 2–4): a line on the right.
+  await thinPen(page);
+  await drag(page, [40, 50], [60, 50]);
+  await page.getByRole('button', { name: 'New animation cel' }).click();
+  await drag(page, [140, 70], [160, 70]);
+
+  // File > Export animation > Animated WebP: half size, two loops, transparent, lossy.
+  await page.evaluate(() => window.__madPaint.runCommand('exportWebp'));
+  const wp = page.getByRole('dialog', { name: 'Animated WebP export settings' });
+  await expect(wp.getByTestId('export-playback')).toHaveText('Playback time: 1.0 s ( Image number: 4 )');
+  await expect(wp.getByLabel('Height')).toHaveValue('100');
+  await wp.getByLabel('Height').fill('50');
+  await expect(wp.getByLabel('Width')).toHaveValue('100');
+  await wp.getByLabel('Loop count').selectOption('count');
+  await wp.getByLabel('Number of loops').fill('2');
+  await wp.getByLabel('Export transparency').check();
+  await expect(wp.getByLabel('Quality', { exact: true })).toBeDisabled();
+  await wp.getByLabel('Prioritize file size').check();
+  await wp.getByLabel('Quality', { exact: true }).fill('80');
+  const [webp] = await Promise.all([page.waitForEvent('download'), wp.getByRole('button', { name: 'OK' }).click()]);
+  expect(webp.suggestedFilename()).toBe('Illustration.webp');
+  const w = readFileSync((await webp.path())!);
+  expect([w.subarray(0, 4).toString('latin1'), w.subarray(8, 12).toString('latin1'), w.readUInt32LE(4)]).toEqual(['RIFF', 'WEBP', w.length - 8]);
+  const top = riffChunks(w);
+  expect(top.map((c) => c.fourcc)).toEqual(['VP8X', 'ANIM', 'ANMF', 'ANMF', 'ANMF', 'ANMF']);
+  expect(top[0].data[0] & 0x12).toBe(0x12);
+  expect([top[0].data.readUIntLE(4, 3) + 1, top[0].data.readUIntLE(7, 3) + 1]).toEqual([100, 50]);
+  expect(top[1].data.readUInt16LE(4)).toBe(2);
+  for (const f of top.slice(2)) {
+    expect(f.data.readUIntLE(12, 3)).toBe(250);
+    // Lossy pictures with an alpha chunk.
+    expect(riffChunks(f.data, 16).map((c) => c.fourcc)).toEqual(['ALPH', 'VP8 ']);
+  }
+  // The browser plays it: 4 frames; frame 1 shows cel 1 only, frame 2 cel 2 only.
+  const decoded = await page.evaluate(async (b64) => {
+    const bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+    const dec = new (window as any).ImageDecoder({ data: bytes, type: 'image/webp' });
+    await dec.tracks.ready;
+    const alphaNear = async (index: number, x: number, y: number) => {
+      const { image } = await dec.decode({ frameIndex: index });
+      const c = new OffscreenCanvas(image.displayWidth, image.displayHeight);
+      const g = c.getContext('2d')!;
+      g.drawImage(image, 0, 0);
+      image.close();
+      const d = g.getImageData(x - 2, y - 2, 5, 5).data;
+      let a = 0;
+      for (let i = 3; i < d.length; i += 4) a = Math.max(a, d[i]);
+      return a;
+    };
+    return { frames: dec.tracks.selectedTrack.frameCount, f1: [await alphaNear(0, 25, 25), await alphaNear(0, 75, 35)], f2: [await alphaNear(1, 25, 25), await alphaNear(1, 75, 35)] };
+  }, w.toString('base64'));
+  expect(decoded.frames).toBe(4);
+  expect(decoded.f1[0]).toBeGreaterThan(100);
+  expect(decoded.f1[1]).toBe(0);
+  expect(decoded.f2[0]).toBe(0);
+  expect(decoded.f2[1]).toBeGreaterThan(100);
+
+  // Animated sticker (APNG): always transparent; Delete blank spaces and Color reduction.
+  await page.evaluate(() => window.__madPaint.runCommand('exportApng'));
+  const ap = page.getByRole('dialog', { name: 'Animated sticker (APNG) export settings' });
+  await expect(ap.getByLabel('Export transparency')).toHaveCount(0);
+  await ap.getByLabel('Delete blank spaces').check();
+  await ap.getByLabel('Color reduction').check();
+  const [apng] = await Promise.all([page.waitForEvent('download'), ap.getByRole('button', { name: 'OK' }).click()]);
+  const png = readFileSync((await apng.path())!);
+  const types: string[] = [];
+  for (let p = 8; p < png.length; p += 12 + png.readUInt32BE(p)) types.push(png.subarray(p + 4, p + 8).toString('latin1'));
+  expect(types.slice(0, 4)).toEqual(['IHDR', 'PLTE', 'tRNS', 'acTL']);
+  // Cropped to both lines (x 40…160, y 50…70 plus the pen's width); indexed colour.
+  const [pw, ph] = [png.readUInt32BE(16), png.readUInt32BE(20)];
+  expect(pw).toBeGreaterThan(120);
+  expect(pw).toBeLessThan(135);
+  expect(ph).toBeGreaterThan(20);
+  expect(ph).toBeLessThan(35);
+  expect(png[25]).toBe(3);
+
+  // Image sequence: file name settings, TIFF pictures; BMP has no transparency.
+  await page.evaluate(() => window.__madPaint.runCommand('exportSequence'));
+  const sq = page.getByRole('dialog', { name: 'Image sequence export settings' });
+  await expect(sq.getByTestId('sequence-name')).toHaveText('Illustration_0001.png');
+  await sq.getByLabel('Type').selectOption('bmp');
+  await expect(sq.getByLabel('Export transparency')).toHaveCount(0);
+  await sq.getByLabel('Type').selectOption('tiff');
+  await sq.getByLabel('File prefix').fill('walk');
+  await sq.getByLabel('File suffix').fill('x');
+  await sq.getByLabel('Separator').fill('-');
+  await expect(sq.getByTestId('sequence-name')).toHaveText('walk-0001-x.tif');
+  await sq.getByLabel('Export transparency').check();
+  const [zip] = await Promise.all([page.waitForEvent('download'), sq.getByRole('button', { name: 'OK' }).click()]);
+  const files = unzipSync(readFileSync((await zip.path())!));
+  expect(Object.keys(files).sort()).toEqual(['walk-0001-x.tif', 'walk-0002-x.tif', 'walk-0003-x.tif', 'walk-0004-x.tif']);
+  const tif = Buffer.from(files['walk-0002-x.tif']);
+  expect(tif.subarray(0, 4).toString('latin1')).toBe('II*\0');
   expect(errors).toEqual([]);
 });
 
@@ -2510,11 +2629,11 @@ test('animation frame lines: output frame, title-safe area, overflow frame and b
   const ex = page.getByRole('dialog', { name: 'Animated GIF export settings' });
   await expect(ex.getByLabel('Drawing area')).toHaveValue('output');
   await expect(ex.getByLabel('Width')).toHaveValue('320');
-  await expect(ex).toContainText('× 240 px');
+  await expect(ex.getByLabel('Height')).toHaveValue('240');
   await ex.getByLabel('Drawing area').selectOption('overflow');
   await expect(ex.getByLabel('Width')).toHaveValue('800');
   await ex.getByLabel('Drawing area').selectOption('canvas');
-  await expect(ex).toContainText('× 360 px');
+  await expect(ex.getByLabel('Height')).toHaveValue('360');
   await ex.getByLabel('Drawing area').selectOption('output');
   const [dl] = await Promise.all([page.waitForEvent('download'), ex.getByRole('button', { name: 'OK' }).click()]);
   const gif = readFileSync((await dl.path())!);

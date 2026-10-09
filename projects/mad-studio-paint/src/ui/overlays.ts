@@ -12,7 +12,7 @@ export interface MenuItem {
   submenu?: MenuItem[];
 }
 
-export type CustomDialogId = 'newCanvas' | 'export' | 'exportPsd' | 'frameTemplates' | 'timelineSettings' | 'newTimeline' | 'frameRate' | 'manageTimelines' | 'cameraFolder' | 'onionSkin' | 'exportGif' | 'exportApng' | 'exportSequence' | 'exportMovie' | 'canvasSize' | 'imageResolution' | 'gaussianBlur' | 'preferences' | 'about' | 'shortcuts' | 'pressure' | 'newFrameFolder' | 'divideFrame' | 'drawAlongRuler' | 'newTone' | 'gradient';
+export type CustomDialogId = 'newCanvas' | 'export' | 'exportPsd' | 'frameTemplates' | 'timelineSettings' | 'newTimeline' | 'frameRate' | 'manageTimelines' | 'cameraFolder' | 'onionSkin' | 'exportGif' | 'exportApng' | 'exportWebp' | 'exportSequence' | 'exportMovie' | 'canvasSize' | 'imageResolution' | 'gaussianBlur' | 'preferences' | 'about' | 'shortcuts' | 'pressure' | 'newFrameFolder' | 'divideFrame' | 'drawAlongRuler' | 'newTone' | 'gradient';
 
 /** What a tonal correction dialog changes. */
 export type TonalTarget =

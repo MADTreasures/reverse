@@ -23,7 +23,7 @@ export const MENUS: MenuSpec[] = [
       '-',
       { label: 'Import', items: ['importImage', 'importAudio', 'importMovie'] },
       'export',
-      { label: 'Export animation', items: ['exportSequence', 'exportGif', 'exportApng', 'exportMovie'] },
+      { label: 'Export animation', items: ['exportSequence', 'exportGif', 'exportApng', 'exportWebp', 'exportMovie'] },
       '-',
       'renameCanvas',
       '-',

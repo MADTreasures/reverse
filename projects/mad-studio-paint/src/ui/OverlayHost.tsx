@@ -61,6 +61,7 @@ export function OverlayHost() {
           {dialog.kind === 'custom' && dialog.id === 'manageTimelines' && <ManageTimelinesDialog />}
           {dialog.kind === 'custom' && dialog.id === 'exportGif' && <AnimationExportDialog format="gif" />}
           {dialog.kind === 'custom' && dialog.id === 'exportApng' && <AnimationExportDialog format="apng" />}
+          {dialog.kind === 'custom' && dialog.id === 'exportWebp' && <AnimationExportDialog format="webp" />}
           {dialog.kind === 'custom' && dialog.id === 'exportSequence' && <AnimationExportDialog format="sequence" />}
           {dialog.kind === 'custom' && dialog.id === 'exportMovie' && <MovieExportDialog />}
           {dialog.kind === 'custom' && dialog.id === 'about' && <AboutDialog />}

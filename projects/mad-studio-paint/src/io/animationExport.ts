@@ -1,10 +1,11 @@
 /**
  * File > Export animation: animated GIF (through gifenc, MIT; palette, dithering and transparency
- * are our own), animated PNG (APNG, own encoder) and image sequences (PNG files in a ZIP). Pure (no
- * DOM): frames come in as straight RGBA.
+ * are our own), animated PNG (APNG, own encoder; optionally reduced to 256 colours with alpha and
+ * cropped to the drawn area) and image sequences (files in a ZIP). Pure (no DOM): frames come in as
+ * straight RGBA.
  */
 import { zipSync, zlibSync } from 'fflate';
-import { GIFEncoder, quantize } from 'gifenc';
+import { applyPalette, GIFEncoder, quantize } from 'gifenc';
 import type { Pixels } from './psd';
 
 /**
@@ -201,14 +202,51 @@ function scanlines(p: Pixels): Uint8Array {
   return out;
 }
 
-/** An animated PNG: every frame replaces the whole image; `plays` 0 = endlessly. */
-export function encodeApng(frames: Pixels[], delays: number[], plays: number): Uint8Array {
+/** PNG scanlines of an indexed image (filter None, as recommended for palettes). */
+function indexedScanlines(index: Uint8Array, width: number, height: number): Uint8Array {
+  const out = new Uint8Array((width + 1) * height);
+  for (let y = 0; y < height; y++) out.set(index.subarray(y * width, (y + 1) * width), y * (width + 1) + 1);
+  return out;
+}
+
+/** One palette with alpha (at most 256 entries) for all frames, and each frame's palette indices. */
+function reduceColors(frames: Pixels[]): { palette: Palette; indices: Uint8Array[] } {
+  const total = frames.reduce((n, f) => n + f.width * f.height, 0);
+  const stride = Math.max(1, Math.floor(total / 1_000_000));
+  const sample: number[] = [];
+  for (const f of frames) {
+    for (let i = 0; i < f.width * f.height; i += stride) {
+      const o = i * 4;
+      sample.push(f.data[o], f.data[o + 1], f.data[o + 2], f.data[o + 3]);
+    }
+  }
+  const palette = quantize(new Uint8Array(sample), 256, { format: 'rgba4444' });
+  // applyPalette reads the whole buffer as 32-bit pixels.
+  const own = (d: Uint8ClampedArray) => (d.byteOffset === 0 && d.byteLength === d.buffer.byteLength ? d : d.slice());
+  return { palette, indices: frames.map((f) => applyPalette(own(f.data), palette, 'rgba4444')) };
+}
+
+/**
+ * An animated PNG: every frame replaces the whole image; `plays` 0 = endlessly. `colors`: Color
+ * reduction (an indexed image of 256 colours with transparency: smaller files).
+ */
+export function encodeApng(frames: Pixels[], delays: number[], plays: number, colors = false): Uint8Array {
   const { width, height } = frames[0];
   const parts: Uint8Array[] = [new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10])];
   const ihdr = new Uint8Array(13);
   ihdr.set(u32s(width, height));
-  ihdr.set([8, 6, 0, 0, 0], 8);
-  parts.push(chunk('IHDR', ihdr), chunk('acTL', u32s(frames.length, plays)));
+  const reduced = colors ? reduceColors(frames) : null;
+  // 8 bits; RGBA (6) or indexed (3).
+  ihdr.set([8, reduced ? 3 : 6, 0, 0, 0], 8);
+  parts.push(chunk('IHDR', ihdr));
+  if (reduced) {
+    parts.push(chunk('PLTE', new Uint8Array(reduced.palette.flatMap((c) => [c[0], c[1], c[2]]))));
+    // Alpha per entry (trailing opaque entries may be left out).
+    const alphas = reduced.palette.map((c) => c[3] ?? 255);
+    while (alphas.length && alphas[alphas.length - 1] === 255) alphas.pop();
+    if (alphas.length) parts.push(chunk('tRNS', new Uint8Array(alphas)));
+  }
+  parts.push(chunk('acTL', u32s(frames.length, plays)));
   let seq = 0;
   frames.forEach((f, k) => {
     const fc = new Uint8Array(26);
@@ -224,7 +262,7 @@ export function encodeApng(frames: Pixels[], delays: number[], plays: number): U
     fc[24] = 0;
     fc[25] = 0;
     parts.push(chunk('fcTL', fc));
-    const data = zlibSync(scanlines(f), { level: 6 });
+    const data = zlibSync(reduced ? indexedScanlines(reduced.indices[k], width, height) : scanlines(f), { level: 6 });
     if (k === 0) parts.push(chunk('IDAT', data));
     else {
       const fd = new Uint8Array(4 + data.length);
@@ -245,17 +283,40 @@ export function encodeApng(frames: Pixels[], delays: number[], plays: number): U
 
 // ------------------------------------------------------------------ image sequence
 
-/** File names like the reference's: prefix, separator, sequence number (zero-padded), suffix. */
-export function sequenceNames(count: number, opts: { prefix: string; suffix: string; separator: string; start: number; ext: string }): string[] {
-  const digits = Math.max(4, String(opts.start + count - 1).length);
-  const clean = (s: string) => s.replace(/[\\/:*?"<>|\u0000-\u001f]/g, '');
-  return Array.from({ length: count }, (_, i) => {
-    const parts = [clean(opts.prefix), String(opts.start + i).padStart(digits, '0'), clean(opts.suffix)].filter(Boolean);
-    return `${parts.join(opts.separator)}.${opts.ext}`;
-  });
+/** The images in a ZIP: stored when they are compressed already (PNG, JPEG, WebP), else deflated. */
+export function zipSequence(files: { name: string; data: Uint8Array }[], compress = false): Uint8Array {
+  const level = compress ? 6 : 0;
+  return zipSync(Object.fromEntries(files.map((f) => [f.name, [f.data, { level }] as [Uint8Array, { level: 0 | 6 }]])));
 }
 
-/** The images in a ZIP (stored: PNG and JPEG are compressed already). */
-export function zipSequence(files: { name: string; data: Uint8Array }[]): Uint8Array {
-  return zipSync(Object.fromEntries(files.map((f) => [f.name, [f.data, { level: 0 }] as [Uint8Array, { level: 0 }]])));
+// ------------------------------------------------------------------ blank space
+
+/**
+ * Delete blank spaces: the smallest rectangle that holds every drawn (not fully transparent) pixel
+ * of all frames, or null when nothing is drawn.
+ */
+export function drawnArea(frames: Pixels[]): { x: number; y: number; w: number; h: number } | null {
+  let x0 = Infinity;
+  let y0 = Infinity;
+  let x1 = -1;
+  let y1 = -1;
+  for (const f of frames) {
+    for (let y = 0; y < f.height; y++) {
+      for (let x = 0, i = y * f.width * 4 + 3; x < f.width; x++, i += 4) {
+        if (f.data[i] === 0) continue;
+        if (x < x0) x0 = x;
+        if (x > x1) x1 = x;
+        if (y < y0) y0 = y;
+        if (y > y1) y1 = y;
+      }
+    }
+  }
+  return x1 < 0 ? null : { x: x0, y: y0, w: x1 - x0 + 1, h: y1 - y0 + 1 };
+}
+
+/** A rectangle of a picture. */
+export function cropPixels(p: Pixels, r: { x: number; y: number; w: number; h: number }): Pixels {
+  const data = new Uint8ClampedArray(r.w * r.h * 4);
+  for (let y = 0; y < r.h; y++) data.set(p.data.subarray(((r.y + y) * p.width + r.x) * 4, ((r.y + y) * p.width + r.x + r.w) * 4), y * r.w * 4);
+  return { width: r.w, height: r.h, data };
 }

@@ -1,7 +1,8 @@
 import { crc32 } from 'node:zlib';
 import { unzipSync, unzlibSync } from 'fflate';
 import { describe, expect, it } from 'vitest';
-import { encodeApng, encodeGif, exportFrames, frameDelays, sequenceNames, zipSequence } from './animationExport';
+import { cropPixels, drawnArea, encodeApng, encodeGif, exportFrames, frameDelays, zipSequence } from './animationExport';
+import { sequenceNames } from './sequence';
 import type { Pixels } from './psd';
 
 const image = (w: number, h: number, colors: [number, number, number, number][]): Pixels => {
@@ -182,5 +183,86 @@ describe('animated PNG', () => {
     };
     expect([...unfilter(unzlibSync(chunks[3].data))]).toEqual([...a.data]);
     expect([...unfilter(unzlibSync(chunks[5].data.slice(4)))]).toEqual([...b.data]);
+  });
+});
+
+/** The chunks of a PNG (CRCs checked). */
+function pngChunks(png: Uint8Array): { type: string; data: Uint8Array }[] {
+  const view = new DataView(png.buffer, png.byteOffset);
+  const chunks: { type: string; data: Uint8Array }[] = [];
+  for (let p = 8; p < png.length; ) {
+    const len = view.getUint32(p);
+    const data = png.slice(p + 8, p + 8 + len);
+    expect(view.getUint32(p + 8 + len)).toBe(crc32(png.slice(p + 4, p + 8 + len)));
+    chunks.push({ type: String.fromCharCode(...png.slice(p + 4, p + 8)), data });
+    p += 12 + len;
+  }
+  return chunks;
+}
+
+describe('animated PNG: Color reduction and Delete blank spaces', () => {
+  it('writes an indexed image with a palette and alpha per entry', () => {
+    const a = image(2, 2, [
+      [255, 0, 0, 255],
+      [0, 255, 0, 128],
+      [0, 0, 0, 0],
+      [16, 32, 48, 255],
+    ]);
+    const b = image(2, 2, [
+      [16, 32, 48, 255],
+      [255, 0, 0, 255],
+      [0, 255, 0, 128],
+      [0, 0, 0, 0],
+    ]);
+    const png = encodeApng([a, b], [100, 100], 1, true);
+    const chunks = pngChunks(png);
+    expect(chunks.map((c) => c.type)).toEqual(['IHDR', 'PLTE', 'tRNS', 'acTL', 'fcTL', 'IDAT', 'fcTL', 'fdAT', 'IEND']);
+    // 8 bits, colour type 3 (indexed).
+    expect([...chunks[0].data.slice(8, 10)]).toEqual([8, 3]);
+    const plte = chunks[1].data;
+    const trns = chunks[2].data;
+    expect(plte.length % 3).toBe(0);
+    expect(plte.length / 3).toBeLessThanOrEqual(256);
+    expect(trns.length).toBeLessThanOrEqual(plte.length / 3);
+    const decode = (raw: Uint8Array) => {
+      const out: number[] = [];
+      for (let y = 0; y < 2; y++) {
+        // Filter None.
+        expect(raw[y * 3]).toBe(0);
+        for (let x = 0; x < 2; x++) {
+          const i = raw[y * 3 + 1 + x];
+          out.push(plte[i * 3], plte[i * 3 + 1], plte[i * 3 + 2], i < trns.length ? trns[i] : 255);
+        }
+      }
+      return out;
+    };
+    // Few colours: each keeps its exact value.
+    expect(decode(unzlibSync(chunks[5].data))).toEqual([...a.data]);
+    expect(decode(unzlibSync(chunks[7].data.slice(4)))).toEqual([...b.data]);
+  });
+
+  it('crops all frames to the area drawn in any of them', () => {
+    const blank = image(4, 3, []);
+    const one = image(4, 3, []);
+    one.data.set([1, 2, 3, 255], (1 * 4 + 1) * 4);
+    const two = image(4, 3, []);
+    two.data.set([4, 5, 6, 10], (2 * 4 + 2) * 4);
+    expect(drawnArea([blank])).toBeNull();
+    expect(drawnArea([one])).toEqual({ x: 1, y: 1, w: 1, h: 1 });
+    const r = drawnArea([one, blank, two])!;
+    expect(r).toEqual({ x: 1, y: 1, w: 2, h: 2 });
+    const c = cropPixels(two, r);
+    expect([c.width, c.height]).toEqual([2, 2]);
+    expect([...c.data]).toEqual([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 4, 5, 6, 10]);
+  });
+});
+
+describe('image sequence ZIP', () => {
+  it('stores compressed pictures and deflates uncompressed ones', () => {
+    const files = [{ name: 'a.bmp', data: new Uint8Array(4000).fill(7) }];
+    const stored = zipSequence(files);
+    const deflated = zipSequence(files, true);
+    expect(deflated.length).toBeLessThan(stored.length / 10);
+    expect([...unzipSync(deflated)['a.bmp']]).toEqual([...files[0].data]);
   });
 });

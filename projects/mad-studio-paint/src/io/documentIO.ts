@@ -11,6 +11,7 @@ import { native, openFiles, saveFile, type OpenedFile, type SavedFile } from '..
 import * as actions from '../store/actions';
 import { getState, setState, useStore } from '../store/store';
 import { confirmDialog, toast } from '../ui/overlays';
+import { SEQUENCE_EXT, sequenceNames, type SequenceType } from './sequence';
 import { EXTENSION, IMAGE_EXTENSIONS, isDocumentFileName, isImageFileName, isPsdFileName, mimeForName, packDocument, PSD_EXTENSIONS, unpackDocument } from './format';
 import { idbDelete, idbGet, idbSet } from './idb';
 import { docLightImages } from '../paint/lightTable';
@@ -368,7 +369,7 @@ export async function exportPsd(opts: { skipDraft: boolean }): Promise<boolean> 
 
 // ------------------------------------------------------------------ animation
 
-export type AnimationFormat = 'gif' | 'apng' | 'sequence';
+export type AnimationFormat = 'gif' | 'apng' | 'webp' | 'sequence';
 
 export interface AnimationExportOptions {
   format: AnimationFormat;
@@ -389,8 +390,24 @@ export interface AnimationExportOptions {
   area: DrawingArea;
   /** Image sequence: draw the frame lines (Export frames). */
   frameLines?: boolean;
-  /** Image sequence: file names and type. */
-  sequence: { prefix: string; suffix: string; separator: string; startNumber: number; type: 'png' | 'jpeg' };
+  /** APNG: Delete blank spaces (crop to what is drawn) and Color reduction (256 colours). */
+  cropBlank?: boolean;
+  reduceColors?: boolean;
+  /** Animated WebP: Prioritize quality (lossless) or file size (lossy at `quality`, 0…1). */
+  webp?: { lossless: boolean; quality: number };
+  /** Image sequence: file names, type and (JPEG, WebP) quality. */
+  sequence: { prefix: string; suffix: string; separator: string; startNumber: number; type: SequenceType; quality?: number; lossless?: boolean };
+}
+
+/**
+ * A still WebP picture. Lossless at quality 1 (the browser's convention); lossy otherwise (at most
+ * 0.99, which the browser would take as lossless).
+ */
+async function webpBytes(canvas: HTMLCanvasElement, lossless: boolean, quality: number): Promise<Uint8Array> {
+  const bytes = await canvasToBytes(canvas, 'image/webp', lossless ? 1 : Math.max(0.01, Math.min(0.99, quality)));
+  // Browsers without a WebP encoder return PNG.
+  if (String.fromCharCode(...bytes.subarray(8, 12)) !== 'WEBP') throw new Error('this system cannot encode WebP pictures');
+  return bytes;
 }
 
 /** A canvas on white (formats without transparency, with the paper hidden). */
@@ -403,7 +420,10 @@ function onWhite(canvas: HTMLCanvasElement): HTMLCanvasElement {
   return flat;
 }
 
-/** File > Export animation: animated GIF, animated PNG (APNG) or an image sequence (ZIP). */
+/**
+ * File > Export animation: animated GIF, animated sticker (APNG, always transparent), animated
+ * WebP or an image sequence (ZIP).
+ */
 export async function exportAnimation(o: AnimationExportOptions): Promise<boolean> {
   const { doc } = getState();
   const t = doc.timeline;
@@ -412,9 +432,11 @@ export async function exportAnimation(o: AnimationExportOptions): Promise<boolea
     return false;
   }
   try {
-    const { encodeApng, encodeGif, exportFrames, frameDelays, sequenceNames, zipSequence } = await import('./animationExport');
+    const { cropPixels, drawnArea, encodeApng, encodeGif, exportFrames, frameDelays, zipSequence } = await import('./animationExport');
     const frames = exportFrames(o.start, o.end, t.fps, o.fps);
-    const transparent = o.transparent && !(o.format === 'sequence' && o.sequence.type === 'jpeg');
+    const type = o.sequence.type;
+    // BMP and JPEG have no alpha; stickers (APNG) always keep it.
+    const transparent = o.format === 'apng' || (o.transparent && !(o.format === 'sequence' && (type === 'jpeg' || type === 'bmp')));
     const area = areaRect(doc.outputFrame, o.area, doc.width, doc.height);
     const scale = o.width / area.w;
     // Each timeline frame is drawn once, even when it is shown several times.
@@ -435,16 +457,47 @@ export async function exportAnimation(o: AnimationExportOptions): Promise<boolea
     let mime: string;
     const base = doc.name || 'Untitled';
     if (o.format === 'sequence') {
-      const ext = o.sequence.type === 'jpeg' ? 'jpg' : 'png';
+      const { encodeBmp, encodeTga, encodeTiff } = await import('./imageFormats');
+      const ext = SEQUENCE_EXT[type];
       const names = sequenceNames(frames.length, { ...o.sequence, start: o.sequence.startNumber, ext });
+      const quality = o.sequence.quality ?? 0.92;
+      const encode = async (c: HTMLCanvasElement): Promise<Uint8Array> => {
+        if (type === 'png') return canvasToBytes(c, 'image/png');
+        if (type === 'jpeg') return canvasToBytes(c, 'image/jpeg', quality);
+        if (type === 'webp') return webpBytes(c, o.sequence.lossless ?? true, quality);
+        if (type === 'bmp') return encodeBmp(pixelsOf(c), doc.dpi);
+        if (type === 'tiff') return encodeTiff(pixelsOf(c), transparent, doc.dpi);
+        return encodeTga(pixelsOf(c), transparent);
+      };
+      // A frame shown several times is encoded once.
+      const encoded = new Map<number, Uint8Array>();
       const files = [];
-      for (let i = 0; i < frames.length; i++) files.push({ name: names[i], data: await canvasToBytes(await draw(frames[i]), o.sequence.type === 'jpeg' ? 'image/jpeg' : 'image/png', 0.92) });
-      bytes = zipSequence(files);
+      for (let i = 0; i < frames.length; i++) {
+        let data = encoded.get(frames[i]);
+        if (!data) encoded.set(frames[i], (data = await encode(await draw(frames[i]))));
+        files.push({ name: names[i], data });
+      }
+      bytes = zipSequence(files, type === 'bmp' || type === 'tiff' || type === 'tga');
       name = `${base}.zip`;
       filter = { name: 'Image sequence (ZIP)', extensions: ['zip'] };
       mime = 'application/zip';
+    } else if (o.format === 'webp') {
+      const { muxAnimatedWebp } = await import('./webp');
+      const delays = frameDelays(frames.length, o.fps, 1);
+      const encoded = new Map<number, Uint8Array>();
+      const parts = [];
+      for (let i = 0; i < frames.length; i++) {
+        let data = encoded.get(frames[i]);
+        if (!data) encoded.set(frames[i], (data = await webpBytes(await draw(frames[i]), o.webp?.lossless ?? true, o.webp?.quality ?? 1)));
+        parts.push({ data, duration: delays[i] });
+      }
+      const first = await draw(frames[0]);
+      bytes = muxAnimatedWebp(parts, first.width, first.height, o.plays, transparent);
+      name = `${base}.webp`;
+      filter = { name: 'Animated WebP', extensions: ['webp'] };
+      mime = 'image/webp';
     } else {
-      const pixels = [];
+      let pixels = [];
       for (const f of frames) pixels.push(pixelsOf(await draw(f)));
       if (o.format === 'gif') {
         bytes = encodeGif(pixels, { delays: frameDelays(pixels.length, o.fps, 10), plays: o.plays, transparent, dither: o.dither });
@@ -452,7 +505,10 @@ export async function exportAnimation(o: AnimationExportOptions): Promise<boolea
         filter = { name: 'Animated GIF', extensions: ['gif'] };
         mime = 'image/gif';
       } else {
-        bytes = encodeApng(pixels, frameDelays(pixels.length, o.fps, 1), o.plays);
+        // Delete blank spaces: every frame cropped to what any of them shows.
+        const drawnRect = o.cropBlank ? drawnArea(pixels) : null;
+        if (drawnRect) pixels = pixels.map((p) => cropPixels(p, drawnRect));
+        bytes = encodeApng(pixels, frameDelays(pixels.length, o.fps, 1), o.plays, o.reduceColors);
         name = `${base}.png`;
         filter = { name: 'Animated PNG', extensions: ['png', 'apng'] };
         mime = 'image/apng';

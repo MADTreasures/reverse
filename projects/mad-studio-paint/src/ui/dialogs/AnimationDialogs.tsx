@@ -1,9 +1,10 @@
 /**
  * Animation dialogs: Animation > Timeline > New timeline / Change settings, Show animation cels >
- * Onion skin settings, and File > Export animation (animated GIF, APNG, image sequence, movie).
+ * Onion skin settings, and File > Export animation (image sequence, animated GIF, APNG, WebP, movie).
  */
 import { useEffect, useState } from 'react';
 import { exportAnimation, exportMovie, type AnimationFormat } from '../../io/documentIO';
+import { SEQUENCE_EXT, sequenceNames, type SequenceType } from '../../io/sequence';
 import { hasSound, isCameraFolder, outputRect } from '../../model/animation';
 import { flatten } from '../../model/layers';
 import { DEFAULT_TIMELINE, endOf, MAX_FPS, MAX_FRAMES, startOf, type OnionMode, type Timeline } from '../../paint/animation';
@@ -368,9 +369,48 @@ function DrawingAreaField({ doc, value, onChange }: { doc: PaintDocument; value:
   );
 }
 
-const TITLES: Record<AnimationFormat, string> = { gif: 'Animated GIF export settings', apng: 'Animated sticker (APNG) export settings', sequence: 'Image sequence export settings' };
+const TITLES: Record<AnimationFormat, string> = {
+  gif: 'Animated GIF export settings',
+  apng: 'Animated sticker (APNG) export settings',
+  webp: 'Animated WebP export settings',
+  sequence: 'Image sequence export settings',
+};
 
-/** File > Export animation > Animated GIF / Animated sticker (APNG) / Image sequence. */
+const SEQUENCE_TYPES: [SequenceType, string][] = [
+  ['bmp', 'BMP'],
+  ['jpeg', 'JPEG'],
+  ['png', 'PNG'],
+  ['webp', 'WEBP'],
+  ['tiff', 'TIFF'],
+  ['tga', 'TGA'],
+];
+
+/** "1.0": tenths of a second when they are exact, else hundredths. */
+const secondsText = (s: number) => s.toFixed(Math.abs(s * 10 - Math.round(s * 10)) < 1e-6 ? 1 : 2);
+
+/** WebP: Prioritize quality (lossless) or Prioritize file size with a quality. */
+function WebpCompression({ lossless, quality, onLossless, onQuality }: { lossless: boolean; quality: number; onLossless: (v: boolean) => void; onQuality: (v: number) => void }) {
+  return (
+    <fieldset className="group">
+      <legend>Compression method</legend>
+      <label className="check">
+        <input type="radio" name="webp-method" checked={lossless} onChange={() => onLossless(true)} /> Prioritize quality
+      </label>
+      <label className="check">
+        <input type="radio" name="webp-method" checked={!lossless} onChange={() => onLossless(false)} /> Prioritize file size
+      </label>
+      <span className="with-unit indent">
+        <label htmlFor="webp-quality">Quality</label>
+        <input id="webp-quality" type="number" min={1} max={100} value={quality} disabled={lossless} onChange={(e) => onQuality(clampInt(e.target.value, 1, 100, quality))} />
+      </span>
+    </fieldset>
+  );
+}
+
+/**
+ * File > Export animation > Image sequence / Animated GIF / Animated sticker (APNG) / Animated
+ * WebP, laid out like the reference's export settings dialogs.
+ */
 export function AnimationExportDialog({ format }: { format: AnimationFormat }) {
   const doc = useStore((s) => s.doc);
   const t = doc.timeline ?? DEFAULT_TIMELINE;
@@ -386,15 +426,28 @@ export function AnimationExportDialog({ format }: { format: AnimationFormat }) {
   const [plays, setPlays] = useState(1);
   const [dither, setDither] = useState(false);
   const [transparent, setTransparent] = useState(false);
+  const [cropBlank, setCropBlank] = useState(false);
+  const [reduce, setReduce] = useState(false);
+  const [lossless, setLossless] = useState(true);
+  const [quality, setQuality] = useState(100);
   const [drafts, setDrafts] = useState(false);
   const [camera, setCamera] = useState(true);
-  const [prefix, setPrefix] = useState(doc.name || 'frame');
+  const [prefix, setPrefix] = useState(doc.name || 'Sequence');
+  const [suffix, setSuffix] = useState('');
+  const [separator, setSeparator] = useState('_');
   const [startNumber, setStartNumber] = useState(1);
-  const [type, setType] = useState<'png' | 'jpeg'>('png');
+  const [type, setType] = useState<SequenceType>('png');
   const [busy, setBusy] = useState(false);
+  const maxWidth = doc.width * 4;
   const height = Math.max(1, Math.round((width * rect.h) / rect.w));
+  const setHeight = (h: number) => setWidth(Math.max(1, Math.min(maxWidth, Math.round((h * rect.w) / rect.h))));
   const seconds = (end - start + 1) / t.fps;
   const images = Math.max(1, Math.round(seconds * fps));
+  const sequence = format === 'sequence';
+  // An empty separator: spaces between the parts (as in the reference).
+  const names = { prefix, suffix, separator: separator || ' ', startNumber, type, quality: quality / 100, lossless };
+  const firstName = sequenceNames(images, { ...names, start: startNumber, ext: SEQUENCE_EXT[type] })[0];
+  const opaqueType = sequence && (type === 'jpeg' || type === 'bmp');
   const run = async () => {
     setBusy(true);
     // Let the dialog show that it is busy before the frames are drawn.
@@ -413,14 +466,55 @@ export function AnimationExportDialog({ format }: { format: AnimationFormat }) {
       camera,
       area,
       frameLines,
-      sequence: { prefix, suffix: '', separator: '_', startNumber, type },
+      cropBlank,
+      reduceColors: reduce,
+      webp: { lossless, quality: quality / 100 },
+      sequence: names,
     });
     setBusy(false);
     if (ok) closeDialog();
   };
+  const area$ = (
+    <DrawingAreaField
+      doc={doc}
+      value={area}
+      onChange={(a) => {
+        setArea(a);
+        setWidth(areaRect(doc.outputFrame, a, doc.width, doc.height).w);
+      }}
+    />
+  );
+  const size = (
+    <span className="with-unit">
+      <input id="ex-width" type="number" min={1} max={maxWidth} value={width} onChange={(e) => setWidth(clampInt(e.target.value, 1, maxWidth, width))} />
+      <label htmlFor="ex-height">Height</label>
+      <input id="ex-height" type="number" min={1} max={maxWidth * 4} value={height} onChange={(e) => setHeight(clampInt(e.target.value, 1, maxWidth * 4, height))} /> px
+    </span>
+  );
+  const range = (
+    <span className="with-unit">
+      <input type="number" aria-label="Start frame" min={1} max={end} value={start} onChange={(e) => setStart(clampInt(e.target.value, 1, end, start))} /> to{' '}
+      <input type="number" aria-label="End frame" min={start} max={t.frames} value={end} onChange={(e) => setEnd(clampInt(e.target.value, start, t.frames, end))} /> (Frame)
+    </span>
+  );
+  const rate = (
+    <span className="with-unit">
+      <input id="ex-fps" type="number" min={1} max={MAX_FPS} value={fps} onChange={(e) => setFps(clampInt(e.target.value, 1, MAX_FPS, fps))} /> fps
+    </span>
+  );
+  const playback = (
+    <span data-testid="export-playback">
+      Playback time: {secondsText(seconds)} s ( Image number: {images} )
+    </span>
+  );
+  const check = (label: string, value: boolean, set: (v: boolean) => void) => (
+    <label className="check">
+      <input type="checkbox" checked={value} onChange={(e) => set(e.target.checked)} /> {label}
+    </label>
+  );
   return (
     <form
-      className="modal"
+      className="modal export-settings"
       role="dialog"
       aria-label={TITLES[format]}
       onSubmit={(e) => {
@@ -429,90 +523,124 @@ export function AnimationExportDialog({ format }: { format: AnimationFormat }) {
       }}
     >
       <h2>{TITLES[format]}</h2>
-      <div className="form-grid">
-        <DrawingAreaField
-          doc={doc}
-          value={area}
-          onChange={(a) => {
-            setArea(a);
-            setWidth(areaRect(doc.outputFrame, a, doc.width, doc.height).w);
-          }}
-        />
-        <label htmlFor="ex-width">Width</label>
-        <span className="with-unit">
-          <input id="ex-width" type="number" min={1} max={doc.width * 4} value={width} onChange={(e) => setWidth(clampInt(e.target.value, 1, doc.width * 4, width))} /> × {height} px
-        </span>
-        <label>Export range</label>
-        <span className="with-unit">
-          <input type="number" aria-label="Start frame" min={1} max={end} value={start} onChange={(e) => setStart(clampInt(e.target.value, 1, end, start))} /> –{' '}
-          <input type="number" aria-label="End frame" min={start} max={t.frames} value={end} onChange={(e) => setEnd(clampInt(e.target.value, start, t.frames, end))} />
-        </span>
-        <label htmlFor="ex-fps">Frame rate</label>
-        <span className="with-unit">
-          <input id="ex-fps" type="number" min={1} max={MAX_FPS} value={fps} onChange={(e) => setFps(clampInt(e.target.value, 1, MAX_FPS, fps))} /> fps
-        </span>
-        <label>Playback time</label>
-        <span data-testid="export-playback">
-          {seconds.toFixed(2)} s · {images} images
-        </span>
-        {format !== 'sequence' && (
-          <>
-            <label>Loop count</label>
+      {sequence ? (
+        <>
+          <fieldset className="group">
+            <legend>File name settings</legend>
+            <div className="form-grid">
+              <label>File name</label>
+              <span data-testid="sequence-name">{firstName}</span>
+              <label htmlFor="ex-prefix">File prefix</label>
+              <input id="ex-prefix" value={prefix} onChange={(e) => setPrefix(e.target.value.slice(0, 60))} />
+              <label htmlFor="ex-suffix">File suffix</label>
+              <input id="ex-suffix" value={suffix} onChange={(e) => setSuffix(e.target.value.slice(0, 60))} />
+              <label htmlFor="ex-separator">Separator</label>
+              <span className="with-unit">
+                <input id="ex-separator" value={separator} onChange={(e) => setSeparator(e.target.value.slice(0, 8))} />
+                <label htmlFor="ex-start-number">Start number</label>
+                <input id="ex-start-number" type="number" min={0} max={99999} value={startNumber} onChange={(e) => setStartNumber(clampInt(e.target.value, 0, 99999, 1))} />
+              </span>
+            </div>
+          </fieldset>
+          <fieldset className="group">
+            <legend>Advanced settings</legend>
+            <div className="form-grid">
+              <label htmlFor="ex-type">Type</label>
+              <select id="ex-type" value={type} onChange={(e) => setType(e.target.value as SequenceType)}>
+                {SEQUENCE_TYPES.map(([v, label]) => (
+                  <option key={v} value={v}>
+                    {label}
+                  </option>
+                ))}
+              </select>
+              {type === 'jpeg' && (
+                <>
+                  <label htmlFor="ex-quality">Quality</label>
+                  <input id="ex-quality" type="number" min={1} max={100} value={quality} onChange={(e) => setQuality(clampInt(e.target.value, 1, 100, quality))} />
+                </>
+              )}
+              <label />
+              <span className="checks">
+                {check('Export draft', drafts, setDrafts)}
+                {doc.outputFrame && check('Export frames', frameLines, setFrameLines)}
+                {!opaqueType && check('Export transparency', transparent, setTransparent)}
+              </span>
+            </div>
+            {type === 'webp' && <WebpCompression lossless={lossless} quality={quality} onLossless={setLossless} onQuality={setQuality} />}
+          </fieldset>
+          <fieldset className="group">
+            <legend>Size settings</legend>
+            <div className="form-grid">
+              {area$}
+              <label htmlFor="ex-width">Width</label>
+              {size}
+              <label />
+              {check('Apply 2D camera effects', camera, setCamera)}
+            </div>
+          </fieldset>
+          <fieldset className="group">
+            <legend>Frame export</legend>
+            <div className="form-grid">
+              <label>Export range</label>
+              {range}
+              <label htmlFor="ex-fps">Frame rate</label>
+              {rate}
+              <label />
+              {playback}
+            </div>
+          </fieldset>
+          <p className="muted">The images are saved together in a ZIP file.</p>
+        </>
+      ) : (
+        <>
+          <div className="form-grid">
+            {area$}
+            <label htmlFor="ex-width">Width</label>
+            {size}
+            <label>Export range</label>
+            {range}
+            <label htmlFor="ex-fps">Frame rate</label>
+            {rate}
+            <label htmlFor="ex-loop">Loop count</label>
             <span className="with-unit">
-              <label className="check">
-                <input type="checkbox" checked={endless} onChange={(e) => setEndless(e.target.checked)} /> Unlimited
-              </label>
-              {!endless && <input type="number" aria-label="Number of loops" min={1} max={100} value={plays} onChange={(e) => setPlays(clampInt(e.target.value, 1, 100, plays))} />}
+              <select id="ex-loop" value={endless ? 'unlimited' : 'count'} onChange={(e) => setEndless(e.target.value === 'unlimited')}>
+                <option value="unlimited">Unlimited</option>
+                <option value="count">Number of loops</option>
+              </select>
+              {!endless && (
+                <>
+                  <input type="number" aria-label="Number of loops" min={1} max={100} value={plays} onChange={(e) => setPlays(clampInt(e.target.value, 1, 100, plays))} /> Time(s)
+                </>
+              )}
             </span>
-          </>
-        )}
-        {format === 'gif' && (
-          <>
             <label />
-            <label className="check">
-              <input type="checkbox" checked={dither} onChange={(e) => setDither(e.target.checked)} /> Dithering
-            </label>
-          </>
-        )}
-        {format === 'sequence' && (
-          <>
-            <label htmlFor="ex-prefix">File prefix</label>
-            <input id="ex-prefix" value={prefix} onChange={(e) => setPrefix(e.target.value.slice(0, 60))} />
-            <label htmlFor="ex-start-number">Start number</label>
-            <input id="ex-start-number" type="number" min={0} max={99999} value={startNumber} onChange={(e) => setStartNumber(clampInt(e.target.value, 0, 99999, 1))} />
-            <label htmlFor="ex-type">Type</label>
-            <select id="ex-type" value={type} onChange={(e) => setType(e.target.value as 'png' | 'jpeg')}>
-              <option value="png">PNG</option>
-              <option value="jpeg">JPEG</option>
-            </select>
-            {doc.outputFrame && (
+            {playback}
+          </div>
+          <fieldset className="group">
+            <legend>Export options</legend>
+            {format === 'gif' && (
               <>
-                <label />
-                <label className="check">
-                  <input type="checkbox" checked={frameLines} onChange={(e) => setFrameLines(e.target.checked)} /> Export frames
-                </label>
+                {check('Dithering', dither, setDither)}
+                {check('Export transparency', transparent, setTransparent)}
               </>
             )}
-          </>
-        )}
-        {!(format === 'sequence' && type === 'jpeg') && (
-          <>
-            <label />
-            <label className="check">
-              <input type="checkbox" checked={transparent} onChange={(e) => setTransparent(e.target.checked)} /> Export transparency
-            </label>
-          </>
-        )}
-        <label />
-        <label className="check">
-          <input type="checkbox" checked={drafts} onChange={(e) => setDrafts(e.target.checked)} /> Export draft
-        </label>
-        <label />
-        <label className="check">
-          <input type="checkbox" checked={camera} onChange={(e) => setCamera(e.target.checked)} /> Apply 2D camera effects
-        </label>
-      </div>
-      {format === 'sequence' && <p className="muted">The images are saved together in a ZIP file.</p>}
+            {format === 'apng' && (
+              <>
+                {check('Delete blank spaces', cropBlank, setCropBlank)}
+                {check('Color reduction', reduce, setReduce)}
+              </>
+            )}
+            {format === 'webp' && (
+              <>
+                {check('Export transparency', transparent, setTransparent)}
+                <WebpCompression lossless={lossless} quality={quality} onLossless={setLossless} onQuality={setQuality} />
+              </>
+            )}
+            {check('Export draft', drafts, setDrafts)}
+            {check('Apply 2D camera effects', camera, setCamera)}
+          </fieldset>
+        </>
+      )}
       <Actions ok={busy ? 'Exporting…' : 'OK'} busy={busy} />
     </form>
   );
