@@ -98,6 +98,12 @@ export const isCameraFolder = (l: Layer | null | undefined): l is FolderLayer =>
 /** Whether a track's keyframes are in effect: turned on, or a 2D camera folder's. */
 export const keysOn = (l: Layer): boolean => isCameraFolder(l) || Boolean(l.keys?.enabled);
 
+const MASK = '#mask';
+/** The id under which a layer mask's keyframes appear in the Timeline palette and the Graph Editor. */
+export const maskTrackId = (id: Id): string => `${id}${MASK}`;
+/** The layer of a mask's track id (null: not a mask). */
+export const maskOwner = (id: string): Id | null => (id.endsWith(MASK) ? id.slice(0, -MASK.length) : null);
+
 /** The track with keyframes turned on that a layer belongs to (2D camera folders do not count: their layers stay editable). */
 export const keyedTrackOf = (layers: Layer[], id: Id): Layer | null => tracksOf(layers, id).find((l) => !isCameraFolder(l) && l.keys?.enabled) ?? null;
 

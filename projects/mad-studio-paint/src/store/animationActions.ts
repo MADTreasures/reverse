@@ -2,7 +2,20 @@
  * Animation (Timeline palette and Animation menu): the timeline, animation folders and cels,
  * assigning cels to frames, moving between frames, playback and onion skin.
  */
-import { animationFolders, celOf, isAnimationFolder, isCameraFolder, keysOn, setTrackContent, trackContent, trackFolderOf, tracksOf, type AnimationFolder } from '../model/animation';
+import {
+  animationFolders,
+  celOf,
+  isAnimationFolder,
+  isCameraFolder,
+  keysOn,
+  maskOwner,
+  maskTrackId,
+  setTrackContent,
+  trackContent,
+  trackFolderOf,
+  tracksOf,
+  type AnimationFolder,
+} from '../model/animation';
 import { createFolder, createRasterLayer, findLayer, flatten, locate } from '../model/layers';
 import type { Id, Layer, PaintDocument } from '../model/types';
 import { assignAt, celAt, DEFAULT_TIMELINE, emptyTrack, entryAt, MAX_FRAMES, nextCelName, nextTrackName, removeAt, type OnionSkin, type Timeline } from '../paint/animation';
@@ -122,6 +135,8 @@ export function setFrame(frame: number, follow = true): void {
   if (!follow) return;
   const track = trackFolderOf(s.doc.layers, s.activeLayerId);
   if (!track || !s.doc.timeline?.enabled) return;
+  // The folder's own layer mask stays selected (its keyframes are placed at the frame).
+  if (s.maskEditing && track.id === s.activeLayerId) return;
   const target = editTargetAt(track, f, s.activeLayerId, s.doc.layers);
   if (target !== s.activeLayerId) setState({ activeLayerId: target, maskEditing: false, selectedObjects: [] });
 }
@@ -615,23 +630,61 @@ export function toggleKeyframes(): void {
   if (!on) setState({ keySelection: [], editKeyed: false });
 }
 
+/** What a layer mask's keyframes record: its placement within the layer (no opacity). */
+export const MASK_CHANNELS: PlacementChannel[] = ['x', 'y', 'scaleX', 'scaleY', 'rotation', 'pivotX', 'pivotY'];
+
 /**
- * Records a placement at `frame` of a track: the settings of the given properties (all when left
- * out; X records the position) go into the keyframe there, or a new one (a clip is made there if
- * needed; `enable` turns keyframes on).
+ * The track whose layer mask the Object tool places: the current track's mask is selected (Layer
+ * palette: its thumbnail; Timeline palette: the Mask row) and the track's keyframes are on.
+ */
+export function maskKeyed(s: PaintState = getState()): Layer | null {
+  if (!s.maskEditing || !s.doc.timeline) return null;
+  const t = currentTrack(s);
+  return t && t.id === s.activeLayerId && t.mask && t.keys?.enabled && !isCameraFolder(t) ? t : null;
+}
+
+/** The keyframes edited now: the current track's, or (mask selected) its mask's. */
+export function keyTrackId(s: PaintState = getState()): Id | null {
+  const m = maskKeyed(s);
+  return m ? maskTrackId(m.id) : currentTrackId(s);
+}
+
+/** A layer mask's placement at a frame (within the layer). */
+export function maskPlacementNow(layer: Layer, frame = getState().frame, s: PaintState = getState()): Placement {
+  const rest = restPlacement(s.doc.width, s.doc.height);
+  return placementAt(layer.mask?.keys ?? [], frame, rest) ?? rest;
+}
+
+/** Timeline palette: the Mask row of a track selects its mask (and the frame). */
+export function selectMaskFrame(trackId: Id, frame: number): void {
+  const s = getState();
+  if (!findLayer(s.doc.layers, trackId)?.mask) return;
+  setState({ frame: clampFrame(frame, timelineOf(s)), activeLayerId: trackId, activeSound: null, maskEditing: true, ...(trackId !== s.activeLayerId ? { selectedObjects: [] } : {}) });
+}
+
+/**
+ * Records a placement at `frame` of a track (or of its mask: see maskTrackId): the settings of the
+ * given properties (all when left out; X records the position) go into the keyframe there, or a
+ * new one (a clip is made there if needed; `enable` turns keyframes on).
  */
 export function setKeyframe(trackId: Id, frame: number, p: Placement, label = 'Keyframe', key?: string, enable = false, channels: readonly PlacementChannel[] = PLACEMENT_CHANNELS): void {
   const s = getState();
-  if (channels.length === 0) return;
+  const owner = maskOwner(trackId);
+  const recorded = withSettings(channels).filter((c) => !owner || MASK_CHANNELS.includes(c));
+  if (recorded.length === 0) return;
   const interp = s.keyInterp;
-  const values = Object.fromEntries(withSettings(channels).map((c) => [c, p[c]]));
+  const values = Object.fromEntries(recorded.map((c) => [c, p[c]]));
   actions.changeDoc(
     label,
     (doc) => {
-      const l = findLayer(doc.layers, trackId);
+      const l = findLayer(doc.layers, owner ?? trackId);
       if (!l || !doc.timeline) return;
-      if (!l.keys) l.keys = { enabled: true, frames: [] };
       if (l.clips) setTrackContent(l, ensureClipAt(trackContent(l, doc.timeline.frames), frame, doc.timeline.frames, true));
+      if (owner) {
+        if (l.mask) l.mask = { ...l.mask, keys: recordKey(l.mask.keys ?? [], frame, values, interp) };
+        return;
+      }
+      if (!l.keys) l.keys = { enabled: true, frames: [] };
       l.keys = { enabled: l.keys.enabled || enable, frames: recordKey(l.keys.frames, frame, values, interp) };
     },
     key ? { key } : {},
@@ -651,6 +704,13 @@ export function addKeyframe(): void {
     setState({ keySelection: [{ track: sound.id, frame: s.frame }] });
     return;
   }
+  const masked = maskKeyed(s);
+  if (masked) {
+    const id = maskTrackId(masked.id);
+    setKeyframe(id, s.frame, maskPlacementNow(masked, s.frame, s), 'Add keyframe', undefined, false, MASK_CHANNELS);
+    setState({ keySelection: [{ track: id, frame: s.frame }] });
+    return;
+  }
   const track = currentTrack(s);
   if (!track || !s.doc.timeline || track.kind === 'correction') {
     setState({ hint: 'Select a layer or animation folder on the timeline' });
@@ -661,8 +721,14 @@ export function addKeyframe(): void {
   setState({ keySelection: [{ track: track.id, frame: s.frame }] });
 }
 
-/** The keyframes of a track (a document copy's, to change them), as a list and a way to replace it. */
+/** The keyframes of a track or a layer mask (a document copy's, to change them), as a list and a way to replace it. */
 function keysOfTrack(doc: PaintDocument, id: Id): { list: Keyframe[]; set: (list: Keyframe[]) => void } | null {
+  const owner = maskOwner(id);
+  if (owner) {
+    const l = findLayer(doc.layers, owner);
+    const mask = l?.mask;
+    return l && mask ? { list: mask.keys ?? [], set: (list) => (l.mask = { ...mask, keys: list }) } : null;
+  }
   const t = trackById(doc, id);
   if (t?.layer?.keys) {
     const l = t.layer;
@@ -696,7 +762,7 @@ function keyTargets(s: PaintState): KeyTarget[] {
     out.set(id, t);
   }
   if (out.size === 0) {
-    const id = currentTrackId(s);
+    const id = keyTrackId(s);
     if (id && keysOfTrack(s.doc, id)?.list.some((k) => k.frame === s.frame)) return [{ track: id, frames: [s.frame] }];
   }
   return [...out.values()];
@@ -729,7 +795,7 @@ export function deleteKeyframes(): void {
 /** Animation > Edit track > Delete all keyframes of the current track. */
 export function deleteAllKeyframes(): void {
   const s = getState();
-  const id = currentTrackId(s);
+  const id = keyTrackId(s);
   if (!id || !keysOfTrack(s.doc, id)?.list.length) {
     setState({ hint: 'This track has no keyframes' });
     return;
@@ -763,7 +829,9 @@ export function selectKeyframe(track: Id, frame: number, add = false, group?: Ch
   const ref: KeyRef = { track, frame, ...(group ? { group } : {}) };
   const keySelection = !add ? [ref] : s.keySelection.some(same) ? s.keySelection.filter((k) => !same(k)) : [...s.keySelection, ref];
   setState({ keySelection, clipSelection: [] });
-  if (getState().doc.sound?.tracks.some((t) => t.id === track)) setState({ activeSound: track, frame });
+  const owner = maskOwner(track);
+  if (owner) selectMaskFrame(owner, frame);
+  else if (getState().doc.sound?.tracks.some((t) => t.id === track)) setState({ activeSound: track, frame });
   else selectTrackFrame(track, frame);
 }
 

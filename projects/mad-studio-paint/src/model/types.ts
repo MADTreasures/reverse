@@ -1,7 +1,7 @@
 /** Document model of MAD Studio Paint. Pixel data lives in surfaces (see engine/surfaces.ts), keyed by layer id. */
 import type { AnimationTrack, Timeline } from '../paint/animation';
 import type { Clip } from '../paint/clips';
-import type { KeyTrack } from '../paint/keyframes';
+import type { Keyframe, KeyTrack } from '../paint/keyframes';
 import type { LightLayer, LightTable } from '../paint/lightTable';
 import type { DocSound } from '../paint/sound';
 import type { LayerEffects } from '../paint/effects';
@@ -54,6 +54,16 @@ export interface LayerMask {
   enabled: boolean;
   /** Moves and transforms together with the layer. */
   linked: boolean;
+  /**
+   * Beyond its pixels (where keyframes move the mask away from part of the canvas) the mask hides
+   * the layer ('hide': made by Mask outside selection); else it shows it.
+   */
+  outside?: 'hide';
+  /**
+   * Keyframes of the mask (Timeline palette: Details > Mask): its position, scale ratio, rotation
+   * and centre of rotation over time, within the layer; they apply while the layer's keyframes are on.
+   */
+  keys?: Keyframe[];
 }
 
 /** Where a layer's rulers apply: on every layer, on layers in the same folder, or only on this layer. */

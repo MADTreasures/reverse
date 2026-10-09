@@ -92,6 +92,17 @@ describe('.madpaint format', () => {
     expect(clash.layers.map((l) => l.mask)).toEqual([{ id: 'm1', enabled: true, linked: false }, undefined, undefined]);
   });
 
+  it('keeps the keyframes of layer masks and what a mask is beyond its pixels', () => {
+    const doc = createDocument('Mask keys', 200, 100, 72);
+    doc.layers[0].mask = { ...createLayerMask(), outside: 'hide', keys: [{ frame: 2, interp: 'smooth', values: { x: 10, y: 0 } }] };
+    doc.layers[0].keys = { enabled: true, frames: [] };
+    const back = unpackDocument(packDocument({ doc, activeLayerId: null, layers: new Map() }));
+    expect(back.doc.layers[0].mask).toEqual(doc.layers[0].mask);
+    // A mask keyframe places the mask only: no opacity.
+    const odd = sanitizeDocument({ layers: [{ id: 'l', kind: 'raster', mask: { id: 'm2', outside: 'x', keys: [{ frame: 1, values: { opacity: 0.5 } }, { frame: 3, values: { x: 4, opacity: 0.2 } }] } }] });
+    expect(odd.layers[0].mask).toEqual({ id: 'm2', enabled: true, linked: true, keys: [{ frame: 3, interp: 'linear', values: { x: 4 } }] });
+  });
+
   it('stores vector lines with a shared brush table', () => {
     const doc = createDocument('Lines', 200, 100, 72);
     const brush = { ...DEFAULT_BRUSH, size: 6 };

@@ -23,7 +23,7 @@ import { sanitizeBalloon, sanitizeTextBox, type Balloon, type TextBox } from '..
 import { sanitizeFrame } from '../paint/frames';
 import { pruneTrack, sanitizeTimeline, sanitizeTrack } from '../paint/animation';
 import { sanitizeClips } from '../paint/clips';
-import { sanitizeKeyTrack } from '../paint/keyframes';
+import { removeChannels, sanitizeKeyframes, sanitizeKeyTrack } from '../paint/keyframes';
 import { sanitizeLightLayers } from '../paint/lightTable';
 import { sanitizeSound } from '../paint/sound';
 
@@ -61,7 +61,9 @@ function sanitizeMask(raw: unknown, seen: Set<string>): LayerMask | undefined {
   // A mask needs its own pixels; an unusable id drops the mask rather than sharing another surface.
   if (!ID.test(id) || seen.has(id)) return undefined;
   seen.add(id);
-  return { id, enabled: bool(r.enabled, true), linked: bool(r.linked, true) };
+  // Mask keyframes place the mask only (no opacity).
+  const keys = sanitizeKeyframes(r.keys).flatMap((k) => removeChannels([k], k.frame, ['opacity', 'volume']));
+  return { id, enabled: bool(r.enabled, true), linked: bool(r.linked, true), ...(r.outside === 'hide' ? { outside: 'hide' as const } : {}), ...(keys.length ? { keys } : {}) };
 }
 
 function sanitizeRulers(raw: unknown): LayerRulers | undefined {

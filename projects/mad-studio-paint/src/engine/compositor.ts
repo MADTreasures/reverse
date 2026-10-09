@@ -6,8 +6,9 @@
 import { nativeOp } from '../model/blend';
 import { hexToRgb } from '../model/color';
 import { celAt, onionCels, onionOpacity, tintOnion, type OnionSkin } from '../paint/animation';
+import { maskTrackId } from '../model/animation';
 import { inClips } from '../paint/clips';
-import { cameraMatrix, invert, isRest, placementAt, placementMatrix, restPlacement, type Placement } from '../paint/keyframes';
+import { cameraMatrix, invert, isRest, placementAt, placementMatrix, placedCorners, restPlacement, type Placement } from '../paint/keyframes';
 import type { Affine } from '../paint/rulers';
 import { lightMatrix, type LightLayer } from '../paint/lightTable';
 import { clipGroups, findLayer, flatten } from '../model/layers';
@@ -126,6 +127,10 @@ export class Compositor {
   /** The document being composed (light table layers refer to its layers). */
   private doc: PaintDocument | null = null;
   private inLight = false;
+  /** Masks placed by their keyframes, per layer. */
+  private placedMasks = new Map<Id, HTMLCanvasElement>();
+  /** The masks of the composition under way (each placed once). */
+  private masksNow = new Map<Id, HTMLCanvasElement | null>();
 
   constructor(width: number, height: number) {
     this.canvas = createCanvas(width, height);
@@ -187,6 +192,7 @@ export class Compositor {
       target.fillRect(r.x, r.y, r.w, r.h);
     }
     this.doc = doc;
+    this.masksNow.clear();
     // Without a target cel, the light table lies on the paper.
     if (opts.light && this.light && this.light.folder === null) this.drawLightTable(target, r, opts);
     this.composeList(doc.layers, target, r, opts);
@@ -203,6 +209,7 @@ export class Compositor {
     this.applyCamera = Boolean(opts.camera);
     this.anim = { frame: doc.timeline?.enabled ? (opts.frame ?? this.frame) : null, onion: null };
     this.doc = doc;
+    this.masksNow.clear();
     const out = createCanvas(this.canvas.width, this.canvas.height);
     this.drawContent(layer, ctx2d(out), this.bounds, opts);
     return out;
@@ -214,6 +221,50 @@ export class Compositor {
     // A track shows only where it has a clip.
     if (this.anim.frame !== null && this.inCel === 0 && !inClips(layer.clips, this.anim.frame)) return false;
     return true;
+  }
+
+  /**
+   * The surface of a layer's enabled mask (or null); while the layer's keyframes are on, placed by
+   * the mask's keyframes at the frame. Where the moved mask leaves the canvas uncovered it shows
+   * the layer, unless it hides what lies beyond it (Mask outside selection).
+   */
+  private maskOf(layer: Layer): HTMLCanvasElement | null {
+    const known = this.masksNow.get(layer.id);
+    if (known !== undefined) return known;
+    const out = this.placedMask(layer);
+    this.masksNow.set(layer.id, out);
+    return out;
+  }
+
+  private placedMask(layer: Layer): HTMLCanvasElement | null {
+    const mask = layer.mask;
+    const surface = mask?.enabled ? (getSurface(mask.id) ?? null) : null;
+    if (!mask || !surface || this.anim.frame === null || !layer.keys?.enabled || layer.id === this.unkeyed) return surface;
+    const rest = restPlacement(this.doc?.width ?? surface.width, this.doc?.height ?? surface.height);
+    const p = this.keyPreview.get(maskTrackId(layer.id)) ?? (mask.keys?.length ? placementAt(mask.keys, this.anim.frame, rest) : null);
+    if (!p || isRest(p)) return surface;
+    let out = this.placedMasks.get(layer.id);
+    if (!out || out.width !== surface.width || out.height !== surface.height) {
+      out = createCanvas(surface.width, surface.height);
+      this.placedMasks.set(layer.id, out);
+    }
+    const ctx = ctx2d(out);
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.clearRect(0, 0, out.width, out.height);
+    const m = placementMatrix(p);
+    ctx.setTransform(m[0], m[1], m[2], m[3], m[4], m[5]);
+    ctx.drawImage(surface, 0, 0);
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    if (mask.outside !== 'hide') {
+      const c = placedCorners(p, surface.width, surface.height);
+      ctx.beginPath();
+      ctx.rect(0, 0, out.width, out.height);
+      c.forEach((q, i) => (i === 0 ? ctx.moveTo(q.x, q.y) : ctx.lineTo(q.x, q.y)));
+      ctx.closePath();
+      ctx.fillStyle = '#000';
+      ctx.fill('evenodd');
+    }
+    return out;
   }
 
   /** How a track is placed at the frame by its keyframes, or seen through its 2D camera; null: as it is. */
@@ -233,7 +284,7 @@ export class Compositor {
     // Only the part of the layer that lands in `r` is needed.
     const src = this.sourceOf(xf.m, r);
     if (!src) return out;
-    const plain = layer.kind !== 'folder' && !maskOf(layer) && !hasEffects(layer);
+    const plain = layer.kind !== 'folder' && !this.maskOf(layer) && !hasEffects(layer);
     const c = plain ? null : this.content(layer, src, opts);
     const source = c ? c.canvas : getSurface(layer.id);
     if (source) this.drawPlaced(out, source, xf.m, xf.opacity);
@@ -306,7 +357,7 @@ export class Compositor {
       paint(mixed, result.canvas, r, 1, layer.blend);
       this.pool.release(result);
     }
-    mixInto(target, mixed, r, layer.opacity, maskOf(layer));
+    mixInto(target, mixed, r, layer.opacity, this.maskOf(layer));
     this.pool.release(mixed);
   }
 
@@ -327,7 +378,7 @@ export class Compositor {
     if (layer.kind === 'raster' || layer.kind === 'vector' || layer.kind === 'text' || layer.kind === 'gradient') {
       const s = getSurface(layer.id);
       if (!s) return;
-      if (!maskOf(layer) && !hasEffects(layer)) {
+      if (!this.maskOf(layer) && !hasEffects(layer)) {
         paint(target, s, r, layer.opacity, layer.blend);
         return;
       }
@@ -336,7 +387,7 @@ export class Compositor {
       this.pool.release(c);
       return;
     }
-    const mask = maskOf(layer);
+    const mask = this.maskOf(layer);
     // Frame border folders are always isolated (their panels clip the result), and so are
     // animation folders showing onion skins.
     if (layer.blend === 'pass-through' && !layer.frame && !this.skinned(layer) && !this.lit(layer, opts)) {
@@ -375,7 +426,7 @@ export class Compositor {
       if (opts.light && this.light?.folder === layer.id) this.drawLightTable(ctx, rr, opts);
       this.composeChildren(layer, ctx, rr, opts);
     }
-    const mask = maskOf(layer);
+    const mask = this.maskOf(layer);
     if (mask) applyMask(ctx, mask);
     if (layer.kind === 'folder' && layer.frame) this.drawFrame(ctx, layer.id, layer.frame);
     const fx = layer.effects;
@@ -542,7 +593,7 @@ export class Compositor {
       this.pool.release(c);
       return;
     }
-    if (layer.kind !== 'folder' && !maskOf(layer) && !hasEffects(layer)) {
+    if (layer.kind !== 'folder' && !this.maskOf(layer) && !hasEffects(layer)) {
       const s = getSurface(layer.id);
       if (s) target.drawImage(s, 0, 0);
       return;
@@ -578,11 +629,6 @@ const hasEffects = (layer: Layer) => anyEffect(layer.effects);
 
 /** A screentone that reflects the layer opacity shows it in the dot size, so the dots stay opaque. */
 const opacityOf = (layer: Layer) => (layer.effects?.tone?.enabled && layer.effects.tone.reflectOpacity ? 1 : layer.opacity);
-
-/** The surface of a layer's enabled mask, or null. */
-function maskOf(layer: Layer): HTMLCanvasElement | null {
-  return layer.mask?.enabled ? (getSurface(layer.mask.id) ?? null) : null;
-}
 
 /** Keeps only the parts of `ctx` that the mask shows. */
 function applyMask(ctx: Ctx, mask: HTMLCanvasElement): void {

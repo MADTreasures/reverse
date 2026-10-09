@@ -13,7 +13,7 @@
  */
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useShallow } from 'zustand/react/shallow';
-import { keysOn } from '../../model/animation';
+import { keysOn, maskOwner } from '../../model/animation';
 import {
   addCurvePoint,
   curveHandles,
@@ -102,21 +102,23 @@ type Drag =
   | { kind: 'zoom'; x0: number; v: number; range: Range }
   | { kind: 'marquee'; x0: number; y0: number; add: boolean };
 
+/** The Graph Editor's track: the current track (or, its mask selected, the mask). */
+function graphTrack(s: ReturnType<typeof getState>) {
+  const id = anim.keyTrackId(s);
+  const mask = id ? maskOwner(id) !== null : false;
+  const snd = id ? s.doc.sound?.tracks.find((t) => t.id === id) : undefined;
+  const layer = id && !snd ? anim.currentTrack(s) : null;
+  return { name: snd?.name ?? (layer ? `${layer.name}${mask ? ' : Mask' : ''}` : ''), sound: Boolean(snd), mask, keyed: Boolean(snd) || Boolean(layer && keysOn(layer)) };
+}
+
 export function GraphEditor({ frames, cell }: { frames: number; cell: number }) {
-  const trackId = useStore((s) => anim.currentTrackId(s));
-  const info = useStore(
-    useShallow((s) => {
-      const id = anim.currentTrackId(s);
-      const snd = id ? s.doc.sound?.tracks.find((t) => t.id === id) : undefined;
-      const layer = id && !snd ? anim.currentTrack(s) : null;
-      return { name: snd?.name ?? layer?.name ?? '', sound: Boolean(snd), keyed: Boolean(snd) || Boolean(layer && keysOn(layer)) };
-    }),
-  );
+  const trackId = useStore((s) => anim.keyTrackId(s));
+  const info = useStore(useShallow(graphTrack));
   const keys = useStore((s) => (trackId ? anim.trackKeys(trackId, s) : NONE));
   const { selection, axes, hidden, setting, snapX, snapY, dragZoom } = useStore(
     useShallow((s) => ({ selection: s.graphSelection, axes: s.graphAxes, hidden: s.graphHidden, setting: s.graphSetting, snapX: s.graphSnapX, snapY: s.graphSnapY, dragZoom: s.graphDragZoom })),
   );
-  const groups = info.sound ? SOUND_GROUPS : LAYER_GROUPS;
+  const groups = info.sound ? SOUND_GROUPS : info.mask ? TRANSFORM_GROUPS : LAYER_GROUPS;
   const [preview, setPreview] = useState<Keyframe[] | null>(null);
   const [marquee, setMarquee] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
   const shown = preview ?? keys;
@@ -478,9 +480,5 @@ export function GraphEditor({ frames, cell }: { frames: number; cell: number }) 
 
 /** The track name shown over the Graph Editor's settings list. */
 export function useGraphTrackName(): string {
-  return useStore((s) => {
-    const id = anim.currentTrackId(s);
-    const snd = id ? s.doc.sound?.tracks.find((t) => t.id === id) : undefined;
-    return snd?.name ?? anim.currentTrack(s)?.name ?? '';
-  });
+  return useStore((s) => graphTrack(s).name);
 }

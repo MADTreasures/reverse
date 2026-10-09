@@ -1030,7 +1030,7 @@ function maskFromSelection(): LayerMask {
     ctx.globalCompositeOperation = 'source-over';
   }
   touch(mask.id);
-  return mask;
+  return sel ? { ...mask, outside: 'hide' } : mask;
 }
 
 /**
@@ -1166,7 +1166,7 @@ export function maskLayer(outside: boolean, id: Id = getState().activeLayerId): 
       commitPixels(label, [patch]);
     }
   } else {
-    const mask = createLayerMask();
+    const mask: LayerMask = outside ? { ...createLayerMask(), outside: 'hide' } : createLayerMask();
     const surface = ensureSurface(mask.id, width, height);
     const m = ctx2d(surface);
     m.fillStyle = '#ffffff';

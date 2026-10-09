@@ -8,13 +8,14 @@
  * the track's pop-up menu (assign a cel, clip commands).
  *
  * Keyframes: Details (+) in front of a track name shows its property rows (Transform, whose > opens
- * Position, Scale ratio, Rotate and Center of rotation; Opacity). A keyframe that records only some
+ * Position, Scale ratio, Rotate and Center of rotation; Opacity; Mask for a track with a layer
+ * mask, whose keyframes place the mask). A keyframe that records only some
  * of a row's properties shows small. Click selects (Ctrl/⌘: several), dragging around keyframes
  * selects them (Shift: adds, Ctrl/⌘: takes out); drag to move, Alt+drag to duplicate.
  */
 import { memo, useCallback, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { useShallow } from 'zustand/react/shallow';
-import { isAnimationFolder, isCameraFolder, keysOn, timelineTracks, trackContent, type AnimationFolder, type TrackRow as Row } from '../../model/animation';
+import { isAnimationFolder, isCameraFolder, keysOn, maskTrackId, timelineTracks, trackContent, type AnimationFolder, type TrackRow as Row } from '../../model/animation';
 import type { Id, Layer } from '../../model/types';
 import { assignmentAt, entryAt } from '../../paint/animation';
 import { clipIndexAt, type ClipEdge, type Timed, type TrackContent } from '../../paint/clips';
@@ -122,6 +123,10 @@ interface RowProps {
   /** Details (+) open: the property rows show; `transformOpen`: with the parts of Transform. */
   details: boolean;
   transformOpen: boolean;
+  /** The track's layer mask: its selected keyframes, how they look while dragged, and whether it is selected. */
+  maskKeys: string;
+  maskPreview: Keyframe[] | null;
+  maskActive: boolean;
   onGrip: (e: React.PointerEvent<HTMLDivElement>, track: Id, start: number, lane: HTMLElement) => void;
   onKey: (e: React.PointerEvent<HTMLDivElement>, track: Id, frame: number, group?: ChannelGroup) => void;
 }
@@ -185,7 +190,7 @@ function detailRows(transformOpen: boolean): { group: ChannelGroup; indent: numb
   return [...(transformOpen ? TRANSFORM_GROUPS.map((group) => ({ group, indent: 2 })) : []), { group: 'opacity', indent: 1 }];
 }
 
-const TrackRow = memo(function TrackRow({ row, frames, active, selected, selectedKeys, preview, details, transformOpen, onGrip, onKey }: RowProps) {
+const TrackRow = memo(function TrackRow({ row, frames, active, selected, selectedKeys, preview, details, transformOpen, maskKeys, maskPreview, maskActive, onGrip, onKey }: RowProps) {
   const track = row.layer;
   const content = preview ?? trackContent(track, frames);
   const keyed = keysOn(track);
@@ -315,6 +320,25 @@ const TrackRow = memo(function TrackRow({ row, frames, active, selected, selecte
             </div>
           </div>
         ))}
+      {open && track.mask && (
+        <div className={`tl-row tl-sub ${maskActive ? 'active' : ''}`} data-testid="timeline-subtrack" data-track-id={track.id} data-group="mask">
+          <div className="tl-name" style={{ paddingLeft: 4 + row.depth * 12 + 34 }}>
+            <button className="tl-prop-name tl-mask-name" title="Select the layer mask: the Object tool places it" onClick={() => anim.selectMaskFrame(track.id, getState().frame)}>
+              Mask
+            </button>
+          </div>
+          <div
+            className="tl-lane"
+            onClick={(e) => {
+              anim.clearClipSelection();
+              anim.clearKeySelection();
+              anim.selectMaskFrame(track.id, frameIn(e));
+            }}
+          >
+            <KeyMarks keys={maskPreview ?? track.mask.keys ?? []} frames={frames} sel={parseKeySel(maskKeys)} track={maskTrackId(track.id)} full={anim.MASK_CHANNELS} onKey={onKey} menu={menu} />
+          </div>
+        </div>
+      )}
     </>
   );
 });
@@ -439,6 +463,7 @@ export function TimelinePalette() {
     useShallow((s) => ({ frame: s.frame, playing: s.playing, loop: s.loop, onionSkin: s.onionSkin, clipSelection: s.clipSelection, height: s.timelineHeight })),
   );
   const activeId = useStore((s) => anim.currentTrackId(s));
+  const maskKeyed = useStore((s) => anim.maskKeyed(s)?.id ?? null);
   const soundDoc = useStore((s) => s.doc.sound);
   const hasCels = useStore((s) => anim.activeTrack(s) !== null);
   const { keySelection, editKeyed, keyDetails, transformDetails, graph, snapX, snapY, dragZoom } = useStore(
@@ -580,13 +605,14 @@ export function TimelinePalette() {
       if (t && i >= 0) out.set(drag.track, anim.draggedEdge(t, i, drag.edge, drag.frame, drag.stretch, fps));
       return out;
     }
-    const ids = [...rows.map((r) => r.layer.id), ...(soundTracks ?? []).map((t) => t.id)];
+    const ids = [...rows.map((r) => r.layer.id), ...rows.filter((r) => r.layer.mask).map((r) => maskTrackId(r.layer.id)), ...(soundTracks ?? []).map((t) => t.id)];
     if (drag.kind === 'keys') {
       if (!drag.delta) return out;
       for (const id of ids) {
-        const t = keySelection.some((k) => k.track === id) ? anim.trackContentOf(id, s) : null;
-        const keys = t ? anim.movedKeys(id, drag.delta, drag.copy, s) : null;
-        if (t && keys) out.set(id, { ...t, keys });
+        if (!keySelection.some((k) => k.track === id)) continue;
+        const keys = anim.movedKeys(id, drag.delta, drag.copy, s);
+        const t = anim.trackContentOf(id, s) ?? { clips: [] };
+        if (keys) out.set(id, { ...t, keys });
       }
       return out;
     }
@@ -773,6 +799,9 @@ export function TimelinePalette() {
                   preview={previews.get(r.layer.id) ?? null}
                   details={keyDetails.includes(r.layer.id)}
                   transformOpen={transformDetails.includes(r.layer.id)}
+                  maskKeys={r.layer.mask ? keysOf(maskTrackId(r.layer.id)) : ''}
+                  maskPreview={(previews.get(maskTrackId(r.layer.id))?.keys as Keyframe[] | undefined) ?? null}
+                  maskActive={maskKeyed === r.layer.id}
                   onGrip={stableGrip}
                   onKey={stableKey}
                 />

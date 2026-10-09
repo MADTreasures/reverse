@@ -4,7 +4,7 @@ import { BRUSH_SIZE_PRESETS } from '../../store/actions';
 import * as actions from '../../store/actions';
 import * as anim from '../../store/animationActions';
 import * as sound from '../../store/soundActions';
-import { isCameraFolder } from '../../model/animation';
+import { isCameraFolder, maskTrackId } from '../../model/animation';
 import type { Layer } from '../../model/types';
 import type { Interp, Placement, PlacementChannel } from '../../paint/keyframes';
 import { currentSubTool, drawingColor, getState, setState, useStore } from '../../store/store';
@@ -446,18 +446,22 @@ function KeyframeSettings({ track }: { track: Layer }) {
   const frame = useStore((s) => s.frame);
   const { width, height } = useStore(useShallow((s) => ({ width: s.doc.width, height: s.doc.height })));
   const cameraView = useStore((s) => s.cameraView);
-  const interp = useStore((s) => track.keys?.frames.find((k) => k.frame === s.frame)?.interp ?? s.keyInterp);
+  // With the track's layer mask selected, the settings place the mask.
+  const mask = useStore((s) => anim.maskKeyed(s)?.id === track.id);
+  const id = mask ? maskTrackId(track.id) : track.id;
+  const keys = mask ? (track.mask?.keys ?? []) : (track.keys?.frames ?? []);
+  const interp = useStore((s) => keys.find((k) => k.frame === s.frame)?.interp ?? s.keyInterp);
   const [keepAspect, setKeepAspect] = useState(true);
-  const p = anim.placementNow(track, frame);
+  const p = mask ? anim.maskPlacementNow(track, frame) : anim.placementNow(track, frame);
   const camera = isCameraFolder(track);
-  const atKey = Boolean(track.keys?.frames.some((k) => k.frame === frame));
+  const atKey = keys.some((k) => k.frame === frame);
   // A change records the properties it sets.
-  const set = (patch: Partial<Placement>, what: string) => anim.setKeyframe(track.id, frame, { ...p, ...patch }, `Keyframe: ${what}`, `key:${track.id}:${frame}:${what}`, false, Object.keys(patch) as PlacementChannel[]);
+  const set = (patch: Partial<Placement>, what: string) => anim.setKeyframe(id, frame, { ...p, ...patch }, `Keyframe: ${what}`, `key:${id}:${frame}:${what}`, false, Object.keys(patch) as PlacementChannel[]);
   const span = Math.max(width, height) * 2;
   return (
     <>
       <div className="prop-note" data-testid="keyframe-info">
-        {camera ? '2D camera folder' : 'Keyframes'} · frame {frame}
+        {camera ? '2D camera folder' : mask ? `Mask of ${track.name}` : 'Keyframes'} · frame {frame}
         {atKey ? ' (keyframe)' : ''}
       </div>
       {camera && (
@@ -504,7 +508,7 @@ function KeyframeSettings({ track }: { track: Layer }) {
       <PropSlider label="Rotate" unit="°" value={round2(p.rotation)} min={-360} max={360} step={1} decimals={1} onChange={(v) => set({ rotation: v }, 'rotate')} />
       <PropSlider label="Center of rotation X" unit="px" value={round2(p.pivotX)} min={-width} max={width * 2} step={1} onChange={(v) => set({ pivotX: v }, 'center')} />
       <PropSlider label="Center of rotation Y" unit="px" value={round2(p.pivotY)} min={-height} max={height * 2} step={1} onChange={(v) => set({ pivotY: v }, 'center')} />
-      <PropSlider label="Opacity" unit="%" value={Math.round(p.opacity * 100)} min={0} max={100} onChange={(v) => set({ opacity: v / 100 }, 'opacity')} />
+      {!mask && <PropSlider label="Opacity" unit="%" value={Math.round(p.opacity * 100)} min={0} max={100} onChange={(v) => set({ opacity: v / 100 }, 'opacity')} />}
       <Segmented
         label="Keyframe interpolation"
         value={interp}

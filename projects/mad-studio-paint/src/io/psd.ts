@@ -621,7 +621,8 @@ export function decodePsd(bytes: Uint8Array, name: string, onPixels: (id: Id, pi
       const img = w && h ? decode(() => (real ? getLayerRealMaskImageData(l) : getLayerMaskImageData(l)), w, h) : undefined;
       // An empty mask that would hide everything is how some writers say "no mask" (other readers agree).
       if (img || (m.defaultColor ?? 0) !== 0) {
-        layer.mask = { ...createLayerMask(), enabled: !m.disabled };
+        // The default colour is what the mask is beyond its pixels.
+        layer.mask = { ...createLayerMask(), enabled: !m.disabled, ...((m.defaultColor ?? 0) === 0 ? { outside: 'hide' as const } : {}) };
         onPixels(layer.mask.id, maskAlpha(m, img, width, height));
       }
     }

@@ -2369,6 +2369,92 @@ test('Graph Editor: curves per setting, move and add keyframes on one curve, slo
   expect(errors).toEqual([]);
 });
 
+test('mask keyframes: the Mask row and the Object tool move a layer mask over time; saved', async ({ page }) => {
+  const errors = await boot(page);
+  await page.evaluate(() => void window.__madPaint.runCommand('new'));
+  const dlg = page.getByRole('dialog', { name: 'New canvas' });
+  await dlg.getByLabel('Width').fill('400');
+  await dlg.getByLabel('Height').fill('300');
+  await dlg.getByText('Create animated illustration').click();
+  await dlg.getByLabel('Number of cels').fill('8');
+  await dlg.getByLabel('Frame rate').fill('8');
+  await dlg.getByRole('button', { name: 'OK' }).click();
+  const ruler = (f: number) => page.getByTestId('timeline-ruler').locator('.tl-cell').nth(f - 1).click();
+  // Cel 1 black; the animation folder's mask shows its left 100 px only.
+  await fillBlack(page);
+  await page.evaluate(() => {
+    const m = window.__madPaint;
+    const a = m.useStore.getState().doc.layers[0];
+    m.actions.setSelection({ width: 400, height: 300, data: new Uint8Array(400 * 300).map((_: number, i: number) => (i % 400 < 100 ? 255 : 0)) });
+    m.actions.maskLayer(true, a.id);
+    m.actions.deselect();
+  });
+  expect(await shown(page, 50, 150)).toBeLessThan(60);
+  expect(await shown(page, 150, 150)).toBe(255);
+  // Keyframes on for the folder; then, with the mask selected, Add keyframe records the mask.
+  await page.getByRole('button', { name: 'Add keyframe' }).click();
+  await page.getByRole('button', { name: 'Add keyframe' }).click();
+  const folder = () => page.evaluate(() => window.__madPaint.useStore.getState().doc.layers[0]);
+  let a = await folder();
+  expect(a.keys.frames.map((k: any) => k.frame)).toEqual([1]);
+  expect(a.mask.keys).toEqual([{ frame: 1, interp: 'linear', values: { x: 0, y: 0, scaleX: 1, scaleY: 1, rotation: 0, pivotX: 200, pivotY: 150 } }]);
+  // Details (+): the Mask row shows the mask's keyframes; clicking it selects the mask.
+  const track = page.locator('[data-testid=timeline-track][data-track="A"]');
+  await track.getByRole('button', { name: 'Details' }).click();
+  const maskRow = page.locator('[data-testid=timeline-subtrack][data-group="mask"]');
+  await expect(maskRow.getByTestId('timeline-key')).toHaveCount(1);
+  await page.evaluate(() => {
+    const m = window.__madPaint;
+    m.actions.selectLayer(m.useStore.getState().doc.layers[0].id, false);
+  });
+  expect(await page.evaluate(() => window.__madPaint.useStore.getState().maskEditing)).toBe(false);
+  await maskRow.getByRole('button', { name: 'Mask' }).click();
+  expect(await page.evaluate(() => window.__madPaint.useStore.getState().maskEditing)).toBe(true);
+  // Frame 8: the Object tool drags the mask 200 px to the right.
+  await ruler(8);
+  await selectTool(page, 'object');
+  await page.getByRole('button', { name: 'Tool Settings', exact: true }).click();
+  await expect(page.getByTestId('keyframe-info')).toContainText('Mask of A');
+  await drag(page, [50, 150], [250, 150], 8);
+  a = await folder();
+  expect(a.mask.keys.map((k: any) => [k.frame, Math.round(k.values.x ?? NaN), Object.keys(k.values).length])).toEqual([
+    [1, 0, 7],
+    [8, 200, 2],
+  ]);
+  expect(a.keys.frames.length).toBe(1);
+  await expect(maskRow.getByTestId('timeline-key')).toHaveCount(2);
+  expect(await shown(page, 250, 150)).toBeLessThan(60);
+  expect(await shown(page, 50, 150)).toBe(255);
+  // Frame 5: on its way (4/7 of 200 px).
+  await ruler(5);
+  expect(await shown(page, 160, 150)).toBeLessThan(60);
+  expect(await shown(page, 50, 150)).toBe(255);
+  // The Graph Editor shows the mask's curves (no opacity).
+  await page.getByRole('button', { name: 'Graph Editor' }).click();
+  await expect(page.getByTestId('graph-setting')).toHaveText(['Position', 'Scale ratio', 'Rotate', 'Center of rotation']);
+  await expect(page.getByTestId('timeline').locator('.tl-head .tl-name')).toHaveText('A : Mask');
+  await page.getByRole('button', { name: 'Graph Editor' }).click();
+  // Saved and opened again.
+  const back = await page.evaluate(async () => {
+    const m = window.__madPaint;
+    await m.openFileBytes({ name: 'mask-keys.madpaint', data: await m.buildDocumentBytes() });
+    return m.useStore.getState().doc.layers[0].mask.keys.map((k: any) => [k.frame, Math.round(k.values.x)]);
+  });
+  expect(back).toEqual([
+    [1, 0],
+    [8, 200],
+  ]);
+  // With the folder's keyframes off the mask stays where it was drawn.
+  await page.evaluate(() => {
+    const m = window.__madPaint;
+    m.actions.selectLayer(m.useStore.getState().doc.layers[0].id);
+    m.anim.setFrame(8);
+    m.runCommand('enableKeyframes');
+  });
+  expect(await shown(page, 50, 150)).toBeLessThan(60);
+  expect(errors).toEqual([]);
+});
+
 test('light table: a cel and an image on the target cel, colour mode, Light table tool, saved', async ({ page }) => {
   const errors = await boot(page);
   await page.evaluate(() => void window.__madPaint.runCommand('new'));
