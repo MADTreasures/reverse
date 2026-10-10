@@ -161,7 +161,13 @@ void Sequencer::process (BlockContext& ctx, const Timeline* tl, const AutoParam&
                     sink.noteEvent (ev, bends, at, secondsPerTick);
                 }
             }
-            if (metronome)
+            if (metronome && tl != nullptr && ! tl->signatures.empty())
+            {
+                // Time signature markers (scheduler.ts: beatsIn()).
+                forEachBeat (tl->signatures, t0, t1, [&] (double b, bool accent)
+                             { sink.click ((double) ctx.blockStart + pos + (b - t0) / tps, accent); });
+            }
+            else if (metronome)
             {
                 for (double b = std::ceil (t0 / ppq - 1.0e-9) * ppq; b < t1 - 1.0e-9; b += ppq)
                 {

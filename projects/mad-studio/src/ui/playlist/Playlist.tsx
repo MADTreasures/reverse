@@ -5,15 +5,27 @@ import { CLIP_GAIN_MAX_DB, CLIP_GAIN_MIN_DB, CLIP_PITCH_RANGE, CLIP_STRETCH_MAX,
 import { segmentMidValue } from '../../model/automation';
 import { describeTarget, fromNorm } from '../../model/automationTargets';
 import { findPattern, songLength } from '../../model/patterns';
+import { MARKER_ACTIONS, adjacentMarker, markerAction, nextMarkerName, parseSignature, positionAt, signatureMap, sortedMarkers } from '../../model/markers';
 import { foldIntoLoop } from '../../model/timeline';
 import { PALETTE, PALETTE_NAMES } from '../../model/colors';
 import { SNAP_OPTIONS, formatPosition, gridLineTicks, secondsToTicks, snapFloor, snapLabel, snapRound, snapTicks, ticksPerBar, ticksToSeconds, type SnapId } from '../../model/timing';
 import { makeId } from '../../model/ids';
-import type { AudioClip, AutomationChannel, Clip, Id, Project } from '../../model/types';
+import type { AudioClip, AutomationChannel, Clip, Id, Project, TimeMarker } from '../../model/types';
 import { createAudioClip, importAudioFiles } from '../../project/projectIO';
 import {
+  addArrangement,
   addClip,
+  addMarker,
+  addTimeSignature,
   addTracks,
+  arrangementList,
+  cloneArrangement,
+  deleteAllMarkers,
+  deleteArrangement,
+  deleteMarker,
+  renameArrangement,
+  switchArrangement,
+  updateMarker,
   cloneTrack,
   deleteClips,
   deleteTrack,
@@ -52,7 +64,22 @@ import { openClipProperties, promptDialog, showMenu, toast, type MenuItem } from
 import { WindowFrame } from '../workspace/WindowFrame';
 import { focusWindow, openChannelEditor, openPianoRoll, openWindow } from '../workspace/windows';
 import { chopClip, normalizeClips } from './audioClipTools';
-import { CLIP_ICON_W, RULER_H, TRACK_LED_W, TRACK_W, audioClipHandles, automationClipView, drawPlaylist, tickAtX, trackAtY, xOfTick, yOfTrack, type PlaylistViewport } from './draw';
+import {
+  CLIP_ICON_W,
+  RULER_H,
+  TRACK_LED_W,
+  TRACK_W,
+  audioClipHandles,
+  automationClipView,
+  drawPlaylist,
+  markerAt,
+  markerLabel,
+  tickAtX,
+  trackAtY,
+  xOfTick,
+  yOfTrack,
+  type PlaylistViewport,
+} from './draw';
 import { PlaylistPicker, usePick } from './PlaylistPicker';
 
 const EDGE = 7;
@@ -72,7 +99,115 @@ type Drag =
   | { kind: 'autoTension'; key: string; channelId: Id; index: number; startY: number; startTension: number }
   | { kind: 'clipFade'; key: string; clipId: Id; side: 'in' | 'out' }
   | { kind: 'clipTension'; key: string; clipId: Id; side: 'in' | 'out'; startY: number; startTension: number }
-  | { kind: 'clipGain'; key: string; clipId: Id; startY: number; startGain: number };
+  | { kind: 'clipGain'; key: string; clipId: Id; startY: number; startGain: number }
+  | { kind: 'marker'; key: string; id: Id; originTick: number; x0: number; moved: boolean };
+
+/** Where a new time marker goes: the time selection's start, else the song position (FL Studio). */
+function markerTick(): number {
+  const s = useStore.getState();
+  if (s.transport.loop) return s.transport.loop.start;
+  return Math.round(engine.playheadTick() ?? s.transport.songStart);
+}
+
+/** FL Studio's Alt+T: a named marker at the song position. */
+async function promptAddMarker(): Promise<void> {
+  const tick = markerTick();
+  const name = await promptDialog('Add marker', nextMarkerName(useStore.getState().project));
+  if (name) addMarker(tick, name);
+}
+
+/** FL Studio's Shift+Alt+T: a time signature at the song position (or over the time selection). */
+async function promptTimeSignature(tick = markerTick()): Promise<void> {
+  const s = useStore.getState();
+  const current = positionAt(signatureMap(s.project), tick).signature;
+  const text = await promptDialog('Time signature (for example 6/8)', `${current.numerator}/${current.denominator}`);
+  if (text === null) return;
+  const sig = parseSignature(text);
+  if (!sig) {
+    toast('Enter a time signature like 3/4, 6/8 or 7/8 (denominator 2, 4, 8 or 16).', 'error');
+    return;
+  }
+  addTimeSignature(tick, sig, s.transport.loop);
+}
+
+function jumpToMarker(direction: 1 | -1): void {
+  const s = useStore.getState();
+  const from = engine.playheadTick() ?? s.transport.songStart;
+  const m = adjacentMarker(s.project, from, direction);
+  if (!m) return;
+  if (s.transport.mode !== 'song') setTransport({ mode: 'song' });
+  engine.seek(m.tick);
+}
+
+/** Right-click menu of a time marker (FL Studio). */
+function markerMenu(project: Project, marker: TimeMarker): MenuItem[] {
+  const next = sortedMarkers(project).find((m) => m.tick > marker.tick);
+  const action = markerAction(marker);
+  return [
+    { label: markerLabel(marker), header: true },
+    { label: 'Rename…', onClick: () => void promptDialog('Rename marker', marker.name).then((n) => n && updateMarker(marker.id, (m) => void (m.name = n))) },
+    {
+      label: 'Action',
+      submenu: MARKER_ACTIONS.map((a) => ({
+        label: a.value === 'timeSignature' ? 'Time signature…' : a.label,
+        radio: true,
+        checked: action === a.value,
+        onClick: () => {
+          if (a.value === 'timeSignature') void promptTimeSignature(marker.tick).then(() => deleteMarker(marker.id));
+          else updateMarker(marker.id, (m) => void (a.value === 'none' ? delete m.action : (m.action = a.value)));
+        },
+      })),
+    },
+    {
+      label: 'Place loop',
+      onClick: () => {
+        setTransport({ loop: { start: marker.tick, end: next?.tick ?? Math.max(marker.tick + ticksPerBar(project.beatsPerBar), songLength(project)) } });
+        if (useStore.getState().transport.mode !== 'song') setTransport({ mode: 'song' });
+      },
+    },
+    { separator: true },
+    { label: 'Add marker…', shortcut: 'Alt+T', onClick: () => void promptAddMarker() },
+    { label: 'Add time signature…', shortcut: 'Shift+Alt+T', onClick: () => void promptTimeSignature() },
+    { separator: true },
+    { label: 'Delete', danger: true, onClick: () => deleteMarker(marker.id) },
+  ];
+}
+
+/** FL Studio's Playlist › Arrangements menu. */
+function arrangementMenu(project: Project): MenuItem[] {
+  const list = arrangementList(project);
+  return [
+    { label: 'Arrangements', header: true },
+    ...list.map((a) => ({ label: a.name, radio: true, checked: a.current, onClick: () => !a.current && switchArrangement(a.id) })),
+    { separator: true },
+    { label: 'Add one', onClick: () => addArrangement() },
+    { label: 'Clone', onClick: () => cloneArrangement() },
+    {
+      label: 'Rename…',
+      onClick: () => void promptDialog('Rename arrangement', list.find((a) => a.current)?.name ?? '').then((n) => n && renameArrangement(n)),
+    },
+    { label: 'Delete', danger: true, disabled: list.length < 2, onClick: () => deleteArrangement() },
+  ];
+}
+
+/** FL Studio's Playlist menu (time markers, arrangements). */
+function playlistMenu(project: Project): MenuItem[] {
+  return [
+    {
+      label: 'Time markers',
+      submenu: [
+        { label: 'Add marker…', shortcut: 'Alt+T', onClick: () => void promptAddMarker() },
+        { label: 'Add time signature…', shortcut: 'Shift+Alt+T', onClick: () => void promptTimeSignature() },
+        { separator: true },
+        { label: 'Jump to next marker', shortcut: 'Alt+*', disabled: !project.markers?.length, onClick: () => jumpToMarker(1) },
+        { label: 'Jump to previous marker', shortcut: 'Alt+/', disabled: !project.markers?.length, onClick: () => jumpToMarker(-1) },
+        { separator: true },
+        { label: 'Delete all markers', danger: true, disabled: !project.markers?.length, onClick: () => deleteAllMarkers() },
+      ],
+    },
+    { label: 'Arrangements', submenu: arrangementMenu(project) },
+  ];
+}
 
 /** An audio clip's handles (FL Studio): fade triangles, tension circles, gain semi-circle. */
 type AudioHandle = 'fadeIn' | 'fadeOut' | 'tensionIn' | 'tensionOut' | 'gain';
@@ -444,6 +579,17 @@ export function Playlist() {
       return;
     }
     if (y < RULER_H) {
+      const marker = x > TRACK_W ? markerAt(vp, project.markers, x, y) : null;
+      if (marker) {
+        if (e.button === 2) {
+          showMenu(e, markerMenu(project, marker));
+          return;
+        }
+        if (e.button === 0) {
+          drag.current = { kind: 'marker', key: gestureKey('marker'), id: marker.id, originTick: marker.tick, x0: x, moved: false };
+          return;
+        }
+      }
       if (x > TRACK_W && e.button === 2) {
         const raw = Math.max(0, tickAtX(vp, x));
         drag.current = { kind: 'loop', anchor: snapRound(raw, e.altKey ? 1 : grid), rawTick: raw, x0: x, prev: useStore.getState().transport.loop, moved: false };
@@ -628,8 +774,14 @@ export function Playlist() {
     const { x, y } = local(e);
     if (!d) {
       if (y < RULER_H) {
+        const marker = markerAt(vp, project.markers, x, y);
+        if (marker) {
+          e.currentTarget.style.cursor = 'ew-resize';
+          setHint(`Marker ${markerLabel(marker)} – click: jump here, drag: move, double-click: rename, right-click: options`);
+          return;
+        }
         e.currentTarget.style.cursor = 'text';
-        setHint('Click: song position · right-drag: select a time range, playback loops in it (Ctrl+D clears it)');
+        setHint('Click: song position · right-drag: select a time range, playback loops in it (Ctrl+D clears it) · Alt+T: add a marker');
         return;
       }
       if (x < TRACK_W) {
@@ -794,6 +946,14 @@ export function Playlist() {
         );
         break;
       }
+      case 'marker': {
+        if (Math.abs(x - d.x0) < 3 && !d.moved) break;
+        d.moved = true;
+        const raw = d.originTick + (x - d.x0) / vp.pxPerTick;
+        const tick = Math.max(0, e.altKey ? Math.round(raw) : snapRound(raw, grid));
+        updateMarker(d.id, (m) => void (m.tick = tick), { coalesce: d.key, label: 'playlist move marker' });
+        break;
+      }
       case 'clipFade': {
         const clip = project.clips.find((c) => c.id === d.clipId);
         if (!clip || clip.kind !== 'audio') break;
@@ -868,6 +1028,11 @@ export function Playlist() {
       suspendClipVariants(false);
       ensureClipVariants(useStore.getState().project);
     }
+    if (d?.kind === 'marker' && !d.moved) {
+      // FL Studio: a click on a marker moves the song position there.
+      if (useStore.getState().transport.mode !== 'song') setTransport({ mode: 'song' });
+      engine.seek(d.originTick);
+    }
     if (d?.kind === 'loop' && !d.moved && d.prev) {
       // A right-click outside the time selection extends it to the clicked position.
       const { start, end } = d.prev;
@@ -880,6 +1045,11 @@ export function Playlist() {
 
   const onDoubleClick = (e: ReactMouseEvent<HTMLCanvasElement>) => {
     const { x, y } = local(e);
+    const marker = y < RULER_H ? markerAt(vp, project.markers, x, y) : null;
+    if (marker) {
+      void promptDialog('Rename marker', marker.name).then((n) => n && updateMarker(marker.id, (m) => void (m.name = n)));
+      return;
+    }
     if (x < TRACK_W - TRACK_LED_W && y > RULER_H) {
       const ti = trackAtY(vp, y);
       if (project.tracks[ti]) setRenaming({ index: ti, y: RULER_H + ti * view.trackHeight - view.scrollY });
@@ -979,6 +1149,20 @@ export function Playlist() {
             return true;
           }
         }
+        // FL Studio: Alt+T adds a time marker, Shift+Alt+T a time signature, Alt+* / Alt+/ jump
+        // (Ctrl+T stays the typing keyboard switch).
+        if (e.code === 'KeyT' && e.altKey && !mod) {
+          void (e.shiftKey ? promptTimeSignature() : promptAddMarker());
+          return true;
+        }
+        if (e.altKey && (e.code === 'NumpadMultiply' || e.key === '*')) {
+          jumpToMarker(1);
+          return true;
+        }
+        if (e.altKey && (e.code === 'NumpadDivide' || e.key === '/')) {
+          jumpToMarker(-1);
+          return true;
+        }
         // FL Studio (typing keyboard off): 7 / 8 repitch the selected audio clips, 9 reverses them.
         const audioIds = chosen.filter((c) => c.kind === 'audio').map((c) => c.id);
         if (!mod && !e.altKey && audioIds.length && !useStore.getState().ui.typingKeyboard) {
@@ -1054,8 +1238,15 @@ export function Playlist() {
     </button>
   );
 
+  const arrangementName = project.arrangement?.name ?? 'Arrangement';
   const toolbar = (
     <>
+      <button className="btn" data-hint="Playlist menu: time markers, arrangements" onClick={(e) => showMenu(e, playlistMenu(project))}>
+        ▾ Menu
+      </button>
+      <button className="btn arrangement-select" data-hint="Arrangements: switch, add, clone, rename, delete" onClick={(e) => showMenu(e, arrangementMenu(project))}>
+        {arrangementName} ▾
+      </button>
       <div className="seg">
         {toolButton('draw', <IconPencil size={12} />, 'Draw (P): click to place the picked pattern or clip, drag to move')}
         {toolButton('paint', <IconBrush size={12} />, 'Paint (B): drag to place several clips')}
@@ -1084,7 +1275,7 @@ export function Playlist() {
   );
 
   return (
-    <WindowFrame id="playlist" title={`Playlist - Arrangement › ${pickName(project, pick)}`} icon={<IconPlaylist />} toolbar={toolbar}>
+    <WindowFrame id="playlist" title={`Playlist - ${arrangementName} › ${pickName(project, pick)}`} icon={<IconPlaylist />} toolbar={toolbar}>
       <div className="editor with-picker" onDragOver={onDragOver} onDragLeave={() => (dropHint.current = null)} onDrop={onDrop}>
         <PlaylistPicker />
         <div className="editor-canvas-wrap" ref={wrapRef}>

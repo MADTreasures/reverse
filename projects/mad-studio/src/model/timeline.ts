@@ -1,5 +1,6 @@
 import { channelSettings } from './channelSettings';
 import { clipFades, clipGain, clipVariant, variantSampleId } from './clips';
+import { hasSignatureChanges, signatureMap, type Signature } from './markers';
 import { arpSequence, random } from './noteTools';
 import { MAX_NOTE_BENDS, type PitchBend } from './notes';
 import { CHORDS } from './scales';
@@ -57,6 +58,8 @@ export interface Timeline {
   start: number;
   /** Loop end in ticks (exclusive). */
   end: number;
+  /** Song mode with time signature markers: the signature map (markers.ts) for the metronome. */
+  signatures?: Signature[];
 }
 
 function sortEvents<T extends SequencedEvent>(events: T[]): T[] {
@@ -288,7 +291,8 @@ export function songTimeline(project: Project): Timeline {
       }
     }
   }
-  return { events: resolveNotes(sortEvents(events), project), start: 0, end: songLength(project) };
+  const map = signatureMap(project);
+  return { events: resolveNotes(sortEvents(events), project), start: 0, end: songLength(project), ...(hasSignatureChanges(map) ? { signatures: map } : {}) };
 }
 
 /** Index of the first event at or after the given tick (binary search). */
@@ -306,7 +310,7 @@ export function firstEventAtOrAfter(events: SequencedEvent[], tick: number): num
 /** The song timeline looping inside a time selection (FL Studio: playback loops in the selected range). */
 export function withLoop(tl: Timeline, loop: { start: number; end: number } | null): Timeline {
   if (!loop || loop.end <= loop.start) return tl;
-  return { events: tl.events, start: Math.max(0, loop.start), end: loop.end };
+  return { ...tl, start: Math.max(0, loop.start), end: loop.end };
 }
 
 /** Maps a position into a loop range the way playback wraps (positions outside fold back in). */

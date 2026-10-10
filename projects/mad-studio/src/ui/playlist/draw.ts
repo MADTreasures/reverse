@@ -2,7 +2,8 @@ import { samplePool } from '../../audio/samplePool';
 import { CLIP_GAIN_MIN_DB, clipFades, clipGain, clipVariant, fadeShape, variantSampleId } from '../../model/clips';
 import { keyRange, patternLength } from '../../model/patterns';
 import { PPQ, ticksPerBar, ticksToSeconds } from '../../model/timing';
-import type { AudioClip, Clip, Project } from '../../model/types';
+import { barLines, signatureMap } from '../../model/markers';
+import type { AudioClip, Clip, Project, TimeMarker } from '../../model/types';
 import { drawCurve, type CurveView } from '../automation/curve';
 
 export const TRACK_W = 150;
@@ -47,6 +48,32 @@ export interface PlaylistScene {
   lineTicks: number;
   /** Time selection (song playback loops inside it). */
   loop: { start: number; end: number } | null;
+}
+
+/** Top of the time marker flags in the ruler. */
+export const MARKER_Y = 13;
+
+export function markerLabel(m: TimeMarker): string {
+  if (m.action === 'timeSignature') {
+    const sig = `${m.numerator}/${m.denominator}`;
+    return m.name && m.name !== sig && m.name !== 'Time signature' ? `${sig} ${m.name}` : sig;
+  }
+  return m.action === 'start' ? `▶ ${m.name}` : m.name;
+}
+
+export function markerLabelWidth(label: string): number {
+  return Math.min(140, 8 + label.length * 5);
+}
+
+/** The time marker whose flag is at (x, y) in the ruler, if any (the last drawn wins). */
+export function markerAt(v: PlaylistViewport, markers: readonly TimeMarker[] | undefined, x: number, y: number): TimeMarker | null {
+  if (!markers || y < MARKER_Y - 1 || y > RULER_H) return null;
+  for (let i = markers.length - 1; i >= 0; i--) {
+    const m = markers[i];
+    const mx = xOfTick(v, m.tick);
+    if (x >= mx - 3 && x <= mx + markerLabelWidth(markerLabel(m))) return m;
+  }
+  return null;
 }
 
 /** Width of the clip menu icon at the left of a clip's title bar (FL Studio opens the clip menu there). */
@@ -319,13 +346,25 @@ export function drawPlaylist(ctx: CanvasRenderingContext2D, v: PlaylistViewport,
     ctx.fillRect(TRACK_W, below, width - TRACK_W, height - below);
   }
 
-  // --- grid lines (finer as you zoom in, like FL Studio's "Line" snap)
-  const bar = ticksPerBar(project.beatsPerBar);
+  // --- grid lines (finer as you zoom in, like FL Studio's "Line" snap); bar lines follow the time
+  // signature markers.
   const endTick = tickAtX(v, width);
+  const signatures = signatureMap(project);
+  const bars = barLines(signatures, Math.max(0, v.scrollTick), endTick + 1);
+  const barTickSet = new Set(bars.map((b) => b.tick));
   const line = s.lineTicks;
   for (let t = Math.max(0, Math.floor(v.scrollTick / line) * line); t <= endTick; t += line) {
+    if (barTickSet.has(t)) continue;
     const x = Math.round(xOfTick(v, t)) + 0.5;
-    ctx.strokeStyle = t % bar === 0 ? '#ffffff30' : t % PPQ === 0 ? '#ffffff10' : '#ffffff08';
+    ctx.strokeStyle = t % PPQ === 0 ? '#ffffff10' : '#ffffff08';
+    ctx.beginPath();
+    ctx.moveTo(x, RULER_H);
+    ctx.lineTo(x, Math.min(height, below));
+    ctx.stroke();
+  }
+  ctx.strokeStyle = '#ffffff30';
+  for (const b of bars) {
+    const x = Math.round(xOfTick(v, b.tick)) + 0.5;
     ctx.beginPath();
     ctx.moveTo(x, RULER_H);
     ctx.lineTo(x, Math.min(height, below));
@@ -405,7 +444,7 @@ export function drawPlaylist(ctx: CanvasRenderingContext2D, v: PlaylistViewport,
     const y = yOfTrack(v, s.dropHint.track);
     ctx.strokeStyle = '#ff9b3d';
     ctx.setLineDash([4, 3]);
-    ctx.strokeRect(x + 0.5, y + 1.5, Math.max(30, bar * pxPerTick * 0.5), trackHeight - 4);
+    ctx.strokeRect(x + 0.5, y + 1.5, Math.max(30, ticksPerBar(project.beatsPerBar) * pxPerTick * 0.5), trackHeight - 4);
     ctx.setLineDash([]);
   }
 
@@ -437,17 +476,30 @@ export function drawPlaylist(ctx: CanvasRenderingContext2D, v: PlaylistViewport,
       ctx.fillRect(lx0, 0, lx1 - lx0, RULER_H - 1);
     }
   }
-  const barPx = bar * pxPerTick;
+  const barPx = ticksPerBar(project.beatsPerBar) * pxPerTick;
   const every = barPx < 26 ? Math.ceil(26 / barPx) : 1;
-  for (let t = Math.floor(v.scrollTick / bar) * bar; t <= endTick; t += bar) {
-    const x = Math.round(xOfTick(v, t)) + 0.5;
-    if (x < TRACK_W) continue;
-    const index = t / bar;
-    if (index % every !== 0) continue;
+  for (const b of bars) {
+    const x = Math.round(xOfTick(v, b.tick)) + 0.5;
+    if (x < TRACK_W || b.bar % every !== 0) continue;
     ctx.fillStyle = '#e6ebee';
-    ctx.fillText(String(index + 1), x + 4, 9);
+    ctx.fillText(String(b.bar + 1), x + 4, 7);
     ctx.fillStyle = '#ffffff40';
     ctx.fillRect(x, RULER_H - 8, 1, 7);
+  }
+
+  // --- time markers (FL Studio: in the timeline, a flag with the name; signature markers show it)
+  for (const m of project.markers ?? []) {
+    const x = Math.round(xOfTick(v, m.tick)) + 0.5;
+    const label = markerLabel(m);
+    const w = markerLabelWidth(label);
+    if (x + w < TRACK_W || x > width) continue;
+    ctx.fillStyle = m.action === 'timeSignature' ? '#d9a441' : m.action === 'start' ? '#7cc35b' : '#c7d0d6';
+    ctx.fillRect(x, MARKER_Y, 1, RULER_H - MARKER_Y - 1);
+    ctx.fillRect(x, MARKER_Y, w, 9);
+    ctx.fillStyle = '#1b2227';
+    ctx.font = '8.5px -apple-system, sans-serif';
+    ctx.fillText(label, x + 3, MARKER_Y + 5, w - 4);
+    ctx.font = '10px -apple-system, sans-serif';
   }
 
   // --- song start marker

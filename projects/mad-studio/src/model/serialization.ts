@@ -19,7 +19,9 @@ import { NOTE_COLOR_COUNT, NOTE_PROPS, setNoteValue } from './notes';
 import { DEFAULT_SEND, sanitizeRoutes } from './routing';
 import { SCALES, type ScaleSpec, type ScaleType } from './scales';
 import { CLIP_GAIN_MAX_DB, CLIP_GAIN_MIN_DB, CLIP_PITCH_RANGE, CLIP_STRETCH_MAX, CLIP_STRETCH_MIN } from './clips';
+import { parseSignature } from './markers';
 import type {
+  Arrangement,
   AudioClip,
   AutomationData,
   AutomationPoint,
@@ -39,6 +41,7 @@ import type {
   SampleInfo,
   SamplerParams,
   SynthParams,
+  TimeMarker,
   TrackInput,
   WaveType,
 } from './types';
@@ -395,31 +398,46 @@ export function parseProject(raw: unknown): Project {
   if (patterns.length === 0) patterns = [createPattern('Pattern 1', paletteColor(5), beatsPerBar)];
   const patternIds = new Set(patterns.map((p) => p.id));
 
-  let tracks: PlaylistTrack[] = arr(raw.tracks)
-    .filter(isObj)
-    .map((t, i) => ({ id: str(t.id, makeId('trk')), name: str(t.name, `Track ${i + 1}`), muted: bool(t.muted, false) }));
-  if (tracks.length === 0) tracks = createTracks();
-  const trackIds = new Set(tracks.map((t) => t.id));
-
-  const clips: Clip[] = [];
-  for (const c of arr(raw.clips)) {
-    if (!isObj(c) || typeof c.trackId !== 'string' || !trackIds.has(c.trackId)) continue;
-    const base = {
-      id: str(c.id, makeId('clip')),
-      trackId: c.trackId,
-      start: Math.round(num(c.start, 0, 0)),
-      length: Math.max(1, Math.round(num(c.length, ticksPerBar(beatsPerBar), 1))),
-      offset: Math.round(num(c.offset, 0, 0)),
-      ...(bool(c.muted, false) ? { muted: true } : {}),
-    };
-    if (c.kind === 'pattern' && typeof c.patternId === 'string' && patternIds.has(c.patternId)) {
-      clips.push({ ...base, kind: 'pattern', patternId: c.patternId });
-    } else if (c.kind === 'audio' && typeof c.channelId === 'string' && channelIds.has(c.channelId)) {
-      clips.push({ ...base, kind: 'audio', channelId: c.channelId, ...parseAudioClipProps(c) });
-    } else if (c.kind === 'automation' && typeof c.channelId === 'string' && automationIds.has(c.channelId)) {
-      clips.push({ ...base, kind: 'automation', channelId: c.channelId });
+  // Playlist: tracks, clips and markers of the current arrangement and of the stored ones.
+  const parseTracks = (v: unknown): PlaylistTrack[] => {
+    const list = arr(v)
+      .filter(isObj)
+      .map((t, i) => ({ id: str(t.id, makeId('trk')), name: str(t.name, `Track ${i + 1}`), muted: bool(t.muted, false) }));
+    return list.length ? list : createTracks();
+  };
+  const parseClips = (v: unknown, trackIds: Set<string>): Clip[] => {
+    const clips: Clip[] = [];
+    for (const c of arr(v)) {
+      if (!isObj(c) || typeof c.trackId !== 'string' || !trackIds.has(c.trackId)) continue;
+      const base = {
+        id: str(c.id, makeId('clip')),
+        trackId: c.trackId,
+        start: Math.round(num(c.start, 0, 0)),
+        length: Math.max(1, Math.round(num(c.length, ticksPerBar(beatsPerBar), 1))),
+        offset: Math.round(num(c.offset, 0, 0)),
+        ...(bool(c.muted, false) ? { muted: true } : {}),
+      };
+      if (c.kind === 'pattern' && typeof c.patternId === 'string' && patternIds.has(c.patternId)) {
+        clips.push({ ...base, kind: 'pattern', patternId: c.patternId });
+      } else if (c.kind === 'audio' && typeof c.channelId === 'string' && channelIds.has(c.channelId)) {
+        clips.push({ ...base, kind: 'audio', channelId: c.channelId, ...parseAudioClipProps(c) });
+      } else if (c.kind === 'automation' && typeof c.channelId === 'string' && automationIds.has(c.channelId)) {
+        clips.push({ ...base, kind: 'automation', channelId: c.channelId });
+      }
     }
-  }
+    return clips;
+  };
+  const tracks = parseTracks(raw.tracks);
+  const clips = parseClips(raw.clips, new Set(tracks.map((t) => t.id)));
+  const markers = parseMarkers(raw.markers);
+  const arrangements: Arrangement[] = arr(raw.arrangements)
+    .filter(isObj)
+    .slice(0, 100)
+    .map((a, i) => {
+      const t = parseTracks(a.tracks);
+      return { id: str(a.id, makeId('arr')), name: str(a.name, `Arrangement ${i + 2}`), tracks: t, clips: parseClips(a.clips, new Set(t.map((x) => x.id))), markers: parseMarkers(a.markers) };
+    });
+  const current = isObj(raw.arrangement) ? { id: str(raw.arrangement.id, makeId('arr')), name: str(raw.arrangement.name, 'Arrangement') } : null;
 
   return {
     format: 'mad-studio',
@@ -437,7 +455,26 @@ export function parseProject(raw: unknown): Project {
     pdc: bool(raw.pdc, true),
     pdcAutomation: bool(raw.pdcAutomation, true),
     ...parseScale(raw.scale),
+    ...(markers.length ? { markers } : {}),
+    ...(current ? { arrangement: current } : {}),
+    ...(arrangements.length ? { arrangements } : {}),
   };
+}
+
+/** Time markers (markers.ts): sorted, clamped, signature markers with a valid signature. */
+function parseMarkers(v: unknown): TimeMarker[] {
+  const out: TimeMarker[] = [];
+  for (const m of arr(v)) {
+    if (!isObj(m)) continue;
+    const marker: TimeMarker = { id: str(m.id, makeId('mk')), tick: Math.round(num(m.tick, 0, 0)), name: str(m.name, 'Marker') };
+    if (m.action === 'start') marker.action = 'start';
+    if (m.action === 'timeSignature') {
+      const sig = parseSignature(`${num(m.numerator, 4)}/${num(m.denominator, 4)}`);
+      if (sig) Object.assign(marker, { action: 'timeSignature', ...sig });
+    }
+    out.push(marker);
+  }
+  return out.sort((a, b) => a.tick - b.tick).slice(0, 999);
 }
 
 function parseScale(v: unknown): { scale?: ScaleSpec } {

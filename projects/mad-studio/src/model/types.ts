@@ -326,6 +326,26 @@ export interface AutomationClip extends ClipBase {
 
 export type Clip = PatternClip | AudioClip | AutomationClip;
 
+/** Playlist time marker (FL Studio: Alt+T); markers.ts. */
+export interface TimeMarker {
+  id: Id;
+  tick: number;
+  name: string;
+  /** Absent = none. 'start': song playback starts here; 'timeSignature': a new signature from here on. */
+  action?: 'start' | 'timeSignature';
+  numerator?: number;
+  denominator?: number;
+}
+
+/** A playlist arrangement that is not shown right now (FL Studio: Playlist › Arrangements). */
+export interface Arrangement {
+  id: Id;
+  name: string;
+  tracks: PlaylistTrack[];
+  clips: Clip[];
+  markers: TimeMarker[];
+}
+
 export type EffectType =
   | 'eq'
   | 'filter'
@@ -422,4 +442,10 @@ export interface Project {
   pdcAutomation: boolean;
   /** Key of the song for the piano roll's scale highlighting, snap to scale and generators; absent = none. */
   scale?: ScaleSpec;
+  /** Time markers of the current arrangement (absent = none). */
+  markers?: TimeMarker[];
+  /** The current arrangement (tracks, clips and markers above); absent = the default "Arrangement". */
+  arrangement?: { id: Id; name: string };
+  /** The other arrangements; they share the channels, patterns and mixer (FL Studio). */
+  arrangements?: Arrangement[];
 }

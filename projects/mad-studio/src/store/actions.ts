@@ -9,6 +9,7 @@ import {
   createPlaylistTrack,
   createPluginChannel,
   createSynthChannel,
+  createTracks,
 } from '../model/defaults';
 import { defaultEffectParams } from '../model/effects';
 import { factorySampleInfo } from '../model/factory';
@@ -17,11 +18,13 @@ import { MAX_POLYPHONY, channelSettings, isDefault as isDefaultSettings } from '
 import { DEFAULT_SEND, SIDECHAIN_SEND, routedNeighbours, trackRoutes, wouldCycle } from '../model/routing';
 import { CLIP_GAIN_MAX_DB, CLIP_GAIN_MIN_DB, CLIP_PITCH_RANGE, CLIP_STRETCH_MAX, CLIP_STRETCH_MIN } from '../model/clips';
 import { clampPluginOffset, clampTrackOffset } from '../model/latency';
+import { createMarker, positionAt, signatureMap, type MarkerAction } from '../model/markers';
 import { findPattern, isStepNote, patternLength, stepIndex, stepKey } from '../model/patterns';
 import { findPreset } from '../model/presets';
 import type { ScaleSpec } from '../model/scales';
 import { MAX_BPM, MIN_BPM, TICKS_PER_STEP, ticksPerBar } from '../model/timing';
 import type {
+  Arrangement,
   AudioClip,
   Channel,
   ChannelSettings,
@@ -32,11 +35,13 @@ import type {
   MixerTrack,
   Note,
   Pattern,
+  PlaylistTrack,
   PluginInstanceData,
   Project,
   SampleInfo,
   SamplerParams,
   SynthParams,
+  TimeMarker,
   TrackInput,
 } from '../model/types';
 import { MAX_UNDO, initialUi, useStore, type AppState, type PlayMode, type TransportState, type UiState } from './store';
@@ -1043,6 +1048,147 @@ export function setRouteLevel(from: number, to: number, level: number, opts?: Ed
     const routes = trackRoutes(d.mixer, from).map((r) => (r.to === to ? { ...r, level: Math.min(1, Math.max(0, level)) } : r));
     writeRoutes(d.mixer[from], routes);
   }, { label: 'mixer send level', ...opts });
+}
+
+// ---------------------------------------------------------------------------
+// Time markers and time signatures (FL Studio: Playlist › Time markers, Alt+T, Shift+Alt+T)
+
+/** Adds a time marker; returns its id. */
+export function addMarker(tick: number, name: string, action: MarkerAction = 'none', signature?: { numerator: number; denominator: number }): Id {
+  const marker = createMarker(tick, name, action, signature);
+  edit((d) => {
+    d.markers = [...(d.markers ?? []), marker].sort((a, b) => a.tick - b.tick);
+  }, { label: action === 'timeSignature' ? 'playlist add time signature' : 'playlist add marker' });
+  return marker.id;
+}
+
+/**
+ * FL Studio's "Add time signature…": a signature marker at `tick`; with a time selection the
+ * signature applies to it and a second marker restores the previous signature after it.
+ */
+export function addTimeSignature(tick: number, signature: { numerator: number; denominator: number }, range?: { start: number; end: number } | null): void {
+  const project = useStore.getState().project;
+  const at = range ? range.start : tick;
+  const previous = positionAt(signatureMap(project), range ? range.end : at).signature;
+  const label = `${signature.numerator}/${signature.denominator}`;
+  const added = [createMarker(at, label, 'timeSignature', signature)];
+  if (range && range.end > range.start) added.push(createMarker(range.end, `${previous.numerator}/${previous.denominator}`, 'timeSignature', previous));
+  edit((d) => {
+    const kept = (d.markers ?? []).filter((m) => !(m.action === 'timeSignature' && added.some((a) => a.tick === m.tick)));
+    d.markers = [...kept, ...added].sort((a, b) => a.tick - b.tick);
+  }, { label: 'playlist add time signature' });
+}
+
+export function updateMarker(id: Id, recipe: (m: Draft<TimeMarker>) => void, opts?: EditOptions): void {
+  edit((d) => {
+    const m = d.markers?.find((x) => x.id === id);
+    if (!m) return;
+    recipe(m);
+    m.tick = Math.max(0, Math.round(m.tick));
+    if (m.action !== 'timeSignature') {
+      delete m.numerator;
+      delete m.denominator;
+    }
+    d.markers!.sort((a, b) => a.tick - b.tick);
+  }, { label: 'playlist edit marker', ...opts });
+}
+
+export function deleteMarker(id: Id): void {
+  edit((d) => {
+    d.markers = (d.markers ?? []).filter((m) => m.id !== id);
+    if (d.markers.length === 0) delete d.markers;
+  }, { label: 'playlist delete marker' });
+}
+
+export function deleteAllMarkers(): void {
+  if (!useStore.getState().project.markers?.length) return;
+  edit((d) => void delete d.markers, { label: 'playlist delete all markers' });
+}
+
+// ---------------------------------------------------------------------------
+// Arrangements (FL Studio: Playlist › Arrangements – they share channels, patterns and the mixer)
+
+const DEFAULT_ARRANGEMENT = { id: 'arr_main', name: 'Arrangement' };
+
+/** Every arrangement in menu order; the current one carries the project's tracks, clips and markers. */
+export function arrangementList(project: Project): { id: Id; name: string; current: boolean }[] {
+  const current = project.arrangement ?? DEFAULT_ARRANGEMENT;
+  return [{ id: current.id, name: current.name, current: true }, ...(project.arrangements ?? []).map((a) => ({ id: a.id, name: a.name, current: false }))].sort((a, b) =>
+    a.name.localeCompare(b.name, undefined, { numeric: true }),
+  );
+}
+
+/** Stores the current arrangement and shows `next` (both from inside an edit). */
+function swapArrangement(d: Draft<Project>, next: Arrangement): void {
+  const current = d.arrangement ?? DEFAULT_ARRANGEMENT;
+  const stored: Arrangement = { id: current.id, name: current.name, tracks: d.tracks, clips: d.clips, markers: d.markers ?? [] };
+  d.arrangements = [...(d.arrangements ?? []).filter((a) => a.id !== next.id), stored as Draft<Arrangement>];
+  d.arrangement = { id: next.id, name: next.name };
+  d.tracks = next.tracks as Draft<PlaylistTrack>[];
+  d.clips = next.clips as Draft<Clip>[];
+  if (next.markers.length) d.markers = next.markers as Draft<TimeMarker>[];
+  else delete d.markers;
+}
+
+function arrangementName(project: Project, base: string): string {
+  const names = new Set(arrangementList(project).map((a) => a.name));
+  if (!names.has(base)) return base;
+  for (let i = 2; ; i++) if (!names.has(`${base} ${i}`)) return `${base} ${i}`;
+}
+
+/** FL Studio's "Add one": an empty arrangement, shown at once. */
+export function addArrangement(): Id {
+  const project = useStore.getState().project;
+  const next: Arrangement = { id: makeId('arr'), name: arrangementName(project, 'Arrangement'), tracks: createTracks(), clips: [], markers: [] };
+  edit((d) => swapArrangement(d, next), { label: 'playlist add arrangement' });
+  return next.id;
+}
+
+/** FL Studio's "Clone": a copy of the current arrangement, shown at once. */
+export function cloneArrangement(): Id {
+  const project = useStore.getState().project;
+  const current = project.arrangement ?? DEFAULT_ARRANGEMENT;
+  const next: Arrangement = {
+    id: makeId('arr'),
+    name: arrangementName(project, `${current.name} (clone)`),
+    tracks: structuredClone(project.tracks),
+    clips: project.clips.map((c) => ({ ...structuredClone(c), id: makeId('clip') })),
+    markers: (project.markers ?? []).map((m) => ({ ...m, id: makeId('mk') })),
+  };
+  edit((d) => swapArrangement(d, next), { label: 'playlist clone arrangement' });
+  return next.id;
+}
+
+export function switchArrangement(id: Id): void {
+  const project = useStore.getState().project;
+  const next = project.arrangements?.find((a) => a.id === id);
+  if (!next) return;
+  edit((d) => swapArrangement(d, structuredClone(next)), { label: 'playlist switch arrangement' });
+}
+
+export function renameArrangement(name: string): void {
+  const project = useStore.getState().project;
+  const trimmed = name.trim();
+  if (!trimmed) return;
+  edit((d) => void (d.arrangement = { ...(project.arrangement ?? DEFAULT_ARRANGEMENT), name: trimmed }), { label: 'playlist rename arrangement' });
+}
+
+/** Deletes the current arrangement and shows another one (the last one cannot be deleted). */
+export function deleteArrangement(): boolean {
+  const project = useStore.getState().project;
+  const others = project.arrangements ?? [];
+  if (others.length === 0) return false;
+  const next = others[0];
+  edit((d) => {
+    d.arrangement = { id: next.id, name: next.name };
+    d.tracks = structuredClone(next.tracks) as Draft<PlaylistTrack>[];
+    d.clips = structuredClone(next.clips) as Draft<Clip>[];
+    if (next.markers.length) d.markers = structuredClone(next.markers) as Draft<TimeMarker>[];
+    else delete d.markers;
+    d.arrangements = (d.arrangements ?? []).filter((a) => a.id !== next.id);
+    if (d.arrangements.length === 0) delete d.arrangements;
+  }, { label: 'playlist delete arrangement' });
+  return true;
 }
 
 // ---------------------------------------------------------------------------

@@ -1,3 +1,4 @@
+import { beatsIn } from '../model/markers';
 import { firstEventAtOrAfter, type SequencedEvent, type Timeline } from '../model/timeline';
 import { PPQ, TICKS_PER_STEP, secondsPerTick } from '../model/timing';
 
@@ -106,9 +107,16 @@ export class Scheduler {
       }
 
       if (host.onBeat) {
-        const firstBeat = Math.ceil(this.cursor / PPQ);
-        for (let b = firstBeat; b * PPQ < segEnd; b++) {
-          host.onBeat(b, b % beatsPerBar === 0, this.anchorTime + (b * PPQ - this.anchorTick) * this.spt);
+        if (tl.signatures) {
+          // Time signature markers: the beats and bar accents of the signature map.
+          for (const beat of beatsIn(tl.signatures, this.cursor, segEnd)) {
+            host.onBeat(Math.round(beat.tick / PPQ), beat.accent, this.anchorTime + (beat.tick - this.anchorTick) * this.spt);
+          }
+        } else {
+          const firstBeat = Math.ceil(this.cursor / PPQ);
+          for (let b = firstBeat; b * PPQ < segEnd; b++) {
+            host.onBeat(b, b % beatsPerBar === 0, this.anchorTime + (b * PPQ - this.anchorTick) * this.spt);
+          }
         }
       }
 

@@ -98,6 +98,22 @@ Timeline parseTimeline (const juce::var& v, ChannelIds& ids)
             tl.events.push_back (ev);
         }
     }
+    if (const auto* signatures = json::get (v, "signatures").getArray())
+    {
+        for (const auto& sv : *signatures)
+        {
+            TimeSignature sig;
+            sig.tick = std::max (0.0, json::number (sv, "tick", 0.0));
+            sig.numerator = std::clamp (json::integer (sv, "numerator", 4), 1, 16);
+            const int den = json::integer (sv, "denominator", 4);
+            sig.denominator = den == 2 || den == 8 || den == 16 ? den : 4;
+            if (! tl.signatures.empty() && sig.tick <= tl.signatures.back().tick)
+                continue; // sorted, one per tick
+            tl.signatures.push_back (sig);
+        }
+        if (! tl.signatures.empty() && tl.signatures.front().tick > 0.0)
+            tl.signatures.clear(); // must start at tick 0
+    }
     // Events are documented as sorted; keep the renderer's order for equal ticks.
     std::stable_sort (tl.events.begin(), tl.events.end(),
                       [] (const TimelineEvent& a, const TimelineEvent& b) { return a.tick < b.tick; });

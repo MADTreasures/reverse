@@ -1014,3 +1014,85 @@ test('audio clips: fade and gain handles, clip properties, keys 7/8/9, stretch c
   expect(levels.reversed[0]).toBeGreaterThan(levels.reversed[3]);
   expect(errors).toEqual([]);
 });
+
+test('playlist time markers, time signatures and arrangements', async ({ page }) => {
+  const errors = await boot(page);
+  await page.evaluate(() => {
+    const m = window.__madStudio;
+    m.actions.setUi((d: any) => {
+      for (const w of Object.keys(d.windows)) if (w !== 'playlist') d.windows[w].open = false;
+      d.playlist.pxPerTick = 0.5;
+      d.playlist.scrollTick = 0;
+      d.playlist.snap = 'none';
+      d.focusedWindow = 'playlist';
+    });
+    m.actions.setTransport({ mode: 'song' });
+    m.engine.seek(768);
+  });
+  const project = async () => (await state(page)).project;
+  const box = (await page.locator('[data-window="playlist"] canvas').boundingBox())!;
+  const xOf = (tick: number) => box.x + 150 + tick * 0.5;
+
+  // Alt+T: a marker at the song position, named in the prompt.
+  await page.mouse.click(xOf(3000), box.y + 200); // focus the playlist
+  await page.evaluate(() => window.__madStudio.engine.seek(1536));
+  await page.keyboard.press('Alt+t');
+  const prompt = page.getByRole('dialog', { name: 'Add marker' });
+  await expect(prompt).toBeVisible();
+  await prompt.locator('input').fill('Verse');
+  await prompt.locator('input').press('Enter');
+  expect((await project()).markers).toEqual([expect.objectContaining({ tick: 1536, name: 'Verse' })]);
+
+  // Shift+Alt+T: 3/4 from the song position; bars follow it.
+  await page.evaluate(() => window.__madStudio.engine.seek(768));
+  await page.keyboard.press('Shift+Alt+t');
+  const sig = page.getByRole('dialog', { name: /Time signature/ });
+  await sig.locator('input').fill('3/4');
+  await sig.locator('input').press('Enter');
+  expect((await project()).markers.find((m: any) => m.action === 'timeSignature')).toMatchObject({ tick: 768, numerator: 3, denominator: 4 });
+  await page.evaluate(() => window.__madStudio.engine.seek(768 + 288));
+  await expect(page.locator('.time-display')).toHaveText('4:01:00');
+
+  // Drag the marker flag 96 px to the right, then click it to jump there.
+  const verse = (await project()).markers.find((m: any) => m.name === 'Verse');
+  await page.mouse.move(xOf(verse.tick) + 30, box.y + 18);
+  await page.mouse.down();
+  await page.mouse.move(xOf(verse.tick) + 80, box.y + 18);
+  await page.mouse.move(xOf(verse.tick) + 30 + 96, box.y + 18);
+  await page.mouse.up();
+  const moved = (await project()).markers.find((m: any) => m.name === 'Verse');
+  expect(moved.tick).toBeGreaterThanOrEqual(1536 + 188);
+  expect(moved.tick).toBeLessThanOrEqual(1536 + 196);
+  await page.mouse.click(xOf(moved.tick) + 20, box.y + 18);
+  expect((await state(page)).transport.songStart).toBe(moved.tick);
+
+  // Right-click › Place loop: the time selection from the 3/4 marker to the next marker.
+  await page.mouse.click(xOf(768) + 8, box.y + 18, { button: 'right' });
+  await page.getByRole('menuitem', { name: 'Place loop' }).click();
+  expect((await state(page)).transport.loop).toEqual({ start: 768, end: moved.tick });
+
+  // Arrangements: add an empty one, switch back, clone, rename, delete.
+  const clipCount = (await project()).clips.length;
+  await page.getByRole('button', { name: 'Arrangement ▾' }).click();
+  await page.getByRole('menuitem', { name: 'Add one' }).click();
+  expect((await project()).arrangement.name).toBe('Arrangement 2');
+  expect((await project()).clips).toHaveLength(0);
+  await page.getByRole('button', { name: 'Arrangement 2 ▾' }).click();
+  await page.getByRole('menuitem', { name: /^\S* ?Arrangement$/ }).click();
+  expect((await project()).clips).toHaveLength(clipCount);
+  expect((await project()).markers.length).toBe(2);
+  await page.getByRole('button', { name: 'Arrangement ▾' }).click();
+  await page.getByRole('menuitem', { name: 'Clone' }).click();
+  expect((await project()).arrangement.name).toBe('Arrangement (clone)');
+  expect((await project()).clips).toHaveLength(clipCount);
+  await page.getByRole('button', { name: 'Arrangement (clone) ▾' }).click();
+  await page.getByRole('menuitem', { name: 'Rename…' }).click();
+  const rename = page.getByRole('dialog', { name: 'Rename arrangement' });
+  await rename.locator('input').fill('Club mix');
+  await rename.locator('input').press('Enter');
+  await expect(page.locator('[data-window="playlist"]')).toContainText('Playlist - Club mix');
+  await page.getByRole('button', { name: 'Club mix ▾' }).click();
+  await page.getByRole('menuitem', { name: 'Delete' }).click();
+  expect((await project()).arrangements.map((a: any) => a.name)).not.toContain('Club mix');
+  expect(errors).toEqual([]);
+});

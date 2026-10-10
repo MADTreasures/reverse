@@ -4,7 +4,9 @@
 
 #include <juce_core/juce_core.h>
 
+#include <cmath>
 #include <cstdint>
+#include <limits>
 #include <map>
 #include <mutex>
 #include <vector>
@@ -53,6 +55,13 @@ struct TimelineEvent
     TimelineClip clip;
 };
 
+/** A time signature from `tick` on (markers.ts Signature). */
+struct TimeSignature
+{
+    double tick = 0.0;
+    int numerator = 4, denominator = 4;
+};
+
 /** Compiled note events from timeline.set (sorted by tick). */
 struct Timeline
 {
@@ -62,12 +71,40 @@ struct Timeline
     std::vector<TimelineBend> bends;
     /** Sample variants the audio clips play (TimelineClip::sample). */
     std::vector<juce::String> samples;
+    /** Time signature map for the metronome (empty: the project's beats per bar). */
+    std::vector<TimeSignature> signatures;
 
     /** Index of the first event with tick >= t. */
     size_t firstAtOrAfter (double t) const noexcept;
 };
 
 Timeline parseTimeline (const juce::var& json, ChannelIds& ids);
+
+/** markers.ts beatsIn(): calls fn(tick, accent) for every beat of the signature map in [from, to). */
+template <typename Fn>
+void forEachBeat (const std::vector<TimeSignature>& map, double from, double to, Fn&& fn)
+{
+    if (map.empty())
+        return;
+    size_t i = 0;
+    while (i + 1 < map.size() && map[i + 1].tick <= from)
+        ++i;
+    for (; i < map.size(); ++i)
+    {
+        const auto& sig = map[i];
+        if (sig.tick >= to)
+            break;
+        const double end = i + 1 < map.size() ? map[i + 1].tick : std::numeric_limits<double>::infinity();
+        const double beat = ppq * 4.0 / (double) sig.denominator;
+        for (auto k = (int64_t) std::max (0.0, std::ceil ((from - sig.tick) / beat - 1.0e-9));; ++k)
+        {
+            const double tick = sig.tick + (double) k * beat;
+            if (tick >= std::min (end, to) - 1.0e-9)
+                break;
+            fn (tick, k % sig.numerator == 0);
+        }
+    }
+}
 /** The note properties of a timeline event's JSON. */
 void parseNoteProps (const juce::var& event, NoteProps& props);
 

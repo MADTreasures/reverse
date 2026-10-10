@@ -466,6 +466,47 @@ void testSequencer()
     }
 }
 
+void testTimeSignatures()
+{
+    auto& s = *suite;
+    // markers.ts beatsIn(): 4/4, 3/4 from tick 384, 7/8 from tick 672.
+    const std::vector<TimeSignature> map { { 0.0, 4, 4 }, { 384.0, 3, 4 }, { 672.0, 7, 8 } };
+    std::vector<std::pair<double, bool>> beats;
+    forEachBeat (map, 288.0, 816.0, [&] (double t, bool accent) { beats.push_back ({ t, accent }); });
+    const std::vector<std::pair<double, bool>> expected { { 288.0, false }, { 384.0, true }, { 480.0, false }, { 576.0, false },
+                                                          { 672.0, true }, { 720.0, false }, { 768.0, false } };
+    s.check (beats == expected, str ("beats of the signature map (%g beats)", (double) beats.size()));
+
+    // The sequencer's metronome follows the map: 120 BPM, one bar of 3/4 from tick 0 (= 0.5 s beats),
+    // then 6/8 from tick 288 (eighths, 0.25 s), accents on every bar start.
+    Timeline tl;
+    tl.songMode = true;
+    tl.loopStart = 0.0;
+    tl.loopEnd = 768.0;
+    tl.signatures = { { 0.0, 3, 4 }, { 288.0, 6, 8 } };
+    AutoParam bpm (120.0f), swing (0.0f);
+    Sequencer seq;
+    seq.prepare (48000.0);
+    seq.play (0.0, 0.0);
+    CollectingSink sink;
+    BlockContext ctx;
+    ctx.sampleRate = 48000.0;
+    for (int64_t clock = 0; clock < 48000 * 3; clock += 512)
+    {
+        ctx.numSamples = 512;
+        ctx.numChunks = (512 + chunkSize - 1) / chunkSize;
+        ctx.blockStart = clock;
+        ++ctx.blockIndex;
+        sink.blockStart = clock;
+        seq.process (ctx, &tl, bpm, swing, 4, true, sink);
+    }
+    const std::vector<double> times { 0.0, 24000.0, 48000.0, 72000.0, 84000.0, 96000.0, 108000.0, 120000.0, 132000.0, 144000.0 };
+    bool ok = sink.clicks.size() >= times.size();
+    for (size_t i = 0; ok && i < times.size(); ++i)
+        ok = std::abs (sink.clicks[i].first - times[i]) < 1.0e-6 && sink.clicks[i].second == (i == 0 || i == 3 || i == 9);
+    s.check (ok, str ("metronome clicks follow 3/4 then 6/8 (%g clicks)", (double) sink.clicks.size()));
+}
+
 void testAutomation()
 {
     auto& s = *suite;
@@ -1409,6 +1450,7 @@ bool runSelfTests()
     s.run ("waveshaper curves", testWaveShaper);
     s.run ("parameter smoothing", testSmoother);
     s.run ("sequencer timing, swing, loop wrap, count-in", testSequencer);
+    s.run ("time signature map and metronome", testTimeSignatures);
     s.run ("automation interpolation and override", testAutomation);
     s.run ("WAV writing and reading", testWav);
     s.run ("graph levels, chokes, automation, effects", testGraphLevels);

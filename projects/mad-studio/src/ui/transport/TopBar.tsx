@@ -1,3 +1,4 @@
+import { formatSongPosition, hasSignatureChanges, signatureMap } from '../../model/markers';
 import { useRef } from 'react';
 import { engine } from '../../audio/engine';
 import { describeTarget, mixerTarget } from '../../model/automationTargets';
@@ -396,7 +397,13 @@ function TimeDisplay() {
     if (!el) return;
     const s = useStore.getState();
     const pos = engine.playheadTick() ?? (s.transport.mode === 'song' ? s.transport.songStart : patternStartTick(s));
-    const text = mode === 'clock' ? formatClock(ticksToSeconds(pos, s.project.bpm)) : formatPosition(pos, s.project.beatsPerBar);
+    const signatures = s.transport.mode === 'song' ? signatureMap(s.project) : null;
+    const text =
+      mode === 'clock'
+        ? formatClock(ticksToSeconds(pos, s.project.bpm))
+        : signatures && hasSignatureChanges(signatures)
+          ? formatSongPosition(signatures, pos)
+          : formatPosition(pos, s.project.beatsPerBar);
     if (el.textContent !== text) el.textContent = text;
   });
   return (

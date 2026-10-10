@@ -54,6 +54,11 @@ engine never interprets patterns or clips itself.
 ```
 
 * Events are sorted by tick. Playback loops from `loopEnd` back to `loopStart`.
+* Optional `signatures` (song mode with time signature markers, `src/model/markers.ts`):
+  `[{"tick":0,"numerator":4,"denominator":4},{"tick":1536,"numerator":7,"denominator":8}]`, sorted,
+  starting at tick 0. The metronome then clicks every beat of the signature (`96·4/denominator` ticks)
+  and accents the first beat of each bar; a signature change starts a new bar. Without it the
+  metronome clicks quarter notes with an accent every `beatsPerBar`.
 * Swing: an event at tick `t` is delayed by `swing * 12` ticks when `t % 48 == 24` (every second 16th),
   where `swing` (0..1) is the project value (or its automated value).
 * `length` is converted to seconds at trigger time using the current tempo.

@@ -1,3 +1,4 @@
+import { songStartTick } from '../model/markers';
 import { engine } from '../audio/engine';
 import { findPattern } from '../model/patterns';
 import { isMac } from '../platform/platform';
@@ -214,7 +215,8 @@ export async function runCommand(id: CommandId): Promise<void> {
       engine.panic();
       return;
     case 'gotoStart':
-      engine.seek(0);
+      // FL Studio: Home moves the position to the start (a Start marker in song mode).
+      engine.seek(s.transport.mode === 'song' ? songStartTick(s.project) : 0);
       return;
     case 'toggleMode':
       return togglePlayMode();

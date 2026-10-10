@@ -326,7 +326,7 @@ export class NativeEngine implements EngineApi {
     const t = this.timelineSentFor;
     if (!t || t.project !== key.project || t.mode !== key.mode || t.pattern !== key.pattern || t.loop !== key.loop) {
       const tl = this.currentTimeline();
-      this.send({ type: 'timeline.set', mode: s.transport.mode, loopStart: tl.start, loopEnd: tl.end, events: tl.events });
+      this.send({ type: 'timeline.set', mode: s.transport.mode, loopStart: tl.start, loopEnd: tl.end, events: tl.events, ...(tl.signatures ? { signatures: tl.signatures } : {}) });
       this.timelineSentFor = key;
     }
     const lanes = this.automation.unitLanes(s.project);
@@ -553,7 +553,7 @@ export class NativeEngine implements EngineApi {
     } else {
       const tl = songTimeline(s.project);
       endTick = tl.end;
-      this.send({ type: 'timeline.set', mode: 'song', loopStart: tl.start, loopEnd: tl.end, events: tl.events });
+      this.send({ type: 'timeline.set', mode: 'song', loopStart: tl.start, loopEnd: tl.end, events: tl.events, ...(tl.signatures ? { signatures: tl.signatures } : {}) });
       this.send({ type: 'automation.set', lanes: this.automation.unitLanes(s.project) });
     }
     this.timelineSentFor = null;
