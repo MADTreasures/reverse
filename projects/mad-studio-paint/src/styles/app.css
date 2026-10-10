@@ -950,9 +950,128 @@
 
 .rgb-row {
   display: grid;
-  grid-template-columns: 14px 1fr 44px;
+  grid-template-columns: 14px 1fr 44px 12px;
   gap: 6px;
   align-items: center;
+}
+
+/* Color Slider: the colour space tabs stand on the left edge, like the reference. */
+.slider-body {
+  display: flex;
+  gap: 6px;
+}
+
+.slider-tabs {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.slider-tab {
+  writing-mode: vertical-rl;
+  transform: rotate(180deg);
+  padding: 4px 1px;
+  font-size: 9px;
+  color: var(--text-dim);
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  border-radius: 2px;
+  cursor: pointer;
+}
+
+.slider-tab.active {
+  color: var(--text);
+  background: var(--active-tab);
+}
+
+.slider-rows {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  justify-content: center;
+}
+
+.slider-unit {
+  font-size: 10px;
+  color: var(--text-dim);
+}
+
+.hsv-values .value-name {
+  cursor: pointer;
+}
+
+.space-switch {
+  font-size: 11px;
+  width: 20px;
+  height: 20px;
+}
+
+/* Color Set: the set list on top; Edit color sets dialog. */
+.color-set-bar {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  padding: 4px 4px 0;
+}
+
+.color-set-bar .prop-select {
+  flex: 1;
+  min-width: 0;
+}
+
+button.rgb-readout {
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+}
+
+.color-set-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  width: 260px;
+  max-height: 320px;
+  overflow: auto;
+  border: 1px solid var(--line);
+  background: var(--well);
+}
+
+.color-set-list li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--line);
+  cursor: default;
+}
+
+.color-set-list li.selected {
+  background: var(--select-row);
+}
+
+.color-set-list .set-name {
+  flex: 1;
+}
+
+.color-set-list .set-name-input {
+  flex: 1;
+  min-width: 0;
+}
+
+.color-set-list .set-count {
+  color: var(--text-faint);
+  font-size: 10px;
+}
+
+.color-set-list .set-grip {
+  color: var(--text-dim);
+  cursor: grab;
+}
+
+.side-gap {
+  height: 10px;
 }
 
 .rgb-bar {

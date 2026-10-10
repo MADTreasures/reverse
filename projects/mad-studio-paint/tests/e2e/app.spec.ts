@@ -3813,3 +3813,55 @@ test('View > Grid, Ruler bar, Grid/Ruler bar settings and Snap to grid', async (
   expect(await page.evaluate(() => window.__madPaint.useStore.getState().doc.grid)).toBeUndefined();
   expect(errors).toEqual([]);
 });
+
+test('colour palettes: HLS triangle, RGB/HSV/CMYK slider tabs, several colour sets', async ({ page }) => {
+  const errors = await boot(page);
+  const color = () => page.evaluate(() => { const c = window.__madPaint.useStore.getState().colors; return c.active === 'main' ? c.main : c.sub; });
+  await page.evaluate(() => window.__madPaint.actions.setDrawingColor('#ff0000'));
+  // Color Wheel: switch to HLS; the middle of the triangle's left edge is 50 % grey.
+  await page.getByRole('button', { name: 'HLS color space' }).click();
+  const wheel = page.getByTestId('color-wheel');
+  await expect(wheel).toHaveAttribute('data-space', 'hls');
+  const box = (await wheel.boundingBox())!;
+  const r = (box.width / 2) * (1 - 0.16) * 0.94;
+  await page.mouse.click(box.x + box.width / 2 - r / 2 + 1, box.y + box.height / 2);
+  const grey = await color();
+  expect(grey).toMatch(/^#(7[c-f]|8[0-3])(7[c-f]|8[0-3])(7[c-f]|8[0-3])$/);
+  await expect(page.locator('[data-testid=color-panel]').getByRole('spinbutton', { name: 'L' })).toHaveValue('50');
+  // Back to HSV: the square again.
+  await page.getByRole('button', { name: 'HSV color space' }).click();
+  await expect(wheel).toHaveAttribute('data-space', 'hsv');
+
+  // Color Slider: the CMYK tab sets black.
+  await page.locator('[data-testid=color-panel] .palette-tab', { hasText: 'Color Slider' }).click();
+  const sliders = page.getByTestId('color-sliders');
+  await sliders.getByRole('tab', { name: 'CMYK' }).click();
+  await page.evaluate(() => window.__madPaint.actions.setDrawingColor('#ffffff'));
+  await sliders.getByRole('spinbutton', { name: 'K' }).fill('50');
+  expect(await color()).toBe('#808080');
+  await sliders.getByRole('tab', { name: 'HSV' }).click();
+  await sliders.getByRole('spinbutton', { name: 'V' }).fill('100');
+  expect(await color()).toBe('#ffffff');
+
+  // Color sets: a new set, a colour added to it, the sets kept after a reload.
+  const sets = page.getByTestId('color-set');
+  await page.getByRole('button', { name: 'Edit color sets' }).click();
+  const dlg = page.getByRole('dialog', { name: 'Edit color sets' });
+  await dlg.getByRole('button', { name: 'Create new set' }).click();
+  await dlg.getByRole('textbox', { name: 'Color set name' }).fill('Mine');
+  await dlg.getByRole('textbox', { name: 'Color set name' }).press('Enter');
+  await dlg.getByRole('button', { name: 'OK' }).click();
+  await expect(sets.getByRole('combobox', { name: 'Color set' })).toHaveValue('1');
+  await expect(sets.locator('.swatch')).toHaveCount(0);
+  await page.evaluate(() => window.__madPaint.actions.setDrawingColor('#123456'));
+  await sets.getByRole('button', { name: 'Add color' }).click();
+  await expect(sets.locator('.swatch')).toHaveCount(1);
+  await sets.getByRole('combobox', { name: 'Color set' }).selectOption({ label: 'Grays' });
+  await expect(sets.locator('.swatch')).toHaveCount(16);
+  await page.reload();
+  await page.waitForFunction(() => window.__madPaint !== undefined);
+  const names = await page.evaluate(() => window.__madPaint.useStore.getState().colorSets.sets.map((s: any) => s.name));
+  expect(names).toContain('Mine');
+  expect(await page.evaluate(() => window.__madPaint.useStore.getState().colorSets.sets.find((s: any) => s.name === 'Mine').colors)).toEqual(['#123456']);
+  expect(errors).toEqual([]);
+});

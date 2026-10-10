@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { defaultColorSets, type ColorSets } from '../paint/colorSets';
 import { createDocument } from '../model/document';
 import type { Id, PaintDocument } from '../model/types';
 import type { Mask, SelectionOp } from '../paint/mask';
@@ -99,6 +100,10 @@ export interface PaintState {
   /** View > Grid and View > Ruler bar. */
   showGrid: boolean;
   showRulerBar: boolean;
+  /** Color Wheel / Color Slider palettes: HSV (square) or HLS (triangle). */
+  colorSpace: 'hsv' | 'hls';
+  /** The Color Set palette's sets (kept in the browser, like tool settings). */
+  colorSets: ColorSets;
   /** Ruler selected with the Object tool. */
   selectedRuler: { layerId: Id; rulerId: string } | null;
   /** Objects of the active layer selected with the Object tool (vector lines, text boxes, balloons). */
@@ -225,6 +230,8 @@ function initialState(): PaintState {
     snapGrid: false,
     showGrid: false,
     showRulerBar: false,
+    colorSpace: 'hsv',
+    colorSets: defaultColorSets(),
     selectedRuler: null,
     selectedObjects: [],
     textEdit: null,

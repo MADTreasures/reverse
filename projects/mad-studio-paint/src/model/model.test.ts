@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { BLEND_MODES, compositeOp, nativeOp } from './blend';
-import { hexToRgb, hsvToRgb, pushHistory, rgbToHex, rgbToHsv } from './color';
+import { cmykToRgb, hexToRgb, hlsToRgb, hsvToRgb, pushHistory, rgbToCmyk, rgbToHex, rgbToHls, rgbToHsv } from './color';
 import { clampCanvasSide, createDocument } from './document';
 import {
   clipGroups,
@@ -21,6 +21,32 @@ import {
   removeLayer,
   shiftLayer,
 } from './layers';
+
+describe('color spaces of the colour palettes', () => {
+  it('converts HLS both ways', () => {
+    expect(hlsToRgb({ h: 0, l: 0.5, s: 1 })).toEqual({ r: 255, g: 0, b: 0 });
+    expect(hlsToRgb({ h: 120, l: 0.75, s: 1 })).toEqual({ r: 128, g: 255, b: 128 });
+    expect(hlsToRgb({ h: 240, l: 0.25, s: 0 })).toEqual({ r: 64, g: 64, b: 64 });
+    for (const rgb of [
+      { r: 12, g: 200, b: 99 },
+      { r: 255, g: 255, b: 255 },
+      { r: 140, g: 30, b: 70 },
+    ]) {
+      const back = hlsToRgb(rgbToHls(rgb));
+      for (const k of ['r', 'g', 'b'] as const) expect(Math.abs(back[k] - rgb[k])).toBeLessThanOrEqual(1);
+    }
+    // Grey keeps the hue it had.
+    expect(rgbToHls({ r: 100, g: 100, b: 100 }, 200).h).toBe(200);
+  });
+
+  it('converts CMYK both ways with black taking the common part', () => {
+    expect(rgbToCmyk({ r: 0, g: 0, b: 0 })).toEqual({ c: 0, m: 0, y: 0, k: 1 });
+    expect(rgbToCmyk({ r: 255, g: 0, b: 0 })).toEqual({ c: 0, m: 1, y: 1, k: 0 });
+    const c = rgbToCmyk({ r: 51, g: 102, b: 153 });
+    expect(c.k).toBeCloseTo(0.4, 5);
+    expect(cmykToRgb(c)).toEqual({ r: 51, g: 102, b: 153 });
+  });
+});
 
 describe('color', () => {
   it('round-trips hex ↔ rgb ↔ hsv', () => {

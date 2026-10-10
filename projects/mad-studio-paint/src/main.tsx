@@ -43,6 +43,7 @@ const PREFS_KEY = 'mad-paint:prefs';
 
 /** Workspace and view preferences survive restarts. */
 function persistPreferences(): void {
+  actions.loadColorSets();
   try {
     const raw = localStorage.getItem(PREFS_KEY);
     const p = raw ? (JSON.parse(raw) as Record<string, unknown>) : {};
@@ -56,12 +57,13 @@ function persistPreferences(): void {
       ...(typeof p.showGrid === 'boolean' ? { showGrid: p.showGrid } : {}),
       ...(typeof p.showRulerBar === 'boolean' ? { showRulerBar: p.showRulerBar } : {}),
       ...(typeof p.snapGrid === 'boolean' ? { snapGrid: p.snapGrid } : {}),
+      ...(p.colorSpace === 'hsv' || p.colorSpace === 'hls' ? { colorSpace: p.colorSpace } : {}),
     });
   } catch {
     // Ignore.
   }
   useStore.subscribe((s, prev) => {
-    const keys = ['workspace', 'showSelectionLauncher', 'loop', 'timelineShown', 'timelineHeight', 'onion', 'showGrid', 'showRulerBar', 'snapGrid'] as const;
+    const keys = ['workspace', 'showSelectionLauncher', 'loop', 'timelineShown', 'timelineHeight', 'onion', 'showGrid', 'showRulerBar', 'snapGrid', 'colorSpace'] as const;
     if (keys.every((k) => s[k] === prev[k])) return;
     try {
       localStorage.setItem(PREFS_KEY, JSON.stringify(Object.fromEntries(keys.map((k) => [k, s[k]]))));

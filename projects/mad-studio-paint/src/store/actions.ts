@@ -47,6 +47,7 @@ import type { LayerEffects } from '../paint/effects';
 import { defaultTone, DOT_SHAPES, type ToneEffect } from '../paint/tone';
 import type { GradientFill } from '../paint/gradient';
 import { defaultGrid, sanitizeGrid, type GridSettings } from '../paint/grid';
+import { sanitizeColorSets, type ColorSets } from '../paint/colorSets';
 import { applyCorrection, correctionLabel, type Correction } from '../paint/tonal';
 import { combine, createMask, expandMask, invertMask, isMaskEmpty, isSelected, maskBounds, rectMask, type Mask, type SelectionOp } from '../paint/mask';
 import { mergeSubTools, type SubTool, type ToolId } from '../paint/tools';
@@ -1025,6 +1026,32 @@ export function setGridSettings(g: GridSettings, asDefault = false): void {
   changeDoc('Grid/Ruler bar settings', (doc) => {
     doc.grid = grid;
   });
+}
+
+const COLOR_SETS_KEY = 'mad-paint:colorsets';
+
+/** The Color Set palette's sets from the browser (earlier versions kept one list under another key). */
+export function loadColorSets(): void {
+  try {
+    const raw = localStorage.getItem(COLOR_SETS_KEY) ?? localStorage.getItem('mad-paint:colorset');
+    if (raw) setState({ colorSets: sanitizeColorSets(JSON.parse(raw)) });
+  } catch {
+    // Keep the standard sets.
+  }
+}
+
+export function setColorSets(colorSets: ColorSets): void {
+  setState({ colorSets });
+  try {
+    localStorage.setItem(COLOR_SETS_KEY, JSON.stringify(colorSets));
+  } catch {
+    // Storage unavailable: the sets last for this session.
+  }
+}
+
+/** Color Wheel / Color Slider palette: HSV or HLS. */
+export function setColorSpace(colorSpace: 'hsv' | 'hls'): void {
+  setState({ colorSpace });
 }
 
 export function toggleGrid(): void {
