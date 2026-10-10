@@ -13,7 +13,7 @@ export interface MenuItem {
   submenu?: MenuItem[];
 }
 
-export type CustomDialogId = 'newCanvas' | 'colorSettings' | 'export' | 'exportPreview' | 'exportPsd' | 'frameTemplates' | 'timelineSettings' | 'newTimeline' | 'frameRate' | 'manageTimelines' | 'cameraFolder' | 'assignMultiple' | 'centerCanvas' | 'onionSkin' | 'exportGif' | 'exportApng' | 'exportWebp' | 'exportSequence' | 'exportCels' | 'exportAudio' | 'exportMovie' | 'canvasSize' | 'imageResolution' | 'gridSettings' | 'colorSets' | 'preferences' | 'about' | 'shortcuts' | 'pressure' | 'newFrameFolder' | 'divideFrame' | 'drawAlongRuler' | 'newTone' | 'gradient' | 'timelineLabel' | 'trackLabel' | 'goToFrame' | 'goToLabel' | 'insertFrame' | 'deleteFrame' | 'expandSelection' | 'shrinkSelection' | 'blurBorder' | 'colorGamut' | 'registerMaterial' | 'quickAccessSettings';
+export type CustomDialogId = 'newCanvas' | 'colorSettings' | 'export' | 'exportPreview' | 'exportPsd' | 'frameTemplates' | 'timelineSettings' | 'newTimeline' | 'frameRate' | 'manageTimelines' | 'cameraFolder' | 'assignMultiple' | 'centerCanvas' | 'onionSkin' | 'exportGif' | 'exportApng' | 'exportWebp' | 'exportSequence' | 'exportCels' | 'exportAudio' | 'exportMovie' | 'canvasSize' | 'imageResolution' | 'gridSettings' | 'colorSets' | 'preferences' | 'about' | 'shortcuts' | 'pressure' | 'newFrameFolder' | 'divideFrame' | 'drawAlongRuler' | 'newTone' | 'gradient' | 'timelineLabel' | 'trackLabel' | 'goToFrame' | 'goToLabel' | 'insertFrame' | 'deleteFrame' | 'expandSelection' | 'shrinkSelection' | 'blurBorder' | 'colorGamut' | 'registerMaterial' | 'quickAccessSettings' | 'shortcutSettings';
 
 /** What a tonal correction dialog changes. */
 export type TonalTarget =
@@ -114,3 +114,10 @@ export function toast(text: string, kind: 'info' | 'error' = 'info'): void {
 }
 
 export const isModalOpen = () => useOverlays.getState().dialog !== null;
+
+let keyCapture = false;
+/** A dialog takes the next keys as a shortcut (Esc then cancels that, not the dialog). */
+export const setKeyCapture = (on: boolean) => {
+  keyCapture = on;
+};
+export const isKeyCapture = () => keyCapture;

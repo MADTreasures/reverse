@@ -1,6 +1,6 @@
 /** Global keyboard handling: commands, tool keys (with hold-to-switch), Space and modifier tracking. */
 import { isMac } from '../platform/platform';
-import { toolForKey, type ToolId } from '../paint/tools';
+import type { ToolId } from '../paint/tools';
 import * as actions from '../store/actions';
 import { stop as stopPlayback } from '../store/animationActions';
 import { getState } from '../store/store';
@@ -10,8 +10,8 @@ import { PolylineSelect } from '../tools/sessions';
 import { CurveInput } from '../tools/curveInput';
 import { cancelTransform, isTransforming } from '../tools/transform';
 import { CurveFigure } from '../tools/sessions';
-import { commandForShortcut, isEnabled, runCommand } from './commands';
-import { noteCommand } from '../store/autoActionStore';
+import { commandForShortcut, isEnabled, runCommand, targetsForShortcut, toolForShortcut } from './commands';
+import { noteCommand, playAction } from '../store/autoActionStore';
 import { closeMenu, isModalOpen, useOverlays } from './overlays';
 import { eventToShortcut, keyName } from './shortcuts';
 
@@ -19,7 +19,7 @@ const isTextTarget = (t: EventTarget | null) =>
   t instanceof HTMLElement && (t.isContentEditable || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || (t.tagName === 'INPUT' && !['checkbox', 'radio', 'button', 'color', 'range'].includes((t as HTMLInputElement).type)));
 
 /** Clipboard keys go through the copy/cut/paste events so native menus and the system clipboard work. */
-const CLIPBOARD_KEYS = new Set(['Mod+c', 'Mod+x', 'Mod+v']);
+const CLIPBOARD_KEYS: Record<string, string> = { 'Mod+c': 'copy', 'Mod+x': 'cut', 'Mod+v': 'paste' };
 
 interface HeldTool {
   key: string;
@@ -57,7 +57,12 @@ export function installKeyboard(): void {
         return;
       }
       const shortcut = eventToShortcut({ key: e.key, code: e.code, shift: e.shiftKey, alt: e.altKey, mod });
-      if (CLIPBOARD_KEYS.has(shortcut)) return;
+      // ⌘C / ⌘X / ⌘V go through the clipboard events while they still copy, cut and paste; set on
+      // something else (Shortcut Settings), they do that instead.
+      if (CLIPBOARD_KEYS[shortcut]) {
+        if (commandForShortcut(shortcut)?.id === CLIPBOARD_KEYS[shortcut]) return;
+        e.preventDefault();
+      }
       if (isTransforming() && e.key === 'Escape') {
         e.preventDefault();
         cancelTransform();
@@ -103,12 +108,19 @@ export function installKeyboard(): void {
         }
         return;
       }
-      // Tool keys: plain letters / "/" without modifiers.
-      if (!mod && !e.altKey && !e.repeat) {
+      // Auto actions with a shortcut (Shortcut Settings) play.
+      const action = targetsForShortcut(shortcut).find((t) => t.startsWith('action:'));
+      if (action) {
+        e.preventDefault();
+        if (!e.repeat) void playAction(action.slice('action:'.length), null);
+        return;
+      }
+      // Tool keys: a tool's shortcut, or its plain key (Shift aside); held down, the tool is only borrowed.
+      if (!e.repeat && !isTransforming()) {
         const key = keyName({ key: e.key, code: e.code, alt: false, shift: false });
         const current = getState().tool;
-        const next = toolForKey(key, current);
-        if (next && !isTransforming()) {
+        const next = toolForShortcut(shortcut, current) ?? (!mod && !e.altKey ? toolForShortcut(key, current) : null);
+        if (next) {
           e.preventDefault();
           held = { key, previous: current, used: false, since: performance.now() };
           actions.setTool(next);

@@ -1,6 +1,7 @@
 import { isElectron } from '../platform/platform';
 import { useShallow } from 'zustand/react/shallow';
 import { useStore } from '../store/store';
+import { useShortcuts } from '../store/shortcutStore';
 import { commandById, isEnabled, runCommand, shortcutLabel } from './commands';
 import { Icon } from './controls/Icons';
 
@@ -72,6 +73,7 @@ function WindowTitle() {
 export function CommandBar() {
   useStore(useShallow((s) => [s.canUndo, s.canRedo, s.selection, s.activeLayerId, s.doc, s.transforming, s.view.flipH, s.showSelectionBorder, s.snapRuler, s.snapSpecial, s.tool, s.selectedRuler]));
   const transforming = useStore((s) => s.transforming);
+  useShortcuts((s) => s.overrides);
   const workspace = useStore((s) => s.workspace);
   const groups = workspace === 'classic' ? CLASSIC_GROUPS : DEFAULT_GROUPS;
   return (

@@ -31,6 +31,7 @@ export const MENUS: MenuSpec[] = [
       'renameCanvas',
       '-',
       'pressureSettings',
+      'shortcutSettings',
       'preferences',
     ],
   },

@@ -1,6 +1,6 @@
 import { isMac } from '../../platform/platform';
 import { TOOLS } from '../../paint/tools';
-import { COMMANDS } from '../commands';
+import { COMMANDS, commandShortcuts, toolShortcuts } from '../commands';
 import { formatShortcut } from '../shortcuts';
 import { closeDialog } from '../overlays';
 
@@ -50,7 +50,8 @@ const MODIFIERS: [string, string][] = [
 ];
 
 export function ShortcutsDialog() {
-  const commands = COMMANDS.filter((c) => c.keys?.length);
+  // The shortcuts as set in Shortcut Settings.
+  const commands = COMMANDS.filter((c) => commandShortcuts(c.id).length);
   return (
     <div className="modal wide" role="dialog" aria-label="Keyboard shortcuts">
       <h2>Keyboard shortcuts</h2>
@@ -59,9 +60,9 @@ export function ShortcutsDialog() {
           <h3>Tools</h3>
           <table>
             <tbody>
-              {TOOLS.filter((t) => t.key).map((t) => (
+              {TOOLS.filter((t) => toolShortcuts(t.id).length).map((t) => (
                 <tr key={t.id}>
-                  <td className="kbd">{t.key}</td>
+                  <td className="kbd">{toolShortcuts(t.id).map((k) => formatShortcut(k, isMac)).join('  ')}</td>
                   <td>{t.label}</td>
                 </tr>
               ))}
@@ -85,7 +86,7 @@ export function ShortcutsDialog() {
             <tbody>
               {commands.map((c) => (
                 <tr key={c.id}>
-                  <td className="kbd">{c.keys!.map((k) => formatShortcut(k, isMac)).join('  ')}</td>
+                  <td className="kbd">{commandShortcuts(c.id).map((k) => formatShortcut(k, isMac)).join('  ')}</td>
                   <td>{c.label}</td>
                 </tr>
               ))}

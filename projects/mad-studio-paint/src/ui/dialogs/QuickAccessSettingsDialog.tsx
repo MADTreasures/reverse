@@ -128,8 +128,8 @@ export function QuickAccessSettingsDialog() {
               <span className="muted">{colorName(color)}</span>
             </div>
           ) : (
-            <div className="qa-func-list" role="tree" aria-label="Functions">
-              {rows.map((r) =>
+            <div key={category} className="qa-func-list" role="tree" aria-label="Functions">
+              {rows.map((r, n) =>
                 r.kind === 'group' ? (
                   <div key={`g-${r.key}`} className="qa-func group" role="treeitem" aria-expanded={open.has(r.key)} aria-label={r.label} style={{ paddingLeft: 6 + r.depth * 14 }} onClick={() => toggle(r.key)}>
                     <span className="twist">{open.has(r.key) ? '▾' : '▸'}</span>
@@ -137,7 +137,7 @@ export function QuickAccessSettingsDialog() {
                   </div>
                 ) : (
                   <div
-                    key={`i-${itemKey(r.item)}-${r.depth}`}
+                    key={`i-${itemKey(r.item)}-${n}`}
                     className={`qa-func ${chosen && itemKey(chosen) === itemKey(r.item) ? 'on' : ''} ${hasItem(set, r.item) ? 'added' : ''}`}
                     role="treeitem"
                     aria-selected={Boolean(chosen && itemKey(chosen) === itemKey(r.item))}

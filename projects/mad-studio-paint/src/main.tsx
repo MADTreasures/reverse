@@ -20,6 +20,7 @@ import { filterCenter } from './tools/filterCenter';
 import { runCommand } from './ui/commands';
 import { installKeyboard } from './ui/keyboard';
 import { nativeMenuTemplate } from './ui/nativeMenu';
+import { useShortcuts } from './store/shortcutStore';
 import { toast } from './ui/overlays';
 import './styles/base.css';
 import './styles/app.css';
@@ -144,6 +145,8 @@ async function boot(): Promise<void> {
   listenForNativeOpen();
   native?.onMenu((action) => void runCommand(action));
   native?.setMenu(nativeMenuTemplate());
+  // Shortcut Settings change the menu's accelerators.
+  useShortcuts.subscribe(() => native?.setMenu(nativeMenuTemplate()));
 
   window.addEventListener('beforeunload', (e) => {
     if (getState().dirty && !isElectron) e.preventDefault();

@@ -26,6 +26,9 @@ import { IMAGE_FORMAT_ORDER, IMAGE_FORMATS } from '../io/imageExport';
 import { formatShortcut, normalizeShortcut } from './shortcuts';
 import { toggleMaterialStrip, useMaterials } from '../store/materialActions';
 import { noteCommand, setCommandRunner } from '../store/autoActionStore';
+import { useShortcuts } from '../store/shortcutStore';
+import { effectiveShortcuts, type ShortcutMap, type ShortcutTarget } from '../model/shortcutMap';
+import { TOOLS, type ToolId } from '../paint/tools';
 import { openQuickAccessSettings } from './palettes/QuickAccessPalette';
 
 export interface Command {
@@ -433,6 +436,7 @@ export const COMMANDS: Command[] = [
   { id: 'win-material', label: 'Material', run: () => toggleMaterialStrip(), checked: () => useMaterials.getState().stripShown },
   { id: 'registerMaterial', label: 'Image…', run: () => openDialog('registerMaterial'), enabled: () => actions.editTarget() !== null },
   { id: 'quickAccessSettings', label: 'Quick Access Settings…', run: () => openQuickAccessSettings() },
+  { id: 'shortcutSettings', label: 'Shortcut Settings…', run: () => openDialog('shortcutSettings') },
   // Window: palettes shown or hidden (Animation cels has its own command above).
   ...PALETTE_NAMES.filter(([id]) => id !== 'animationCels').map(([id, name]) => ({
     id: `win-${id}`,
@@ -453,14 +457,54 @@ export const COMMANDS: Command[] = [
 ];
 
 const byId = new Map(COMMANDS.map((c) => [c.id, c]));
-const byKey = new Map<string, Command>();
-for (const c of COMMANDS) for (const k of c.keys ?? []) byKey.set(normalizeShortcut(k), c);
 
 export const commandById = (id: string) => byId.get(id);
-export const commandForShortcut = (s: string) => byKey.get(normalizeShortcut(s));
+
+/** The default shortcuts: the commands' keys and the tools' keys (Shortcut Settings changes them). */
+export const DEFAULT_SHORTCUTS: ShortcutMap = Object.fromEntries([
+  ...COMMANDS.filter((c) => c.keys?.length).map((c) => [`command:${c.id}`, c.keys!.map(normalizeShortcut)]),
+  ...TOOLS.filter((t) => t.key).map((t) => [`tool:${t.id}`, [normalizeShortcut(t.key.toLowerCase())]]),
+]);
+
+let current: { overrides: ShortcutMap; map: ShortcutMap; index: Map<string, ShortcutTarget[]> } | null = null;
+
+/** The shortcuts now (the defaults with the user's changes) and what each shortcut runs. */
+export function shortcutsNow(): { map: ShortcutMap; index: Map<string, ShortcutTarget[]> } {
+  const overrides = useShortcuts.getState().overrides;
+  if (current?.overrides !== overrides) {
+    const map = effectiveShortcuts(DEFAULT_SHORTCUTS, overrides);
+    const index = new Map<string, ShortcutTarget[]>();
+    for (const [t, keys] of Object.entries(map)) for (const k of keys) index.set(k, [...(index.get(k) ?? []), t]);
+    current = { overrides, map, index };
+  }
+  return current;
+}
+
+/** The functions a shortcut runs (tools may share one). */
+export const targetsForShortcut = (s: string): ShortcutTarget[] => shortcutsNow().index.get(normalizeShortcut(s)) ?? [];
+
+export function commandForShortcut(s: string): Command | undefined {
+  const t = targetsForShortcut(s).find((x) => x.startsWith('command:'));
+  return t ? byId.get(t.slice('command:'.length)) : undefined;
+}
+
+/** A command's shortcuts (canonical strings). */
+export const commandShortcuts = (id: string): string[] => shortcutsNow().map[`command:${id}`] ?? [];
+
+/** A tool's shortcuts (canonical strings). */
+export const toolShortcuts = (tool: ToolId): string[] => shortcutsNow().map[`tool:${tool}`] ?? [];
+
+/** The tool a shortcut switches to: of the tools sharing it, the one after the current tool. */
+export function toolForShortcut(s: string, now: ToolId): ToolId | null {
+  const key = normalizeShortcut(s);
+  const tools = TOOLS.filter((t) => toolShortcuts(t.id).includes(key));
+  if (!tools.length) return null;
+  const i = tools.findIndex((t) => t.id === now);
+  return tools[(i + 1) % tools.length].id;
+}
 
 export function shortcutLabel(id: string): string | undefined {
-  const k = byId.get(id)?.keys?.[0];
+  const k = commandShortcuts(id)[0];
   return k ? formatShortcut(k, isMac) : undefined;
 }
 

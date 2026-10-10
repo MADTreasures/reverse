@@ -1,5 +1,6 @@
 import { RegisterMaterialDialog } from './dialogs/MaterialDialogs';
 import { QuickAccessSettingsDialog } from './dialogs/QuickAccessSettingsDialog';
+import { ShortcutSettingsDialog } from './dialogs/ShortcutSettingsDialog';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { CanvasSizeDialog } from './dialogs/AdjustDialogs';
 import { FilterDialog } from './dialogs/FilterDialog';
@@ -19,7 +20,7 @@ import { AboutDialog, ShortcutsDialog } from './dialogs/InfoDialogs';
 import { FrameEditDialog, GoToFrameDialog, GoToLabelDialog, TimelineLabelDialog, TrackLabelDialog } from './dialogs/LabelDialogs';
 import { BlurBorderDialog, ColorGamutDialog, GrowSelectionDialog } from './dialogs/SelectionDialogs';
 import { NewCanvasDialog } from './dialogs/NewCanvasDialog';
-import { closeDialog, closeMenu, useOverlays, type MenuItem } from './overlays';
+import { closeDialog, closeMenu, isKeyCapture, useOverlays, type MenuItem } from './overlays';
 
 /** Context menus, modal dialogs and toast notifications. */
 export function OverlayHost() {
@@ -30,7 +31,7 @@ export function OverlayHost() {
   useEffect(() => {
     if (!dialog) return;
     const esc = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
+      if (e.key === 'Escape' && !isKeyCapture()) {
         e.stopPropagation();
         closeDialog();
       }
@@ -108,6 +109,7 @@ export function OverlayHost() {
           {dialog.kind === 'custom' && dialog.id === 'gradient' && <GradientDialog />}
           {dialog.kind === 'custom' && dialog.id === 'registerMaterial' && <RegisterMaterialDialog />}
           {dialog.kind === 'custom' && dialog.id === 'quickAccessSettings' && <QuickAccessSettingsDialog />}
+          {dialog.kind === 'custom' && dialog.id === 'shortcutSettings' && <ShortcutSettingsDialog />}
         </div>
       )}
       <div className="toasts" aria-live="polite">

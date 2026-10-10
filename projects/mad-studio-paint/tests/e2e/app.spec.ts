@@ -5085,3 +5085,96 @@ test('Quick Access palette: buttons run tools, colours, commands and auto action
   expect(kept.history).toContain('gaussian');
   expect(errors).toEqual([]);
 });
+
+test('Shortcut Settings: menu commands, tools and auto actions get new shortcuts; conflicts move; Esc, Cancel and Reset', async ({ page }) => {
+  const errors = await boot(page);
+  const layerCount = () => page.evaluate(() => window.__madPaint.useStore.getState().doc.layers.length);
+  const open = async () => {
+    await page.getByRole('navigation', { name: 'Main menu' }).getByRole('button', { name: 'File', exact: true }).dispatchEvent('pointerdown');
+    await page.locator('[data-command=shortcutSettings]').click();
+  };
+  const canvas = page.getByTestId('paint-canvas');
+  await open();
+  const dialog = page.getByRole('dialog', { name: 'Shortcut Settings' });
+  const list = dialog.getByRole('tree', { name: 'Shortcuts' });
+  const info = dialog.getByRole('status', { name: 'Information' });
+  // Menu commands: Layer > New raster layer gets Ctrl/⌘+Alt+L instead of Ctrl/⌘+Shift+N.
+  await list.getByRole('treeitem', { name: 'Layer', exact: true }).click();
+  const newLayer = list.getByRole('treeitem', { name: 'New raster layer' }).first();
+  await newLayer.click();
+  await expect(info).toContainText('New raster layer');
+  await dialog.getByRole('button', { name: 'Edit shortcut' }).click();
+  await expect(info).toContainText('Press the keys');
+  // Esc cancels the new shortcut, not the dialog.
+  await page.keyboard.press('Escape');
+  await expect(dialog).toBeVisible();
+  await expect(info).not.toContainText('Press the keys');
+  await dialog.getByRole('button', { name: 'Edit shortcut' }).click();
+  await page.keyboard.press('ControlOrMeta+Alt+l');
+  await page.keyboard.press('Enter');
+  await expect(newLayer).toContainText(/(⌥⌘L|Ctrl\+Alt\+L)/);
+  // A shortcut of another command moves here: Save's ⌘S / Ctrl+S on Duplicate layer.
+  await list.getByRole('treeitem', { name: 'Duplicate layer' }).first().click();
+  await dialog.getByRole('button', { name: 'Add shortcut' }).click();
+  await page.keyboard.press('ControlOrMeta+s');
+  await expect(info).toContainText('used by Save');
+  await page.keyboard.press('Enter');
+  await expect(info).toContainText('was taken from Save');
+  // Tools: Q for the eraser; Auto Actions: F6 plays "New draft layer".
+  await dialog.getByRole('combobox', { name: 'Category' }).selectOption({ label: 'Tools' });
+  await list.getByRole('treeitem', { name: 'Eraser', exact: true }).click();
+  await dialog.getByRole('button', { name: 'Add shortcut' }).click();
+  await page.keyboard.press('q');
+  await page.keyboard.press('Enter');
+  await expect(list.getByRole('treeitem', { name: 'Eraser', exact: true })).toContainText('E, Q');
+  await dialog.getByRole('combobox', { name: 'Category' }).selectOption({ label: 'Auto Actions' });
+  await list.getByRole('treeitem', { name: 'Default' }).click();
+  await list.getByRole('treeitem', { name: 'New draft layer' }).click();
+  await dialog.getByRole('button', { name: 'Edit shortcut' }).click();
+  await page.keyboard.press('F6');
+  // A click elsewhere in the dialog sets it too.
+  await info.click();
+  await expect(list.getByRole('treeitem', { name: 'New draft layer' })).toContainText('F6');
+  await dialog.getByRole('button', { name: 'OK' }).click();
+  await expect(dialog).toBeHidden();
+
+  // The new shortcuts work, the old one no longer; the menu shows the new one.
+  await canvas.hover();
+  const n = await layerCount();
+  await page.keyboard.press('ControlOrMeta+Shift+n');
+  expect(await layerCount()).toBe(n);
+  await page.keyboard.press('ControlOrMeta+Alt+l');
+  expect(await layerCount()).toBe(n + 1);
+  await page.keyboard.press('ControlOrMeta+s');
+  expect(await layerCount()).toBe(n + 2);
+  await page.keyboard.press('q');
+  expect((await state(page)).tool).toBe('eraser');
+  await page.keyboard.press('F6');
+  await expect.poll(layerCount).toBe(n + 3);
+  expect(await page.evaluate(() => window.__madPaint.useStore.getState().doc.layers[0].draft)).toBe(true);
+  await page.getByRole('navigation', { name: 'Main menu' }).getByRole('button', { name: 'Layer', exact: true }).dispatchEvent('pointerdown');
+  await expect(page.locator('[data-command=newRasterLayer]').first()).toContainText(/(⌥⌘L|Ctrl\+Alt\+L)/);
+  await page.keyboard.press('Escape');
+  const kept = await page.evaluate(() => JSON.parse(localStorage.getItem('mad-paint:shortcuts')!));
+  expect(kept['command:newRasterLayer']).toEqual(['Mod+Alt+l']);
+  expect(kept['command:save']).toEqual([]);
+  expect(kept['tool:eraser']).toEqual(['e', 'q']);
+
+  // Cancel keeps nothing; Reset brings back the defaults.
+  await open();
+  await dialog.getByRole('combobox', { name: 'Category' }).selectOption({ label: 'Tools' });
+  await list.getByRole('treeitem', { name: 'Eraser', exact: true }).click();
+  await dialog.getByRole('button', { name: 'Delete shortcut' }).click();
+  await expect(list.getByRole('treeitem', { name: 'Eraser', exact: true })).not.toContainText('Q');
+  await dialog.getByRole('button', { name: 'Cancel' }).click();
+  expect((await page.evaluate(() => JSON.parse(localStorage.getItem('mad-paint:shortcuts')!)))['tool:eraser']).toEqual(['e', 'q']);
+  await open();
+  await dialog.getByRole('button', { name: 'Reset' }).click();
+  await dialog.getByRole('button', { name: 'OK' }).click();
+  await canvas.hover();
+  const m = await layerCount();
+  await page.keyboard.press('ControlOrMeta+Shift+n');
+  expect(await layerCount()).toBe(m + 1);
+  expect(await page.evaluate(() => localStorage.getItem('mad-paint:shortcuts'))).toBe('{}');
+  expect(errors).toEqual([]);
+});

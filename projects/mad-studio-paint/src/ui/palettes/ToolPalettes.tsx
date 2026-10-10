@@ -1,4 +1,8 @@
 import { QUICK_ITEM_MIME } from '../quickItems';
+import { toolShortcuts } from '../commands';
+import { formatShortcut } from '../shortcuts';
+import { useShortcuts } from '../../store/shortcutStore';
+import { isMac } from '../../platform/platform';
 import { useState } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import { BRUSH_SIZE_PRESETS } from '../../store/actions';
@@ -52,6 +56,8 @@ const lastTool = new Map<string, ToolId>();
 /** Column of tool buttons in sections, with the colour icons at the bottom. */
 export function ToolPalette() {
   const tool = useStore((s) => s.tool);
+  // Shortcut Settings change the keys in the tooltips.
+  useShortcuts((s) => s.overrides);
   const workspace = useStore((s) => s.workspace);
   const current = entryForTool(tool, workspace);
   lastTool.set(current.id, tool);
@@ -62,7 +68,7 @@ export function ToolPalette() {
           {section.map((id) => {
             const e = PALETTE_ENTRIES.find((x) => x.id === id)!;
             const active = e.id === current.id;
-            const keys = [...new Set(e.tools.map((t) => toolInfo(t).key).filter(Boolean))].join(', ');
+            const keys = [...new Set(e.tools.flatMap((t) => toolShortcuts(t)).map((k) => formatShortcut(k, isMac)))].join(', ');
             return (
               <button
                 key={e.id}

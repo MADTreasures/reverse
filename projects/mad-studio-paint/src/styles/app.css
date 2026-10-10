@@ -4606,3 +4606,37 @@ body.canvas-only .modal * {
   display: flex;
   gap: 8px;
 }
+
+/* Shortcut Settings */
+.modal.shortcut-settings {
+  width: 640px;
+}
+
+.shortcut-row {
+  display: flex;
+  gap: 12px;
+}
+
+.shortcut-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.shortcut-keys {
+  color: var(--text-dim);
+  font-family: var(--mono);
+  font-size: 11px;
+}
+
+.shortcut-row.on .shortcut-keys {
+  color: #fff;
+}
+
+.shortcut-info {
+  min-height: 34px;
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  background: var(--well);
+  font-size: 12px;
+}

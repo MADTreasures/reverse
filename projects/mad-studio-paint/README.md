@@ -97,13 +97,20 @@ Die Bedienung folgt dem öffentlichen Handbuch des Vorbilds (Ver. 5). Die wichti
 | Comic-Rahmen (Rahmenordner, Rahmen teilen, Rahmen-Vorlagen) | gleich (Vorlagen im Dialog statt Material-Palette; ohne Kontrollpunkte, Rahmen verbinden) |
 | Konzentrations-/Speedlines und Blitze (Comic-Werkzeug) | gleich (eigene Werte; ohne „Dark focus lines (curved)“, „Make curve“ und Kontrollpunkte der Referenz-/Formlinie) |
 | Material-Palette, Bildmaterial-Ebenen, Material registrieren | gleich (eigene Materialien statt der mitgelieferten; ohne Clip Studio Assets, 3D-Materialien, Pinsel-/Verlaufs-/Farbset-Materialien, Material-Eigenschaften-Dialog) |
-| Auto Actions (Aufnahme, Wiedergabe, Schalter, Sätze) und Quick-Access-Palette (Suche, Sätze, Ansichten, Einstellungen) | gleich (eigene Standardsätze; ohne Aufnahme von Werkzeugbewegungen, Mehrfachauswahl, Kürzel für Auto Actions, eigene Symbole und Hintergrundfarben, Companion-Modus) |
+| Auto Actions (Aufnahme, Wiedergabe, Schalter, Sätze) und Quick-Access-Palette (Suche, Sätze, Ansichten, Einstellungen) | gleich (eigene Standardsätze; ohne Aufnahme von Werkzeugbewegungen, Mehrfachauswahl, eigene Symbole und Hintergrundfarben, Companion-Modus) |
+| Tastenkürzel ändern (*File → Shortcut Settings*: Menübefehle, Optionen, Werkzeuge, Auto Actions) | gleich (ohne Pop-up-Paletten, Kürzel-Sätze und Tasten für Stift oder Edge Keyboard) |
 | Animation: Animationsordner, Zeitleiste mit Clips und Keyframes, 2D-Kamera, Zwiebelschicht, Leuchttisch, Ton, Film-Import, Export als Einzelbilder, GIF, APNG, WebP und Film (MP4/MOV) | gleich |
 | 3D | noch nicht (siehe unten) |
 
 ### Tastenkürzel
 
-Wie im Handbuch des Vorbilds (macOS: Ctrl → ⌘, Alt → ⌥):
+Wie im Handbuch des Vorbilds (macOS: Ctrl → ⌘, Alt → ⌥). Unter *File → Shortcut Settings* lässt
+sich jedes Kürzel ändern wie im Vorbild: Kategorien *Menu commands* (als Menübaum), *Options*,
+*Tools* und *Auto Actions*; *Edit shortcut* (Tasten drücken, Enter oder ein Klick übernimmt, Esc
+bricht ab), *Add shortcut*, *Delete shortcut*, *Reset*, OK/Cancel. Ein Kürzel gehört immer nur
+einem Befehl (es wandert dorthin, wo es neu gesetzt wird); Werkzeuge dürfen sich eines teilen
+(nochmals drücken wechselt). Menüs, Tooltips, die Übersicht (F1) und das Mac-Menü zeigen die
+eigenen Kürzel; Auto Actions lassen sich per Kürzel abspielen.
 
 | Taste | Funktion | Taste | Funktion |
 | ----- | -------- | ----- | -------- |

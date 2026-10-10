@@ -2,7 +2,7 @@
  * The native (Electron) menu is built from the same MENUS and COMMANDS as the in-window menu bar:
  * the renderer sends this plain template to the main process, which adds the platform roles.
  */
-import { commandById } from './commands';
+import { commandById, commandShortcuts } from './commands';
 import { MENUS, type MenuItem } from './menus';
 import { toAccelerator } from './shortcuts';
 
@@ -21,7 +21,7 @@ function convert(items: MenuItem[]): NativeMenuItem[] {
     if (typeof item !== 'string') return [{ label: item.label, submenu: convert(item.items) }];
     const c = commandById(item);
     if (!c) return [];
-    const key = c.keys?.[0];
+    const key = commandShortcuts(c.id)[0];
     return [{ id: c.id, label: c.label, ...(key ? { accelerator: toAccelerator(key) } : {}) }];
   });
 }
