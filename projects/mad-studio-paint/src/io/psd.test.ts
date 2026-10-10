@@ -2,7 +2,7 @@ import { readPsd, writePsdUint8Array } from 'ag-psd';
 import { describe, expect, it } from 'vitest';
 import { BLEND_MODES } from '../model/blend';
 import { createDocument } from '../model/document';
-import { createCorrectionLayer, createFolder, createLayerMask, createRasterLayer, flatten } from '../model/layers';
+import { createCorrectionLayer, createFillLayer, createFolder, createLayerMask, createRasterLayer, flatten } from '../model/layers';
 import type { DrawnLayer, FolderLayer, Id, Layer } from '../model/types';
 import { rectPoints } from '../paint/frames';
 import { CORRECTIONS, defaultCorrection, type Correction } from '../paint/tonal';
@@ -183,6 +183,31 @@ describe('PSD documents', () => {
     expect(at(p, 0, 2)).toEqual([255, 255, 255, 255]);
     expect(at(p, W - 1, 5)).toEqual([255, 255, 255, 255]);
     expect(at(p, 0, 6)).toEqual([0, 0, 0, 0]);
+  });
+
+  it('writes fill layers as Photoshop fill layers and opens them as fill layers', () => {
+    const doc = createDocument('Fill', W, H);
+    const fill = createFillLayer('Sky', '#3366cc', { opacity: 0.75, mask: createLayerMask() });
+    doc.layers = [fill];
+    const pixels = new Map<Id, Pixels>([
+      [fill.id, image(() => [0x33, 0x66, 0xcc, 255])],
+      [fill.mask!.id, image((x) => [0, 0, 0, x < 10 ? 255 : 0])],
+    ]);
+    const psd = readPsd(encodePsd(source(doc, pixels)), { useImageData: true });
+    expect(psd.children![1].vectorFill).toEqual({ type: 'color', color: { r: 0x33, g: 0x66, b: 0xcc } });
+    const { doc: back, notes } = open(encodePsd(source(doc, pixels)));
+    expect(notes).toEqual([]);
+    const l = back.layers[0];
+    expect([l.kind, l.name, l.kind === 'fill' && l.color, Math.round(l.opacity * 100), Boolean(l.mask)]).toEqual(['fill', 'Sky', '#3366cc', 75, true]);
+  });
+
+  it('writes big documents (PSB)', () => {
+    const doc = createDocument('Big', W, H);
+    const bytes = encodePsd(source(doc, new Map()), true);
+    // Signature, then version 2.
+    expect([String.fromCharCode(...bytes.subarray(0, 4)), (bytes[4] << 8) | bytes[5]]).toEqual(['8BPS', 2]);
+    expect(open(bytes).doc.layers.map((l) => l.name)).toEqual(['Layer 1']);
+    expect((encodeFlatPsd(image(() => [0, 0, 0, 255]), 72, false, true)[5])).toBe(2);
   });
 
   it('exports the merged image as one layer or as the background', () => {

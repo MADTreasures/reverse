@@ -1656,6 +1656,8 @@ test('screentones: the Tone effect turns grey into dots; New tone makes a masked
   await dlg.getByRole('button', { name: 'OK' }).click();
   const l = (await state(page)).layers[0];
   expect(l.name).toMatch(/line 20%/);
+  // Like the reference: a fill layer (black) with the tone effect and a mask.
+  expect([l.kind, l.color]).toEqual(['fill', '#000000']);
   expect(l.mask).toBeTruthy();
   const inside = await darkShare(page, 60, 100, 40, 40);
   expect(inside).toBeGreaterThan(0.1);
@@ -1673,6 +1675,73 @@ test('screentones: the Tone effect turns grey into dots; New tone makes a masked
 
 /** Displayed RGB at a point. */
 const rgbAt = (page: Page, x: number, y: number) => page.evaluate(([px, py]) => window.__madPaint.engine.sampleDisplayed(px, py, '#ffffff').slice(0, 3), [x, y]);
+
+test('fill layers: one colour in the selection; its colour from Color settings, the thumbnail, the Object tool and the colour palettes; saved', async ({ page }) => {
+  const errors = await boot(page);
+  await page.evaluate(() => delete (window as any).showSaveFilePicker);
+  // The left half selected; Layer > New Layer > Fill in red.
+  await page.evaluate(() => {
+    const m = window.__madPaint;
+    m.actions.setSelection({ width: 400, height: 300, data: new Uint8Array(400 * 300).map((_: number, i: number) => (i % 400 < 200 ? 255 : 0)) });
+    m.runCommand('newFillLayer');
+  });
+  const dlg = page.getByRole('dialog', { name: 'Color settings' });
+  await dlg.getByLabel('Hex').fill('#ff0000');
+  await dlg.getByRole('button', { name: 'OK' }).click();
+  const top = () =>
+    page.evaluate(() => {
+      const l = window.__madPaint.useStore.getState().doc.layers[0];
+      return { kind: l.kind, name: l.name, color: l.color, mask: Boolean(l.mask) };
+    });
+  expect(await top()).toEqual({ kind: 'fill', name: 'Fill 1', color: '#ff0000', mask: true });
+  await expect(page.getByTestId('fill-icon')).toHaveCount(1);
+  expect(await rgbAt(page, 100, 150)).toEqual([255, 0, 0]);
+  expect(await rgbAt(page, 300, 150)).toEqual([255, 255, 255]);
+  // It cannot be drawn on (its mask can).
+  await page.keyboard.press('ControlOrMeta+d');
+  await thinPen(page);
+  await drag(page, [250, 100], [350, 100]);
+  expect(await page.evaluate(() => window.__madPaint.useStore.getState().hint)).toMatch(/Fill layers cannot be drawn on/);
+  expect(await rgbAt(page, 300, 100)).toEqual([255, 255, 255]);
+  // Double-clicking the thumbnail: blue.
+  await page.getByTestId('fill-thumb').dblclick();
+  await expect(dlg.getByLabel('Hex')).toHaveValue('#ff0000');
+  await dlg.getByLabel('R', { exact: true }).fill('0');
+  await dlg.getByLabel('B', { exact: true }).fill('255');
+  await dlg.getByRole('button', { name: 'OK' }).click();
+  expect((await top()).color).toBe('#0000ff');
+  expect(await rgbAt(page, 100, 150)).toEqual([0, 0, 255]);
+  // Object tool: Tool Settings > Fill color; a colour picked in the Color Set palette fills it.
+  await selectTool(page, 'object');
+  await page.getByRole('button', { name: 'Tool Settings', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Fill color' })).toBeVisible();
+  await page.getByTestId('color-set').getByRole('button', { name: '#43a047' }).click();
+  expect((await top()).color).toBe('#43a047');
+  expect(await rgbAt(page, 100, 150)).toEqual([0x43, 0xa0, 0x47]);
+  await page.evaluate(() => window.__madPaint.actions.undo());
+  expect((await top()).color).toBe('#0000ff');
+  // Saved as .madpaint and as .psd (a Photoshop fill layer): still a fill layer.
+  const reopened = await page.evaluate(async () => {
+    const m = window.__madPaint;
+    await m.openFileBytes({ name: 'fill.madpaint', data: await m.buildDocumentBytes() });
+    const l = m.useStore.getState().doc.layers[0];
+    return [l.kind, l.color];
+  });
+  expect(reopened).toEqual(['fill', '#0000ff']);
+  expect(await rgbAt(page, 100, 150)).toEqual([0, 0, 255]);
+  await page.evaluate(() => window.__madPaint.runCommand('saveDuplicatePsd'));
+  const [psd] = await Promise.all([page.waitForEvent('download'), page.getByRole('dialog', { name: 'Export settings' }).getByRole('button', { name: 'OK' }).click()]);
+  const fromPsd = await page.evaluate(async (data) => {
+    const m = window.__madPaint;
+    await m.openFileBytes({ name: 'fill.psd', data: new Uint8Array(data) });
+    const l = m.useStore.getState().doc.layers[0];
+    return [l.kind, l.color, Boolean(l.mask)];
+  }, [...readFileSync((await psd.path())!)]);
+  expect(fromPsd).toEqual(['fill', '#0000ff', true]);
+  expect(await rgbAt(page, 100, 150)).toEqual([0, 0, 255]);
+  expect(await rgbAt(page, 300, 150)).toEqual([255, 255, 255]);
+  expect(errors).toEqual([]);
+});
 
 test('gradients: shapes and edge rules, the Edit gradient dialog, editable gradient layers', async ({ page }) => {
   const errors = await boot(page);

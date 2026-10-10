@@ -16,6 +16,7 @@ import type { GradientEdge, GradientSpec } from '../../paint/gradient';
 import { GradientBar } from '../controls/GradientBar';
 import { tipAlphaUrl } from '../../engine/materials';
 import { openDialog } from '../overlays';
+import { openColorSettings } from '../dialogs/ColorSettingsDialog';
 import { entryForTool, isSpecialCurve, PALETTE_ENTRIES, PALETTE_LAYOUT, subToolsOf, toolInfo, type CorrectSettings, type FillReference, type SubTool, type ToolId } from '../../paint/tools';
 import { Icon } from '../controls/Icons';
 import { PropSlider } from '../controls/PropSlider';
@@ -436,7 +437,27 @@ function LightTableSettings() {
 function ObjectSettings({ sub, update }: { sub: SubTool; update: (patch: Partial<SubTool>) => void }) {
   const audio = useStore((s) => (s.doc.timeline ? sound.activeSoundTrack(s) : null));
   const keyed = useStore((s) => (s.doc.timeline?.enabled && !s.editKeyed ? anim.keyTrack(s) : null));
+  const fill = useStore((s) => {
+    const l = actions.activeLayer(s);
+    return l?.kind === 'fill' && !s.maskEditing ? l : null;
+  });
   if (audio) return <AudioTrackSettings />;
+  if (fill && !keyed)
+    return (
+      <>
+        <div className="prop-row">
+          <span className="prop-label">Fill color</span>
+          <button
+            className="fill-swatch"
+            aria-label="Fill color"
+            title="Change the fill layer's colour (a colour picked in the colour palettes does too)"
+            style={{ background: fill.color }}
+            onClick={() => openColorSettings(fill.color, (c) => actions.setFillColor(fill.id, c))}
+          />
+        </div>
+        <div className="prop-note">A colour picked in the Color Wheel, Color Slider or Color Set palette becomes the fill colour.</div>
+      </>
+    );
   return keyed ? <KeyframeSettings track={keyed} /> : <ObjectLineSettings sub={sub} update={update} />;
 }
 

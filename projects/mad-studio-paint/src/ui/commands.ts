@@ -8,12 +8,13 @@ import * as anim from '../store/animationActions';
 import * as light from '../store/lightTableActions';
 import * as sound from '../store/soundActions';
 import { copy, cut, hasClip, pasteImage } from '../store/clipboard';
-import { getState, setState } from '../store/store';
+import { drawingColor, getState, setState } from '../store/store';
 import { cancelTransform, confirmTransform, isTransforming, startTransform } from '../tools/transform';
 import { CORRECTIONS, correctionLabel, defaultCorrection, type CorrectionType } from '../paint/tonal';
 import { openDialog, openTonalDialog, promptDialog } from './overlays';
 import { openAssignMenu } from './palettes/TimelinePalette';
 import { openImageExport, openPsdDuplicate } from './dialogs/ExportDialog';
+import { openColorSettings } from './dialogs/ColorSettingsDialog';
 import { IMAGE_FORMAT_ORDER, IMAGE_FORMATS } from '../io/imageExport';
 import { formatShortcut, normalizeShortcut } from './shortcuts';
 
@@ -173,10 +174,11 @@ export const COMMANDS: Command[] = [
   { id: 'newVectorLayer', label: 'New vector layer', run: () => void actions.addVectorLayer() },
   { id: 'newFolder', label: 'New layer folder', run: () => void actions.addFolder() },
   { id: 'newFrameFolder', label: 'New frame border folder…', run: () => openDialog('newFrameFolder') },
-  { id: 'newTone', label: 'New tone layer…', run: () => openDialog('newTone') },
+  { id: 'newTone', label: 'Tone…', run: () => openDialog('newTone') },
+  { id: 'newFillLayer', label: 'Fill…', run: () => openColorSettings(drawingColor(getState().colors), (c) => void actions.addFillLayer(c)) },
   {
     id: 'newGradientLayer',
-    label: 'New gradient layer…',
+    label: 'Gradient…',
     run: () => {
       actions.newGradientLayer();
       openDialog('gradient');

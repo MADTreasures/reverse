@@ -172,6 +172,19 @@ export interface GradientLayer extends LayerBase {
 }
 
 /**
+ * Fill layer (Layer > New Layer > Fill): one colour over the whole canvas; its layer mask sets
+ * where it shows. The colour stays editable; rendered by the engine.
+ */
+export interface FillLayer extends LayerBase {
+  kind: 'fill';
+  blend: BlendMode;
+  /** '#rrggbb'. */
+  color: string;
+  /** Changes with every edit (never reused), so rendered pixels can be cached. */
+  rev: number;
+}
+
+/**
  * Audio layer (Animation > New animation layer > Audio, File > Import > Audio): a track of the
  * timeline whose clips play sound files; hidden, it is muted. It has no pixels.
  */
@@ -213,7 +226,7 @@ export interface MovieFile {
   height: number;
 }
 
-export type Layer = RasterLayer | FolderLayer | CorrectionLayer | VectorLayer | TextLayer | GradientLayer | AudioLayer | MovieLayer;
+export type Layer = RasterLayer | FolderLayer | CorrectionLayer | VectorLayer | TextLayer | GradientLayer | FillLayer | AudioLayer | MovieLayer;
 
 /** Layers that take part in the picture (all but audio layers). */
 export type DrawnLayer = Exclude<Layer, AudioLayer>;

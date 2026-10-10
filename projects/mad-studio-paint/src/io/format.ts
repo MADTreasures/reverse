@@ -13,7 +13,7 @@ import { strFromU8, strToU8, unzipSync, zipSync } from 'fflate';
 import { isBlendMode } from '../model/blend';
 import { clampCanvasSide } from '../model/document';
 import { createAudioLayer, createRasterLayer, flatten, nextRev } from '../model/layers';
-import type { AudioLayer, CorrectionLayer, FolderLayer, GradientLayer, Id, Layer, LayerMask, LayerRulers, MovieFile, MovieLayer, PaintDocument, RasterLayer, TextLayer, VectorLayer } from '../model/types';
+import type { AudioLayer, CorrectionLayer, FillLayer, FolderLayer, GradientLayer, Id, Layer, LayerMask, LayerRulers, MovieFile, MovieLayer, PaintDocument, RasterLayer, TextLayer, VectorLayer } from '../model/types';
 import { sanitizeGradientFill } from '../paint/gradient';
 import { sanitizeEffects } from '../paint/effects';
 import { sanitizeRuler, type Ruler } from '../paint/rulers';
@@ -36,9 +36,10 @@ export const FORMAT = 'mad-studio-paint';
  * 4: animation (timeline, animation folders). 5: clips, keyframes, 2D camera folders, light tables
  * (their images are stored like layer pixels, as layers/<id>.png), sound. 6: keyframes record
  * single settings, mask keyframes, audio layers (audio tracks were kept beside the layers),
- * animation frame lines, several timelines (start and end frames). Older files open unchanged.
+ * animation frame lines, several timelines (start and end frames). 7: fill layers (tone layers
+ * are fill layers with the tone effect). Older files open unchanged.
  */
-export const FORMAT_VERSION = 6;
+export const FORMAT_VERSION = 7;
 export const EXTENSION = 'madpaint';
 
 export interface DocumentFile {
@@ -190,6 +191,11 @@ function sanitizeLayer(raw: unknown, seen: Set<string>, depth: number, files: Se
     const vector: VectorLayer = { ...common, kind: 'vector', blend: isBlendMode(r.blend) ? r.blend : 'normal', strokes, rev: nextRev() };
     return vector;
   }
+  if (r.kind === 'fill') {
+    const color = typeof r.color === 'string' && /^#[0-9a-f]{6}$/i.test(r.color) ? r.color.toLowerCase() : '#000000';
+    const layer: FillLayer = { ...common, kind: 'fill', blend: isBlendMode(r.blend) ? r.blend : 'normal', color, rev: nextRev() };
+    return layer;
+  }
   if (r.kind === 'gradient') {
     const gradient = sanitizeGradientFill(r.gradient);
     if (gradient) {
@@ -293,13 +299,13 @@ function documentJson(doc: PaintDocument): unknown {
   const pack = (layers: Layer[]): unknown[] =>
     layers.map((l) => {
       if (l.kind === 'vector') return packVectorLayer(l);
-      if (l.kind === 'text' || l.kind === 'gradient') {
+      if (l.kind === 'text' || l.kind === 'gradient' || l.kind === 'fill') {
         const { rev: _rev, ...rest } = l;
         return rest;
       }
       return l.kind === 'folder' ? { ...l, children: pack(l.children) } : l;
     });
-  return flatten(doc.layers).some((l) => l.kind === 'vector' || l.kind === 'text' || l.kind === 'gradient') ? { ...doc, layers: pack(doc.layers) } : doc;
+  return flatten(doc.layers).some((l) => l.kind === 'vector' || l.kind === 'text' || l.kind === 'gradient' || l.kind === 'fill') ? { ...doc, layers: pack(doc.layers) } : doc;
 }
 
 export function packDocument(file: DocumentFile): Uint8Array {

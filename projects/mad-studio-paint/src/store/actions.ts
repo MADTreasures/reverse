@@ -10,6 +10,7 @@ import {
   cloneDocument,
   cloneLayer,
   createCorrectionLayer,
+  createFillLayer,
   createFolder,
   createGradientLayer,
   createLayerMask,
@@ -32,7 +33,7 @@ import {
   shiftLayer as shiftLayerInTree,
   type DropPosition,
 } from '../model/layers';
-import type { AudioLayer, DrawnLayer, FolderLayer, GradientLayer, Id, Layer, LayerMask, PaintDocument, RasterLayer, RulerRange, TextLayer, VectorLayer } from '../model/types';
+import type { AudioLayer, DrawnLayer, FillLayer, FolderLayer, GradientLayer, Id, Layer, LayerMask, PaintDocument, RasterLayer, RulerRange, TextLayer, VectorLayer } from '../model/types';
 import { defaultPerspective, rulerLine, type Affine, type Ruler, type RulerInput } from '../paint/rulers';
 import { eraseWhere, keepWhere, type VectorStroke } from '../paint/vector';
 import { editable } from '../paint/vectorEdit';
@@ -253,7 +254,7 @@ export function editBlocker(s: PaintState = getState()): string | null {
   const l = activeLayer(s);
   if (!l) return 'No layer selected';
   if (!editTarget(s)) {
-    if (l.kind === 'text' || l.kind === 'gradient') return `${l.kind === 'text' ? 'Text' : 'Gradient'} layers cannot be drawn on (Layer > Rasterize converts the layer)`;
+    if (l.kind === 'text' || l.kind === 'gradient' || l.kind === 'fill') return `${l.kind === 'text' ? 'Text' : l.kind === 'fill' ? 'Fill' : 'Gradient'} layers cannot be drawn on (Layer > Rasterize converts the layer; draw on the layer mask to change where it shows)`;
     if (isAnimationFolder(l)) return 'Select a cel to draw on, or make one with New animation cel';
     if (l.kind === 'audio') return 'Audio layers cannot be drawn on';
     if (l.kind === 'movie') return 'Movie layers cannot be drawn on (they show a movie file)';
@@ -835,8 +836,8 @@ export function previewContent(l: ObjectLayer, c: Content, r: Rect | null): void
   } else engine.previewFrame(l.id, c.panels);
 }
 
-/** Vector, text and gradient layers: their pixels are rendered from their content. */
-export const isRenderedLayer = (l: Layer | null | undefined): l is VectorLayer | TextLayer | GradientLayer => l?.kind === 'vector' || l?.kind === 'text' || l?.kind === 'gradient';
+/** Vector, text, gradient and fill layers: their pixels are rendered from their content. */
+export const isRenderedLayer = (l: Layer | null | undefined): l is VectorLayer | TextLayer | GradientLayer | FillLayer => l?.kind === 'vector' || l?.kind === 'text' || l?.kind === 'gradient' || l?.kind === 'fill';
 
 /** Layer > Rasterize: a vector or text layer becomes a raster layer with the same pixels. */
 export function rasterizeLayer(id: Id = getState().activeLayerId): void {
@@ -1060,21 +1061,51 @@ export function addCorrectionLayer(correction: Correction, preview = false): Id 
 }
 
 /**
- * Layer > New layer > Tone: a layer filled with black and shown as a tone of the set density, with a
- * mask limited to the selection (everywhere without one), named after the tone like the reference.
+ * Layer > New Layer > Fill: a fill layer of one colour with a layer mask limited to the selection
+ * (everywhere without one).
+ */
+export function addFillLayer(color: string): Id {
+  const s = getState();
+  const layer = createFillLayer(nextLayerName(s.doc, 'Fill'), color.toLowerCase(), { mask: maskFromSelection() });
+  changeDoc('New fill layer', (doc) => {
+    insertNew(doc, layer, s.activeLayerId);
+    return layer.id;
+  });
+  setState({ maskEditing: false });
+  return layer.id;
+}
+
+/** A fill layer's colour (Color settings, Tool Settings > Fill color, a colour palette); `key` merges drags. */
+export function setFillColor(id: Id, color: string, key?: string): void {
+  const l = findLayer(getState().doc.layers, id);
+  if (l?.kind !== 'fill' || l.color === color.toLowerCase()) return;
+  if (isEffectivelyLocked(getState().doc.layers, id)) {
+    setState({ hint: 'The layer is locked' });
+    return;
+  }
+  changeDoc(
+    'Fill color',
+    (doc) => {
+      const x = findLayer(doc.layers, id);
+      if (x?.kind !== 'fill') return;
+      x.color = color.toLowerCase();
+      x.rev = nextRev();
+    },
+    key ? { key } : {},
+  );
+}
+
+/**
+ * Layer > New Layer > Tone: a fill layer of black shown as a tone of the set density (as in the
+ * reference), with a mask limited to the selection (everywhere without one), named after the tone.
  */
 export function addToneLayer(tone: Pick<ToneEffect, 'frequency' | 'value' | 'shape' | 'angle'>): Id {
   const s = getState();
   const shape = DOT_SHAPES.find(([id]) => id === tone.shape)?.[1] ?? 'Circle';
-  const layer = createRasterLayer(`${shape} ${tone.frequency.toFixed(1)} line ${Math.round(tone.value)}%`, {
+  const layer = createFillLayer(`${shape} ${tone.frequency.toFixed(1)} line ${Math.round(tone.value)}%`, '#000000', {
     mask: maskFromSelection(),
     effects: { tone: defaultTone(s.doc.dpi, { ...tone, density: 'fixed', enabled: true }) },
   });
-  const surface = ensureSurface(layer.id, s.doc.width, s.doc.height);
-  const ctx = ctx2d(surface);
-  ctx.fillStyle = '#000000';
-  ctx.fillRect(0, 0, surface.width, surface.height);
-  touch(layer.id);
   changeDoc('New tone layer', (doc) => {
     insertNew(doc, layer, s.activeLayerId);
     return layer.id;
@@ -1911,6 +1942,10 @@ export function setColor(patch: Partial<ColorState>): void {
 /** Sets the colour of the active slot (main or sub) and leaves transparent mode. */
 export function setDrawingColor(hex: string): void {
   setState((s) => ({ colors: { ...s.colors, [s.colors.active]: hex.toLowerCase(), transparent: false } }));
+  // The Object tool on a fill layer: picking a colour gives the layer that colour (as in the reference).
+  const s = getState();
+  const l = activeLayer(s);
+  if (s.tool === 'object' && l?.kind === 'fill' && !s.maskEditing) setFillColor(l.id, hex, `fill:color:${l.id}`);
 }
 
 export function swapColors(): void {

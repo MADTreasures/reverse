@@ -1,7 +1,7 @@
 import { strFromU8, unzipSync } from 'fflate';
 import { describe, expect, it } from 'vitest';
 import { createDocument } from '../model/document';
-import { cloneDocument, createAudioLayer, createFolder, createLayerMask, createMovieLayer, createRasterLayer, createVectorLayer, flatten } from '../model/layers';
+import { cloneDocument, createAudioLayer, createFillLayer, createFolder, createLayerMask, createMovieLayer, createRasterLayer, createVectorLayer, flatten } from '../model/layers';
 import type { FolderLayer } from '../model/types';
 import { DEFAULT_BRUSH } from '../paint/tools';
 import { isDocumentFileName, isImageFileName, mimeForName, packDocument, sanitizeDocument, unpackDocument } from './format';
@@ -112,6 +112,18 @@ describe('.madpaint format', () => {
     expect(odd.layers.map((l) => l.id)).toEqual(['b']);
     expect(odd.layers[0]).toMatchObject({ kind: 'movie', movie: 'm2', volume: 1, clips: [{ start: 1, end: 2 }] });
     expect(odd.movies).toEqual([{ id: 'm2', name: 'Movie', type: 'video/mp4', duration: 0, width: 1, height: 1 }]);
+  });
+
+  it('keeps fill layers (their colour; the pixels are drawn again)', () => {
+    const doc = createDocument('Fill', 200, 100, 72);
+    const fill = createFillLayer('Fill 1', '#12ab34', { mask: createLayerMask(), opacity: 0.5 });
+    doc.layers.unshift(fill);
+    const back = unpackDocument(packDocument({ doc, activeLayerId: fill.id, layers: new Map() }));
+    const l = back.doc.layers[0];
+    expect(l).toMatchObject({ kind: 'fill', name: 'Fill 1', color: '#12ab34', opacity: 0.5 });
+    expect(typeof (l.kind === 'fill' && l.rev)).toBe('number');
+    // A bad colour becomes black.
+    expect(sanitizeDocument({ layers: [{ id: 'f', kind: 'fill', color: 'red' }] }).layers[0]).toMatchObject({ kind: 'fill', color: '#000000' });
   });
 
   it('keeps the clips of tracks', () => {

@@ -123,7 +123,7 @@ class PaintEngine {
   /** Renders vector and text layers whose content changed (new lines, erasing, typing, undo …). */
   private syncVectors(doc: PaintDocument): void {
     for (const l of flatten(doc.layers)) {
-      if (l.kind !== 'vector' && l.kind !== 'text' && l.kind !== 'gradient') continue;
+      if (l.kind !== 'vector' && l.kind !== 'text' && l.kind !== 'gradient' && l.kind !== 'fill') continue;
       const known = getSurface(l.id);
       const sized = known && known.width === doc.width && known.height === doc.height;
       if (sized && this.vectorRevs.get(l.id) === l.rev) continue;
@@ -138,7 +138,10 @@ class PaintEngine {
       ctx.clearRect(0, 0, surface.width, surface.height);
       if (l.kind === 'vector') for (const stroke of l.strokes) renderVectorStroke(ctx, stroke);
       else if (l.kind === 'text') renderTextLayer(ctx, l, this.hidden);
-      else drawGradientFill(ctx, l.gradient);
+      else if (l.kind === 'fill') {
+        ctx.fillStyle = l.color;
+        ctx.fillRect(0, 0, surface.width, surface.height);
+      } else drawGradientFill(ctx, l.gradient);
       this.vectorRevs.set(l.id, l.rev);
       touch(l.id);
       this.compositor?.invalidate();

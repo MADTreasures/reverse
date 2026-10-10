@@ -19,12 +19,12 @@ import { getCompositeImageData, getLayerImageData, getLayerMaskImageData, getLay
 import type { AdjustmentLayer, BlendMode as PsdBlendMode, CurvesAdjustment, Layer as PsdLayer, LayerMaskData, LevelsAdjustment, PixelData, Psd } from 'ag-psd';
 import { rgbToHex, hexToRgb } from '../model/color';
 import { createDocument, MAX_CANVAS_SIDE } from '../model/document';
-import { clipGroups, createCorrectionLayer, createFolder, createLayerMask, createRasterLayer, createTextLayer } from '../model/layers';
+import { clipGroups, createCorrectionLayer, createFillLayer, createFolder, createLayerMask, createRasterLayer, createTextLayer } from '../model/layers';
 import type { BlendMode, DrawnLayer, FolderBlendMode, FolderLayer, Id, Layer, LayerMask, PaintDocument, TextLayer } from '../model/types';
 import { sanitizeCorrection, type Channel, type Correction, type Levels } from '../paint/tonal';
 import { celAt } from '../paint/animation';
 import type { TextBox } from '../paint/text';
-import { colorHex, fromPsdEffects, toPsdEffects } from './psdStyles';
+import { colorHex, fromPsdEffects, psdColor, toPsdEffects } from './psdStyles';
 import { fromPsdText, textLayerName, toPsdText } from './psdText';
 
 /** Straight RGBA pixels. */
@@ -354,6 +354,8 @@ function exportLayer(l: DrawnLayer, src: PsdSource): PsdLayer {
     return out;
   }
   if (l.kind === 'text') return exportText(l, src);
+  // A fill layer stays one (Photoshop's solid colour fill layer), with its pixels for other readers.
+  if (l.kind === 'fill') return withMask(styled({ ...common(l), vectorFill: { type: 'color', color: psdColor(l.color) }, ...trimmed(src.layerPixels(l)) }, l), l, src);
   if (l.kind !== 'folder') return withMask(styled({ ...common(l), ...trimmed(src.layerPixels(l)) }, l), l, src);
   const children = exportList(l.children, src, l);
   if (!l.frame) return withMask(styled({ ...common(l), opened: l.expanded, children }, l), l, src);
@@ -580,6 +582,13 @@ export function decodePsd(bytes: Uint8Array, name: string, onPixels: (id: Id, pi
         return null;
       }
       layer = createCorrectionLayer(base.name, correction, { ...base, blend: fromPsdBlend(l.blendMode, false) as BlendMode });
+    } else if (l.vectorFill?.type === 'color' && !l.vectorMask && !l.children) {
+      // Photoshop's solid colour fill layer (a shape layer would have a vector mask too).
+      layer = createFillLayer(base.name, colorHex(l.vectorFill.color), {
+        ...base,
+        opacity: base.opacity * Math.min(1, Math.max(0, l.fillOpacity ?? 1)),
+        blend: fromPsdBlend(l.blendMode, false) as BlendMode,
+      });
     } else if (asText && l.text) {
       let t = fromPsdText(l.text, fit);
       if (styles.edge) t = { ...t, edge: styles.edge.width, edgeColor: styles.edge.color };
@@ -611,7 +620,7 @@ export function decodePsd(bytes: Uint8Array, name: string, onPixels: (id: Id, pi
       else if (pixels) onPixels(layer.id, pixels);
       if (l.text) notes.add('Warped text was opened as pixels');
       else if (l.placedLayer) notes.add('Smart objects were opened as raster layers');
-      else if (l.vectorMask || l.vectorFill) notes.add('Shape and fill layers were opened as raster layers');
+      else if (l.vectorMask || l.vectorFill) notes.add('Shape layers and gradient or pattern fill layers were opened as raster layers');
     }
     if (styles.effects) layer.effects = styles.effects;
     // With a vector mask as well, the pixel mask is the "real" one; a lone vector mask comes in as its pixels.

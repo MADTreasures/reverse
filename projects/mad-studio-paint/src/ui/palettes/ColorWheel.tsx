@@ -5,10 +5,10 @@ import { drawingColor, useStore } from '../../store/store';
 
 const RING = 0.16;
 
-/** Hue ring with a saturation/brightness square inside. */
-export function ColorWheel({ size = 200 }: { size?: number }) {
+/** Hue ring with a saturation/brightness square inside: the drawing colour, or (with `value`) a colour of its own. */
+export function ColorWheel({ size = 200, value, onChange }: { size?: number; value?: string; onChange?: (hex: string) => void }) {
   const colors = useStore((s) => s.colors);
-  const hex = drawingColor(colors);
+  const hex = value ?? drawingColor(colors);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   // Keep the hue while the colour is grey (where it is undefined).
   const [hsv, setHsv] = useState<HSV>(() => rgbToHsv(hexToRgb(hex)!));
@@ -87,7 +87,8 @@ export function ColorWheel({ size = 200 }: { size?: number }) {
     setHsv(next);
     const out = hsvToHex(next);
     lastHex.current = out;
-    actions.setDrawingColor(out);
+    if (onChange) onChange(out);
+    else actions.setDrawingColor(out);
   };
 
   const onDown = (e: React.PointerEvent) => {

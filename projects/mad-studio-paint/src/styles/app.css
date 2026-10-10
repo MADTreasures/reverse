@@ -1589,6 +1589,37 @@
   padding-left: 22px;
 }
 
+/* Color settings: the colour wheel beside the values; current and new colour */
+.color-settings-body {
+  display: flex;
+  gap: 16px;
+  align-items: center;
+}
+
+.color-settings .form-grid {
+  grid-template-columns: 40px 110px;
+}
+
+.color-compare {
+  display: flex;
+  height: 26px;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.color-compare span {
+  flex: 1;
+}
+
+/* Tool Settings: a fill layer's colour */
+.fill-swatch {
+  width: 46px;
+  height: 22px;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+}
+
 /* Move canvas to center: the light table layers' names at both ends of the slider */
 .center-slider {
   display: grid;

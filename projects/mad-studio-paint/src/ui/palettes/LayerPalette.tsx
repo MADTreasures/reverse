@@ -8,6 +8,7 @@ import { getState, useStore } from '../../store/store';
 import { Icon } from '../controls/Icons';
 import { openTonalDialog, showMenu } from '../overlays';
 import { LayerThumb } from './LayerThumb';
+import { openColorSettings } from '../dialogs/ColorSettingsDialog';
 
 const blendLabel = (mode: FolderBlendMode) => FOLDER_BLEND_MODES.find((m) => m.id === mode)?.label ?? mode;
 
@@ -343,8 +344,10 @@ function LayerRow({ layer, depth, drag, setDrag, drop, setDrop }: RowsProps & { 
       ) : (
         <span
           className={`thumb-wrap ${active && layer.mask && !maskTarget ? 'target' : ''}`}
-          title={`${isMac ? '⌘' : 'Ctrl'}-click: select layer opacity area`}
+          title={layer.kind === 'fill' ? 'Fill layer: double-click to change its colour' : `${isMac ? '⌘' : 'Ctrl'}-click: select layer opacity area`}
+          data-testid={layer.kind === 'fill' ? 'fill-thumb' : undefined}
           onPointerDown={pickTarget(false)}
+          onDoubleClick={layer.kind === 'fill' ? () => openColorSettings(layer.color, (c) => actions.setFillColor(layer.id, c)) : undefined}
         >
           <LayerThumb id={layer.id} />
         </span>
@@ -411,6 +414,11 @@ function LayerRow({ layer, depth, drag, setDrag, drop, setDrop }: RowsProps & { 
         {layer.kind === 'gradient' && (
           <span className="vector-icon" title="Gradient layer" data-testid="gradient-icon">
             <Icon name="gradient" size={16} />
+          </span>
+        )}
+        {layer.kind === 'fill' && (
+          <span className="vector-icon" title="Fill layer" data-testid="fill-icon">
+            <Icon name="fill" size={16} />
           </span>
         )}
         {layer.kind === 'text' && (

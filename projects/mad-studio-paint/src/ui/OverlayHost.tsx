@@ -7,6 +7,7 @@ import { GradientDialog } from './dialogs/GradientDialog';
 import { TonalDialog } from './dialogs/TonalDialog';
 import { PreferencesDialog } from './dialogs/PreferencesDialog';
 import { ExportDialog, ExportPreviewDialog, PsdExportDialog } from './dialogs/ExportDialog';
+import { ColorSettingsDialog } from './dialogs/ColorSettingsDialog';
 import { AnimationExportDialog, CameraFolderDialog, CenterCanvasDialog, FrameRateDialog, ManageTimelinesDialog, MovieExportDialog, NewTimelineDialog, OnionSkinDialog, TimelineSettingsDialog } from './dialogs/AnimationDialogs';
 import { AboutDialog, ShortcutsDialog } from './dialogs/InfoDialogs';
 import { NewCanvasDialog } from './dialogs/NewCanvasDialog';
@@ -53,6 +54,7 @@ export function OverlayHost() {
           )}
           {dialog.kind === 'custom' && dialog.id === 'newCanvas' && <NewCanvasDialog />}
           {dialog.kind === 'custom' && dialog.id === 'export' && <ExportDialog />}
+          {dialog.kind === 'custom' && dialog.id === 'colorSettings' && <ColorSettingsDialog />}
           {dialog.kind === 'custom' && dialog.id === 'exportPreview' && <ExportPreviewDialog />}
           {dialog.kind === 'custom' && dialog.id === 'exportPsd' && <PsdExportDialog />}
           {dialog.kind === 'custom' && dialog.id === 'timelineSettings' && <TimelineSettingsDialog />}
