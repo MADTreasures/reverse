@@ -4,7 +4,7 @@ import { HistoryStack } from './history';
 import { combine, createMask, ellipseMask, expandMask, invertMask, isMaskEmpty, maskBounds, maskOutline, polygonMask, rectMask, translateMask } from './mask';
 import { circleBounds, intersect, union } from './rect';
 import { dabAlpha, ellipsePoints, interpolateDabs, polygonPoints, velocityFactor, pressureCurve, rectPoints, roundCorners, snapAngle, Stabilizer, stabilizerWindow } from './stroke';
-import { DEFAULT_SUB_TOOLS, mergeSubTools, toolForKey } from './tools';
+import { DEFAULT_SUB_TOOLS, entryForTool, mergeSubTools, toolForKey } from './tools';
 
 const count = (m: { data: Uint8Array }) => m.data.reduce((n, v) => n + (v ? 1 : 0), 0);
 
@@ -229,6 +229,29 @@ describe('tools', () => {
     expect(pen.brush!.antiAlias).toBe(0);
     expect(pen.brush!.hardness).toBe(DEFAULT_SUB_TOOLS.find((s) => s.id === 'pen-g')!.brush!.hardness);
     expect(mergeSubTools('junk')).toHaveLength(DEFAULT_SUB_TOOLS.length);
+  });
+
+  it('keeps edited focus / speed lines settings, checked, with the kind of the sub tool', () => {
+    const saved = [
+      { id: 'focus-burst', tool: 'focusLines', name: 'Burst', effectLines: { style: { kind: 'speed', gap: 12, width: -3, refPos: 'end' }, destination: 'lines', toning: true, lineColor: 'user', userLineColor: '#FF0000', fillColor: 'pink' } },
+    ];
+    const burst = mergeSubTools(saved).find((s) => s.id === 'focus-burst')!.effectLines!;
+    const def = DEFAULT_SUB_TOOLS.find((s) => s.id === 'focus-burst')!.effectLines!;
+    expect(burst.style.kind).toBe('focus');
+    expect(burst.style.gap).toBe(12);
+    expect(burst.style.width).toBe(0.2);
+    expect(burst.style.refPos).toBe('end');
+    expect(burst.style.taperStart).toBe(def.style.taperStart);
+    expect(burst).toMatchObject({ destination: 'lines', toning: true, lineColor: 'user', userLineColor: '#ff0000', fillColor: def.fillColor, useRuler: def.useRuler });
+  });
+
+  it('finds the tool palette button of a tool in each workspace', () => {
+    expect(entryForTool('focusLines', 'default').id).toBe('comic');
+    expect(entryForTool('frame', 'default').id).toBe('comic');
+    expect(entryForTool('text', 'default').id).toBe('text');
+    expect(entryForTool('focusLines', 'classic').id).toBe('figureClassic');
+    expect(entryForTool('flash', 'classic').id).toBe('textClassic');
+    expect(entryForTool('frame', 'classic').id).toBe('frame');
   });
 });
 

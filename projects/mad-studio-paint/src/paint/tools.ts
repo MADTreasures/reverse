@@ -6,6 +6,7 @@ import { sanitizeGradientStops, type GradientSpec } from './gradient';
 import { CURVE_TYPES, type CurveType, type RulerFigure } from './curves';
 import type { TipOrder } from './materials';
 import { LIQUIFY_MODES, type LiquifyMode } from './liquify';
+import { DEFAULT_FOCUS_LINES, sanitizeEffectLines, type EffectLinesStyle } from './effectLines';
 
 export type ToolId =
   | 'zoom'
@@ -31,6 +32,9 @@ export type ToolId =
   | 'object'
   | 'text'
   | 'balloon'
+  | 'flash'
+  | 'focusLines'
+  | 'speedLines'
   | 'frame'
   | 'correct'
   | 'lightTable';
@@ -49,6 +53,25 @@ export interface LiquifySettings {
   /** Correction: stabilization 0..100 (smooths the stroke). */
   stabilization: number;
 }
+/** Focus lines, speed lines and flash: a colour from the colour icons or a user colour. */
+export type LinesColor = 'main' | 'sub' | 'user';
+
+/** Focus lines, speed lines and flash sub tools: the lines' style and where they are drawn. */
+export interface EffectLinesSettings {
+  style: EffectLinesStyle;
+  /** Destination layer: the editing layer, always a new lines layer, or the selected lines layer (else a new one). */
+  destination: 'editing' | 'new' | 'lines';
+  /** Toning: a new lines layer gets the Tone effect and grey lines. */
+  toning: boolean;
+  /** Use radial line ruler for center / parallel line ruler for angle. */
+  useRuler: boolean;
+  lineColor: LinesColor;
+  fillColor: LinesColor;
+  /** The user colours ('#rrggbb'). */
+  userLineColor: string;
+  userFillColor: string;
+}
+
 export type TipFlip = 'off' | 'on' | 'random';
 export type TipTexture = 'none' | 'grain';
 export type SelectShape = 'rect' | 'ellipse' | 'lasso' | 'polyline' | 'pen' | 'erase' | 'shrink';
@@ -315,6 +338,8 @@ export interface SubTool {
   magnet?: number;
   /** Liquify tool settings. */
   liquify?: LiquifySettings;
+  /** Focus lines, speed lines and flash settings. */
+  effectLines?: EffectLinesSettings;
 
   /** Rectangle / ellipse start from the centre. */
   fromCenter?: boolean;
@@ -444,6 +469,9 @@ export const TOOLS: ToolInfo[] = [
   { id: 'object', label: 'Object', key: 'O', hint: 'Click a vector line, text, balloon or ruler to select it · drag to move, handles to scale and rotate · Delete removes it' },
   { id: 'text', label: 'Text', key: 'T', hint: 'Click to type, drag to type in a frame (the text wraps at it) · click text to edit it · ⌘Enter or a click outside confirms' },
   { id: 'balloon', label: 'Balloon', key: 'T', hint: 'Drag to draw a speech balloon · balloon tail: drag from inside a balloon' },
+  { id: 'flash', label: 'Flash', key: '', hint: 'Drag from the centre to draw a flash round it (⇧: a circle) · a focus lines layer keeps it editable with the Object tool' },
+  { id: 'focusLines', label: 'Focus lines', key: '', hint: 'Drag from the centre to set where the lines start (⇧: a circle) · a focus lines layer keeps them editable with the Object tool' },
+  { id: 'speedLines', label: 'Speed lines', key: '', hint: 'Drag a line across the area for the speed lines (they run across it) · a speed lines layer keeps them editable with the Object tool' },
   { id: 'correct', label: 'Correct line', key: 'Y', hint: 'Correct the lines of a vector layer: control points, pinch, simplify, connect, line width, redraw' },
   { id: 'lightTable', label: 'Light table', key: '', hint: 'Moves the selected light table layer (Animation cels palette): drag inside to move, a corner to scale, the round handle to rotate' },
 ];
@@ -461,6 +489,46 @@ const FILL_OTHERS: FillSettings = { reference: 'all', tolerance: 10, expand: 1, 
  * comic and illustration software). Values are our own; only the few documented defaults
  * (G-pen 10 px / stabilization 6, pencil 90 % opacity, straight line 3 px) follow the reference.
  */
+/** A focus lines, speed lines or flash sub tool. */
+function linesTool(id: string, tool: ToolId, name: string, style: Partial<EffectLinesStyle>, patch: Partial<EffectLinesSettings> = {}): SubTool {
+  const { id: _id, cx: _cx, cy: _cy, fx: _fx, fy: _fy, rx: _rx, ry: _ry, rotation: _r, seed: _seed, color: _c, fillColor: _f, ...base } = DEFAULT_FOCUS_LINES;
+  return {
+    id,
+    tool,
+    name,
+    effectLines: {
+      style: { ...base, kind: tool === 'speedLines' ? 'speed' : 'focus', ...style },
+      destination: 'new',
+      toning: false,
+      useRuler: true,
+      lineColor: 'main',
+      fillColor: 'sub',
+      userLineColor: '#000000',
+      userFillColor: '#ffffff',
+      ...patch,
+    },
+  };
+}
+
+const SPEED: Partial<EffectLinesStyle> = { gapMode: 'distance', refPos: 'middle', extend: true, refGap: 0, lengthDisarray: 0, maxLines: 200 };
+const FLASH: Partial<EffectLinesStyle> = { extend: false, refPos: 'start', taperStart: 0, taperEnd: 100, fill: true, fillOpacity: 100 };
+
+export const EFFECT_LINE_TOOLS: SubTool[] = [
+  linesTool('flash-pattern', 'flash', 'Flash pattern', { ...FLASH, gap: 0.6, gapDisarray: 50, length: 70, lengthDisarray: 60, refGap: 10, unevenCount: 30, unevenHeight: 18, width: 4, widthDisarray: 40 }),
+  linesTool('flash-flash', 'flash', 'Flash', { ...FLASH, gap: 1.5, gapDisarray: 60, length: 55, lengthDisarray: 50, refGap: 10, width: 3, widthDisarray: 40 }),
+  linesTool('flash-dense', 'flash', 'Dense flash', { ...FLASH, gap: 0.4, gapDisarray: 60, length: 40, lengthDisarray: 70, refGap: 15, width: 2, widthDisarray: 40 }),
+  linesTool('flash-urchin', 'flash', 'Sea urchin flash', { ...FLASH, gap: 5, gapDisarray: 40, length: 90, lengthDisarray: 30, refGap: 0, width: 14, widthDisarray: 30 }),
+  linesTool('flash-firework', 'flash', 'Firework', { ...FLASH, fill: false, gap: 6, gapDisarray: 50, length: 120, lengthDisarray: 40, refGap: 30, width: 6, widthDisarray: 30, taperEnd: 80, dotted: true }),
+  linesTool('focus-scattered', 'focusLines', 'Scattered focus lines', { gap: 2.5, gapDisarray: 70, refGap: 40, width: 8, widthDisarray: 60, taperStart: 85 }),
+  linesTool('focus-dense', 'focusLines', 'Dense focus lines', { gap: 0.8, gapDisarray: 50, refGap: 25, width: 3, widthDisarray: 40, taperStart: 90 }),
+  linesTool('focus-brightness', 'focusLines', 'Brightness', { gap: 4, gapDisarray: 80, extend: false, length: 250, lengthDisarray: 50, refGap: 20, width: 6, widthDisarray: 50, taperStart: 50, taperEnd: 50 }),
+  linesTool('focus-burst', 'focusLines', 'Burst', { gap: 7, gapDisarray: 40, refGap: 10, width: 40, widthDisarray: 50, taperStart: 100 }),
+  linesTool('speed-scattered', 'speedLines', 'Scattered speed lines', { ...SPEED, gap: 12, gapDisarray: 80, width: 3, widthDisarray: 60, taperStart: 30, taperEnd: 30 }),
+  linesTool('speed-dark', 'speedLines', 'Dark speed lines', { ...SPEED, gap: 5, gapDisarray: 60, grouping: 5, groupDisarray: 50, groupGap: 3, width: 3, widthDisarray: 50, taperStart: 20, taperEnd: 20 }),
+  linesTool('speed-gloom', 'speedLines', 'Gloom', { ...SPEED, refPos: 'start', extend: false, gap: 6, gapDisarray: 60, length: 300, lengthDisarray: 70, width: 3, widthDisarray: 40, taperStart: 0, taperEnd: 100 }),
+  linesTool('speed-rain', 'speedLines', 'Rain', { ...SPEED, extend: false, angle: 15, gap: 4, gapDisarray: 90, length: 50, lengthDisarray: 50, refGap: 600, width: 1.5, widthDisarray: 30, taperStart: 30, taperEnd: 30, maxLines: 400 }),
+];
+
 export const DEFAULT_SUB_TOOLS: SubTool[] = [
   // Pen
   { id: 'pen-g', tool: 'pen', group: 'Pen', name: 'G-pen', brush: brush({ size: 10, minSize: 0.1, hardness: 1, stabilization: 6 }) },
@@ -787,6 +855,8 @@ export const DEFAULT_SUB_TOOLS: SubTool[] = [
   { id: 'balloon-cloud', tool: 'balloon', name: 'Thought balloon', balloon: { shape: 'cloud', lineWidth: 3, fill: true } },
   { id: 'balloon-tail', tool: 'balloon', name: 'Balloon tail', tail: { width: 24, bend: 0.3, kind: 'pointed' } },
   { id: 'balloon-tail-thought', tool: 'balloon', name: 'Thought balloon tail', tail: { width: 30, bend: 0, kind: 'thought' } },
+  // Comic: flash, focus lines, speed lines (own values; the reference documents none)
+  ...EFFECT_LINE_TOOLS,
   // Operation, view & eyedropper
   { id: 'object', tool: 'object', name: 'Object', scaleLineWidth: true },
   { id: 'select-layer', tool: 'selectLayer', name: 'Select layer' },
@@ -820,6 +890,28 @@ function sanitizeLiquify(raw: unknown, d: LiquifySettings): LiquifySettings {
 /** Sub tools drawn with a lasso (they can use the Magnetic lasso). */
 export const usesLasso = (t: SubTool): boolean => t.selectShape === 'lasso' || t.fill?.mode === 'lasso' || t.fill?.mode === 'enclose';
 
+/** Focus lines, speed lines and flash settings from storage. */
+function sanitizeEffectLinesSettings(raw: unknown, d: EffectLinesSettings): EffectLinesSettings {
+  const r = raw as Record<string, unknown>;
+  const { id: _id, cx: _cx, cy: _cy, fx: _fx, fy: _fy, rx: _rx, ry: _ry, rotation: _rotation, seed: _seed, color: _color, fillColor: _fill, ...style } = sanitizeEffectLines(r.style, {
+    ...DEFAULT_FOCUS_LINES,
+    ...d.style,
+  })!;
+  const choice = (v: unknown, fallback: LinesColor): LinesColor => (v === 'main' || v === 'sub' || v === 'user' ? v : fallback);
+  const hex = (v: unknown, fallback: string) => (typeof v === 'string' && /^#[0-9a-f]{6}$/i.test(v) ? v.toLowerCase() : fallback);
+  return {
+    // The kind belongs to the sub tool.
+    style: { ...style, kind: d.style.kind },
+    destination: r.destination === 'editing' || r.destination === 'new' || r.destination === 'lines' ? r.destination : d.destination,
+    toning: typeof r.toning === 'boolean' ? r.toning : d.toning,
+    useRuler: typeof r.useRuler === 'boolean' ? r.useRuler : d.useRuler,
+    lineColor: choice(r.lineColor, d.lineColor),
+    fillColor: choice(r.fillColor, d.fillColor),
+    userLineColor: hex(r.userLineColor, d.userLineColor),
+    userFillColor: hex(r.userFillColor, d.userFillColor),
+  };
+}
+
 /** Keeps user edits but adds sub tools introduced by newer versions and drops unknown ones. */
 export function mergeSubTools(saved: unknown): SubTool[] {
   if (!Array.isArray(saved)) return structuredClone(DEFAULT_SUB_TOOLS);
@@ -843,6 +935,7 @@ export function mergeSubTools(saved: unknown): SubTool[] {
       ...(def.figureFill !== undefined && (s.figureFill === 'line' || s.figureFill === 'fill' || s.figureFill === 'both') ? { figureFill: s.figureFill } : {}),
       ...(usesLasso(def) && typeof s.magnet === 'number' && Number.isFinite(s.magnet) ? { magnet: Math.max(0, Math.min(5, Math.round(s.magnet))) } : {}),
       ...(def.liquify && s.liquify && typeof s.liquify === 'object' ? { liquify: sanitizeLiquify(s.liquify, def.liquify) } : {}),
+      ...(def.effectLines && s.effectLines && typeof s.effectLines === 'object' ? { effectLines: sanitizeEffectLinesSettings(s.effectLines, def.effectLines) } : {}),
       ...(def.tool === 'eraser' && (s.vectorErase === 'touched' || s.vectorErase === 'intersection' || s.vectorErase === 'whole') ? { vectorErase: s.vectorErase } : {}),
       ...(def.tool === 'eraser' && typeof s.vectorReferAll === 'boolean' ? { vectorReferAll: s.vectorReferAll } : {}),
       ...(def.scaleLineWidth !== undefined && typeof s.scaleLineWidth === 'boolean' ? { scaleLineWidth: s.scaleLineWidth } : {}),
@@ -997,10 +1090,15 @@ export const PALETTE_ENTRIES: PaletteEntry[] = [
   { id: 'fill', label: 'Fill', icon: 'fill', tools: ['fill'] },
   { id: 'gradient', label: 'Gradient', icon: 'gradient', tools: ['gradient'] },
   { id: 'figure', label: 'Figure', icon: 'figure', tools: ['figure'] },
-  { id: 'frame', label: 'Frame border', icon: 'frame', tools: ['frame'] },
   { id: 'ruler', label: 'Ruler', icon: 'ruler', tools: ['ruler'] },
-  { id: 'text', label: 'Text (Text, Balloon)', icon: 'text', tools: ['text', 'balloon'] },
+  { id: 'text', label: 'Text', icon: 'text', tools: ['text'] },
+  // Ver. 5: the Comic tool holds balloons, frame borders, flashes, focus lines and speed lines.
+  { id: 'comic', label: 'Comic (Balloon, Frame border, Flash, Focus lines, Speed lines)', icon: 'balloon', tools: ['balloon', 'frame', 'flash', 'focusLines', 'speedLines'] },
   { id: 'correct', label: 'Correct line', icon: 'correct', tools: ['correct'] },
+  // The classic layout: speed and focus lines with the figures, flashes with the balloons.
+  { id: 'figureClassic', label: 'Figure (Figure, Speed lines, Focus lines)', icon: 'figure', tools: ['figure', 'speedLines', 'focusLines'] },
+  { id: 'frame', label: 'Frame border', icon: 'frame', tools: ['frame'] },
+  { id: 'textClassic', label: 'Text (Text, Balloon, Flash)', icon: 'text', tools: ['text', 'balloon', 'flash'] },
 ];
 
 export type WorkspaceId = 'default' | 'classic';
@@ -1014,13 +1112,17 @@ export const PALETTE_LAYOUT: Record<WorkspaceId, string[][]> = {
   default: [
     ['pen', 'pencil', 'brush', 'eraser', 'airbrush', 'decoration', 'blend', 'liquify'],
     ['select', 'autoSelect', 'fill', 'gradient'],
-    ['operation', 'figure', 'frame', 'ruler', 'text', 'correct', 'navigate', 'eyedropper'],
+    ['operation', 'figure', 'text', 'comic', 'ruler', 'correct', 'navigate', 'eyedropper'],
   ],
   classic: [
     ['zoom', 'navigate', 'operation', 'select', 'autoSelect', 'eyedropper'],
     ['pen', 'pencil', 'brush', 'airbrush', 'decoration', 'eraser', 'blend', 'liquify'],
-    ['fill', 'gradient', 'figure', 'frame', 'ruler', 'text', 'correct'],
+    ['fill', 'gradient', 'figureClassic', 'frame', 'ruler', 'textClassic', 'correct'],
   ],
 };
 
-export const entryForTool = (tool: ToolId): PaletteEntry => PALETTE_ENTRIES.find((e) => e.tools.includes(tool))!;
+/** The tool palette button that holds `tool` in a workspace's layout. */
+export function entryForTool(tool: ToolId, workspace: WorkspaceId = 'default'): PaletteEntry {
+  const ids = PALETTE_LAYOUT[workspace].flat();
+  return PALETTE_ENTRIES.find((e) => ids.includes(e.id) && e.tools.includes(tool)) ?? PALETTE_ENTRIES.find((e) => e.tools.includes(tool))!;
+}

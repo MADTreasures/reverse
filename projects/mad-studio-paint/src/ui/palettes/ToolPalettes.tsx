@@ -19,6 +19,7 @@ import { openDialog } from '../overlays';
 import { openColorSettings } from '../dialogs/ColorSettingsDialog';
 import { entryForTool, isSpecialCurve, PALETTE_ENTRIES, PALETTE_LAYOUT, subToolsOf, toolInfo, usesLasso, type CorrectSettings, type FigureFill, type FillReference, type LiquifySettings, type SubTool, type ToolId } from '../../paint/tools';
 import { LIQUIFY_MODES } from '../../paint/liquify';
+import { EffectLinesPreview, EffectLinesToolSettings, LinesObjectSettings } from './EffectLinesSettings';
 import { Icon } from '../controls/Icons';
 import { PropSlider } from '../controls/PropSlider';
 import { DynamicsPopover, dynamicsOn, type DynamicsKind } from './BrushSettingsPanels';
@@ -49,7 +50,7 @@ const lastTool = new Map<string, ToolId>();
 export function ToolPalette() {
   const tool = useStore((s) => s.tool);
   const workspace = useStore((s) => s.workspace);
-  const current = entryForTool(tool);
+  const current = entryForTool(tool, workspace);
   lastTool.set(current.id, tool);
   return (
     <div className="tool-palette" role="toolbar" aria-label="Tools" data-testid="tool-palette">
@@ -85,9 +86,10 @@ export function ToolPalette() {
 /** Sub tools of the selected tool, with group buttons on top and a stroke preview per entry. */
 export function SubToolPalette() {
   const tool = useStore((s) => s.tool);
+  const workspace = useStore((s) => s.workspace);
   const subTools = useStore((s) => s.subTools);
   const active = useStore((s) => currentSubTool(s));
-  const entry = entryForTool(tool);
+  const entry = entryForTool(tool, workspace);
   const list = subToolsOf(subTools, tool);
   const groups = [...new Set(list.map((s) => s.group).filter((g): g is string => Boolean(g)))];
   const group = active.group ?? groups[0];
@@ -118,8 +120,9 @@ export function SubToolPalette() {
       </div>
       <div className="subtool-list">
         {shown.map((s) => (
-          <button key={s.id} className={`subtool ${s.id === active.id ? 'active' : ''} ${s.brush ? 'with-stroke' : ''}`} data-subtool={s.id} onClick={() => actions.setSubTool(tool, s.id)}>
+          <button key={s.id} className={`subtool ${s.id === active.id ? 'active' : ''} ${s.brush || s.effectLines ? 'with-stroke' : ''}`} data-subtool={s.id} onClick={() => actions.setSubTool(tool, s.id)}>
             {s.brush && <StrokePreview sub={s} />}
+            {s.effectLines && <EffectLinesPreview style={s.effectLines.style} />}
             <span className="subtool-name">{s.name}</span>
           </button>
         ))}
@@ -208,6 +211,7 @@ const AA_LEVELS = ['None', 'Weak', 'Medium', 'Strong'];
 export function ToolProperty() {
   const sub = useStore((s) => currentSubTool(s));
   const advanced = useStore((s) => s.advancedToolSettings);
+  const linesLayer = useStore((s) => actions.activeLayer(s)?.kind === 'lines');
   const transform = useTransformInfo((s) => s.info);
   const [more, setMore] = useState(false);
   const [dyn, setDyn] = useState<{ kind: DynamicsKind; at: { x: number; y: number } } | null>(null);
@@ -283,6 +287,7 @@ export function ToolProperty() {
         </>
       )}
       {sub.liquify && <LiquifyToolSettings l={sub.liquify} update={(patch) => update({ liquify: { ...sub.liquify!, ...patch } })} />}
+      {sub.effectLines && <EffectLinesToolSettings sub={sub} more={more} />}
       {usesLasso(sub) && (
         <div className="prop-row column">
           <label className="check prop-check" title="The lasso snaps to the lines of the reference layer (else of the editing layer)">
@@ -362,7 +367,7 @@ export function ToolProperty() {
           </select>
         </div>
       )}
-      {sub.tool === 'object' && <ObjectSettings sub={sub} update={update} />}
+      {sub.tool === 'object' && <ObjectSettings sub={sub} update={update} more={more} />}
       {sub.tool === 'lightTable' && <LightTableSettings />}
       {sub.tool === 'text' && <TextSettings />}
       {sub.tool === 'balloon' && sub.balloon && <BalloonToolSettings sub={sub} update={update} />}
@@ -423,7 +428,7 @@ export function ToolProperty() {
         </>
       )}
       {sub.tool === 'gradient' && <GradientSettings sub={sub} update={update} />}
-      {!b && !f && !['select', 'gradient', 'object', 'text', 'balloon', 'frame', 'correct', 'liquify'].includes(sub.tool) && <div className="prop-note">{toolInfo(sub.tool).hint}</div>}
+      {!b && !f && !['select', 'gradient', 'object', 'text', 'balloon', 'frame', 'correct', 'liquify', 'flash', 'focusLines', 'speedLines'].includes(sub.tool) && <div className="prop-note">{toolInfo(sub.tool).hint}</div>}
       <div className="prop-footer">
         <button className="icon-btn" title="Reset to the default settings" aria-label="Reset sub tool" onClick={() => actions.resetSubTool(sub.id)}>
           <Icon name="resetRotation" size={15} />
@@ -439,8 +444,8 @@ export function ToolProperty() {
             <Icon name="wrench" size={15} />
           </button>
         )}
-        {f && (
-          <button className={`icon-btn ${more ? 'on' : ''}`} title="More fill settings" aria-label="Advanced tool settings" aria-pressed={more} onClick={() => setMore((m) => !m)}>
+        {(f || sub.effectLines || (sub.tool === 'object' && linesLayer)) && (
+          <button className={`icon-btn ${more ? 'on' : ''}`} title="More settings" aria-label="Advanced tool settings" aria-pressed={more} onClick={() => setMore((m) => !m)}>
             <Icon name="wrench" size={15} />
           </button>
         )}
@@ -542,14 +547,19 @@ function LightTableSettings() {
 }
 
 /** Object tool: a track's keyframe placement (keyframes on, or a 2D camera folder), else the selected objects. */
-function ObjectSettings({ sub, update }: { sub: SubTool; update: (patch: Partial<SubTool>) => void }) {
+function ObjectSettings({ sub, update, more }: { sub: SubTool; update: (patch: Partial<SubTool>) => void; more: boolean }) {
   const audio = useStore((s) => (s.doc.timeline ? sound.activeSoundTrack(s) : null));
   const keyed = useStore((s) => (s.doc.timeline?.enabled && !s.editKeyed ? anim.keyTrack(s) : null));
   const fill = useStore((s) => {
     const l = actions.activeLayer(s);
     return l?.kind === 'fill' && !s.maskEditing ? l : null;
   });
+  const lines = useStore((s) => {
+    const l = actions.activeLayer(s);
+    return l?.kind === 'lines' && !s.maskEditing ? l : null;
+  });
   if (audio) return <AudioTrackSettings />;
+  if (lines && !keyed) return <LinesObjectSettings layer={lines} more={more} />;
   if (fill && !keyed)
     return (
       <>

@@ -8,7 +8,8 @@
 import { flatten, isEffectivelyVisible } from '../model/layers';
 import { contentBounds, contentOf, EMPTY_CONTENT, pickObject, transformContent, type Content } from '../paint/objects';
 import type { GradientFill } from '../paint/gradient';
-import type { GradientLayer } from '../model/types';
+import type { GradientLayer, LinesLayer } from '../model/types';
+import { effectLinesGeometry, type EffectLines } from '../paint/effectLines';
 import { union, type Rect } from '../paint/rect';
 import type { Affine } from '../paint/rulers';
 import { linePath } from '../paint/vector';
@@ -173,7 +174,7 @@ function pickAt(p: PointerInfo): { layer: actions.ObjectLayer; id: string } | nu
   const layers = flatten(s.doc.layers).filter((l): l is actions.ObjectLayer => actions.isObjectLayer(l) && isEffectivelyVisible(s.doc.layers, l.id));
   if (active) layers.sort((a, b) => Number(b.id === active.id) - Number(a.id === active.id));
   for (const layer of layers) {
-    const id = pickObject(contentOf(layer), p, tolerance, layer.kind === 'folder' ? layer.frame.lineWidth : 0);
+    const id = pickObject(contentOf(layer), p, tolerance, layer.kind === 'folder' ? layer.frame.lineWidth : 0, { x: 0, y: 0, w: s.doc.width, h: s.doc.height });
     if (id) return { layer, id };
   }
   return null;
@@ -269,6 +270,8 @@ export function objectSession(p: PointerInfo, view: OverlayView): ToolSession | 
   if (keyed) return keyframeSession(p, view, keyed);
   const handle0 = gradientHandleAt(p, view);
   if (handle0) return editable() ? new GradientHandleSession(handle0.layer, handle0.end) : null;
+  const focal = focalHandleAt(p, view);
+  if (focal) return editable() ? new FocalPointSession(focal.layer, focal.item) : null;
   if (hitRulerHandle(p, view)) return rulerObjectSession(p, view);
   // Control points of the selected vector lines move one by one.
   const point = p.shift ? null : selectedPointSession(p, view);
@@ -334,9 +337,84 @@ function drawOutlines(ctx: CanvasRenderingContext2D, view: OverlayView, c: Conte
     for (const t of b.tails) for (const shape of tailShapes(b, t)) poly(shape, true);
   }
   for (const panel of c.panels) if (ids.has(panel.id)) poly(panel.points, true);
+  // Focus / speed lines: the reference line (blue) and the shape line from the centre point (red).
+  for (const e of c.lines ?? []) {
+    if (!ids.has(e.id)) continue;
+    const g = effectLinesGeometry({ ...e, gap: 1e9 }, { x: 0, y: 0, w: 0, h: 0 });
+    poly(g.reference, e.kind === 'focus');
+    ctx.save();
+    ctx.strokeStyle = '#e0403a';
+    const f = focalPoint(e);
+    const q = applyMatrix(view.matrix, f.x, f.y);
+    if (e.kind === 'focus') {
+      poly([f, g.reference[0]], false);
+      ctx.beginPath();
+      ctx.rect(q.x - 4, q.y - 4, 8, 8);
+      ctx.moveTo(q.x - 8, q.y);
+      ctx.lineTo(q.x + 8, q.y);
+      ctx.moveTo(q.x, q.y - 8);
+      ctx.lineTo(q.x, q.y + 8);
+      ctx.stroke();
+    } else {
+      const turn = (e.angle * Math.PI) / 180;
+      const n = { x: -Math.sin(e.rotation), y: Math.cos(e.rotation) };
+      const v = { x: n.x * Math.cos(turn) - n.y * Math.sin(turn), y: n.x * Math.sin(turn) + n.y * Math.cos(turn) };
+      const len = e.extend ? Math.max(40, e.rx) : e.length;
+      poly([f, { x: f.x + v.x * len, y: f.y + v.y * len }], false);
+    }
+    ctx.restore();
+  }
   ctx.setLineDash([3, 3]);
   for (const t of c.texts) if (ids.has(t.id)) poly(frameCorners(t), true);
   ctx.restore();
+}
+
+/** Focus lines' centre point (speed lines: the middle of their reference line). */
+const focalPoint = (e: EffectLines) => ({ x: e.cx + (e.kind === 'focus' ? e.fx : 0), y: e.cy + (e.kind === 'focus' ? e.fy : 0) });
+
+/** The centre point of the selected focus lines under the pointer. */
+function focalHandleAt(p: PointerInfo, view: OverlayView): { layer: LinesLayer; item: EffectLines } | null {
+  const s = getState();
+  const l = actions.activeLayer(s);
+  if (l?.kind !== 'lines' || s.maskEditing) return null;
+  for (const item of l.items) {
+    if (item.kind !== 'focus' || !s.selectedObjects.includes(item.id)) continue;
+    const f = focalPoint(item);
+    const q = applyMatrix(view.matrix, f.x, f.y);
+    if (Math.hypot(q.x - p.sx, q.y - p.sy) <= HANDLE_PX + 2) return { layer: l, item };
+  }
+  return null;
+}
+
+/** Drags focus lines' centre point: the lines point somewhere else, the reference line stays. */
+class FocalPointSession implements ToolSession {
+  private items: EffectLines[];
+  readonly cursor = 'grabbing';
+
+  constructor(
+    private layer: LinesLayer,
+    private item: EffectLines,
+  ) {
+    this.items = layer.items;
+  }
+
+  private update(p: PointerInfo): void {
+    this.items = this.layer.items.map((e) => (e.id === this.item.id ? { ...e, fx: p.x - e.cx, fy: p.y - e.cy } : e));
+    actions.previewContent(this.layer, { ...EMPTY_CONTENT, lines: this.items }, null);
+  }
+
+  move(p: PointerInfo): void {
+    this.update(p);
+  }
+
+  up(p: PointerInfo): void {
+    this.update(p);
+    actions.commitTransform('Move center point', [], new Map([[this.layer.id, { ...EMPTY_CONTENT, lines: this.items }]]));
+  }
+
+  cancel(): void {
+    engine.resync();
+  }
 }
 
 /** The selected objects, their box, scale handles and rotation handle (Object tool). */

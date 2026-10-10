@@ -1,9 +1,11 @@
 /**
  * The objects of vector and text layers – lines, text boxes and balloons – as one content type, so
- * the Object tool, Move layer, transforms and flips treat them alike. Pure, unit tested.
+ * the Object tool, Move layer, transforms and flips treat them alike (also frame panels, a gradient
+ * layer's gradient and the focus / speed lines of a lines layer). Pure, unit tested.
  */
 import { distanceToEdge, polygonBounds, transformPanel, type FramePanel } from './frames';
 import type { GradientFill } from './gradient';
+import { hitEffectLines, referenceBounds, transformEffectLines, type EffectLines } from './effectLines';
 import type { Affine, Pt } from './rulers';
 import {
   balloonBody,
@@ -30,6 +32,8 @@ export interface Content {
   panels: FramePanel[];
   /** The gradient of a gradient layer (object id GRADIENT_ID). */
   gradient?: GradientFill;
+  /** The focus / speed lines of a lines layer. */
+  lines?: EffectLines[];
 }
 
 /** Object id of a gradient layer's gradient. */
@@ -37,15 +41,16 @@ export const GRADIENT_ID = 'gradient';
 
 export const EMPTY_CONTENT: Content = { strokes: [], texts: [], balloons: [], panels: [] };
 
-export const contentOf = (l: { kind: string; strokes?: VectorStroke[]; texts?: TextBox[]; balloons?: Balloon[]; frame?: { panels: FramePanel[] }; gradient?: GradientFill }): Content => ({
+export const contentOf = (l: { kind: string; strokes?: VectorStroke[]; texts?: TextBox[]; balloons?: Balloon[]; frame?: { panels: FramePanel[] }; gradient?: GradientFill; items?: EffectLines[] }): Content => ({
   strokes: l.strokes ?? [],
   texts: l.texts ?? [],
   balloons: l.balloons ?? [],
   panels: l.frame?.panels ?? [],
   ...(l.gradient ? { gradient: l.gradient } : {}),
+  ...(l.items ? { lines: l.items } : {}),
 });
 
-export const objectIds = (c: Content): string[] => [...[...c.strokes, ...c.balloons, ...c.texts, ...c.panels].map((o) => o.id), ...(c.gradient ? [GRADIENT_ID] : [])];
+export const objectIds = (c: Content): string[] => [...[...c.strokes, ...c.balloons, ...c.texts, ...c.panels, ...(c.lines ?? [])].map((o) => o.id), ...(c.gradient ? [GRADIENT_ID] : [])];
 
 const applyTo = (m: Affine, p: Pt): Pt => ({ x: m[0] * p.x + m[2] * p.y + m[4], y: m[1] * p.x + m[3] * p.y + m[5] });
 
@@ -85,6 +90,7 @@ export function transformContent(c: Content, which: Set<string> | null, m: Affin
     texts: c.texts.map((t) => (picked(t.id) || carried.has(t.id) ? transformText(t, m, opts.scaleText ?? !t.wrap) : t)),
     panels: c.panels.map((p) => (picked(p.id) ? transformPanel(p, m) : p)),
     ...(c.gradient ? { gradient: picked(GRADIENT_ID) ? { ...c.gradient, a: applyTo(m, c.gradient.a), b: applyTo(m, c.gradient.b) } : c.gradient } : {}),
+    ...(c.lines ? { lines: c.lines.map((e) => (picked(e.id) ? transformEffectLines(e, m) : e)) } : {}),
   };
 }
 
@@ -121,6 +127,7 @@ export function warpContent(c: Content, which: Set<string> | null, map: (p: Pt) 
     texts: c.texts.map((t) => (picked(t.id) || carried.has(t.id) ? transformText(t, localAffine(map, textCenter(t)), opts.scaleText ?? !t.wrap) : t)),
     panels: c.panels.map((p) => (picked(p.id) ? { ...p, points: p.points.map(map) } : p)),
     ...(c.gradient ? { gradient: picked(GRADIENT_ID) ? { ...c.gradient, a: map(c.gradient.a), b: map(c.gradient.b) } : c.gradient } : {}),
+    ...(c.lines ? { lines: c.lines.map((e) => (picked(e.id) ? transformEffectLines(e, localAffine(map, { x: e.cx, y: e.cy })) : e)) } : {}),
   };
 }
 
@@ -133,6 +140,7 @@ export function contentBounds(c: Content, which: Set<string> | null = null): Box
     ...c.texts.filter((t) => picked(t.id)).map(textBounds),
     ...c.panels.filter((p) => picked(p.id)).map((p) => polygonBounds(p.points)),
     ...(c.gradient && picked(GRADIENT_ID) ? [boundsOf([c.gradient.a, c.gradient.b], 4)] : []),
+    ...(c.lines ?? []).filter((e) => picked(e.id)).map(referenceBounds),
   ].filter((b): b is Box => b !== null);
   return boundsOf(boxes.flatMap((b) => [
     { x: b.x, y: b.y },
@@ -140,8 +148,10 @@ export function contentBounds(c: Content, which: Set<string> | null = null): Box
   ]));
 }
 
-/** The top-most object under p: text above balloons, then lines, then frame borders (on their line). */
-export function pickObject(c: Content, p: Pt, tolerance: number, frameLine = 0): string | null {
+/** The top-most object under p: text above balloons, then lines, then frame borders (on their line); focus / speed lines on their reference or lines (`area`: the canvas). */
+export function pickObject(c: Content, p: Pt, tolerance: number, frameLine = 0, area = { x: 0, y: 0, w: 0, h: 0 }): string | null {
+  const lines = c.lines ?? [];
+  for (let i = lines.length - 1; i >= 0; i--) if (hitEffectLines(lines[i], p, tolerance, area)) return lines[i].id;
   for (let i = c.texts.length - 1; i >= 0; i--) if (hitTextBox(c.texts[i], p, tolerance)) return c.texts[i].id;
   for (let i = c.balloons.length - 1; i >= 0; i--) if (hitBalloon(c.balloons[i], p)) return c.balloons[i].id;
   const k = hitStroke(c.strokes, p, tolerance);
@@ -170,6 +180,7 @@ export function idsTouching(c: Content, inside: (p: Pt) => boolean): Set<string>
     if (inside({ x: m[0] * r.x + m[2] * r.y + m[4], y: m[1] * r.x + m[3] * r.y + m[5] })) ids.add(b.id);
   }
   if (c.gradient && (inside(c.gradient.a) || inside(c.gradient.b))) ids.add(GRADIENT_ID);
+  for (const e of c.lines ?? []) if (inside({ x: e.cx, y: e.cy })) ids.add(e.id);
   return ids;
 }
 
@@ -180,6 +191,7 @@ export const removeObjects = (c: Content, ids: Set<string>): Content => ({
   texts: c.texts.filter((t) => !ids.has(t.id)),
   balloons: c.balloons.filter((b) => !ids.has(b.id)),
   panels: c.panels.filter((p) => !ids.has(p.id)),
+  ...(c.lines ? { lines: c.lines.filter((e) => !ids.has(e.id)) } : {}),
 });
 
 /** Only the objects in `ids`. */
@@ -188,4 +200,5 @@ export const pickContent = (c: Content, ids: Set<string>): Content => ({
   texts: c.texts.filter((t) => ids.has(t.id)),
   balloons: c.balloons.filter((b) => ids.has(b.id)),
   panels: c.panels.filter((p) => ids.has(p.id)),
+  ...(c.lines ? { lines: c.lines.filter((e) => ids.has(e.id)) } : {}),
 });

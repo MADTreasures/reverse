@@ -45,6 +45,7 @@ import { confirmTransform, drawTransformOverlay, hitHandle, isTransforming, tran
 import { drawFilterCenter, filterCenter, FilterCenterSession } from './filterCenter';
 import { canvasPick, CanvasPickSession } from './canvasPick';
 import { LiquifySession } from './liquifyTool';
+import { effectLinesSession } from './effectLinesTool';
 import type { Modifiers, OverlayView, PointerInfo, ToolSession } from './types';
 
 const DOUBLE_CLICK_MS = 350;
@@ -207,6 +208,10 @@ class Controller {
         return textSession(p);
       case 'balloon':
         return balloonSession(sub, p);
+      case 'flash':
+      case 'focusLines':
+      case 'speedLines':
+        return effectLinesSession(sub, p);
       case 'frame':
         return frameSession(sub, p);
       case 'correct':

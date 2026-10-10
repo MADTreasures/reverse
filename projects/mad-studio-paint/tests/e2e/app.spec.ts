@@ -4637,3 +4637,84 @@ test('Liquify: Push drags pixels along (⇧ on a straight line), holding Expand 
   expect(await size()).toBeGreaterThan(100);
   expect(errors).toEqual([]);
 });
+
+test('Comic tool: focus lines, flash and speed lines layers, edited with the Object tool, saved', async ({ page }) => {
+  const errors = await boot(page);
+  const layers = () => page.evaluate(() => window.__madPaint.useStore.getState().doc.layers.map((l: any) => ({ kind: l.kind, name: l.name, items: l.items?.length ?? 0 })));
+  const alphaOf = (id: string, x: number, y: number) => page.evaluate(([i, px, py]) => window.__madPaint.engine.sampleLayer(i, px, py)?.[3] ?? -1, [id, x, y] as const);
+  const top = () => page.evaluate(() => window.__madPaint.useStore.getState().doc.layers[0]);
+  // Like Ver. 5: Text on its own, the Comic tool with five groups.
+  await page.getByRole('button', { name: /^Comic/ }).click();
+  await page.getByRole('button', { name: 'Tool Group', exact: true }).click();
+  const groups = page.getByTestId('subtool-palette').locator('.subtool-groups button');
+  await expect(groups).toHaveText(['Balloon', 'Frame border', 'Flash', 'Focus lines', 'Speed lines']);
+  await groups.filter({ hasText: 'Focus lines' }).click();
+  await expect(page.locator('[data-subtool]')).toHaveText(['Scattered focus lines', 'Dense focus lines', 'Brightness', 'Burst']);
+  // Dragging from the centre makes a focus lines layer: empty in the middle, lines out to the edges.
+  await drag(page, [200, 150], [250, 185]);
+  expect((await layers())[0]).toEqual({ kind: 'lines', name: 'Scattered focus lines', items: 1 });
+  const lines = await top();
+  expect(await alphaOf(lines.id, 200, 150)).toBe(0);
+  let ink = 0;
+  for (let x = 0; x < 400; x += 2) if ((await alphaOf(lines.id, x, 2)) > 128) ink++;
+  expect(ink).toBeGreaterThan(20);
+  await page.keyboard.press('ControlOrMeta+z');
+  expect(await layers()).toHaveLength(1);
+  await page.keyboard.press('ControlOrMeta+Shift+z');
+  expect(await layers()).toHaveLength(2);
+  // The Object tool selects them; Fill center fills the middle with the sub colour (white).
+  await selectTool(page, 'object');
+  const c = await docToScreen(page, 200, 150);
+  await page.mouse.click(c.x, c.y);
+  expect(await page.evaluate(() => window.__madPaint.useStore.getState().selectedObjects)).toEqual([lines.items[0].id]);
+  await page.getByRole('button', { name: 'Tool Settings', exact: true }).click();
+  await page.getByTestId('tool-property').getByLabel('Fill center').check();
+  expect(await alphaOf(lines.id, 200, 150)).toBe(255);
+  expect((await top()).items[0].fill).toBe(true);
+  // Dragging the centre point moves where the lines meet.
+  await page.mouse.move(c.x, c.y);
+  await page.mouse.down();
+  await page.mouse.move(c.x - 40, c.y - 30, { steps: 5 });
+  await page.mouse.up();
+  const moved = (await top()).items[0];
+  expect(moved.fx).toBeLessThan(-10);
+  expect(moved.fy).toBeLessThan(-10);
+  // Speed lines drawn straight onto the editing raster layer (Draw on editing layer).
+  await page.evaluate(() => {
+    const m = window.__madPaint;
+    const s = m.useStore.getState();
+    m.actions.selectLayer(s.doc.layers.find((l: any) => l.kind === 'raster').id);
+    m.actions.setTool('speedLines');
+    m.actions.setSubTool('speedLines', 'speed-dark');
+  });
+  await page.getByTestId('tool-property').getByLabel('Destination layer').selectOption('editing');
+  await drag(page, [100, 60], [100, 240]);
+  expect(await layers()).toHaveLength(2);
+  const raster = await page.evaluate(() => window.__madPaint.useStore.getState().activeLayerId);
+  let dark = 0;
+  for (let y = 60; y < 240; y += 2) if ((await alphaOf(raster, 300, y)) > 128) dark++;
+  expect(dark).toBeGreaterThan(10);
+  expect(await alphaOf(raster, 300, 20)).toBe(0);
+  // A flash goes on its own layer; the lines layers come back from the file.
+  await page.evaluate(() => {
+    const a = window.__madPaint.actions;
+    a.setTool('flash');
+    a.setSubTool('flash', 'flash-pattern');
+  });
+  await drag(page, [300, 200], [340, 230]);
+  // New layers go above the selected one (Layer 1).
+  expect((await layers())[1]).toEqual({ kind: 'lines', name: 'Flash pattern', items: 1 });
+  const reopened = await page.evaluate(async () => {
+    const m = window.__madPaint;
+    const bytes = await m.buildDocumentBytes();
+    m.actions.newDocument('Other', 100, 100, 72, '#ffffff');
+    await m.openFileBytes({ name: 'lines.madpaint', data: bytes });
+    return m.useStore.getState().doc.layers.map((l: any) => [l.kind, l.items?.[0]?.kind ?? null, l.items?.[0]?.fill ?? null]);
+  });
+  expect(reopened).toEqual([
+    ['lines', 'focus', true],
+    ['lines', 'focus', true],
+    ['raster', null, null],
+  ]);
+  expect(errors).toEqual([]);
+});

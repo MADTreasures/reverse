@@ -3,8 +3,9 @@
  * The document structure (layer tree, flags) lives in the store; this module owns the pixels.
  */
 import { flatten, maskIds, pixelIds, renderedIds } from '../model/layers';
-import type { GradientLayer, Id, PaintDocument, TextLayer, VectorLayer } from '../model/types';
+import type { GradientLayer, Id, LinesLayer, PaintDocument, TextLayer, VectorLayer } from '../model/types';
 import { renderGradient, type GradientFill } from '../paint/gradient';
+import { drawEffectLines, type EffectLines } from '../paint/effectLines';
 import { HistoryStack } from '../paint/history';
 import type { Mask } from '../paint/mask';
 import { intersect, type Rect } from '../paint/rect';
@@ -123,7 +124,7 @@ class PaintEngine {
   /** Renders vector and text layers whose content changed (new lines, erasing, typing, undo …). */
   private syncVectors(doc: PaintDocument): void {
     for (const l of flatten(doc.layers)) {
-      if (l.kind !== 'vector' && l.kind !== 'text' && l.kind !== 'gradient' && l.kind !== 'fill') continue;
+      if (l.kind !== 'vector' && l.kind !== 'text' && l.kind !== 'gradient' && l.kind !== 'fill' && l.kind !== 'lines') continue;
       const known = getSurface(l.id);
       const sized = known && known.width === doc.width && known.height === doc.height;
       if (sized && this.vectorRevs.get(l.id) === l.rev) continue;
@@ -141,6 +142,8 @@ class PaintEngine {
       else if (l.kind === 'fill') {
         ctx.fillStyle = l.color;
         ctx.fillRect(0, 0, surface.width, surface.height);
+      } else if (l.kind === 'lines') {
+        for (const item of l.items) drawEffectLines(ctx, item, { x: 0, y: 0, w: surface.width, h: surface.height });
       } else drawGradientFill(ctx, l.gradient);
       this.vectorRevs.set(l.id, l.rev);
       touch(l.id);
@@ -184,6 +187,18 @@ class PaintEngine {
     const ctx = ctx2d(surface);
     ctx.clearRect(0, 0, surface.width, surface.height);
     drawGradientFill(ctx, fill);
+    this.vectorRevs.delete(layer.id);
+    touch(layer.id);
+    this.invalidate();
+  }
+
+  /** Shows a focus / speed lines layer with other lines while a tool changes them. */
+  previewLines(layer: LinesLayer, items: EffectLines[]): void {
+    const surface = getSurface(layer.id);
+    if (!surface) return;
+    const ctx = ctx2d(surface);
+    ctx.clearRect(0, 0, surface.width, surface.height);
+    for (const item of items) drawEffectLines(ctx, item, { x: 0, y: 0, w: surface.width, h: surface.height });
     this.vectorRevs.delete(layer.id);
     touch(layer.id);
     this.invalidate();

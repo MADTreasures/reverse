@@ -1093,6 +1093,30 @@
   padding: 3px 0;
 }
 
+/* Focus / speed lines settings: section titles and colour choices */
+.prop-section {
+  margin-top: 6px;
+  padding-top: 4px;
+  border-top: 1px solid var(--line-soft);
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+.segmented.color-choice button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 3px 0;
+}
+
+.color-chip {
+  display: inline-block;
+  width: 22px;
+  height: 12px;
+  border: 1px solid var(--line);
+  border-radius: 2px;
+}
+
 .prop-value-note {
   margin-left: 4px;
   color: var(--text-dim);

@@ -33,7 +33,7 @@ import {
   shiftLayer as shiftLayerInTree,
   type DropPosition,
 } from '../model/layers';
-import type { AudioLayer, DrawnLayer, FillLayer, FolderLayer, GradientLayer, Id, Layer, LayerMask, PaintDocument, RasterLayer, RulerRange, TextLayer, VectorLayer } from '../model/types';
+import type { AudioLayer, DrawnLayer, FillLayer, FolderLayer, GradientLayer, Id, Layer, LayerMask, LinesLayer, PaintDocument, RasterLayer, RulerRange, TextLayer, VectorLayer } from '../model/types';
 import { defaultPerspective, rulerLine, type Affine, type Ruler, type RulerInput } from '../paint/rulers';
 import { eraseWhere, keepWhere, type VectorStroke } from '../paint/vector';
 import { editable } from '../paint/vectorEdit';
@@ -264,7 +264,8 @@ export function editBlocker(s: PaintState = getState()): string | null {
   const l = activeLayer(s);
   if (!l) return 'No layer selected';
   if (!editTarget(s)) {
-    if (l.kind === 'text' || l.kind === 'gradient' || l.kind === 'fill') return `${l.kind === 'text' ? 'Text' : l.kind === 'fill' ? 'Fill' : 'Gradient'} layers cannot be drawn on (Layer > Rasterize converts the layer; draw on the layer mask to change where it shows)`;
+    if (l.kind === 'text' || l.kind === 'gradient' || l.kind === 'fill' || l.kind === 'lines')
+      return `${l.kind === 'text' ? 'Text' : l.kind === 'fill' ? 'Fill' : l.kind === 'lines' ? (l.items[0]?.kind === 'speed' ? 'Speed lines' : 'Focus lines') : 'Gradient'} layers cannot be drawn on (Layer > Rasterize converts the layer; draw on the layer mask to change where it shows)`;
     if (isAnimationFolder(l)) return 'Select a cel to draw on, or make one with New animation cel';
     if (l.kind === 'audio') return 'Audio layers cannot be drawn on';
     if (l.kind === 'movie') return 'Movie layers cannot be drawn on (they show a movie file)';
@@ -280,7 +281,7 @@ export function editBlocker(s: PaintState = getState()): string | null {
 /** Why the active layer cannot be moved, flipped or transformed, or null. Text layers can be, although they cannot be drawn on. */
 export function transformBlocker(s: PaintState = getState()): string | null {
   const kind = activeLayer(s)?.kind;
-  return (kind === 'text' || kind === 'gradient') && !s.maskEditing ? objectBlocker(s) : editBlocker(s);
+  return (kind === 'text' || kind === 'gradient' || kind === 'lines') && !s.maskEditing ? objectBlocker(s) : editBlocker(s);
 }
 
 /** Selects a layer; with `mask`, its mask thumbnail (the mask becomes the drawing target). */
@@ -309,7 +310,7 @@ export function movingSurfaces(s: PaintState = getState()): Id[] {
   const ids: Id[] = [];
   for (const x of flatten([l])) {
     if (isEffectivelyLocked(s.doc.layers, x.id)) continue;
-    if (x.kind === 'raster' || x.kind === 'vector' || x.kind === 'text' || x.kind === 'gradient') ids.push(x.id);
+    if (x.kind === 'raster' || x.kind === 'vector' || x.kind === 'text' || x.kind === 'gradient' || x.kind === 'lines') ids.push(x.id);
     if (x.mask?.linked) ids.push(x.mask.id);
   }
   return ids;
@@ -661,9 +662,9 @@ export function soloLayer(id: Id): void {
 export type FrameFolder = FolderLayer & { frame: FrameBorder };
 export const isFrameFolder = (l: Layer | null | undefined): l is FrameFolder => l?.kind === 'folder' && Boolean(l.frame);
 
-/** Layers with objects for the Object tool: vector lines, text boxes and balloons, frame panels, a gradient. */
-export type ObjectLayer = VectorLayer | TextLayer | FrameFolder | GradientLayer;
-export const isObjectLayer = (l: Layer | null | undefined): l is ObjectLayer => l?.kind === 'vector' || l?.kind === 'text' || l?.kind === 'gradient' || isFrameFolder(l);
+/** Layers with objects for the Object tool: vector lines, text boxes and balloons, frame panels, a gradient, focus / speed lines. */
+export type ObjectLayer = VectorLayer | TextLayer | FrameFolder | GradientLayer | LinesLayer;
+export const isObjectLayer = (l: Layer | null | undefined): l is ObjectLayer => l?.kind === 'vector' || l?.kind === 'text' || l?.kind === 'gradient' || l?.kind === 'lines' || isFrameFolder(l);
 
 export function addVectorLayer(): Id {
   const layer = createVectorLayer(nextLayerName(getState().doc));
@@ -700,6 +701,9 @@ function setContentIn(l: Layer, c: Content): void {
     else delete l.frame;
   } else if (l.kind === 'gradient' && c.gradient) {
     l.gradient = c.gradient;
+    l.rev = nextRev();
+  } else if (l.kind === 'lines' && c.lines) {
+    l.items = c.lines;
     l.rev = nextRev();
   }
 }
@@ -843,11 +847,13 @@ export function previewContent(l: ObjectLayer, c: Content, r: Rect | null): void
   else if (l.kind === 'text') engine.previewText(l, c);
   else if (l.kind === 'gradient') {
     if (c.gradient) engine.previewGradient(l, c.gradient);
-  } else engine.previewFrame(l.id, c.panels);
+  } else if (l.kind === 'lines') engine.previewLines(l, c.lines ?? []);
+  else engine.previewFrame(l.id, c.panels);
 }
 
-/** Vector, text, gradient and fill layers: their pixels are rendered from their content. */
-export const isRenderedLayer = (l: Layer | null | undefined): l is VectorLayer | TextLayer | GradientLayer | FillLayer => l?.kind === 'vector' || l?.kind === 'text' || l?.kind === 'gradient' || l?.kind === 'fill';
+/** Vector, text, gradient, fill and lines layers: their pixels are rendered from their content. */
+export const isRenderedLayer = (l: Layer | null | undefined): l is VectorLayer | TextLayer | GradientLayer | FillLayer | LinesLayer =>
+  l?.kind === 'vector' || l?.kind === 'text' || l?.kind === 'gradient' || l?.kind === 'fill' || l?.kind === 'lines';
 
 /** Layer > Rasterize: a vector or text layer becomes a raster layer with the same pixels. */
 export function rasterizeLayer(id: Id = getState().activeLayerId): void {

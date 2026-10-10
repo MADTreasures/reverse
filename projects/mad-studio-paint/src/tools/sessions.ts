@@ -15,6 +15,7 @@ import { contentBounds, contentOf, EMPTY_CONTENT, pickContent, transformContent,
 import { renderGradient, resolveStops, type GradientFill, type GradientSpec } from '../paint/gradient';
 import { newObjectId } from '../paint/text';
 import { newPanelId, panelEdges } from '../paint/frames';
+import { newLinesId } from '../paint/effectLines';
 import { apply as applyMatrix, normalizeAngle } from '../paint/viewMath';
 import { BlendStroke, BrushStroke, type Stroke, type StrokeTarget } from '../engine/brushEngine';
 import { createCanvas, ctx2d, maskToCanvas } from '../engine/canvas';
@@ -1455,6 +1456,7 @@ function duplicateContent(c: Content): Content {
     texts: c.texts.map((x) => ({ ...x, id: newObjectId('t') })),
     balloons: c.balloons.map((x) => ({ ...x, id: newObjectId('b'), tails: x.tails.map((t) => ({ ...t, id: newObjectId('q') })) })),
     panels: c.panels.map((x) => ({ ...x, id: newPanelId() })),
+    ...(c.lines ? { lines: c.lines.map((x) => ({ ...x, id: newLinesId() })) } : {}),
   };
 }
 
@@ -1523,6 +1525,7 @@ export class MoveSession implements ToolSession {
       texts: [...v.original.texts, ...copies.texts],
       balloons: [...v.original.balloons, ...copies.balloons],
       panels: [...v.original.panels, ...copies.panels],
+      ...(v.original.lines ? { lines: [...v.original.lines, ...(copies.lines ?? [])] } : {}),
     };
   }
 

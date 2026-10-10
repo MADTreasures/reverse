@@ -51,6 +51,9 @@ export function cursorFor(t: EffectiveTool): string {
       return 'text';
     case 'balloon':
     case 'frame':
+    case 'flash':
+    case 'focusLines':
+    case 'speedLines':
       return 'crosshair';
     case 'ruler':
     case 'correct':

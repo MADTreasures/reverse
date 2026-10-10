@@ -14,6 +14,8 @@ export type LayerType =
   | 'gradient'
   | 'fill'
   | 'tone'
+  | 'focusLines'
+  | 'speedLines'
   | 'correction'
   | 'folder'
   | 'frame'
@@ -32,6 +34,8 @@ export const LAYER_TYPES: [LayerType, string][] = [
   ['gradient', 'Gradient layer'],
   ['fill', 'Fill layer'],
   ['tone', 'Tone layer'],
+  ['focusLines', 'Focus lines layer'],
+  ['speedLines', 'Speed lines layer'],
   ['correction', 'Correction layer'],
   ['folder', 'Layer folder'],
   ['frame', 'Frame border folder'],
@@ -81,6 +85,7 @@ export function typesOf(l: Layer): LayerType[] {
   const out: LayerType[] = [];
   if (l.kind === 'folder') out.push(l.frame ? 'frame' : l.animation ? 'animation' : l.camera ? 'camera' : 'folder');
   else if (l.kind === 'text') out.push(l.balloons.length ? 'balloon' : 'text');
+  else if (l.kind === 'lines') out.push(l.items[0]?.kind === 'speed' ? 'speedLines' : 'focusLines');
   else out.push(l.kind);
   if (l.effects?.tone) out.push('tone');
   if (l.mask) out.push('mask');

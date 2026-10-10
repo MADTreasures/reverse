@@ -11,6 +11,7 @@ import type { Ruler } from '../paint/rulers';
 import type { Correction } from '../paint/tonal';
 import type { FrameBorder } from '../paint/frames';
 import type { GradientFill } from '../paint/gradient';
+import type { EffectLines } from '../paint/effectLines';
 import type { GridSettings } from '../paint/grid';
 import type { Balloon, TextBox } from '../paint/text';
 import type { VectorStroke } from '../paint/vector';
@@ -194,6 +195,19 @@ export interface FillLayer extends LayerBase {
 }
 
 /**
+ * Focus lines / speed lines layer (Comic tool > Focus lines, Speed lines, Flash): lines drawn from
+ * their settings, which stay editable with the Object tool; rendered by the engine.
+ */
+export interface LinesLayer extends LayerBase {
+  kind: 'lines';
+  blend: BlendMode;
+  /** The focus or speed lines on the layer, drawn in order. */
+  items: EffectLines[];
+  /** Changes with every edit (never reused), so rendered pixels can be cached. */
+  rev: number;
+}
+
+/**
  * Audio layer (Animation > New animation layer > Audio, File > Import > Audio): a track of the
  * timeline whose clips play sound files; hidden, it is muted. It has no pixels.
  */
@@ -235,7 +249,7 @@ export interface MovieFile {
   height: number;
 }
 
-export type Layer = RasterLayer | FolderLayer | CorrectionLayer | VectorLayer | TextLayer | GradientLayer | FillLayer | AudioLayer | MovieLayer;
+export type Layer = RasterLayer | FolderLayer | CorrectionLayer | VectorLayer | TextLayer | GradientLayer | FillLayer | LinesLayer | AudioLayer | MovieLayer;
 
 /** Layers that take part in the picture (all but audio layers). */
 export type DrawnLayer = Exclude<Layer, AudioLayer>;
