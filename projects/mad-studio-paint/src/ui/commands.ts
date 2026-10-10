@@ -437,6 +437,7 @@ export const COMMANDS: Command[] = [
   { id: 'registerMaterial', label: 'Image…', run: () => openDialog('registerMaterial'), enabled: () => actions.editTarget() !== null },
   { id: 'quickAccessSettings', label: 'Quick Access Settings…', run: () => openQuickAccessSettings() },
   { id: 'shortcutSettings', label: 'Shortcut Settings…', run: () => openDialog('shortcutSettings') },
+  { id: 'commandBarSettings', label: 'Command Bar Settings…', run: () => openDialog('commandBarSettings') },
   // Window: palettes shown or hidden (Animation cels has its own command above).
   ...PALETTE_NAMES.filter(([id]) => id !== 'animationCels').map(([id, name]) => ({
     id: `win-${id}`,

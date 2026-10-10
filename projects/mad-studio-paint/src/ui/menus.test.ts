@@ -2,6 +2,9 @@ import { describe, expect, it } from 'vitest';
 import { commandById } from './commands';
 import { menuCommandIds } from './menus';
 import { nativeMenuTemplate, type NativeMenuItem } from './nativeMenu';
+import { DEFAULT_COMMAND_BARS } from '../store/commandBarStore';
+import { defaultQuickSets } from '../paint/quickAccess';
+import { defaultActionSets } from '../paint/autoActions';
 
 describe('menus', () => {
   it('refer only to known commands', () => {
@@ -18,5 +21,11 @@ describe('menus', () => {
     expect(masks.submenu!.map((i) => i.id).filter(Boolean)).toContain('maskOutside');
     const file = nativeMenuTemplate().find((m) => m.label === 'File')!;
     expect(file.submenu!.find((i) => i.id === 'save')!.accelerator).toBe('CmdOrCtrl+S');
+  });
+
+  it('default Command Bars, Quick Access sets and auto actions use known commands', () => {
+    const items = [...Object.values(DEFAULT_COMMAND_BARS).flat(), ...defaultQuickSets().flatMap((x) => x.items)];
+    for (const it of items) if (it.kind === 'command') expect(commandById(it.id), it.id).toBeDefined();
+    for (const a of defaultActionSets().flatMap((x) => x.actions)) for (const st of a.steps) if (st.op.kind === 'command') expect(commandById(st.op.id), st.op.id).toBeDefined();
   });
 });

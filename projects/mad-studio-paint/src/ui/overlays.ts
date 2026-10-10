@@ -13,7 +13,7 @@ export interface MenuItem {
   submenu?: MenuItem[];
 }
 
-export type CustomDialogId = 'newCanvas' | 'colorSettings' | 'export' | 'exportPreview' | 'exportPsd' | 'frameTemplates' | 'timelineSettings' | 'newTimeline' | 'frameRate' | 'manageTimelines' | 'cameraFolder' | 'assignMultiple' | 'centerCanvas' | 'onionSkin' | 'exportGif' | 'exportApng' | 'exportWebp' | 'exportSequence' | 'exportCels' | 'exportAudio' | 'exportMovie' | 'canvasSize' | 'imageResolution' | 'gridSettings' | 'colorSets' | 'preferences' | 'about' | 'shortcuts' | 'pressure' | 'newFrameFolder' | 'divideFrame' | 'drawAlongRuler' | 'newTone' | 'gradient' | 'timelineLabel' | 'trackLabel' | 'goToFrame' | 'goToLabel' | 'insertFrame' | 'deleteFrame' | 'expandSelection' | 'shrinkSelection' | 'blurBorder' | 'colorGamut' | 'registerMaterial' | 'quickAccessSettings' | 'shortcutSettings';
+export type CustomDialogId = 'newCanvas' | 'colorSettings' | 'export' | 'exportPreview' | 'exportPsd' | 'frameTemplates' | 'timelineSettings' | 'newTimeline' | 'frameRate' | 'manageTimelines' | 'cameraFolder' | 'assignMultiple' | 'centerCanvas' | 'onionSkin' | 'exportGif' | 'exportApng' | 'exportWebp' | 'exportSequence' | 'exportCels' | 'exportAudio' | 'exportMovie' | 'canvasSize' | 'imageResolution' | 'gridSettings' | 'colorSets' | 'preferences' | 'about' | 'shortcuts' | 'pressure' | 'newFrameFolder' | 'divideFrame' | 'drawAlongRuler' | 'newTone' | 'gradient' | 'timelineLabel' | 'trackLabel' | 'goToFrame' | 'goToLabel' | 'insertFrame' | 'deleteFrame' | 'expandSelection' | 'shrinkSelection' | 'blurBorder' | 'colorGamut' | 'registerMaterial' | 'quickAccessSettings' | 'shortcutSettings' | 'commandBarSettings';
 
 /** What a tonal correction dialog changes. */
 export type TonalTarget =

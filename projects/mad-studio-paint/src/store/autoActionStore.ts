@@ -227,7 +227,7 @@ export function setActionEnabled(actionId: string, enabled: boolean): void {
 // ------------------------------------------------------------------ recording
 
 /** Commands that are not recorded (files, the interface, undo and the auto actions themselves). */
-const NOT_RECORDED = new Set(['undo', 'redo', 'new', 'open', 'save', 'saveAs', 'saveDuplicate', 'saveDuplicatePsd', 'saveDuplicatePsb', 'preferences', 'shortcuts', 'about', 'togglePalettes', 'toggleMenuBar', 'workspaceDefault', 'workspaceClassic', 'toggleTimeline', 'win-material', 'quickAccessSettings']);
+const NOT_RECORDED = new Set(['undo', 'redo', 'new', 'open', 'save', 'saveAs', 'saveDuplicate', 'saveDuplicatePsd', 'saveDuplicatePsb', 'preferences', 'shortcuts', 'about', 'togglePalettes', 'toggleMenuBar', 'workspaceDefault', 'workspaceClassic', 'toggleTimeline', 'win-material', 'quickAccessSettings', 'shortcutSettings', 'commandBarSettings']);
 
 /** Start / Stop recording auto action (the selected one; none selected: a new one). */
 export function toggleRecording(): void {

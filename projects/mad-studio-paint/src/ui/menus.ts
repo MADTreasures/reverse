@@ -32,6 +32,7 @@ export const MENUS: MenuSpec[] = [
       '-',
       'pressureSettings',
       'shortcutSettings',
+      'commandBarSettings',
       'preferences',
     ],
   },

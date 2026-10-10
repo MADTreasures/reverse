@@ -634,6 +634,18 @@ const paths: Record<string, ReactNode> = {
     </>
   ),
   removeCel: <path d="M5.5 2.5h6l3 3v12h-9zM7.8 9.3l4.4 4.4M12.2 9.3l-4.4 4.4" />,
+  freeTransform: (
+    <>
+      <path d="M4.5 4.5l11 1.5-1.5 9.5-9 1z" strokeDasharray="2 1.6" />
+      <path d="M3 3h3v3h-3zM14 4.5h3v3h-3zM12.5 14h3v3h-3zM3.5 15h3v3h-3z" />
+    </>
+  ),
+  meshTransform: (
+    <>
+      <path d="M4 4h12v12h-12zM10 4c-1 4 1 8 0 12M4 10c4-1 8 1 12 0" />
+      <path d="M2.5 2.5h3v3h-3zM14.5 2.5h3v3h-3zM2.5 14.5h3v3h-3zM14.5 14.5h3v3h-3z" />
+    </>
+  ),
   autoAction: (
     <>
       <path d="M3 5h10M3 9h10M3 13h6" />

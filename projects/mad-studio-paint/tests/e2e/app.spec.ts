@@ -5178,3 +5178,74 @@ test('Shortcut Settings: menu commands, tools and auto actions get new shortcuts
   expect(await page.evaluate(() => localStorage.getItem('mad-paint:shortcuts'))).toBe('{}');
   expect(errors).toEqual([]);
 });
+
+test('Command Bar Settings: icons added, named, moved and deleted per workspace; tools dropped on the bar; default layout', async ({ page }) => {
+  const errors = await boot(page);
+  const bar = page.getByRole('toolbar', { name: 'Command bar' });
+  const labels = () => bar.locator('.cmd-items > *').evaluateAll((els) => els.map((e) => e.getAttribute('aria-label')));
+  expect((await labels()).slice(0, 4)).toEqual(['New', 'Open', 'Save', 'Separator']);
+  // The bar's context menu opens Command Bar Settings.
+  await bar.click({ button: 'right', position: { x: 1000, y: 12 } });
+  await page.getByRole('menuitem', { name: 'Command Bar Settings…' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Command Bar Settings' });
+  await expect(dialog).toBeVisible();
+  // While it is open a click selects an icon (Undo does not run).
+  await page.evaluate(() => window.__madPaint.actions.addRasterLayer());
+  const n = await page.evaluate(() => window.__madPaint.useStore.getState().doc.layers.length);
+  await bar.getByRole('button', { name: 'Undo' }).click();
+  expect(await page.evaluate(() => window.__madPaint.useStore.getState().doc.layers.length)).toBe(n);
+  await bar.getByRole('button', { name: 'Save' }).click();
+  await expect(bar.getByRole('button', { name: 'Save' })).toHaveClass(/sel/);
+  // Add: Edit > Copy to the right of Save, then the Eraser tool to the right of Copy.
+  const funcs = dialog.getByRole('tree', { name: 'Functions' });
+  await funcs.getByRole('treeitem', { name: 'Copy', exact: true }).click();
+  await dialog.getByRole('button', { name: 'Add', exact: true }).click();
+  await dialog.getByRole('combobox', { name: 'Category' }).selectOption({ label: 'Tool' });
+  await funcs.getByRole('treeitem', { name: 'Eraser', exact: true }).click();
+  await funcs.getByRole('treeitem', { name: 'Eraser (tool)' }).click();
+  await dialog.getByRole('button', { name: 'Add', exact: true }).click();
+  // Add separator: to the right of the selected icon (never two in a row).
+  await bar.getByRole('button', { name: 'Undo' }).click();
+  await dialog.getByRole('button', { name: 'Add separator' }).click();
+  await dialog.getByRole('button', { name: 'Add separator' }).click();
+  expect((await labels()).slice(0, 10)).toEqual(['New', 'Open', 'Save', 'Copy', 'Eraser', 'Separator', 'Undo', 'Separator', 'Redo', 'Separator']);
+  // Settings names the selected icon; Delete removes one.
+  await bar.getByRole('button', { name: 'Eraser' }).click();
+  await dialog.getByRole('button', { name: 'Settings…' }).click();
+  await dialog.getByRole('textbox', { name: 'Name' }).fill('Rubber');
+  await dialog.getByRole('button', { name: 'OK' }).click();
+  await expect(bar.getByRole('button', { name: 'Rubber' })).toBeVisible();
+  await bar.getByRole('button', { name: 'Open' }).click();
+  await dialog.getByRole('button', { name: 'Delete' }).click();
+  await expect(bar.getByRole('button', { name: 'Open' })).toHaveCount(0);
+  // Dragged while the dialog is open: Rubber before New.
+  await bar.getByRole('button', { name: 'Rubber' }).dragTo(bar.getByRole('button', { name: 'New' }), { targetPosition: { x: 3, y: 12 } });
+  expect((await labels())[0]).toBe('Rubber');
+  await dialog.getByRole('button', { name: 'Close' }).click();
+  await expect(dialog).toBeHidden();
+  // The icons run: the eraser tool shows as on.
+  await bar.getByRole('button', { name: 'Rubber' }).click();
+  expect((await state(page)).tool).toBe('eraser');
+  await expect(bar.getByRole('button', { name: 'Rubber' })).toHaveAttribute('aria-pressed', 'true');
+  // A sub tool dragged from the Sub Tool palette onto the bar is added where it is dropped.
+  await page.evaluate(() => window.__madPaint.actions.setTool('pen'));
+  await page.locator('[data-subtool=pen-g]').dragTo(bar.getByRole('button', { name: 'Undo' }), { targetPosition: { x: 3, y: 12 } });
+  const order = await labels();
+  expect(order[order.indexOf('Undo') - 1]).toBe('G-pen');
+  // The classic workspace has its own Command Bar.
+  await page.evaluate(() => window.__madPaint.runCommand('workspaceClassic'));
+  await expect(bar.getByRole('button', { name: 'Rubber' })).toHaveCount(0);
+  await expect(bar.getByRole('button', { name: 'Deselect' })).toBeVisible();
+  await page.evaluate(() => window.__madPaint.runCommand('workspaceDefault'));
+  await expect(bar.getByRole('button', { name: 'Rubber' })).toBeVisible();
+  // Kept in the browser's storage; Restore default layout brings the default icons back.
+  const kept = await page.evaluate(() => JSON.parse(localStorage.getItem('mad-paint:command-bar')!));
+  expect(kept.default[0]).toEqual({ kind: 'tool', tool: 'eraser', name: 'Rubber' });
+  expect(kept.classic).toBeUndefined();
+  await page.getByRole('navigation', { name: 'Main menu' }).getByRole('button', { name: 'File', exact: true }).dispatchEvent('pointerdown');
+  await page.locator('[data-command=commandBarSettings]').click();
+  await dialog.getByRole('button', { name: 'Restore default layout' }).click();
+  expect((await labels()).slice(0, 4)).toEqual(['New', 'Open', 'Save', 'Separator']);
+  await dialog.getByRole('button', { name: 'Close' }).click();
+  expect(errors).toEqual([]);
+});

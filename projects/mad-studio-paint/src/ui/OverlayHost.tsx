@@ -1,6 +1,7 @@
 import { RegisterMaterialDialog } from './dialogs/MaterialDialogs';
 import { QuickAccessSettingsDialog } from './dialogs/QuickAccessSettingsDialog';
 import { ShortcutSettingsDialog } from './dialogs/ShortcutSettingsDialog';
+import { CommandBarSettingsDialog } from './dialogs/CommandBarSettingsDialog';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { CanvasSizeDialog } from './dialogs/AdjustDialogs';
 import { FilterDialog } from './dialogs/FilterDialog';
@@ -110,6 +111,7 @@ export function OverlayHost() {
           {dialog.kind === 'custom' && dialog.id === 'registerMaterial' && <RegisterMaterialDialog />}
           {dialog.kind === 'custom' && dialog.id === 'quickAccessSettings' && <QuickAccessSettingsDialog />}
           {dialog.kind === 'custom' && dialog.id === 'shortcutSettings' && <ShortcutSettingsDialog />}
+          {dialog.kind === 'custom' && dialog.id === 'commandBarSettings' && <CommandBarSettingsDialog />}
         </div>
       )}
       <div className="toasts" aria-live="polite">
@@ -128,8 +130,8 @@ function backdropClass(dialog: NonNullable<ReturnType<typeof useOverlays.getStat
   if (dialog.kind === 'tonal' || (dialog.kind === 'custom' && dialog.id === 'centerCanvas')) return 'clear';
   // Select color gamut: clicks on the canvas pick colours while it is open.
   if (dialog.kind === 'custom' && dialog.id === 'colorGamut') return 'clear top pass';
-  // Quick Access Settings: the palette (and the rest of the window) stays usable.
-  if (dialog.kind === 'custom' && dialog.id === 'quickAccessSettings') return 'clear pass';
+  // Quick Access / Command Bar Settings: the palette or bar (and the rest of the window) stays usable.
+  if (dialog.kind === 'custom' && (dialog.id === 'quickAccessSettings' || dialog.id === 'commandBarSettings')) return 'clear pass';
   return '';
 }
 

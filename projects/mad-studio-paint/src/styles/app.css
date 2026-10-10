@@ -4640,3 +4640,44 @@ body.canvas-only .modal * {
   background: var(--well);
   font-size: 12px;
 }
+
+/* Command Bar icons (Command Bar Settings) */
+.cmd-items {
+  display: flex;
+  align-items: center;
+  gap: 1px;
+  min-width: 40px;
+  min-height: 26px;
+}
+
+.cmd-sep {
+  align-self: stretch;
+  width: 1px;
+  margin: 3px 5px;
+  background: var(--line-soft);
+}
+
+.command-bar.editing .cmd-sep {
+  width: 3px;
+  cursor: pointer;
+}
+
+.command-bar.editing .cmd {
+  cursor: grab;
+}
+
+.cmd.sel,
+.cmd-sep.sel {
+  outline: 2px solid var(--accent-strong);
+  outline-offset: -1px;
+}
+
+.cmd.drop-before,
+.cmd-sep.drop-before {
+  box-shadow: -3px 0 0 var(--accent-strong);
+}
+
+.cmd.drop-after,
+.cmd-sep.drop-after {
+  box-shadow: 3px 0 0 var(--accent-strong);
+}
