@@ -1390,7 +1390,7 @@ export class BrushSizeSession implements ToolSession {
     p: PointerInfo,
   ) {
     this.start = p;
-    this.startSize = sub.brush?.size ?? 10;
+    this.startSize = actions.brushSizeOf(sub) ?? 10;
     this.size = this.startSize;
   }
 

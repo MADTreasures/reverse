@@ -7,12 +7,13 @@ export function ToolSliders() {
   const sub = useStore((s) => currentSubTool(s));
   const color = useStore((s) => (s.colors.transparent ? 'transparent' : drawingColor(s.colors)));
   const b = sub.brush;
+  const size = actions.brushSizeOf(sub);
   return (
     <div className="tool-sliders" data-testid="tool-sliders">
       <VSlider
-        label={b ? `${b.size.toFixed(b.size < 10 ? 1 : 0)}\npx` : '–'}
-        value={b ? Math.log(b.size / 0.5) / Math.log(2000 / 0.5) : 0}
-        disabled={!b}
+        label={size !== null ? `${size.toFixed(size < 10 ? 1 : 0)}\npx` : '–'}
+        value={size !== null ? Math.log(size / 0.5) / Math.log(2000 / 0.5) : 0}
+        disabled={size === null}
         onChange={(t) => actions.setBrushSize(0.5 * Math.pow(2000 / 0.5, t))}
         className="size"
         aria="Brush size"

@@ -17,7 +17,8 @@ import { GradientBar } from '../controls/GradientBar';
 import { tipAlphaUrl } from '../../engine/materials';
 import { openDialog } from '../overlays';
 import { openColorSettings } from '../dialogs/ColorSettingsDialog';
-import { entryForTool, isSpecialCurve, PALETTE_ENTRIES, PALETTE_LAYOUT, subToolsOf, toolInfo, usesLasso, type CorrectSettings, type FigureFill, type FillReference, type SubTool, type ToolId } from '../../paint/tools';
+import { entryForTool, isSpecialCurve, PALETTE_ENTRIES, PALETTE_LAYOUT, subToolsOf, toolInfo, usesLasso, type CorrectSettings, type FigureFill, type FillReference, type LiquifySettings, type SubTool, type ToolId } from '../../paint/tools';
+import { LIQUIFY_MODES } from '../../paint/liquify';
 import { Icon } from '../controls/Icons';
 import { PropSlider } from '../controls/PropSlider';
 import { DynamicsPopover, dynamicsOn, type DynamicsKind } from './BrushSettingsPanels';
@@ -281,6 +282,7 @@ export function ToolProperty() {
           />
         </>
       )}
+      {sub.liquify && <LiquifyToolSettings l={sub.liquify} update={(patch) => update({ liquify: { ...sub.liquify!, ...patch } })} />}
       {usesLasso(sub) && (
         <div className="prop-row column">
           <label className="check prop-check" title="The lasso snaps to the lines of the reference layer (else of the editing layer)">
@@ -421,7 +423,7 @@ export function ToolProperty() {
         </>
       )}
       {sub.tool === 'gradient' && <GradientSettings sub={sub} update={update} />}
-      {!b && !f && !['select', 'gradient', 'object', 'text', 'balloon', 'frame', 'correct'].includes(sub.tool) && <div className="prop-note">{toolInfo(sub.tool).hint}</div>}
+      {!b && !f && !['select', 'gradient', 'object', 'text', 'balloon', 'frame', 'correct', 'liquify'].includes(sub.tool) && <div className="prop-note">{toolInfo(sub.tool).hint}</div>}
       <div className="prop-footer">
         <button className="icon-btn" title="Reset to the default settings" aria-label="Reset sub tool" onClick={() => actions.resetSubTool(sub.id)}>
           <Icon name="resetRotation" size={15} />
@@ -445,6 +447,39 @@ export function ToolProperty() {
       </div>
       {dyn && b && <DynamicsPopover kind={dyn.kind} at={dyn.at} onClose={() => setDyn(null)} />}
     </div>
+  );
+}
+
+/** Liquify tool: Brush size, the mode (icons, like the reference), Strength, Hardness, Anti-aliasing and Only refer to editing area. */
+function LiquifyToolSettings({ l, update }: { l: LiquifySettings; update: (patch: Partial<LiquifySettings>) => void }) {
+  const current = LIQUIFY_MODES.find(([id]) => id === l.mode)?.[1] ?? '';
+  return (
+    <>
+      <PropSlider testId="prop-size" label="Brush Size" value={l.size} min={0.5} max={2000} log step={0.1} decimals={1} onChange={(v) => actions.setBrushSize(v)} />
+      <div className="prop-row column">
+        <span className="prop-label">
+          Mode <span className="prop-value-note">{current}</span>
+        </span>
+        <div className="segmented icons" role="radiogroup" aria-label="Liquify mode">
+          {LIQUIFY_MODES.map(([id, label]) => (
+            <button key={id} role="radio" aria-checked={l.mode === id} aria-label={label} title={label} className={l.mode === id ? 'on' : ''} onClick={() => update({ mode: id })}>
+              <Icon name={`liquify-${id}`} size={16} />
+            </button>
+          ))}
+        </div>
+      </div>
+      <PropSlider testId="prop-liquify-strength" label="Strength" value={l.strength} min={1} max={100} onChange={(v) => update({ strength: v })} />
+      <PropSlider testId="prop-liquify-hardness" label="Hardness" value={l.hardness} min={0} max={100} onChange={(v) => update({ hardness: v })} />
+      <PropSlider label="Stabilization" value={l.stabilization} min={0} max={100} onChange={(v) => update({ stabilization: v })} />
+      <label className="check prop-check">
+        <input type="checkbox" checked={l.antiAlias} onChange={(e) => update({ antiAlias: e.target.checked })} />
+        Anti-aliasing
+      </label>
+      <label className="check prop-check" title="With a selection, the colours come only from inside it">
+        <input type="checkbox" checked={l.onlyArea} onChange={(e) => update({ onlyArea: e.target.checked })} />
+        Only refer to editing area
+      </label>
+    </>
   );
 }
 
@@ -1203,12 +1238,12 @@ function SelectionModeRow() {
 
 /** Preset brush sizes as dots. */
 export function BrushSizePalette() {
-  const sub = useStore((s) => currentSubTool(s));
-  if (!sub.brush) return <div className="prop-note">This tool has no brush size.</div>;
+  const size = useStore((s) => actions.brushSizeOf(currentSubTool(s)));
+  if (size === null) return <div className="prop-note">This tool has no brush size.</div>;
   return (
     <div className="brush-sizes" data-testid="brush-sizes">
       {BRUSH_SIZE_PRESETS.map((v) => (
-        <button key={v} className={`size-btn ${Math.abs(sub.brush!.size - v) < 0.05 ? 'active' : ''}`} title={`${v} px`} onClick={() => actions.setBrushSize(v)}>
+        <button key={v} className={`size-btn ${Math.abs(size - v) < 0.05 ? 'active' : ''}`} title={`${v} px`} onClick={() => actions.setBrushSize(v)}>
           <span className="dot" style={{ width: Math.max(1.5, Math.min(22, Math.sqrt(v) * 2)), height: Math.max(1.5, Math.min(22, Math.sqrt(v) * 2)) }} />
           <span className="size-label">{v}</span>
         </button>

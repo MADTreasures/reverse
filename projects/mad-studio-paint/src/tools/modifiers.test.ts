@@ -25,9 +25,12 @@ describe('modifier keys', () => {
     expect(effectiveTool('select', { ...none, mod: true })).toBe('select');
   });
 
-  it('keeps Option for selection subtraction and copying with the move tool', () => {
+  it('keeps Option for selection subtraction, copying with the move tool and inverting Liquify', () => {
     expect(effectiveTool('select', { ...none, alt: true })).toBe('select');
     expect(effectiveTool('move', { ...none, alt: true })).toBe('move');
+    expect(effectiveTool('liquify', { ...none, alt: true })).toBe('liquify');
+    expect(effectiveTool('liquify', { ...none, alt: true, mod: true })).toBe('brushSize');
+    expect(effectiveTool('liquify', { ...none, mod: true })).toBe('object');
   });
 
   it('⌘⇧-click selects a layer, mouse buttons map to hand / eyedropper', () => {

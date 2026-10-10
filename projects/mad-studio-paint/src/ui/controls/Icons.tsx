@@ -78,6 +78,54 @@ const paths: Record<string, ReactNode> = {
       <path d="M7.6 12a2.5 2.5 0 0 0 2.4 2.5" />
     </>
   ),
+  liquify: (
+    <>
+      <rect x="3" y="3" width="14" height="14" rx="1" />
+      <path d="M7.6 3c0 3 3.2 4 3.2 7s-3.2 4-3.2 7M12.4 3c0 3 2.4 4 2.4 7s-2.4 4-2.4 7M3 7.6c3 0 5 1.1 7.6 1.1s3.6-1.1 6.4-1.1M3 12.4c3 0 5-1.1 7.6-1.1s3.6 1.1 6.4 1.1" />
+    </>
+  ),
+  'liquify-push': (
+    <>
+      <circle cx="10" cy="10" r="7" strokeDasharray="2 1.7" />
+      <path d="M5 10h9M11.3 7.3 14 10l-2.7 2.7" />
+    </>
+  ),
+  'liquify-expand': (
+    <>
+      <circle cx="10" cy="10" r="1.1" />
+      <path d="M10 7V3M8.3 4.7 10 3l1.7 1.7M10 13v4M8.3 15.3 10 17l1.7-1.7M7 10H3M4.7 8.3 3 10l1.7 1.7M13 10h4M15.3 8.3 17 10l-1.7 1.7" />
+    </>
+  ),
+  'liquify-pinch': (
+    <>
+      <circle cx="10" cy="10" r="1.1" />
+      <path d="M10 3v4M8.3 5.3 10 7l1.7-1.7M10 17v-4M8.3 14.7 10 13l1.7 1.7M3 10h4M5.3 8.3 7 10l-1.7 1.7M17 10h-4M14.7 8.3 13 10l1.7 1.7" />
+    </>
+  ),
+  'liquify-pushLeft': (
+    <>
+      <path d="M3 15.5h12M12.6 13.1l2.4 2.4-2.4 2.4" strokeDasharray="2 1.5" />
+      <path d="M9 12V3.5M6.8 5.7 9 3.5l2.2 2.2" />
+    </>
+  ),
+  'liquify-pushRight': (
+    <>
+      <path d="M3 4.5h12M12.6 2.1l2.4 2.4-2.4 2.4" strokeDasharray="2 1.5" />
+      <path d="M9 8v8.5M6.8 14.3 9 16.5l2.2-2.2" />
+    </>
+  ),
+  'liquify-twirlCW': (
+    <>
+      <path d="M16 10a6 6 0 1 1-2.2-4.6M13.3 2.8l.5 2.6-2.6.1" />
+      <circle cx="10" cy="10" r="1.1" />
+    </>
+  ),
+  'liquify-twirlCCW': (
+    <>
+      <path d="M4 10a6 6 0 1 0 2.2-4.6M6.7 2.8l-.5 2.6 2.6.1" />
+      <circle cx="10" cy="10" r="1.1" />
+    </>
+  ),
   fill: (
     <>
       <path d="m9 3 6.5 6.5-6 6a1.5 1.5 0 0 1-2.1 0L3 11.1a1.5 1.5 0 0 1 0-2.1z" />

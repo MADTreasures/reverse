@@ -5,6 +5,7 @@ import { DEFAULT_TEXT_STYLE, sanitizeTextStyle, type BalloonShape, type TextStyl
 import { sanitizeGradientStops, type GradientSpec } from './gradient';
 import { CURVE_TYPES, type CurveType, type RulerFigure } from './curves';
 import type { TipOrder } from './materials';
+import { LIQUIFY_MODES, type LiquifyMode } from './liquify';
 
 export type ToolId =
   | 'zoom'
@@ -22,6 +23,7 @@ export type ToolId =
   | 'decoration'
   | 'eraser'
   | 'blend'
+  | 'liquify'
   | 'fill'
   | 'gradient'
   | 'figure'
@@ -34,6 +36,19 @@ export type ToolId =
   | 'lightTable';
 
 export type BrushMode = 'paint' | 'erase' | 'blend';
+
+/** Liquify: the mode, the brush size (px), strength and hardness (0..100). */
+export interface LiquifySettings {
+  mode: LiquifyMode;
+  size: number;
+  strength: number;
+  hardness: number;
+  antiAlias: boolean;
+  /** Only refer to editing area: with a selection, colours come only from inside it. */
+  onlyArea: boolean;
+  /** Correction: stabilization 0..100 (smooths the stroke). */
+  stabilization: number;
+}
 export type TipFlip = 'off' | 'on' | 'random';
 export type TipTexture = 'none' | 'grain';
 export type SelectShape = 'rect' | 'ellipse' | 'lasso' | 'polyline' | 'pen' | 'erase' | 'shrink';
@@ -298,6 +313,8 @@ export interface SubTool {
   fill?: FillSettings;
   /** Lasso, Lasso fill, Enclose and fill: Magnetic lasso strength 1 … 5 (0 or absent: off). */
   magnet?: number;
+  /** Liquify tool settings. */
+  liquify?: LiquifySettings;
 
   /** Rectangle / ellipse start from the centre. */
   fromCenter?: boolean;
@@ -418,6 +435,7 @@ export const TOOLS: ToolInfo[] = [
   { id: 'decoration', label: 'Decoration', key: 'B', hint: 'Draws patterns of image tips: leaves, grass, stars, sparkles …' },
   { id: 'eraser', label: 'Eraser', key: 'E', hint: 'Erase pixels on the current layer' },
   { id: 'blend', label: 'Blend', key: 'J', hint: 'Blur, blend and smudge colours on the current layer' },
+  { id: 'liquify', label: 'Liquify', key: 'J', hint: 'Drag to push, expand, pinch or twirl the pixels of the current layer · ⌥ does the opposite · ⇧ along a straight line · press and hold to expand, pinch or twirl in place' },
   { id: 'fill', label: 'Fill', key: 'G', hint: 'Click to fill an area · ⇧-click toggles "refer multiple"' },
   { id: 'gradient', label: 'Gradient', key: 'G', hint: 'Drag to draw a gradient with the drawing colour' },
   { id: 'figure', label: 'Figure', key: 'U', hint: 'Drag to draw · ⇧ snaps lines to 45° and makes squares / circles' },
@@ -686,6 +704,8 @@ export const DEFAULT_SUB_TOOLS: SubTool[] = [
     name: 'Finger tip',
     brush: brush({ size: 30, sizePressure: false, flow: 0.85, hardness: 0.5, mode: 'blend', blendStyle: 'smudge', stabilization: 0, spacing: 0.08 }),
   },
+  // Liquify
+  { id: 'liquify', tool: 'liquify', name: 'Liquify', liquify: { mode: 'push', size: 100, strength: 70, hardness: 50, antiAlias: true, onlyArea: false, stabilization: 0 } },
   // Selection area & auto select
   { id: 'sel-rect', tool: 'select', name: 'Rectangle', selectShape: 'rect' },
   { id: 'sel-ellipse', tool: 'select', name: 'Ellipse', selectShape: 'ellipse' },
@@ -782,10 +802,25 @@ export const DEFAULT_SUB_TOOLS: SubTool[] = [
 
 export const subToolsOf = (subTools: SubTool[], tool: ToolId) => subTools.filter((s) => s.tool === tool);
 
-/** Keeps user edits but adds sub tools introduced by newer versions and drops unknown ones. */
+/** Liquify settings from storage. */
+function sanitizeLiquify(raw: unknown, d: LiquifySettings): LiquifySettings {
+  const r = raw as Record<string, unknown>;
+  const num = (v: unknown, fallback: number, min: number, max: number) => (typeof v === 'number' && Number.isFinite(v) ? Math.min(max, Math.max(min, v)) : fallback);
+  return {
+    mode: LIQUIFY_MODES.some(([m]) => m === r.mode) ? (r.mode as LiquifyMode) : d.mode,
+    size: num(r.size, d.size, 1, 2000),
+    strength: num(r.strength, d.strength, 1, 100),
+    hardness: num(r.hardness, d.hardness, 0, 100),
+    antiAlias: typeof r.antiAlias === 'boolean' ? r.antiAlias : d.antiAlias,
+    onlyArea: typeof r.onlyArea === 'boolean' ? r.onlyArea : d.onlyArea,
+    stabilization: num(r.stabilization, d.stabilization, 0, 100),
+  };
+}
+
 /** Sub tools drawn with a lasso (they can use the Magnetic lasso). */
 export const usesLasso = (t: SubTool): boolean => t.selectShape === 'lasso' || t.fill?.mode === 'lasso' || t.fill?.mode === 'enclose';
 
+/** Keeps user edits but adds sub tools introduced by newer versions and drops unknown ones. */
 export function mergeSubTools(saved: unknown): SubTool[] {
   if (!Array.isArray(saved)) return structuredClone(DEFAULT_SUB_TOOLS);
   const byId = new Map<string, SubTool>();
@@ -807,6 +842,7 @@ export function mergeSubTools(saved: unknown): SubTool[] {
       ...(def.figureRound !== undefined && typeof s.figureRound === 'number' && Number.isFinite(s.figureRound) ? { figureRound: Math.max(0, Math.min(100, s.figureRound)) } : {}),
       ...(def.figureFill !== undefined && (s.figureFill === 'line' || s.figureFill === 'fill' || s.figureFill === 'both') ? { figureFill: s.figureFill } : {}),
       ...(usesLasso(def) && typeof s.magnet === 'number' && Number.isFinite(s.magnet) ? { magnet: Math.max(0, Math.min(5, Math.round(s.magnet))) } : {}),
+      ...(def.liquify && s.liquify && typeof s.liquify === 'object' ? { liquify: sanitizeLiquify(s.liquify, def.liquify) } : {}),
       ...(def.tool === 'eraser' && (s.vectorErase === 'touched' || s.vectorErase === 'intersection' || s.vectorErase === 'whole') ? { vectorErase: s.vectorErase } : {}),
       ...(def.tool === 'eraser' && typeof s.vectorReferAll === 'boolean' ? { vectorReferAll: s.vectorReferAll } : {}),
       ...(def.scaleLineWidth !== undefined && typeof s.scaleLineWidth === 'boolean' ? { scaleLineWidth: s.scaleLineWidth } : {}),
@@ -957,6 +993,7 @@ export const PALETTE_ENTRIES: PaletteEntry[] = [
   { id: 'decoration', label: 'Decoration', icon: 'decoration', tools: ['decoration'] },
   { id: 'eraser', label: 'Eraser', icon: 'eraser', tools: ['eraser'] },
   { id: 'blend', label: 'Blend', icon: 'blend', tools: ['blend'] },
+  { id: 'liquify', label: 'Liquify', icon: 'liquify', tools: ['liquify'] },
   { id: 'fill', label: 'Fill', icon: 'fill', tools: ['fill'] },
   { id: 'gradient', label: 'Gradient', icon: 'gradient', tools: ['gradient'] },
   { id: 'figure', label: 'Figure', icon: 'figure', tools: ['figure'] },
@@ -975,13 +1012,13 @@ export type WorkspaceId = 'default' | 'classic';
  */
 export const PALETTE_LAYOUT: Record<WorkspaceId, string[][]> = {
   default: [
-    ['pen', 'pencil', 'brush', 'eraser', 'airbrush', 'decoration', 'blend'],
+    ['pen', 'pencil', 'brush', 'eraser', 'airbrush', 'decoration', 'blend', 'liquify'],
     ['select', 'autoSelect', 'fill', 'gradient'],
     ['operation', 'figure', 'frame', 'ruler', 'text', 'correct', 'navigate', 'eyedropper'],
   ],
   classic: [
     ['zoom', 'navigate', 'operation', 'select', 'autoSelect', 'eyedropper'],
-    ['pen', 'pencil', 'brush', 'airbrush', 'decoration', 'eraser', 'blend'],
+    ['pen', 'pencil', 'brush', 'airbrush', 'decoration', 'eraser', 'blend', 'liquify'],
     ['fill', 'gradient', 'figure', 'frame', 'ruler', 'text', 'correct'],
   ],
 };

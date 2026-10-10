@@ -44,6 +44,7 @@ import { frameSession } from './frameTool';
 import { confirmTransform, drawTransformOverlay, hitHandle, isTransforming, transformCursor, TransformSession } from './transform';
 import { drawFilterCenter, filterCenter, FilterCenterSession } from './filterCenter';
 import { canvasPick, CanvasPickSession } from './canvasPick';
+import { LiquifySession } from './liquifyTool';
 import type { Modifiers, OverlayView, PointerInfo, ToolSession } from './types';
 
 const DOUBLE_CLICK_MS = 350;
@@ -174,6 +175,8 @@ class Controller {
       case 'eraser':
       case 'blend':
         return BrushSession.create(sub, p);
+      case 'liquify':
+        return LiquifySession.create(sub, p);
       case 'figure':
         if (sub.figureShape === 'curve') return CurveFigure.press(sub, p);
         if (sub.figureShape === 'polyline' || sub.figureShape === 'spline' || sub.figureShape === 'bezier') return figureCurveSession(sub, p);
@@ -281,11 +284,11 @@ class Controller {
     if (!h || this.session instanceof TransformSession) return;
     const tool = this.current();
     const sub = currentSubTool();
-    const brushCursor = BRUSH_TOOLS.includes(tool as ToolId) || (tool === 'select' && Boolean(sub.brush));
-    if (!brushCursor || isTransforming()) return;
-    if (!sub.brush) return;
+    // The brush outline: drawing tools, the selection pen and the Liquify tool.
+    const size = tool === 'liquify' ? sub.liquify?.size : BRUSH_TOOLS.includes(tool as ToolId) || (tool === 'select' && Boolean(sub.brush)) ? sub.brush?.size : undefined;
+    if (size === undefined || isTransforming()) return;
     const c = applyMatrix(this.view.matrix, h.x, h.y);
-    const r = (sub.brush.size / 2) * this.view.zoom;
+    const r = (size / 2) * this.view.zoom;
     ctx.save();
     ctx.lineWidth = 1;
     if (r >= 3) {

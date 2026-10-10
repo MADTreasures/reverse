@@ -4567,3 +4567,73 @@ test('Magnetic lasso: a rough lasso round a drawing snaps to its outline; also f
   expect(await alpha(94, 150)).toBe(0);
   expect(errors).toEqual([]);
 });
+
+test('Liquify: Push drags pixels along (⇧ on a straight line), holding Expand grows them, ⌥ pinches; one undo step each', async ({ page }) => {
+  const errors = await boot(page);
+  // A black bar from x = 190 to 210 on the layer.
+  await selectTool(page, 'select');
+  await drag(page, [190, 60], [210, 260]);
+  await page.evaluate(() => {
+    const a = window.__madPaint.actions;
+    a.setDrawingColor('#000000');
+    a.fillWithColor();
+    a.deselect();
+  });
+  expect(await layerAlpha(page, 215, 150)).toBe(0);
+  await selectTool(page, 'liquify');
+  await page.getByRole('button', { name: 'Tool Settings', exact: true }).click();
+  const prop = page.getByTestId('tool-property');
+  await expect(prop.getByRole('radio', { name: 'Push', exact: true })).toBeChecked();
+  await expect(prop.getByRole('radio')).toHaveCount(7);
+  // Push: dragging across the bar takes it along to the right, near the stroke only.
+  await drag(page, [160, 150], [250, 150], 18);
+  expect(await layerAlpha(page, 216, 150)).toBe(255);
+  expect(await layerAlpha(page, 216, 230)).toBe(0);
+  expect(await layerAlpha(page, 200, 230)).toBe(255);
+  await page.keyboard.press('ControlOrMeta+z');
+  expect(await layerAlpha(page, 216, 150)).toBe(0);
+  // ⇧-drag pushes along the straight line from the press to the release point, whatever the way.
+  await page.keyboard.down('Shift');
+  const way = await Promise.all(
+    [
+      [160, 150],
+      [205, 40],
+      [250, 150],
+    ].map(([x, y]) => docToScreen(page, x, y)),
+  );
+  await page.mouse.move(way[0].x, way[0].y);
+  await page.mouse.down();
+  for (const w of way.slice(1)) await page.mouse.move(w.x, w.y, { steps: 8 });
+  expect(await layerAlpha(page, 216, 150)).toBe(0);
+  await page.mouse.up();
+  await page.keyboard.up('Shift');
+  expect(await layerAlpha(page, 216, 150)).toBe(255);
+  expect(await layerAlpha(page, 200, 60)).toBe(255);
+  await page.keyboard.press('ControlOrMeta+z');
+  // Expand: pressing and holding keeps growing what is under the pen.
+  await prop.getByRole('radio', { name: 'Expand', exact: true }).click();
+  const press = async (ms: number) => {
+    const c = await docToScreen(page, 200, 150);
+    await page.mouse.move(c.x, c.y);
+    await page.mouse.down();
+    await page.waitForTimeout(ms);
+    await page.mouse.up();
+  };
+  await press(1000);
+  expect(await layerAlpha(page, 214, 150)).toBe(255);
+  expect(await layerAlpha(page, 186, 150)).toBe(255);
+  await page.keyboard.press('ControlOrMeta+z');
+  expect(await layerAlpha(page, 214, 150)).toBe(0);
+  // ⌥ does the opposite: Expand pinches.
+  await page.keyboard.down('Alt');
+  await press(1000);
+  await page.keyboard.up('Alt');
+  expect(await layerAlpha(page, 207, 150)).toBe(0);
+  expect(await layerAlpha(page, 200, 150)).toBe(255);
+  // The brush size keys work for Liquify too.
+  const size = () => page.evaluate(() => window.__madPaint.useStore.getState().subTools.find((t: any) => t.id === 'liquify').liquify.size);
+  expect(await size()).toBe(100);
+  await page.keyboard.press(']');
+  expect(await size()).toBeGreaterThan(100);
+  expect(errors).toEqual([]);
+});

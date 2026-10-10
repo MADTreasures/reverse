@@ -22,6 +22,8 @@ export function effectiveTool(tool: ToolId, m: Modifiers, button = 0): Effective
     // ⌘-drag selects and moves vector lines (and rulers) without leaving the tool.
     if (m.mod) return 'object';
   }
+  // The Liquify tool: ⌘ is the Object tool, ⌘⌥-drag sizes the brush (⌥ alone inverts the effect).
+  if (tool === 'liquify' && m.mod) return m.alt ? 'brushSize' : 'object';
   if (tool === 'zoom' && m.alt) return 'zoomOut';
   return tool;
 }

@@ -2005,18 +2005,21 @@ export function restoreSubTools(): void {
   }
 }
 
+/** The brush size of a sub tool (its brush's, or the Liquify tool's), or null when it has none. */
+export const brushSizeOf = (sub: SubTool): number | null => sub.brush?.size ?? sub.liquify?.size ?? null;
+
 /** Changes the brush size of the current sub tool by a factor or to an absolute value. */
 export function setBrushSize(size: number): void {
   const sub = currentSubTool();
-  if (!sub.brush) return;
-  updateSubTool(sub.id, { brush: { ...sub.brush, size: Math.max(0.5, Math.min(2000, Math.round(size * 10) / 10)) } });
+  const v = Math.max(0.5, Math.min(2000, Math.round(size * 10) / 10));
+  if (sub.brush) updateSubTool(sub.id, { brush: { ...sub.brush, size: v } });
+  else if (sub.liquify) updateSubTool(sub.id, { liquify: { ...sub.liquify, size: v } });
 }
 
 export function stepBrushSize(dir: 1 | -1): void {
-  const sub = currentSubTool();
-  if (!sub.brush) return;
+  const size = brushSizeOf(currentSubTool());
+  if (size === null) return;
   const steps = BRUSH_SIZE_PRESETS;
-  const size = sub.brush.size;
   const next = dir > 0 ? steps.find((v) => v > size + 1e-6) ?? steps[steps.length - 1] : [...steps].reverse().find((v) => v < size - 1e-6) ?? steps[0];
   setBrushSize(next);
 }
