@@ -200,6 +200,8 @@ export const MENUS: MenuSpec[] = [
     items: [
       'workspaceDefault',
       'workspaceClassic',
+      'restorePaletteLayout',
+      { label: 'Palette dock', items: ['lockPaletteHeight', 'fixDockWidth', 'lockPalettePosition'] },
       '-',
       ...PALETTE_NAMES.map(([id]) => (id === 'animationCels' ? 'animationCels' : `win-${id}`)),
       'toggleTimeline',

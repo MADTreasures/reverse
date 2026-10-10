@@ -10,7 +10,7 @@ import { DEFAULT_ONION, type OnionSkin } from '../paint/animation';
 import type { Channel, ChannelGroup, Interp } from '../paint/keyframes';
 import type { LabelRef } from '../paint/labels';
 import { DEFAULT_APPROX, DEFAULT_CORNERS, DEFAULT_TILE_GRID, type ApproxSettings, type Corners, type TileGrid } from '../paint/colorGrids';
-import { DEFAULT_HIDDEN_PALETTES, type LayerDockTab, type PaletteId } from '../model/palettes';
+import { DEFAULT_HIDDEN_PALETTES, type PaletteId } from '../model/palettes';
 
 export interface ViewState {
   /** Screen pixels per document pixel. */
@@ -169,8 +169,6 @@ export interface PaintState {
   lockedCel: Id | null;
   /** Switch opacity target between All or Individual: on changes all light table layers. */
   lightOpacityAll: boolean;
-  /** The tab shown in the dock with the Layer palette. */
-  layerDockTab: LayerDockTab;
   /** Window menu: palettes switched off, and the tab in front of each palette stack. */
   hiddenPalettes: PaletteId[];
   paletteTabs: Record<string, string>;
@@ -282,7 +280,6 @@ function initialState(): PaintState {
     lightPicked: [],
     lockedCel: null,
     lightOpacityAll: false,
-    layerDockTab: 'layer',
     hiddenPalettes: [...DEFAULT_HIDDEN_PALETTES],
     paletteTabs: {},
     intermediate: { corners: [...DEFAULT_CORNERS], grid: { ...DEFAULT_TILE_GRID } },

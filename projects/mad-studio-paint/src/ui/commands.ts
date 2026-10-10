@@ -7,7 +7,8 @@ import { activeFrameFolder } from '../store/frameActions';
 import * as anim from '../store/animationActions';
 import * as labels from '../store/labelActions';
 import * as selection from '../store/selectionActions';
-import { isPaletteShown, togglePalette } from '../store/paletteActions';
+import { isPaletteFront, isPaletteShown, togglePalette } from '../store/paletteActions';
+import { currentLayout, restoreDefaultLayout, toggleDockLock } from '../store/paletteLayoutStore';
 import { PALETTE_NAMES } from '../model/palettes';
 import * as light from '../store/lightTableActions';
 import * as sound from '../store/soundActions';
@@ -391,7 +392,7 @@ export const COMMANDS: Command[] = [
   { id: 'deregisterAllLight', label: 'Deregister all images from light table', run: () => light.deregisterAll() },
   { id: 'centerCanvas', label: 'Move canvas to center…', run: () => openDialog('centerCanvas'), enabled: () => light.centerPair() !== null },
   { id: 'lockCel', label: 'Lock current animation cel as editing target', run: () => light.toggleCelLock(), checked: () => getState().lockedCel !== null },
-  { id: 'animationCels', label: 'Animation cels', run: () => light.showCelsPalette(), checked: () => getState().layerDockTab === 'animationCels' && !getState().hiddenPalettes.includes('animationCels') },
+  { id: 'animationCels', label: 'Animation cels', run: () => light.showCelsPalette(), checked: () => isPaletteFront('animationCels') },
   { id: 'selectPrevCel', label: 'Select previous cel', run: () => anim.selectNeighbourCel(-1), enabled: () => anim.activeTrack() !== null },
   { id: 'selectNextCel', label: 'Select next cel', run: () => anim.selectNeighbourCel(1), enabled: () => anim.activeTrack() !== null },
   { id: 'newTimeline', label: 'New timeline…', run: () => openDialog('newTimeline') },
@@ -438,6 +439,11 @@ export const COMMANDS: Command[] = [
   { id: 'quickAccessSettings', label: 'Quick Access Settings…', run: () => openQuickAccessSettings() },
   { id: 'shortcutSettings', label: 'Shortcut Settings…', run: () => openDialog('shortcutSettings') },
   { id: 'commandBarSettings', label: 'Command Bar Settings…', run: () => openDialog('commandBarSettings') },
+  // Window > Palette dock, Restore default palette layout.
+  { id: 'lockPaletteHeight', label: 'Lock palette height', run: () => toggleDockLock('lockHeight'), checked: () => currentLayout().lockHeight },
+  { id: 'fixDockWidth', label: 'Fix the width of palette dock', run: () => toggleDockLock('fixWidth'), checked: () => currentLayout().fixWidth },
+  { id: 'lockPalettePosition', label: 'Lock palette position', run: () => toggleDockLock('lockPosition'), checked: () => currentLayout().lockPosition },
+  { id: 'restorePaletteLayout', label: 'Restore default palette layout', run: () => restoreDefaultLayout() },
   // Window: palettes shown or hidden (Animation cels has its own command above).
   ...PALETTE_NAMES.filter(([id]) => id !== 'animationCels').map(([id, name]) => ({
     id: `win-${id}`,

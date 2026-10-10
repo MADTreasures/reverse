@@ -139,14 +139,11 @@
   align-items: center;
   gap: 4px;
   height: 30px;
-  padding: 0 8px 0 336px;
+  /* lined up with the canvas (the left dock's width is set on .app) */
+  padding: 0 8px 0 calc(var(--left-dock, 328px) + 8px);
   background: var(--bg-2);
   border-bottom: 1px solid var(--line);
   flex: none;
-}
-
-.ws-classic .command-bar {
-  padding-left: 316px;
 }
 
 .palettes-hidden .command-bar {
@@ -262,18 +259,86 @@
 }
 
 .dock-column {
+  position: relative;
   display: flex;
   flex-direction: column;
   min-height: 0;
+  flex: none;
 }
 
 .left-column {
-  width: 250px;
   border-left: 1px solid var(--line);
 }
 
-.right-column {
-  width: 262px;
+.right-column + .right-column {
+  border-left: 1px solid var(--line);
+}
+
+/* the double arrow that hides a palette dock */
+.dock-head {
+  display: flex;
+  height: 10px;
+  flex: none;
+  background: var(--bg-2);
+  border-bottom: 1px solid var(--line);
+}
+
+.dock-head.right {
+  justify-content: flex-end;
+}
+
+.dock-arrow {
+  padding: 0 5px;
+  color: var(--text-faint);
+  font-size: 10px;
+  line-height: 9px;
+}
+
+.dock-arrow:hover {
+  color: var(--text);
+}
+
+.dock-column.dock-hidden {
+  width: 14px;
+  align-items: center;
+  padding-top: 2px;
+  background: var(--bg-2);
+  border-left: 1px solid var(--line);
+}
+
+/* the edge under a palette (height) and a dock's edge next to the canvas (width) */
+.dock-splitter {
+  position: relative;
+  z-index: 2;
+  height: 5px;
+  margin: -3px 0 -2px;
+  flex: none;
+  cursor: row-resize;
+}
+
+.dock-splitter:hover {
+  background: var(--accent-soft);
+}
+
+.dock-grip {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  z-index: 3;
+  width: 6px;
+  cursor: col-resize;
+}
+
+.dock-grip.right {
+  right: -3px;
+}
+
+.dock-grip.left {
+  left: -3px;
+}
+
+.dock-grip:hover {
+  background: var(--accent-soft);
 }
 
 .palette {
@@ -4680,4 +4745,99 @@ body.canvas-only .modal * {
 .cmd.drop-after,
 .cmd-sep.drop-after {
   box-shadow: 3px 0 0 var(--accent-strong);
+}
+
+/* ------------------------------------------------------------------ palette docking */
+
+.palette.sized {
+  flex: none;
+}
+
+.palette.sized .palette-body {
+  max-height: none;
+}
+
+.floating-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  pointer-events: none;
+}
+
+.floating-palette {
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  pointer-events: auto;
+  background: var(--bg-1);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  box-shadow: var(--shadow);
+  overflow: hidden;
+}
+
+.floating-title {
+  display: flex;
+  align-items: center;
+  height: 22px;
+  flex: none;
+  background: var(--bg-2);
+  border-bottom: 1px solid var(--line);
+  cursor: move;
+  user-select: none;
+}
+
+.floating-name {
+  flex: 1;
+  padding: 0 8px;
+  overflow: hidden;
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.floating-btn {
+  width: 22px;
+  height: 22px;
+  color: var(--text-dim);
+}
+
+.floating-btn:hover {
+  color: var(--text);
+  background: var(--bg-3);
+}
+
+.floating-resize {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 12px;
+  height: 12px;
+  cursor: nwse-resize;
+  background: linear-gradient(135deg, transparent 55%, var(--line-soft) 55%);
+}
+
+.palette-drag-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  pointer-events: none;
+}
+
+.drop-indicator {
+  position: absolute;
+  background: #e5393599;
+  outline: 1px solid #e53935;
+}
+
+.palette-ghost {
+  position: absolute;
+  padding: 3px 10px;
+  border: 1px solid #e53935;
+  border-radius: 3px;
+  background: var(--bg-2);
+  color: var(--text);
+  font-size: 11px;
+  opacity: 0.92;
 }

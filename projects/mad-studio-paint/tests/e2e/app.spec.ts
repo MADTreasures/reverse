@@ -5249,3 +5249,90 @@ test('Command Bar Settings: icons added, named, moved and deleted per workspace;
   await dialog.getByRole('button', { name: 'Close' }).click();
   expect(errors).toEqual([]);
 });
+
+test('palette docks: palettes dragged into other stacks, below others, into new docks and floating; heights, widths, locks, default layout', async ({ page }) => {
+  const errors = await boot(page);
+  const tabIn = (panel: string, name: string) => page.locator(`[data-testid=${panel}] .palette-tab`, { hasText: name });
+  /** Presses, moves in steps and lets go (palettes are dragged with the pointer). */
+  const dragFromTo = async (from: { x: number; y: number }, to: { x: number; y: number }) => {
+    await page.mouse.move(from.x, from.y);
+    await page.mouse.down();
+    for (let i = 1; i <= 8; i++) await page.mouse.move(from.x + ((to.x - from.x) * i) / 8, from.y + ((to.y - from.y) * i) / 8);
+    await page.mouse.up();
+  };
+  const center = async (l: ReturnType<Page['locator']>) => {
+    const b = (await l.boundingBox())!;
+    return { x: b.x + b.width / 2, y: b.y + b.height / 2 };
+  };
+  // History stacked with the Navigator: dropped on its title bar after the Navigator tab.
+  const nav = (await tabIn('navigator-panel', 'Navigator').boundingBox())!;
+  await dragFromTo(await center(tabIn('layer-panel', 'History')), { x: nav.x + nav.width + 20, y: nav.y + nav.height / 2 });
+  await expect(tabIn('navigator-panel', 'History')).toHaveClass(/active/);
+  await expect(tabIn('layer-panel', 'History')).toHaveCount(0);
+  await expect(page.getByTestId('navigator-panel').getByTestId('history-list')).toBeVisible();
+
+  // Out onto the canvas: a floating palette with minimise and close; Window > History shows it again.
+  await dragFromTo(await center(tabIn('navigator-panel', 'History')), { x: 700, y: 300 });
+  const floating = page.getByRole('region', { name: 'History palette' });
+  await expect(floating).toBeVisible();
+  await expect(tabIn('navigator-panel', 'History')).toHaveCount(0);
+  await floating.getByRole('button', { name: 'Minimize History' }).click();
+  await expect(floating.getByTestId('history-list')).toHaveCount(0);
+  await floating.getByRole('button', { name: 'Restore History' }).click();
+  await expect(floating.getByTestId('history-list')).toBeVisible();
+  await floating.getByRole('button', { name: 'Close History' }).click();
+  await expect(floating).toHaveCount(0);
+  await page.evaluate(() => window.__madPaint.runCommand('win-history'));
+  await expect(floating).toBeVisible();
+  // Moved by its title bar over the right dock, onto the lower half of Layer Property: docked below it.
+  const lp = (await page.getByTestId('layer-property-panel').boundingBox())!;
+  const title = (await floating.locator('.floating-title').boundingBox())!;
+  await dragFromTo({ x: title.x + 40, y: title.y + 10 }, { x: lp.x + lp.width / 2, y: lp.y + lp.height - 6 });
+  await expect(floating).toHaveCount(0);
+  const fronts = () => page.locator('[data-dock-column=right] [data-dock-stack] .palette-tab.active').allTextContents();
+  expect(await fronts()).toEqual(['Navigator', 'Layer Property', 'History', 'Layer']);
+
+  // Color History onto the left dock's inner edge: a new dock column.
+  const left = (await page.locator('[data-dock-column=left]').boundingBox())!;
+  await dragFromTo(await center(tabIn('colorset-panel', 'Color History')), { x: left.x + left.width - 4, y: left.y + 300 });
+  await expect(page.locator('[data-dock-column]')).toHaveCount(3);
+  await expect(page.locator('[data-dock-column]').nth(1).locator('.palette-tab')).toHaveText(['Color History']);
+
+  // The edge under the Navigator changes its height; the right dock's grip its width.
+  const navPanel = page.getByTestId('navigator-panel');
+  const h0 = (await navPanel.boundingBox())!.height;
+  await dragFromTo(await center(page.getByRole('separator', { name: 'Height of Navigator' })), { x: nav.x + 100, y: (await center(page.getByRole('separator', { name: 'Height of Navigator' }))).y + 60 });
+  expect(Math.abs((await navPanel.boundingBox())!.height - (h0 + 60))).toBeLessThanOrEqual(2);
+  const right = page.locator('[data-dock-column=right]');
+  const w0 = (await right.boundingBox())!.width;
+  const grip = await center(right.locator('.dock-grip'));
+  await dragFromTo(grip, { x: grip.x - 60, y: grip.y });
+  expect(Math.abs((await right.boundingBox())!.width - (w0 + 60))).toBeLessThanOrEqual(2);
+
+  // Window > Palette dock > Lock palette height: no edges to drag. The double arrow hides a dock.
+  await page.evaluate(() => window.__madPaint.runCommand('lockPaletteHeight'));
+  await expect(page.locator('.dock-splitter')).toHaveCount(0);
+  await right.getByRole('button', { name: 'Hide palette dock' }).click();
+  await expect(page.getByTestId('layer-panel')).toHaveCount(0);
+  await right.getByRole('button', { name: 'Show palette dock' }).click();
+  await expect(page.getByTestId('layer-panel')).toBeVisible();
+  // Kept per workspace in the browser's storage; the classic workspace keeps its own layout.
+  const kept = await page.evaluate(() => JSON.parse(localStorage.getItem('mad-paint:palette-layout')!));
+  expect(kept.default.lockHeight).toBe(true);
+  expect(kept.default.columns).toHaveLength(3);
+  await page.evaluate(() => window.__madPaint.runCommand('workspaceClassic'));
+  await expect(page.locator('[data-dock-column]')).toHaveCount(2);
+  await expect(tabIn('layer-panel', 'History')).toHaveCount(1);
+  await page.evaluate(() => window.__madPaint.runCommand('workspaceDefault'));
+  // Restore default palette layout.
+  await page.evaluate(() => window.__madPaint.runCommand('restorePaletteLayout'));
+  await expect(page.locator('[data-dock-column]')).toHaveCount(2);
+  await expect(tabIn('layer-panel', 'History')).toHaveCount(1);
+  await expect(page.locator('.dock-splitter').first()).toBeVisible();
+  // Lock palette position: tabs stay where they are.
+  await page.evaluate(() => window.__madPaint.runCommand('lockPalettePosition'));
+  await dragFromTo(await center(tabIn('layer-panel', 'History')), { x: 700, y: 300 });
+  await expect(page.getByRole('region', { name: 'History palette' })).toHaveCount(0);
+  await expect(tabIn('layer-panel', 'History')).toHaveCount(1);
+  expect(errors).toEqual([]);
+});

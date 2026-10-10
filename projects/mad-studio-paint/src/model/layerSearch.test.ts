@@ -2,7 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { fitZoom, moveItem, wrapAngle, zoomStep } from '../paint/subView';
 import { createFillLayer, createFolder, createRasterLayer, createTextLayer, createVectorLayer } from './layers';
 import { ALL_TYPES, NO_SEARCH, searchLayers, typesOf } from './layerSearch';
-import { DEFAULT_HIDDEN_PALETTES, PALETTE_NAMES, stackOf } from './palettes';
+import { DEFAULT_HIDDEN_PALETTES, PALETTE_NAMES } from './palettes';
+import { defaultLayout, hasPalette } from './paletteLayout';
 
 function canvas() {
   const sky = createRasterLayer('Sky', { id: 'sky', locked: true });
@@ -54,16 +55,12 @@ describe('Search Layer', () => {
 });
 
 describe('palettes', () => {
-  it('every palette has a stack in both workspaces; the extra palettes start hidden', () => {
-    for (const [id] of PALETTE_NAMES) {
-      expect(stackOf(id, 'default')).toBeTruthy();
-      expect(stackOf(id, 'classic')).toBeTruthy();
+  it('every palette is in a dock of both workspaces, except Brush Size in the default one; the extra palettes start hidden', () => {
+    for (const ws of ['default', 'classic'] as const) {
+      const layout = defaultLayout(ws);
+      for (const [id] of PALETTE_NAMES) expect(hasPalette(layout, id), `${ws} ${id}`).toBe(!(ws === 'default' && id === 'brushSize'));
     }
-    expect(stackOf('intermediateColor', 'default')).toBe('colorSet');
-    expect(stackOf('colorWheel', 'classic')).toBe(stackOf('approximateColor', 'classic'));
     expect(DEFAULT_HIDDEN_PALETTES).toEqual(['subView', 'intermediateColor', 'approximateColor', 'searchLayer', 'quickAccess', 'autoAction']);
-    expect(stackOf('quickAccess', 'default')).toBe('colorSet');
-    expect(stackOf('autoAction', 'default')).toBe('layerProperty');
   });
 });
 

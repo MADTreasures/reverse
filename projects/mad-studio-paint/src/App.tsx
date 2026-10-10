@@ -2,146 +2,46 @@ import { MaterialStrip } from './ui/palettes/MaterialPalette';
 import { applyMaterial, MATERIAL_MIME, useMaterials } from './store/materialActions';
 import { apply as applyMatrix, invert } from './paint/viewMath';
 import { controller } from './tools/controller';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { handleDroppedFiles } from './io/documentIO';
 import { isElectron } from './platform/platform';
-import { setState, useStore } from './store/store';
+import { useStore } from './store/store';
 import { CanvasView } from './ui/canvas/CanvasView';
 import { CommandBar } from './ui/CommandBar';
 import { MenuBar } from './ui/MenuBar';
 import { OverlayHost } from './ui/OverlayHost';
-import { Palette } from './ui/Palette';
-import { ColorSet } from './ui/palettes/ColorSet';
-import { ColorHistory, ColorSliders, ColorWheelPanel } from './ui/palettes/ColorWheel';
-import { ApproximateColor, approximateMenu, IntermediateColor, intermediateMenu } from './ui/palettes/ColorGrids';
-import { SearchLayer } from './ui/palettes/SearchLayer';
-import { SubView, subViewMenu } from './ui/palettes/SubView';
-import { HistoryPalette } from './ui/palettes/HistoryPalette';
-import { LayerActionBar, LayerFlagBar, LayerList, LayerPropertyBar } from './ui/palettes/LayerPalette';
 import { AdvancedToolSettings } from './ui/palettes/BrushSettingsPanels';
-import { LayerPropertyPalette } from './ui/palettes/LayerPropertyPalette';
-import { Navigator } from './ui/palettes/Navigator';
 import { ToolSliders } from './ui/palettes/ToolSliders';
-import { BrushSizePalette, SubToolPalette, ToolPalette, ToolProperty } from './ui/palettes/ToolPalettes';
+import { ToolPalette } from './ui/palettes/ToolPalettes';
+import { DockColumns, FloatingPalettes, PaletteDragOverlay } from './ui/Docks';
 import { StatusBar } from './ui/StatusBar';
 import { TimelinePalette } from './ui/palettes/TimelinePalette';
-import { AnimationCelsPalette } from './ui/palettes/AnimationCelsPalette';
-import { QuickAccessPalette, quickAccessMenu } from './ui/palettes/QuickAccessPalette';
-import { AutoActionPalette, autoActionMenu } from './ui/palettes/AutoActionPalette';
 
-function LayerPaletteBody() {
+/** Left of the canvas: the Tool palette, the left palette docks and (default workspace) the Tool sliders. */
+function LeftDock() {
+  const workspace = useStore((s) => s.workspace);
+  const ref = useRef<HTMLElement>(null);
+  // The command bar lines its icons up with the canvas.
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const ro = new ResizeObserver(() => document.querySelector<HTMLElement>('.app')?.style.setProperty('--left-dock', `${el.offsetWidth}px`));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
   return (
-    <div className="layer-palette">
-      <LayerPropertyBar />
-      <LayerFlagBar />
-      <LayerActionBar />
-      <LayerList />
-    </div>
-  );
-}
-
-/** Left dock of the current default workspace: tool palette, tool group/settings, colours, tool sliders. */
-function DefaultLeftDock() {
-  return (
-    <aside className="dock dock-left" data-workspace="default">
+    <aside ref={ref} className="dock dock-left" data-workspace={workspace}>
       <ToolPalette />
-      <div className="dock-column left-column">
-        <Palette
-          grow
-          testId="subtool-panel"
-          tabs={[
-            { id: 'group', label: 'Tool Group', content: <SubToolPalette /> },
-            { id: 'settings', label: 'Tool Settings', content: <ToolProperty /> },
-          ]}
-        />
-        <Palette
-          testId="color-panel"
-          stack="color"
-          tabs={[
-            { id: 'colorWheel', label: 'Color Wheel', content: <ColorWheelPanel size={176} /> },
-            { id: 'colorSlider', label: 'Color Slider', content: <ColorSliders /> },
-          ]}
-        />
-        <Palette
-          className="colorset-palette"
-          testId="colorset-panel"
-          stack="colorSet"
-          tabs={[
-            { id: 'colorSet', label: 'Color Set', content: <ColorSet /> },
-            { id: 'colorHistory', label: 'Color History', content: <ColorHistory /> },
-            { id: 'intermediateColor', label: 'Intermediate Color', content: <IntermediateColor />, menu: intermediateMenu },
-            { id: 'approximateColor', label: 'Approximate Color', content: <ApproximateColor />, menu: approximateMenu },
-            { id: 'quickAccess', label: 'Quick Access', content: <QuickAccessPalette />, menu: quickAccessMenu },
-          ]}
-        />
-      </div>
-      <ToolSliders />
-    </aside>
-  );
-}
-
-/** Left dock of the classic workspace: sub tool, tool property, brush size and colour palettes stacked. */
-function ClassicLeftDock() {
-  return (
-    <aside className="dock dock-left" data-workspace="classic">
-      <ToolPalette />
-      <div className="dock-column left-column">
-        <Palette testId="subtool-panel" className="classic-subtool" tabs={[{ id: 'sub', label: 'Sub Tool', content: <SubToolPalette /> }]} />
-        <Palette grow testId="property-panel" tabs={[{ id: 'prop', label: 'Tool Property', content: <ToolProperty /> }]} />
-        <Palette className="classic-sizes" testId="brushsize-panel" tabs={[{ id: 'size', label: 'Brush Size', content: <BrushSizePalette /> }]} />
-        <Palette
-          testId="color-panel"
-          stack="classicColor"
-          tabs={[
-            { id: 'colorWheel', label: 'Color Wheel', content: <ColorWheelPanel size={150} /> },
-            { id: 'colorSlider', label: 'Slider', content: <ColorSliders /> },
-            { id: 'colorSet', label: 'Set', content: <ColorSet /> },
-            { id: 'colorHistory', label: 'History', content: <ColorHistory /> },
-            { id: 'intermediateColor', label: 'Intermediate', content: <IntermediateColor />, menu: intermediateMenu },
-            { id: 'approximateColor', label: 'Approximate', content: <ApproximateColor />, menu: approximateMenu },
-            { id: 'quickAccess', label: 'Quick Access', content: <QuickAccessPalette />, menu: quickAccessMenu },
-          ]}
-        />
-      </div>
+      <DockColumns side="left" />
+      {workspace === 'default' && <ToolSliders />}
     </aside>
   );
 }
 
 function RightDock() {
-  const tab = useStore((s) => s.layerDockTab);
   return (
     <aside className="dock dock-right">
-      <div className="dock-column right-column">
-        <Palette
-          testId="navigator-panel"
-          stack="navigator"
-          tabs={[
-            { id: 'navigator', label: 'Navigator', content: <Navigator /> },
-            { id: 'subView', label: 'Sub View', content: <SubView />, menu: subViewMenu },
-          ]}
-        />
-        <Palette
-          testId="layer-property-panel"
-          className="layer-property-palette"
-          stack="layerProperty"
-          tabs={[
-            { id: 'layerProperty', label: 'Layer Property', content: <LayerPropertyPalette /> },
-            { id: 'autoAction', label: 'Auto Action', content: <AutoActionPalette />, menu: autoActionMenu },
-          ]}
-        />
-        <Palette
-          grow
-          testId="layer-panel"
-          active={tab}
-          onSelect={(id) => setState({ layerDockTab: id as typeof tab })}
-          tabs={[
-            { id: 'layer', label: 'Layer', content: <LayerPaletteBody /> },
-            { id: 'searchLayer', label: 'Search Layer', content: <SearchLayer /> },
-            { id: 'history', label: 'History', content: <HistoryPalette /> },
-            { id: 'animationCels', label: 'Animation cels', content: <AnimationCelsPalette /> },
-          ]}
-        />
-      </div>
+      <DockColumns side="right" />
     </aside>
   );
 }
@@ -208,7 +108,7 @@ export function App() {
       {!isElectron && !menuHidden && <MenuBar />}
       {!menuHidden && <CommandBar />}
       <div className="workspace">
-        {!hidden && (workspace === 'classic' ? <ClassicLeftDock /> : <DefaultLeftDock />)}
+        {!hidden && <LeftDock />}
         <main className="canvas-window">
           <div className="canvas-tabs">
             <span className="canvas-tab active" title={name}>
@@ -224,6 +124,8 @@ export function App() {
         {!hidden && stripShown && <MaterialStrip />}
       </div>
       {dragOver && <div className="drop-hint">Drop on the canvas to open · drop images on the Layer palette to add them as layers</div>}
+      {!hidden && <FloatingPalettes />}
+      <PaletteDragOverlay />
       <AdvancedToolSettings />
       <OverlayHost />
     </div>

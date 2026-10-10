@@ -4,6 +4,9 @@
  * order, colour mode, opacity, flips and position, Move canvas to center, and locking the target
  * cel.
  */
+import { locate } from '../model/paletteLayout';
+import { hidePalette, isPaletteFront, setPaletteTab, showPalette } from './paletteActions';
+import { currentLayout } from './paletteLayoutStore';
 import { animationFolders, celOf, type AnimationFolder } from '../model/animation';
 import { cloneDocument, findLayer, flatten } from '../model/layers';
 import type { Id, Layer, PaintDocument } from '../model/types';
@@ -353,7 +356,14 @@ export function finishCanvasCenter(t: number | null): void {
 }
 
 /** Window > Animation cels. */
-export const showCelsPalette = () => setState((s) => (s.layerDockTab === 'animationCels' && !s.hiddenPalettes.includes('animationCels') ? { layerDockTab: 'layer' } : { layerDockTab: 'animationCels', hiddenPalettes: s.hiddenPalettes.filter((x) => x !== 'animationCels') }));
+export function showCelsPalette(): void {
+  if (!isPaletteFront('animationCels')) return showPalette('animationCels');
+  // In front: the palette stacked with it comes to the front instead (a floating one is hidden).
+  const at = locate(currentLayout(), 'animationCels');
+  const other = at && 'stack' in at ? at.stack.tabs.find((t) => t !== 'animationCels' && !getState().hiddenPalettes.includes(t)) : undefined;
+  if (at && 'stack' in at && other) setPaletteTab(at.stack.id, other);
+  else hidePalette('animationCels');
+}
 
 /** Whether the canvas has animation folders (the Animation cels palette needs one). */
 export const hasAnimation = (s: PaintState = getState()) => animationFolders(s.doc.layers).length > 0;
