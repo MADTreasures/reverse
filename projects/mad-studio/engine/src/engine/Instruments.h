@@ -209,7 +209,13 @@ private:
         bool notePanned = false;
         double notePan = 0.0;
         dsp::PanGains noteGains;
+        // Audio clip gain and fades (clips.ts), over the clip's length in seconds.
+        ClipShape clip;
+        double clipDuration = 0.0;
     };
+
+    /** The sample a note plays: an audio clip's variant or the channel's (reversed) sample. */
+    const SampleData* sampleFor (const NoteEvent& e, bool reverse) const noexcept;
 
     void kill (Voice& v, double atTime) noexcept;
     void finish (Voice& v) noexcept;

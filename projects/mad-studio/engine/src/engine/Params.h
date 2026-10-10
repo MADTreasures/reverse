@@ -150,6 +150,17 @@ struct NoteBend
 inline constexpr int maxNoteBends = 8;
 
 /** A note event for one channel inside the current block. */
+struct SampleData;
+
+/** Audio clip instance (model/clips.ts): clip gain and fades in seconds. */
+struct ClipShape
+{
+    bool active = false;
+    float gain = 1.0f;
+    double fadeIn = 0.0, fadeOut = 0.0;
+    float fadeInTension = 0.0f, fadeOutTension = 0.0f;
+};
+
 struct NoteEvent
 {
     enum class Kind : uint8_t
@@ -171,6 +182,12 @@ struct NoteEvent
     NoteProps props;
     int numBends = 0;
     std::array<NoteBend, maxNoteBends> bends {};
+    /** Audio clips: a sample variant instead of the channel's sample (and its reversed copy, when
+        the channel plays reversed), plus the clip's gain and fades. */
+    bool sampleOverride = false;
+    const SampleData* sample = nullptr;
+    const SampleData* sampleReversed = nullptr;
+    ClipShape clip;
 };
 
 //==============================================================================

@@ -57,6 +57,8 @@ export interface PlaylistView {
   scrollTick: number;
   scrollY: number;
   tool: ToolId;
+  /** FL Studio's "Stretch clips": resizing an audio clip stretches it instead of trimming. */
+  stretch?: boolean;
 }
 
 /** Channel rack filter (FL Studio's channel group menu). */

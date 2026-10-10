@@ -21,6 +21,7 @@ import { AutomationRuntime } from './automationRuntime';
 import type { EngineApi, LiveNoteOptions } from './engineApi';
 import { deliverTakes, type RecordedTake } from './recorder';
 import type { RenderOptions } from './render';
+import { ensureClipVariants, neededVariants } from './clipVariants';
 import { decodeAudioFile, samplePool } from './samplePool';
 import type { WavBitDepth } from './wav';
 
@@ -273,6 +274,8 @@ export class NativeEngine implements EngineApi {
       this.automation.reconcile(state.project);
       this.timeline = null;
       this.markPluginInstances(state.project);
+      // Audio clip variants are samples too: send new ones before the timeline refers to them.
+      if (state.project.clips !== prev.project.clips || state.project.channels !== prev.project.channels) this.syncSamples();
       this.scheduleSync();
     }
     if (state.ui.selectedPatternId !== prev.ui.selectedPatternId || state.transport.mode !== prev.transport.mode || state.transport.loop !== prev.transport.loop) {
@@ -337,7 +340,9 @@ export class NativeEngine implements EngineApi {
   private syncSamples(): void {
     if (!this.ready) return;
     const project = useStore.getState().project;
-    const wanted = new Set(Object.keys(project.samples));
+    // Audio clip variants (pitch, stretch, reverse) are computed here and sent like any sample.
+    ensureClipVariants(project);
+    const wanted = new Set([...Object.keys(project.samples), ...neededVariants(project)]);
     for (const id of [...this.sentSamples.keys()]) {
       if (!samplePool.has(id)) {
         this.sentSamples.delete(id);

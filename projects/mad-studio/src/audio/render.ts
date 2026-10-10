@@ -8,6 +8,7 @@ import { ProjectGraph } from './graph';
 import { samplePool, type SamplePool } from './samplePool';
 import { swingOffsetTicks } from './scheduler';
 import { loadWorklets } from './worklets';
+import { ensureClipVariants, holdClipVariants } from './clipVariants';
 
 export interface RenderOptions {
   mode: 'song' | 'pattern';
@@ -73,6 +74,8 @@ export async function renderProject(project: Project, opts: RenderOptions, pool:
 
   // Buffers at another rate are resampled on playback, so existing factory sounds are reused.
   if (!pool.hasFactorySamples()) pool.ensureFactorySamples(sampleRate);
+  const release = holdClipVariants(project);
+  ensureClipVariants(project, pool);
   const ctx = new OfflineAudioContext({ numberOfChannels: 2, length, sampleRate });
   await loadWorklets(ctx);
   const graph = new ProjectGraph(ctx, pool, { meters: false });
@@ -98,11 +101,16 @@ export async function renderProject(project: Project, opts: RenderOptions, pool:
     graph.sync(project);
   }
 
-  for (let loop = 0; loop < loops; loop++) {
-    for (const ev of tl.events) {
-      const tick = ev.tick + swingOffsetTicks(ev.tick, swingAt(ev.tick));
-      graph.trigger(ev, at(tick) + loop * loopSeconds, sptAt(ev.tick));
+  try {
+    for (let loop = 0; loop < loops; loop++) {
+      for (const ev of tl.events) {
+        const tick = ev.tick + swingOffsetTicks(ev.tick, swingAt(ev.tick));
+        graph.trigger(ev, at(tick) + loop * loopSeconds, sptAt(ev.tick));
+      }
     }
+  } finally {
+    // The scheduled voices hold their buffers; the variants may be pruned from now on.
+    release();
   }
 
   const buffer = await ctx.startRendering();

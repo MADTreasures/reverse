@@ -1,4 +1,5 @@
 import { channelSettings } from './channelSettings';
+import { clipFades, clipGain, clipVariant, variantSampleId } from './clips';
 import { arpSequence, random } from './noteTools';
 import { MAX_NOTE_BENDS, type PitchBend } from './notes';
 import { CHORDS } from './scales';
@@ -21,6 +22,14 @@ export interface SequencedEvent {
   sampleOffset?: number;
   /** True for audio clips, which are gated by the clip length. */
   audioClip?: boolean;
+  /** Audio clips: sample variant to play instead of the channel's sample (pitch, stretch, reverse; clips.ts). */
+  sample?: string;
+  /** Audio clips: linear clip gain and fades (ticks from the clip's start / before its end, tension -1..1). */
+  clipGain?: number;
+  fadeIn?: number;
+  fadeOut?: number;
+  fadeInTension?: number;
+  fadeOutTension?: number;
   /** Note properties (see notes.ts for ranges and defaults). */
   release?: number;
   pan?: number;
@@ -232,7 +241,7 @@ export function songTimeline(project: Project): Timeline {
     if (clip.kind === 'audio') {
       const ch = channels.get(clip.channelId);
       if (!ch || ch.kind !== 'sampler') continue;
-      events.push({
+      const ev: RawEvent = {
         tick: clip.start,
         length: clip.length,
         channelId: ch.id,
@@ -240,7 +249,22 @@ export function songTimeline(project: Project): Timeline {
         velocity: 1,
         sampleOffset: clip.offset,
         audioClip: true,
-      });
+      };
+      // Instance properties (clips.ts): variant sample, gain and fades.
+      const variant = clipVariant(clip);
+      if (variant && ch.sampler.sampleId) ev.sample = variantSampleId(ch.sampler.sampleId, variant);
+      const gain = clipGain(clip.gain);
+      if (gain !== 1) ev.clipGain = gain;
+      const { fadeIn, fadeOut } = clipFades(clip);
+      if (fadeIn > 0) {
+        ev.fadeIn = fadeIn;
+        if (clip.fadeInTension) ev.fadeInTension = clip.fadeInTension;
+      }
+      if (fadeOut > 0) {
+        ev.fadeOut = fadeOut;
+        if (clip.fadeOutTension) ev.fadeOutTension = clip.fadeOutTension;
+      }
+      events.push(ev);
       continue;
     }
 

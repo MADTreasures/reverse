@@ -20,6 +20,7 @@ import { Scheduler } from './scheduler';
 import { Ticker } from './timer';
 import { encodeWav, type WavBitDepth } from './wav';
 import { loadWorklets } from './worklets';
+import { ensureClipVariants } from './clipVariants';
 
 interface HeldNote {
   voice: Voice | null;
@@ -86,16 +87,22 @@ export class WebAudioEngine implements EngineApi {
     this.ctx = ctx;
     samplePool.ensureFactorySamples(ctx.sampleRate);
     await loadWorklets(ctx);
+    ensureClipVariants(useStore.getState().project);
     const graph = new ProjectGraph(ctx, samplePool, { meters: true });
     graph.sync(this.automation.apply(useStore.getState().project));
     this.graph = graph;
     useStore.subscribe((state, prev) => this.onStoreChange(state, prev));
-    samplePool.subscribe(() => useStore.setState((s) => ({ sampleRevision: s.sampleRevision + 1 })));
+    samplePool.subscribe(() => {
+      // A newly loaded sample may be the source of audio clip variants.
+      ensureClipVariants(useStore.getState().project);
+      useStore.setState((s) => ({ sampleRevision: s.sampleRevision + 1 }));
+    });
     useStore.setState({ audioReady: true });
   }
 
   private onStoreChange(state: AppState, prev: AppState): void {
     if (state.project !== prev.project) {
+      if (state.project.clips !== prev.project.clips || state.project.channels !== prev.project.channels) ensureClipVariants(state.project);
       this.automation.reconcile(state.project);
       this.graph?.sync(this.automation.apply(state.project));
       this.timeline = null;

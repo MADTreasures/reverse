@@ -1,7 +1,8 @@
 import { samplePool } from '../../audio/samplePool';
+import { CLIP_GAIN_MIN_DB, clipFades, clipGain, clipVariant, fadeShape, variantSampleId } from '../../model/clips';
 import { keyRange, patternLength } from '../../model/patterns';
 import { PPQ, ticksPerBar, ticksToSeconds } from '../../model/timing';
-import type { Clip, Project } from '../../model/types';
+import type { AudioClip, Clip, Project } from '../../model/types';
 import { drawCurve, type CurveView } from '../automation/curve';
 
 export const TRACK_W = 150;
@@ -100,11 +101,63 @@ function drawPatternClip(ctx: CanvasRenderingContext2D, v: PlaylistViewport, pro
   return pattern.name;
 }
 
-function drawAudioClip(ctx: CanvasRenderingContext2D, v: PlaylistViewport, project: Project, clip: Extract<Clip, { kind: 'audio' }>, x: number, y: number, w: number, h: number): string {
+/** Positions of an audio clip's fade, tension and gain handles (FL Studio), or null when the clip is too small. */
+export interface AudioClipHandles {
+  left: number;
+  right: number;
+  top: number;
+  bottom: number;
+  fadeInX: number;
+  fadeOutX: number;
+  fadeInTension: { x: number; y: number } | null;
+  fadeOutTension: { x: number; y: number } | null;
+  gain: { x: number; y: number };
+}
+
+export function audioClipHandles(v: PlaylistViewport, clip: AudioClip, x: number, y: number, h: number): AudioClipHandles | null {
+  const w = clip.length * v.pxPerTick;
+  if (h < 30 || w < 24) return null;
+  const top = y + 15;
+  const bottom = y + h - 2;
+  const { fadeIn, fadeOut } = clipFades(clip);
+  const fadeInX = x + fadeIn * v.pxPerTick;
+  const fadeOutX = x + w - fadeOut * v.pxPerTick;
+  const tensionAt = (x0: number, x1: number, tension: number) => ({ x: (x0 + x1) / 2, y: bottom - fadeShape(0.5, tension) * (bottom - top) });
+  return {
+    left: x,
+    right: x + w,
+    top,
+    bottom,
+    fadeInX,
+    fadeOutX,
+    fadeInTension: fadeIn * v.pxPerTick >= 10 ? tensionAt(x, fadeInX, clip.fadeInTension ?? 0) : null,
+    fadeOutTension: fadeOut * v.pxPerTick >= 10 ? tensionAt(x + w, fadeOutX, clip.fadeOutTension ?? 0) : null,
+    gain: { x: x + w / 2, y: bottom },
+  };
+}
+
+/** The buffer an audio clip plays: its pitch/stretch/reverse variant once computed, else the source. */
+export function audioClipBuffer(project: Project, clip: AudioClip): AudioBuffer | null {
+  const channel = project.channels.find((c) => c.id === clip.channelId);
+  if (!channel || channel.kind !== 'sampler' || !channel.sampler.sampleId) return null;
+  const variant = clipVariant(clip);
+  const entry = (variant ? samplePool.get(variantSampleId(channel.sampler.sampleId, variant)) : undefined) ?? samplePool.get(channel.sampler.sampleId);
+  return entry?.buffer ?? null;
+}
+
+function drawAudioClip(ctx: CanvasRenderingContext2D, v: PlaylistViewport, project: Project, clip: AudioClip, x: number, y: number, w: number, h: number): string {
   const channel = project.channels.find((c) => c.id === clip.channelId);
   if (!channel || channel.kind !== 'sampler' || !channel.sampler.sampleId) return 'missing sample';
-  const entry = samplePool.get(channel.sampler.sampleId);
-  const name = project.samples[channel.sampler.sampleId]?.name ?? channel.name;
+  const variant = clipVariant(clip);
+  const variantId = variant ? variantSampleId(channel.sampler.sampleId, variant) : null;
+  const entry = (variantId ? samplePool.get(variantId) : undefined) ?? samplePool.get(channel.sampler.sampleId);
+  const baseName = project.samples[channel.sampler.sampleId]?.name ?? channel.name;
+  const tags = [
+    clip.pitch || clip.fine ? `${(clip.pitch ?? 0) >= 0 ? '+' : ''}${clip.pitch ?? 0}${clip.fine ? `.${String(Math.abs(clip.fine)).padStart(2, '0')}` : ''} st` : '',
+    clip.stretch && clip.stretch !== 1 ? `×${clip.stretch.toFixed(2)}` : '',
+    clip.reverse ? 'rev' : '',
+  ].filter(Boolean);
+  const name = tags.length ? `${baseName} (${tags.join(', ')})` : baseName;
   if (!entry || h <= 20) return name;
   const secondsPerPx = ticksToSeconds(1, project.bpm) / v.pxPerTick;
   const duration = entry.buffer.duration;
@@ -114,16 +167,90 @@ function drawAudioClip(ctx: CanvasRenderingContext2D, v: PlaylistViewport, proje
   const mid = y + 15 + (h - 17) / 2;
   const amp = (h - 19) / 2;
   const offsetSec = ticksToSeconds(clip.offset, project.bpm);
+  const gain = clipGain(clip.gain);
+  const { fadeIn, fadeOut } = clipFades(clip);
+  const fadeInPx = fadeIn * v.pxPerTick;
+  const fadeOutPx = fadeOut * v.pxPerTick;
+  // The waveform shows the clip's gain and fades.
+  const envelope = (px: number) => {
+    let g = gain;
+    if (fadeInPx > 0 && px < fadeInPx) g *= fadeShape(px / fadeInPx, clip.fadeInTension ?? 0);
+    if (fadeOutPx > 0 && px > w - fadeOutPx) g *= fadeShape((w - px) / fadeOutPx, clip.fadeOutTension ?? 0);
+    return Math.min(1.5, g);
+  };
   ctx.fillStyle = '#10151add';
   const startPx = Math.max(0, TRACK_W - x);
   for (let px = startPx; px < w && x + px < v.width; px++) {
     const t = offsetSec + px * secondsPerPx;
     if (t >= duration) break;
     const b = Math.min(buckets - 1, Math.floor((t / duration) * buckets));
-    const lo = peaks[b * 2];
-    const hi = peaks[b * 2 + 1];
+    const e = envelope(px);
+    const lo = peaks[b * 2] * e;
+    const hi = peaks[b * 2 + 1] * e;
     ctx.fillRect(x + px, mid - hi * amp, 1, Math.max(1, (hi - lo) * amp));
   }
+
+  // Fade curves and the handles (FL Studio: triangles on the upper edge, circles for the tension,
+  // the semi-circle on the lower edge for the gain).
+  const hd = audioClipHandles(v, clip, x, y, h);
+  if (!hd) return name;
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(Math.max(TRACK_W, x), y, w, h);
+  ctx.clip();
+  const height = hd.bottom - hd.top;
+  ctx.strokeStyle = '#ffffffcc';
+  ctx.lineWidth = 1;
+  if (fadeInPx > 0) {
+    ctx.beginPath();
+    for (let i = 0; i <= 24; i++) {
+      const px = (i / 24) * fadeInPx;
+      const yy = hd.bottom - fadeShape(i / 24, clip.fadeInTension ?? 0) * height;
+      if (i === 0) ctx.moveTo(x + px, yy);
+      else ctx.lineTo(x + px, yy);
+    }
+    ctx.stroke();
+  }
+  if (fadeOutPx > 0) {
+    ctx.beginPath();
+    for (let i = 0; i <= 24; i++) {
+      const px = w - fadeOutPx + (i / 24) * fadeOutPx;
+      const yy = hd.bottom - fadeShape(1 - i / 24, clip.fadeOutTension ?? 0) * height;
+      if (i === 0) ctx.moveTo(x + px, yy);
+      else ctx.lineTo(x + px, yy);
+    }
+    ctx.stroke();
+  }
+  ctx.fillStyle = '#f2f5f7';
+  for (const [hx, dir] of [
+    [hd.fadeInX, 1],
+    [hd.fadeOutX, -1],
+  ] as const) {
+    ctx.beginPath();
+    ctx.moveTo(hx, hd.top);
+    ctx.lineTo(hx + dir * 7, hd.top);
+    ctx.lineTo(hx, hd.top + 7);
+    ctx.closePath();
+    ctx.fill();
+  }
+  ctx.strokeStyle = '#f2f5f7';
+  for (const t of [hd.fadeInTension, hd.fadeOutTension]) {
+    if (!t) continue;
+    ctx.beginPath();
+    ctx.arc(t.x, t.y, 3, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+  ctx.beginPath();
+  ctx.arc(hd.gain.x, hd.gain.y, 5, Math.PI, 0);
+  ctx.closePath();
+  ctx.fill();
+  if (clip.gain) {
+    ctx.font = '9px system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText(clip.gain <= CLIP_GAIN_MIN_DB ? '-∞ dB' : `${clip.gain > 0 ? '+' : ''}${clip.gain.toFixed(1)} dB`, hd.gain.x, hd.gain.y - 8);
+    ctx.textAlign = 'left';
+  }
+  ctx.restore();
   return name;
 }
 

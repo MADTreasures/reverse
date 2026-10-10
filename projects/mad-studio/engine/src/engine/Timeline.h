@@ -31,6 +31,15 @@ struct TimelineBend
     float to = 0.0f;               // semitones relative to the note's key
 };
 
+/** Audio clip instance properties of a timeline event (model/clips.ts; ticks for the fades). */
+struct TimelineClip
+{
+    int32_t sample = -1; // index into Timeline::samples, -1: the channel's own sample
+    float gain = 1.0f;
+    double fadeIn = 0.0, fadeOut = 0.0;
+    float fadeInTension = 0.0f, fadeOutTension = 0.0f;
+};
+
 struct TimelineEvent
 {
     double tick = 0.0, length = 0.0;
@@ -41,6 +50,7 @@ struct TimelineEvent
     bool audioClip = false;
     NoteProps props;
     uint32_t bendFirst = 0, bendCount = 0; // into Timeline::bends
+    TimelineClip clip;
 };
 
 /** Compiled note events from timeline.set (sorted by tick). */
@@ -50,6 +60,8 @@ struct Timeline
     double loopStart = 0.0, loopEnd = 384.0;
     std::vector<TimelineEvent> events;
     std::vector<TimelineBend> bends;
+    /** Sample variants the audio clips play (TimelineClip::sample). */
+    std::vector<juce::String> samples;
 
     /** Index of the first event with tick >= t. */
     size_t firstAtOrAfter (double t) const noexcept;

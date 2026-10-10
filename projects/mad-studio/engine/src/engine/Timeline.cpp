@@ -65,6 +65,22 @@ Timeline parseTimeline (const juce::var& v, ChannelIds& ids)
             ev.velocity = (float) std::clamp (json::number (e, "velocity", 0.8), 0.0, 1.0);
             ev.sampleOffset = std::max (0.0, json::number (e, "sampleOffset", 0.0));
             ev.audioClip = json::boolean (e, "audioClip", false);
+            if (ev.audioClip)
+            {
+                const auto sample = json::string (e, "sample");
+                if (sample.isNotEmpty())
+                {
+                    auto it = std::find (tl.samples.begin(), tl.samples.end(), sample);
+                    if (it == tl.samples.end())
+                        it = tl.samples.insert (tl.samples.end(), sample);
+                    ev.clip.sample = (int32_t) std::distance (tl.samples.begin(), it);
+                }
+                ev.clip.gain = (float) std::clamp (json::number (e, "clipGain", 1.0), 0.0, 64.0);
+                ev.clip.fadeIn = std::clamp (json::number (e, "fadeIn", 0.0), 0.0, ev.length);
+                ev.clip.fadeOut = std::clamp (json::number (e, "fadeOut", 0.0), 0.0, ev.length - ev.clip.fadeIn);
+                ev.clip.fadeInTension = (float) std::clamp (json::number (e, "fadeInTension", 0.0), -1.0, 1.0);
+                ev.clip.fadeOutTension = (float) std::clamp (json::number (e, "fadeOutTension", 0.0), -1.0, 1.0);
+            }
             parseNoteProps (e, ev.props);
             if (const auto* bends = json::get (e, "bends").getArray())
             {

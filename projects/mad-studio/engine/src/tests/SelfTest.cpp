@@ -11,6 +11,7 @@
 #include "engine/AudioEngine.h"
 #include "engine/GraphBuilder.h"
 #include "engine/Latency.h"
+#include "engine/NoteShaping.h"
 #include "engine/Renderer.h"
 #include "engine/Sequencer.h"
 #include "engine/Wav.h"
@@ -369,7 +370,7 @@ void testSequencer()
         tl.loopStart = 0.0;
         tl.loopEnd = reference::schedulerLoopEnd;
         for (const auto t : reference::schedulerEventTicks)
-            tl.events.push_back ({ t, 24.0, 1, 60, 1.0f, 0.0, false, {}, 0, 0 });
+            tl.events.push_back ({ t, 24.0, 1, 60, 1.0f, 0.0, false, {}, 0, 0, {} });
 
         AutoParam bpm ((float) reference::schedulerBpm), swing ((float) reference::schedulerSwing);
         Sequencer seq;
@@ -442,7 +443,7 @@ void testSequencer()
     {
         Timeline tl;
         tl.loopEnd = 3840.0;
-        tl.events.push_back ({ 192.0, 24.0, 1, 60, 1.0f, 0.0, false, {}, 0, 0 });
+        tl.events.push_back ({ 192.0, 24.0, 1, 60, 1.0f, 0.0, false, {}, 0, 0, {} });
         AutoParam bpm (120.0f), swing (0.0f);
         Sequencer seq;
         seq.prepare (48000.0);
@@ -611,7 +612,7 @@ void testGraphLevels()
         auto p = makeProject();
         p.channels.push_back (samplerChannel ("ch_a", "dc_mono", 1));
         std::vector<float> l, r;
-        const auto res = renderWith (p, { { 0.0, 96.0, ids.uidFor ("ch_a"), 60, 1.0f, 0.0, false, {}, 0, 0 } }, l, r);
+        const auto res = renderWith (p, { { 0.0, 96.0, ids.uidFor ("ch_a"), 60, 1.0f, 0.0, false, {}, 0, 0, {} } }, l, r);
         s.check (res.ok, "render ok");
         s.near (rms (l, 4800, 9600), 0.5 * std::cos (3.14159265358979323846 / 4.0), 1.0e-4, "mono sample: -3 dB pan law");
         s.near (rms (r, 4800, 9600), 0.5 * std::cos (3.14159265358979323846 / 4.0), 1.0e-4, "mono sample R");
@@ -621,7 +622,7 @@ void testGraphLevels()
         auto p = makeProject();
         p.channels.push_back (samplerChannel ("ch_b", "dc_stereo", 2));
         std::vector<float> l, r;
-        renderWith (p, { { 0.0, 96.0, ids.uidFor ("ch_b"), 60, 1.0f, 0.0, false, {}, 0, 0 } }, l, r);
+        renderWith (p, { { 0.0, 96.0, ids.uidFor ("ch_b"), 60, 1.0f, 0.0, false, {}, 0, 0, {} } }, l, r);
         s.near (rms (l, 4800, 9600), 0.5, 1.0e-4, "stereo sample: unity at centre");
     }
     // Volume knob 0.4 -> gain 0.25, mixer fader 1.0 -> 1.5625, mute.
@@ -632,16 +633,16 @@ void testGraphLevels()
         p.channels.push_back (ch);
         p.mixer[1].volume = 1.0f;
         std::vector<float> l, r;
-        renderWith (p, { { 0.0, 96.0, ids.uidFor ("ch_c"), 60, 1.0f, 0.0, false, {}, 0, 0 } }, l, r);
+        renderWith (p, { { 0.0, 96.0, ids.uidFor ("ch_c"), 60, 1.0f, 0.0, false, {}, 0, 0, {} } }, l, r);
         s.near (rms (l, 4800, 9600), 0.5 * 0.25 * 1.5625, 1.0e-4, "volumeToGain on channel and fader");
 
         p.mixer[1].muted = true;
-        renderWith (p, { { 0.0, 96.0, ids.uidFor ("ch_c"), 60, 1.0f, 0.0, false, {}, 0, 0 } }, l, r);
+        renderWith (p, { { 0.0, 96.0, ids.uidFor ("ch_c"), 60, 1.0f, 0.0, false, {}, 0, 0, {} } }, l, r);
         s.near (rms (l, 4800, 9600), 0.0, 1.0e-6, "muted insert is silent");
 
         p.mixer[1].muted = false;
         p.mixer[2].solo = true;
-        renderWith (p, { { 0.0, 96.0, ids.uidFor ("ch_c"), 60, 1.0f, 0.0, false, {}, 0, 0 } }, l, r);
+        renderWith (p, { { 0.0, 96.0, ids.uidFor ("ch_c"), 60, 1.0f, 0.0, false, {}, 0, 0, {} } }, l, r);
         s.near (rms (l, 4800, 9600), 0.0, 1.0e-6, "insert soloed out");
     }
     // One-shot plays to the end of the sample regardless of note length; gated stops.
@@ -649,11 +650,11 @@ void testGraphLevels()
         auto p = makeProject();
         p.channels.push_back (samplerChannel ("ch_d", "dc_stereo", 1));
         std::vector<float> l, r;
-        renderWith (p, { { 0.0, 24.0, ids.uidFor ("ch_d"), 60, 1.0f, 0.0, false, {}, 0, 0 } }, l, r, nullptr, 768.0);
+        renderWith (p, { { 0.0, 24.0, ids.uidFor ("ch_d"), 60, 1.0f, 0.0, false, {}, 0, 0, {} } }, l, r, nullptr, 768.0);
         s.near (rms (l, 40000, 44000), 0.5, 1.0e-4, "one-shot ignores the note length");
 
         p.channels[0].samplerParams[sampler::oneShot] = 0.0f;
-        renderWith (p, { { 0.0, 24.0, ids.uidFor ("ch_d"), 60, 1.0f, 0.0, false, {}, 0, 0 } }, l, r, nullptr, 768.0);
+        renderWith (p, { { 0.0, 24.0, ids.uidFor ("ch_d"), 60, 1.0f, 0.0, false, {}, 0, 0, {} } }, l, r, nullptr, 768.0);
         s.near (rms (l, 40000, 44000), 0.0, 1.0e-6, "gated sampler stops after the release");
     }
     // Choke group: the second hat cuts the first within ~18 ms.
@@ -667,8 +668,8 @@ void testGraphLevels()
         p.channels.push_back (a);
         p.channels.push_back (b);
         std::vector<float> l, r;
-        renderWith (p, { { 0.0, 24.0, ids.uidFor ("ch_h1"), 60, 1.0f, 0.0, false, {}, 0, 0 },
-                         { 96.0, 24.0, ids.uidFor ("ch_h2"), 60, 1.0f, 0.0, false, {}, 0, 0 } }, l, r);
+        renderWith (p, { { 0.0, 24.0, ids.uidFor ("ch_h1"), 60, 1.0f, 0.0, false, {}, 0, 0, {} },
+                         { 96.0, 24.0, ids.uidFor ("ch_h2"), 60, 1.0f, 0.0, false, {}, 0, 0, {} } }, l, r);
         s.near (rms (l, 12000, 23000), 0.5, 1.0e-4, "before the choke");
         s.near (rms (l, 26000, 30000), 0.0, 1.0e-5, "choke group kills the earlier voice (18 ms fade)");
     }
@@ -679,7 +680,7 @@ void testGraphLevels()
         auto automation = std::make_shared<AutomationData>();
         automation->lanes.push_back ({ "ch:ch_e:volume", { { 0.0, 0.8 }, { 192.0, 0.8 }, { 193.0, 0.0 } } });
         std::vector<float> l, r;
-        renderWith (p, { { 0.0, 384.0, ids.uidFor ("ch_e"), 60, 1.0f, 0.0, false, {}, 0, 0 } }, l, r, automation);
+        renderWith (p, { { 0.0, 384.0, ids.uidFor ("ch_e"), 60, 1.0f, 0.0, false, {}, 0, 0, {} } }, l, r, automation);
         // 120 BPM: tick 192 = 1 s.
         s.near (rms (l, 12000, 46000), 0.5, 1.0e-3, "automation before the step");
         s.near (rms (l, 52000, 90000), 0.0, 1.0e-4, "automated volume reaches 0");
@@ -701,7 +702,7 @@ void testGraphLevels()
         ch.synthParams[synth::ampSustain] = 1.0f;
         p.channels.push_back (ch);
         std::vector<float> l, r;
-        renderWith (p, { { 0.0, 192.0, ids.uidFor ("ch_s"), 69, 1.0f, 0.0, false, {}, 0, 0 } }, l, r);
+        renderWith (p, { { 0.0, 192.0, ids.uidFor ("ch_s"), 69, 1.0f, 0.0, false, {}, 0, 0, {} } }, l, r);
         s.near (rms (l, 12000, 36000), std::sqrt (0.5) * std::cos (3.14159265358979323846 / 4.0), 2.0e-3,
                 "synth sine voice level with mono pan law");
     }
@@ -728,7 +729,7 @@ void testGraphLevels()
         p.mixer[1].effects = { reverb, delay };
         p.mixer[0].effects = { limiter };
         std::vector<float> l, r;
-        renderWith (p, { { 0.0, 24.0, ids.uidFor ("ch_f"), 60, 1.0f, 0.0, false, {}, 0, 0 } }, l, r, nullptr, 768.0);
+        renderWith (p, { { 0.0, 24.0, ids.uidFor ("ch_f"), 60, 1.0f, 0.0, false, {}, 0, 0, {} } }, l, r, nullptr, 768.0);
         bool finite = true;
         for (size_t i = 0; i < l.size(); ++i)
             finite = finite && std::isfinite (l[i]) && std::isfinite (r[i]);
@@ -1109,7 +1110,7 @@ void testMixerRouting()
         return ch;
     };
     const auto note = [&ids] (const juce::String& channel, double start, double length)
-    { return TimelineEvent { start, length, ids.uidFor (channel), 60, 1.0f, 0.0, false, {}, 0, 0 }; };
+    { return TimelineEvent { start, length, ids.uidFor (channel), 60, 1.0f, 0.0, false, {}, 0, 0, {} }; };
 
     // Insert 1 -> insert 2 only, send level 0.4 (gain 0.25); insert 2's fader applies too.
     {
@@ -1206,6 +1207,70 @@ void testMixerRouting()
     }
 }
 
+void testAudioClips()
+{
+    auto& s = *suite;
+    SampleStore samples;
+    ChannelIds ids;
+    samples.add (constantSample ("ac_dc", 2, 0.5f, 3.0, 48000.0));
+    samples.add (constantSample ("ac_dc~x2c0", 2, 0.25f, 3.0, 48000.0)); // stands in for a variant
+
+    const auto render = [&] (std::vector<TimelineEvent> events, std::vector<juce::String> clipSamples, std::vector<float>& l, std::vector<float>& r)
+    {
+        auto p = makeProject (1);
+        ChannelModel ch;
+        ch.id = "ac_ch";
+        ch.kind = ChannelKind::sampler;
+        ch.mixerTrack = 1;
+        for (int i = 0; i < sampler::numParams; ++i)
+            ch.samplerParams[(size_t) i] = sampler::defaultValue (i);
+        ch.samplerParams[sampler::gain] = 1.0f;
+        ch.sampleId = "ac_dc";
+        p.channels.push_back (ch);
+        auto tl = std::make_shared<Timeline>();
+        tl->songMode = true;
+        tl->loopEnd = 768.0;
+        tl->events = std::move (events);
+        tl->samples = std::move (clipSamples);
+        RenderRequest req;
+        req.project = std::move (p);
+        req.timeline = tl;
+        req.sampleRate = 48000.0;
+        req.endTick = 768.0;
+        req.tailSeconds = 0.0;
+        return renderOfflineToBuffers (req, samples, ids, nullptr, l, r);
+    };
+    // A one-second audio clip (120 BPM: 192 ticks) at -6 dB with a 0.25 s fade-in and a 0.5 s fade-out.
+    TimelineEvent clip { 0.0, 192.0, ids.uidFor ("ac_ch"), 60, 1.0f, 0.0, true, {}, 0, 0, {} };
+    clip.clip.gain = 0.5f;
+    clip.clip.fadeIn = 48.0;
+    clip.clip.fadeOut = 96.0;
+    std::vector<float> l, r;
+    s.check (render ({ clip }, {}, l, r).ok, "render ok");
+    s.near (l[6000], 0.5 * 0.5 * 0.5, 2.0e-3, "linear fade-in halfway: half the clip gain");
+    s.near (rms (l, 13000, 23000), 0.25, 1.0e-4, "clip gain between the fades");
+    s.near (l[36000], 0.25 * 0.5, 2.0e-3, "linear fade-out halfway");
+    s.near (rms (l, 49000, 60000), 0.0, 1.0e-4, "silent after the clip");
+
+    clip.clip.fadeInTension = 1.0f;
+    clip.clip.fadeOutTension = -1.0f;
+    render ({ clip }, {}, l, r);
+    s.near (l[6000], 0.25 * 0.0625, 1.0e-3, "fade-in tension 1: x^4");
+    s.near (l[36000], 0.25 * 0.9375, 2.0e-3, "fade-out tension -1: 1 - (1 - x)^4");
+    // The browser interpolates fadeCurve()'s 256 points linearly; so does the engine.
+    const double x = 100.5 / 255.0;
+    const double pointA = (float) (0.5 * notes::fadeShape (100.0 / 255.0, 1.0)), pointB = (float) (0.5 * notes::fadeShape (101.0 / 255.0, 1.0));
+    s.near (notes::fadeCurveAt (true, 1.0, 0.5, x * 0.25, 0.25), 0.5 * (pointA + pointB), 1.0e-6, "fade curve: Web Audio's linear interpolation between points");
+
+    // A variant sample instead of the channel's sample; a variant that is not loaded stays silent.
+    TimelineEvent variant { 0.0, 192.0, ids.uidFor ("ac_ch"), 60, 1.0f, 0.0, true, {}, 0, 0, {} };
+    variant.clip.sample = 0;
+    render ({ variant }, { "ac_dc~x2c0" }, l, r);
+    s.near (rms (l, 13000, 23000), 0.25, 1.0e-4, "audio clip plays its variant sample");
+    render ({ variant }, { "ac_dc~missing" }, l, r);
+    s.near (rms (l, 0, 48000), 0.0, 1.0e-6, "a variant that is not loaded is silent");
+}
+
 void testCompensationDelay()
 {
     auto& s = *suite;
@@ -1278,7 +1343,7 @@ void testLoopedCompensation()
     tl->songMode = true;
     tl->loopStart = 0.0;
     tl->loopEnd = 96.0;
-    tl->events = { { 0.0, 96.0, ids.uidFor ("ch_dc"), 60, 1.0f, 0.0, false, {}, 0, 0 } };
+    tl->events = { { 0.0, 96.0, ids.uidFor ("ch_dc"), 60, 1.0f, 0.0, false, {}, 0, 0, {} } };
     auto automation = std::make_shared<AutomationData>();
     automation->lanes.push_back ({ "mx:0:volume", { { 0.0, 0.8 }, { 48.0, 0.8 }, { 48.0, 0.0 }, { 96.0, 0.0 } } });
 
@@ -1333,6 +1398,7 @@ bool runSelfTests()
     s.run ("plugin delay compensation plan", testLatencyPlan);
     s.run ("plugin delay compensation along mixer sends", testRoutedLatencyPlan);
     s.run ("mixer routing: sends, order, sidechain", testMixerRouting);
+    s.run ("audio clips: gain, fades, variant samples", testAudioClips);
     s.run ("compensation delay line", testCompensationDelay);
     s.run ("compensated automation across a loop wrap", testLoopedCompensation);
     collectSampleGarbage();

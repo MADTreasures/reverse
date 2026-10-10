@@ -1,3 +1,4 @@
+import { fadeCurve } from '../../model/clips';
 import type { PitchPoint } from '../../model/notes';
 import { fadeOut } from '../envelope';
 
@@ -93,6 +94,37 @@ export interface TriggerOptions {
   release?: number;
   /** Pitch curve (portamento, slide notes) in semitones relative to the key, times relative to the note start. */
   pitch?: PitchPoint[] | null;
+  /** Audio clips: sample variant to play instead of the channel's sample (clipVariants.ts). */
+  sample?: string;
+  /** Audio clips: clip gain (linear) and fades in seconds (clips.ts). */
+  clip?: ClipEnvelope;
+}
+
+export interface ClipEnvelope {
+  gain: number;
+  fadeIn: number;
+  fadeOut: number;
+  fadeInTension: number;
+  fadeOutTension: number;
+}
+
+/**
+ * Schedules an audio clip's gain and fades on `param` for a clip at `t` lasting `duration` seconds:
+ * fadeCurve() points with setValueCurveAtTime (the native engine interpolates the same points).
+ */
+export function scheduleClipEnvelope(param: AudioParam, clip: ClipEnvelope, t: number, duration: number): void {
+  param.value = clip.fadeIn > 0 ? 0 : clip.gain;
+  try {
+    if (clip.fadeIn > 0) param.setValueCurveAtTime(fadeCurve('in', clip.fadeInTension, clip.gain), t, clip.fadeIn);
+    if (clip.fadeOut > 0) {
+      const start = Math.max(t + clip.fadeIn, t + duration - clip.fadeOut);
+      const length = t + duration - start;
+      if (length > 0) param.setValueCurveAtTime(fadeCurve('out', clip.fadeOutTension, clip.gain), start, length);
+    }
+  } catch {
+    param.cancelScheduledValues(0);
+    param.value = clip.gain;
+  }
 }
 
 /** Thresholds shared with the native engine (Instruments.cpp). */

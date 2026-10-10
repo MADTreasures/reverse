@@ -7,7 +7,8 @@ import { samplePool } from './audio/samplePool';
 import { signalStats } from './audio/wav';
 import { native, isElectron, isMac } from './platform/platform';
 import { usePlugins } from './plugins/pluginStore';
-import { buildProjectBundle, listenForNativeOpen, openProjectBytes, restoreSession, startAutosave } from './project/projectIO';
+import { buildProjectBundle, createAudioClip, listenForNativeOpen, openProjectBytes, restoreSession, startAutosave } from './project/projectIO';
+import { factorySampleInfo } from './model/factory';
 import * as actions from './store/actions';
 import { createAutomationClip, updateAutomation } from './store/automationActions';
 import { defaultWindows, useStore, type UiState } from './store/store';
@@ -114,6 +115,8 @@ async function boot(): Promise<void> {
       signalStats,
       buildProjectBundle,
       openProjectBytes,
+      createAudioClip,
+      factorySampleInfo,
       runCommand,
       createAutomationClip,
       updateAutomation,

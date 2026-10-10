@@ -629,6 +629,48 @@ async function testRouting(engine) {
   engine.send(timeline());
 }
 
+async function testAudioClips(engine) {
+  console.log('audio clips');
+  // A stereo DC sample and a "variant" of it (the renderer computes real variants; any sample id works).
+  const load = async (id, value) => {
+    const path = writeRawSample(`${id.replace(/[^a-z0-9]/gi, '_')}.f32`, 2, 96000, () => value);
+    return engine.request({ type: 'samples.loadRaw', id, path, sampleRate: 48000, channels: 2, frames: 96000 },
+      (m) => (m.type === 'samples.loaded' && m.id === id) || (m.type === 'error' && m.request === 'samples.loadRaw'), 5000, `load ${id}`);
+  };
+  check((await load('ac:dc', 0.5)).type === 'samples.loaded', 'audio clip sample loaded');
+  check((await load('ac:dc~x1c1200', 0.25)).type === 'samples.loaded', 'variant sample loaded');
+  const project = baseProject();
+  project.mixer[0].effects = [];
+  project.channels = [{ id: 'ch_ac', kind: 'sampler', volume: 0.8, pan: 0, muted: false, mixerTrack: 3, audioClip: true, sampler: samplerParams('ac:dc', { gain: 1 }) }];
+  engine.send({ type: 'project.sync', project });
+  const render = async (name, event) => {
+    engine.send({ type: 'timeline.set', mode: 'song', loopStart: 0, loopEnd: 384, events: [{ tick: 0, length: 192, channelId: 'ch_ac', key: 60, velocity: 1, audioClip: true, ...event }] });
+    const path = join(work, name);
+    const d = await engine.request({ type: 'render.start', requestId: name, path, sampleRate: 48000, bitDepth: 32, startTick: 0, endTick: 384, tailSeconds: 0 },
+      (m) => (m.type === 'render.done' && m.requestId === name) || (m.type === 'error' && m.request === 'render.start'), 60000, `render ${name}`);
+    check(d.type === 'render.done', `render ${name}`);
+    return d.type === 'render.done' ? readWav(path) : null;
+  };
+  // 120 BPM: the clip lasts 1 s; a 0.25 s fade-in, a 0.5 s fade-out and -6 dB.
+  let wav = await render('clip-fades.wav', { clipGain: 0.5, fadeIn: 48, fadeOut: 96 });
+  if (wav) {
+    const l = wav.data[0];
+    near(l[6000], 0.125, 2e-3, 'clipGain 0.5 with a linear fadeIn: half way at 0.125 s');
+    near(stats([l], 13000, 23000).rms, 0.25, 1e-3, 'clipGain between the fades');
+    near(l[36000], 0.125, 2e-3, 'linear fadeOut half way');
+    near(stats([l], 49000, 60000).peak, 0, 1e-4, 'silent after the clip');
+  }
+  wav = await render('clip-tension.wav', { fadeIn: 48, fadeInTension: 1 });
+  if (wav) near(wav.data[0][6000], 0.5 * 0.0625, 1e-3, 'fadeInTension 1: x^4 curve');
+  wav = await render('clip-variant.wav', { sample: 'ac:dc~x1c1200' });
+  if (wav) near(stats([wav.data[0]], 13000, 23000).rms, 0.25, 1e-3, 'an audio clip plays its "sample" variant');
+  wav = await render('clip-missing.wav', { sample: 'ac:dc~nope' });
+  if (wav) near(stats(wav.data).peak, 0, 1e-6, 'a variant that is not loaded stays silent');
+  engine.send({ type: 'samples.unload', id: 'ac:dc~x1c1200' });
+  engine.send({ type: 'project.sync', project: baseProject() });
+  engine.send(timeline());
+}
+
 async function testPlugins(engine) {
   const gainPath = join(pluginDir, 'MAD Test Gain.vst3');
   const synthPath = join(pluginDir, 'MAD Test Synth.vst3');
@@ -1279,6 +1321,7 @@ async function main() {
     await testAutomation(engine);
     await testNoteProps(engine);
     await testRouting(engine);
+    await testAudioClips(engine);
     const plugins = await testPlugins(engine);
     await testLatency(engine, plugins);
     await testStress(engine, plugins);

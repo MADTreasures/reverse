@@ -302,6 +302,20 @@ export interface AudioClip extends ClipBase {
   kind: 'audio';
   /** Sampler channel that plays the clip. */
   channelId: Id;
+  /** Instance properties (clips.ts; absent = default). Gain in dB, -96 (= -∞) … +36 (FL: gain handle). */
+  gain?: number;
+  /** Fade lengths in ticks (FL: fade handles) and their curve tension -1..1. */
+  fadeIn?: number;
+  fadeOut?: number;
+  fadeInTension?: number;
+  fadeOutTension?: number;
+  /** Pitch in semitones (±24) and cents (±100); the length stays (FL: clip properties). */
+  pitch?: number;
+  fine?: number;
+  /** Plays the sample backwards (FL: clip properties › Reverse). */
+  reverse?: boolean;
+  /** Time factor 0.25..4: the audio plays this many times longer at the same pitch (FL: Stretch clips). */
+  stretch?: number;
 }
 
 export interface AutomationClip extends ClipBase {

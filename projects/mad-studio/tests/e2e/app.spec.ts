@@ -889,3 +889,128 @@ test('mixer routing: route switches, send knobs, route only, sidechain links, lo
   expect(ratio.off).toBeGreaterThan(0.8);
   expect(errors).toEqual([]);
 });
+
+test('audio clips: fade and gain handles, clip properties, keys 7/8/9, stretch clips; the browser plays fades and variants', async ({ page }) => {
+  const errors = await boot(page);
+  // An audio clip of the riser after the end of the demo song, on the first track, 1 px per tick.
+  const setup = await page.evaluate(() => {
+    const m = window.__madStudio;
+    const s = m.useStore.getState();
+    const start = Math.max(...s.project.clips.map((c: any) => c.start + c.length)) + 384;
+    const id = m.createAudioClip(m.factorySampleInfo('fx_riser'), s.project.tracks[0].id, start);
+    m.actions.setUi((d: any) => {
+      for (const w of Object.keys(d.windows)) if (w !== 'playlist') d.windows[w].open = false;
+      d.playlist.pxPerTick = 1;
+      d.playlist.scrollTick = start;
+      d.playlist.scrollY = 0;
+      d.playlist.trackHeight = 80;
+      d.playlist.snap = 'none';
+    });
+    const clip = m.useStore.getState().project.clips.find((c: any) => c.id === id);
+    return { id, length: clip.length };
+  });
+  const clip = async () => (await state(page)).project.clips.find((c: any) => c.id === setup.id);
+  const box = (await page.locator('[data-window="playlist"] canvas').boundingBox())!;
+  const left = box.x + 150;
+  const top = box.y + 24 + 1;
+  const bodyTop = top + 15;
+  const bottom = top + 80 - 3 - 2;
+  const width = Math.min(setup.length, box.width - 160);
+
+  // Drag the fade-in triangle 96 px to the right: a 96-tick fade-in.
+  await page.mouse.move(left + 1, bodyTop + 3);
+  await page.mouse.down();
+  await page.mouse.move(left + 50, bodyTop + 3);
+  await page.mouse.move(left + 97, bodyTop + 3);
+  await page.mouse.up();
+  expect((await clip()).fadeIn).toBeGreaterThanOrEqual(90);
+  expect((await clip()).fadeIn).toBeLessThanOrEqual(100);
+
+  // The gain handle: 40 px up = +10 dB; Alt+click resets; right-click › normalize.
+  const gainX = left + setup.length / 2;
+  if (gainX < box.x + box.width - 10) {
+    await page.mouse.move(gainX, bottom - 1);
+    await page.mouse.down();
+    await page.mouse.move(gainX, bottom - 21);
+    await page.mouse.move(gainX, bottom - 41);
+    await page.mouse.up();
+    expect((await clip()).gain).toBeCloseTo(10, 0);
+    await page.keyboard.down('Alt');
+    await page.mouse.click(gainX, bottom - 1);
+    await page.keyboard.up('Alt');
+    expect((await clip()).gain).toBeUndefined();
+    await page.mouse.click(gainX, bottom - 1, { button: 'right' });
+    await page.getByRole('menuitem', { name: 'Normalize selection individually' }).click();
+    expect((await clip()).gain).toBeGreaterThan(0);
+  }
+
+  // Alt+double-click: clip properties; Reverse + Accept.
+  await page.keyboard.down('Alt');
+  await page.mouse.dblclick(left + width / 3, top + 45);
+  await page.keyboard.up('Alt');
+  const dialog = page.getByRole('dialog', { name: 'Clip properties' });
+  await expect(dialog).toBeVisible();
+  await dialog.getByLabel('Reverse').check();
+  await dialog.getByRole('button', { name: 'Accept' }).click();
+  expect((await clip()).reverse).toBe(true);
+
+  // Keys (typing keyboard off): 8 / 7 repitch the selected clip, 9 toggles reverse.
+  await page.mouse.click(left + width / 3, top + 45);
+  await page.keyboard.press('8');
+  await page.keyboard.press('8');
+  await page.keyboard.press('7');
+  expect((await clip()).pitch).toBe(1);
+  await page.keyboard.press('9');
+  expect((await clip()).reverse).toBeUndefined();
+
+  // Stretch clips: dragging the right edge stretches the audio (the variant is computed on release).
+  await page.getByRole('button', { name: '↔ Stretch' }).click();
+  const before = await clip();
+  const edge = left + Math.min(before.length, box.width - 260) - 2;
+  const scale = (box.width - 170 - (edge - box.x)) / Math.max(1, before.length);
+  const grow = Math.min(before.length * 0.5, box.width - 170 - (edge - box.x));
+  await page.mouse.move(edge, top + 45);
+  await page.mouse.down();
+  await page.mouse.move(edge + grow / 2, top + 45);
+  await page.mouse.move(edge + grow, top + 45);
+  await page.mouse.up();
+  const stretched = await clip();
+  expect(scale).toBeGreaterThan(0);
+  expect(stretched.stretch).toBeCloseTo((before.length + grow) / before.length, 1);
+  expect(stretched.length).toBeGreaterThan(before.length);
+  const hasVariant = await page.evaluate((id) => {
+    const m = window.__madStudio;
+    const c = m.useStore.getState().project.clips.find((x: any) => x.id === id);
+    const ch = m.useStore.getState().project.channels.find((x: any) => x.id === c.channelId);
+    return m.samplePool.derivedEntries().some((e: any) => e.id.startsWith(`${ch.sampler.sampleId}~x`));
+  }, setup.id);
+  expect(hasVariant).toBe(true);
+
+  // The browser engine: a long fade-in starts quiet; the reversed riser falls instead of rising.
+  const levels = await page.evaluate(async (id) => {
+    const m = window.__madStudio;
+    const base = structuredClone(m.useStore.getState().project);
+    const c = base.clips.find((x: any) => x.id === id);
+    base.channels = base.channels.filter((ch: any) => ch.id === c.channelId);
+    base.mixer[0].effects = [];
+    const quarters = async (patch: any) => {
+      const project = structuredClone(base);
+      project.clips = [{ ...c, start: 0, offset: 0, pitch: undefined, fine: undefined, stretch: undefined, gain: undefined, fadeIn: undefined, fadeOut: undefined, reverse: undefined, ...patch }];
+      for (const k of Object.keys(project.clips[0])) if (project.clips[0][k] === undefined) delete project.clips[0][k];
+      const buffer = await m.renderProject(project, { mode: 'song', sampleRate: 44100, tail: 0 });
+      const [l] = m.bufferChannels(buffer);
+      const n = Math.floor(l.length / 4);
+      return [0, 1, 2, 3].map((q) => {
+        let s = 0;
+        for (let i = q * n; i < (q + 1) * n; i++) s += l[i] * l[i];
+        return Math.sqrt(s / n);
+      });
+    };
+    return { plain: await quarters({}), faded: await quarters({ fadeIn: Math.round(c.length / 2) }), reversed: await quarters({ reverse: true }) };
+  }, setup.id);
+  expect(levels.faded[0]).toBeLessThan(levels.plain[0] * 0.6);
+  expect(levels.faded[3]).toBeCloseTo(levels.plain[3], 2);
+  expect(levels.plain[3]).toBeGreaterThan(levels.plain[0]); // a riser
+  expect(levels.reversed[0]).toBeGreaterThan(levels.reversed[3]);
+  expect(errors).toEqual([]);
+});

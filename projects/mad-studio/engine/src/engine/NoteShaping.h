@@ -26,6 +26,55 @@ inline double resonance (double res, float modY) noexcept
 
 inline double releaseScale (float release) noexcept { return std::exp2 (((double) release - 0.5) * 2.0); }
 
+//==============================================================================
+// model/clips.ts: audio clip fades. The browser schedules FADE_CURVE_POINTS float32 points with
+// setValueCurveAtTime; the same points are interpolated here the way Web Audio does.
+inline constexpr int fadeCurvePoints = 256; // FADE_CURVE_POINTS
+
+/** clips.ts fadeShape(): gain at x (0..1) for a tension in -1..1. */
+inline double fadeShape (double x, double tension) noexcept
+{
+    const double p = std::clamp (x, 0.0, 1.0);
+    const double t = std::clamp (tension, -1.0, 1.0);
+    if (t >= 0.0)
+        return std::pow (p, 1.0 + 3.0 * t);
+    return 1.0 - std::pow (1.0 - p, 1.0 - 3.0 * t);
+}
+
+/** Point j of clips.ts fadeCurve() as the float32 the browser schedules. */
+inline float fadeCurvePoint (bool fadeIn, double tension, double gain, int j) noexcept
+{
+    const double x = (double) j / (double) (fadeCurvePoints - 1);
+    return (float) (gain * fadeShape (fadeIn ? x : 1.0 - x, tension));
+}
+
+/** A setValueCurveAtTime(fadeCurve(…), 0, duration) automation at `t` seconds. */
+inline float fadeCurveAt (bool fadeIn, double tension, double gain, double t, double duration) noexcept
+{
+    if (! (t < duration))
+        return fadeCurvePoint (fadeIn, tension, gain, fadeCurvePoints - 1);
+    const double pos = (double) (fadeCurvePoints - 1) * std::max (0.0, t) / duration;
+    const int k = std::clamp ((int) pos, 0, fadeCurvePoints - 2);
+    const float a = fadeCurvePoint (fadeIn, tension, gain, k);
+    const float b = fadeCurvePoint (fadeIn, tension, gain, k + 1);
+    return a + (b - a) * (float) (pos - (double) k);
+}
+
+/** voice.ts scheduleClipEnvelope(): the clip's gain `t` seconds after its start (clip `duration` s). */
+inline float clipEnvelopeAt (const ClipShape& c, double t, double duration) noexcept
+{
+    if (c.fadeIn > 0.0 && t < c.fadeIn)
+        return t < 0.0 ? 0.0f : fadeCurveAt (true, c.fadeInTension, c.gain, t, c.fadeIn);
+    if (c.fadeOut > 0.0)
+    {
+        const double start = std::max (c.fadeIn, duration - c.fadeOut);
+        const double length = duration - start;
+        if (length > 0.0 && t >= start)
+            return fadeCurveAt (false, c.fadeOutTension, c.gain, t - start, length);
+    }
+    return c.gain;
+}
+
 /** notes.ts pitchCurve(): portamento glide, then slide bends; piecewise linear in semitones over
     seconds after the note start, holding the last value. */
 class PitchCurve

@@ -3,7 +3,17 @@ import { minPitch, releaseScale } from '../../model/notes';
 import type { SamplerChannel, SamplerParams } from '../../model/types';
 import { releaseEnvelope, scheduleEnvelope } from '../envelope';
 import type { SamplePool } from '../samplePool';
-import { ChokeManager, NOTE_PAN_EPSILON, Voice, createPannedOutput, enforcePolyphony, schedulePitch, type Instrument, type TriggerOptions } from './voice';
+import {
+  ChokeManager,
+  NOTE_PAN_EPSILON,
+  Voice,
+  createPannedOutput,
+  enforcePolyphony,
+  scheduleClipEnvelope,
+  schedulePitch,
+  type Instrument,
+  type TriggerOptions,
+} from './voice';
 
 const MAX_VOICES = 32;
 
@@ -39,7 +49,7 @@ export class SamplerInstrument implements Instrument {
 
   trigger(key: number, velocity: number, t: number, duration: number | null, opts: TriggerOptions = {}): Voice | null {
     const p = this.params;
-    const buffer = this.pool.buffer(p.sampleId, p.reverse);
+    const buffer = this.pool.buffer(opts.sample ?? p.sampleId, p.reverse);
     if (!buffer) return null;
 
     const rate = (p.keyTrack ? Math.pow(2, (key - p.rootKey) / 12) : 1) * Math.pow(2, p.fine / 1200);
@@ -60,15 +70,24 @@ export class SamplerInstrument implements Instrument {
     amp.gain.value = 0;
     src.connect(amp);
     const nodes: AudioNode[] = [src, amp];
+    // Audio clips: the clip's gain and fades after the amp envelope.
+    let tail: AudioNode = amp;
+    if (opts.clip && duration !== null) {
+      const clipAmp = this.ctx.createGain();
+      scheduleClipEnvelope(clipAmp.gain, opts.clip, t, duration);
+      amp.connect(clipAmp);
+      nodes.push(clipAmp);
+      tail = clipAmp;
+    }
     const pan = Math.max(-1, Math.min(1, opts.pan ?? 0));
     if (Math.abs(pan) > NOTE_PAN_EPSILON) {
       const panner = this.ctx.createStereoPanner();
       panner.pan.value = pan;
-      amp.connect(panner);
+      tail.connect(panner);
       panner.connect(this.pannedOutput);
       nodes.push(panner);
     } else {
-      amp.connect(this.output);
+      tail.connect(this.output);
     }
 
     if (p.loop) {

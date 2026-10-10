@@ -18,7 +18,9 @@ import { parseChannelSettings } from './channelSettings';
 import { NOTE_COLOR_COUNT, NOTE_PROPS, setNoteValue } from './notes';
 import { DEFAULT_SEND, sanitizeRoutes } from './routing';
 import { SCALES, type ScaleSpec, type ScaleType } from './scales';
+import { CLIP_GAIN_MAX_DB, CLIP_GAIN_MIN_DB, CLIP_PITCH_RANGE, CLIP_STRETCH_MAX, CLIP_STRETCH_MIN } from './clips';
 import type {
+  AudioClip,
   AutomationData,
   AutomationPoint,
   Channel,
@@ -328,6 +330,24 @@ function parseMixerTrack(v: unknown, i: number): MixerTrack {
   };
 }
 
+/** Audio clip instance properties (clips.ts); defaults are left out. */
+function parseAudioClipProps(c: Record<string, unknown>): Partial<AudioClip> {
+  const out: Partial<AudioClip> = {};
+  const set = <K extends keyof AudioClip>(key: K, value: AudioClip[K], def: AudioClip[K]) => {
+    if (value !== def) out[key] = value;
+  };
+  set('gain', num(c.gain, 0, CLIP_GAIN_MIN_DB, CLIP_GAIN_MAX_DB), 0);
+  set('fadeIn', Math.round(num(c.fadeIn, 0, 0)), 0);
+  set('fadeOut', Math.round(num(c.fadeOut, 0, 0)), 0);
+  set('fadeInTension', num(c.fadeInTension, 0, -1, 1), 0);
+  set('fadeOutTension', num(c.fadeOutTension, 0, -1, 1), 0);
+  set('pitch', Math.round(num(c.pitch, 0, -CLIP_PITCH_RANGE, CLIP_PITCH_RANGE)), 0);
+  set('fine', Math.round(num(c.fine, 0, -100, 100)), 0);
+  set('stretch', num(c.stretch, 1, CLIP_STRETCH_MIN, CLIP_STRETCH_MAX), 1);
+  if (c.reverse === true) out.reverse = true;
+  return out;
+}
+
 export function parseTrackInput(v: unknown): TrackInput | null {
   if (typeof v !== 'string') return null;
   const m = /^(stereo|mono):(\d{1,2})$/.exec(v);
@@ -395,7 +415,7 @@ export function parseProject(raw: unknown): Project {
     if (c.kind === 'pattern' && typeof c.patternId === 'string' && patternIds.has(c.patternId)) {
       clips.push({ ...base, kind: 'pattern', patternId: c.patternId });
     } else if (c.kind === 'audio' && typeof c.channelId === 'string' && channelIds.has(c.channelId)) {
-      clips.push({ ...base, kind: 'audio', channelId: c.channelId });
+      clips.push({ ...base, kind: 'audio', channelId: c.channelId, ...parseAudioClipProps(c) });
     } else if (c.kind === 'automation' && typeof c.channelId === 'string' && automationIds.has(c.channelId)) {
       clips.push({ ...base, kind: 'automation', channelId: c.channelId });
     }

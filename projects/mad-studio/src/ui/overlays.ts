@@ -25,6 +25,7 @@ type DialogSpec =
   | { kind: 'confirm'; title: string; message: string; okLabel: string; danger: boolean; resolve: (v: boolean) => void }
   | { kind: 'custom'; id: CustomDialogId }
   | { kind: 'note'; patternId: string; channelId: string; noteId: string }
+  | { kind: 'clip'; clipId: string }
   | { kind: 'tool'; toolId: string; patternId: string; channelId: string; selected: string[]; ctx: ToolContext };
 
 interface Toast {
@@ -92,6 +93,11 @@ export function openDialog(id: CustomDialogId): void {
 /** FL Studio's note properties (double-click a note in the piano roll). */
 export function openNoteProperties(patternId: string, channelId: string, noteId: string): void {
   useOverlays.setState({ dialog: { kind: 'note', patternId, channelId, noteId } });
+}
+
+/** FL Studio's audio clip properties (Alt+double-click a clip in the playlist). */
+export function openClipProperties(clipId: string): void {
+  useOverlays.setState({ dialog: { kind: 'clip', clipId } });
 }
 
 /** A piano roll tool with parameters (FL Studio: Tools › Arpeggiate… etc.), previewed live. */

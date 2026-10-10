@@ -38,7 +38,10 @@ const enginePath = resolve(option('--engine', process.env.MAD_ENGINE ?? defaultE
 const { createDemoProject } = await import(`${app}/src/model/demo.ts`);
 const { songTimeline } = await import(`${app}/src/model/timeline.ts`);
 const { factorySampleKeys, generateFactorySample } = await import(`${app}/src/audio/factorySamples.ts`);
-const { factorySampleId } = await import(`${app}/src/model/factory.ts`);
+const { factorySampleId, factorySampleInfo } = await import(`${app}/src/model/factory.ts`);
+const { createSamplerChannel } = await import(`${app}/src/model/defaults.ts`);
+const { neededVariants, processVariant } = await import(`${app}/src/audio/clipVariants.ts`);
+const { parseVariantSampleId } = await import(`${app}/src/model/clips.ts`);
 
 const dist = join(app, 'dist');
 if (!existsSync(join(dist, 'index.html'))) throw new Error('run `npm run build` in projects/mad-studio first');
@@ -209,7 +212,7 @@ function compare(label, web, native) {
   return maxSecond;
 }
 
-// --only demo|notes|routing runs one group of comparisons (default: all).
+// --only demo|notes|routing|clips runs one group of comparisons (default: all).
 const only = option('--only', null);
 const runs = (group) => only === null || only === group;
 
@@ -320,6 +323,37 @@ for (const bus of [reverbBus, delayBus]) {
   for (let i = 1; i < solo.mixer.length; i++) if ((solo.mixer[i].routes ?? []).some((r) => r.to === bus)) solo.mixer[i].solo = true;
   compare(`  ${solo.mixer[bus].name.toLowerCase()}`, await browserRender(solo), nativeRender(solo, `routed-bus${bus}`));
 }
+}
+
+// Audio clips (model/clips.ts): gain, fades with tension, pitch, stretch and reverse on clips of the
+// riser. The browser computes the sample variants itself (renderProject); the native engine gets the
+// same variants, computed here with the same code, as sample files.
+if (runs('clips')) {
+const clipped = structuredClone(demo);
+const insert = 13;
+const ch = createSamplerChannel({ name: 'Riser clip', sampleId: factorySampleId('fx_riser'), params: { oneShot: true }, audioClip: true, mixerTrack: insert });
+clipped.channels.push(ch);
+clipped.samples[ch.sampler.sampleId] = factorySampleInfo('fx_riser');
+const track = clipped.tracks[clipped.tracks.length - 1].id;
+const audio = (id, start, length, props) => ({ id, kind: 'audio', trackId: track, channelId: ch.id, start, length, offset: 0, ...props });
+clipped.clips.push(
+  audio('pc_fades', 0, 384, { gain: -3, fadeIn: 96, fadeOut: 120, fadeInTension: 0.6, fadeOutTension: -0.4 }),
+  audio('pc_pitch', 768, 384, { offset: 48, pitch: 5, fine: -20 }),
+  audio('pc_stretch', 1536, 576, { stretch: 1.5, reverse: true, fadeOut: 200 }),
+  audio('pc_quiet', 2304, 192, { gain: -18, pitch: -7, fadeIn: 192 }),
+);
+for (const id of neededVariants(clipped)) {
+  const parsed = parseVariantSampleId(id);
+  const key = parsed.sampleId.replace(/^factory:/, '');
+  const [data] = processVariant([generateFactorySample(key, factoryRate)], factoryRate, parsed.variant);
+  const path = join(work, `variant-${sampleFiles.length}.f32`);
+  writeFileSync(path, Buffer.from(data.buffer, data.byteOffset, data.byteLength));
+  sampleFiles.push({ id, path, sampleRate: factoryRate, channels: 1, frames: data.length });
+}
+compare('audio clips', await browserRender(clipped), nativeRender(clipped, 'clips'));
+const soloClips = structuredClone(clipped);
+soloClips.mixer[insert].solo = true;
+compare('  clip insert', await browserRender(soloClips), nativeRender(soloClips, 'clips-solo'));
 }
 
 await browser.close();

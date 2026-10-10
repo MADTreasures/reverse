@@ -59,6 +59,15 @@ engine never interprets patterns or clips itself.
 * `length` is converted to seconds at trigger time using the current tempo.
 * `audioClip: true` → sampler voice is gated by `length` even for one-shot samplers, and playback starts
   `sampleOffset` ticks (converted to seconds at trigger time) into the sample.
+* Audio clip instance properties (`src/model/clips.ts`, optional, only with `audioClip`):
+  `sample` – id of a loaded sample to play instead of the channel's sample (the renderer computes
+  pitch-shifted, time-stretched and reversed variants of the channel's sample, ids like
+  `factory:fx_riser~x1.5c-200r`, and loads them with `samples.loadRaw`; a variant that is not loaded is
+  silent, and the channel's `reverse` plays its reversed copy); `clipGain` – linear gain (0..64);
+  `fadeIn` / `fadeOut` – ticks from the clip start / before the clip end (together at most `length`);
+  `fadeInTension` / `fadeOutTension` – −1..1. The fade gain is `x^(1+3t)` for tension `t ≥ 0`, else
+  `1−(1−x)^(1−3t)`, sampled at 256 points as float32 and interpolated linearly between them (exactly
+  what the browser's `setValueCurveAtTime` does), times `clipGain`, after the amp envelope.
 
 **Note properties** (FL Studio's note properties, `src/model/notes.ts`). All fields are optional and only
 sent when they differ from the default; the renderer has already resolved slide and portamento notes

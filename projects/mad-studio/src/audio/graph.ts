@@ -379,6 +379,16 @@ export class ProjectGraph {
     const strip = this.strips.get(ev.channelId);
     if (!strip || strip.channel.muted) return;
     const opts: TriggerOptions = ev.audioClip ? { gate: true, sampleOffset: (ev.sampleOffset ?? 0) * spt } : {};
+    if (ev.sample) opts.sample = ev.sample;
+    if (ev.clipGain !== undefined || ev.fadeIn || ev.fadeOut) {
+      opts.clip = {
+        gain: ev.clipGain ?? 1,
+        fadeIn: (ev.fadeIn ?? 0) * spt,
+        fadeOut: (ev.fadeOut ?? 0) * spt,
+        fadeInTension: ev.fadeInTension ?? 0,
+        fadeOutTension: ev.fadeOutTension ?? 0,
+      };
+    }
     if (ev.pan !== undefined) opts.pan = ev.pan;
     if (ev.fine !== undefined) opts.fine = ev.fine;
     if (ev.modX !== undefined) opts.modX = ev.modX;

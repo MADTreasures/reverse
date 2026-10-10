@@ -486,9 +486,27 @@ void GraphBuilder::publish()
     planInput = latencyInput();
     plan = planCompensation (planInput);
 
+    // Sample variants of the audio clips in the timeline (and their reversed copies when a sampler
+    // channel plays reversed); they may arrive after the timeline, so they are part of the structure.
+    std::vector<std::pair<SamplePtr, SamplePtr>> clipSamples;
+    if (currentTimeline != nullptr && ! currentTimeline->samples.empty())
+    {
+        const bool anyReversed = std::any_of (model.channels.begin(), model.channels.end(), [] (const ChannelModel& c)
+                                              { return c.kind == ChannelKind::sampler && c.samplerParams[sampler::reverse] >= 0.5f; });
+        for (const auto& id : currentTimeline->samples)
+        {
+            auto fwd = samples.get (id, false);
+            auto rev = anyReversed && fwd != nullptr ? samples.get (id, true) : nullptr;
+            clipSamples.emplace_back (std::move (fwd), std::move (rev));
+        }
+    }
+
     // Structure signature: anything the audio thread holds pointers to or iterates over.
     juce::String key;
     key << (int) tracks.size() << "|" << pointerKey (currentTimeline.get()) << "|" << pointerKey (currentAutomation.get()) << "|";
+    for (const auto& [fwd, rev] : clipSamples)
+        key << pointerKey (fwd.get()) << "/" << pointerKey (rev.get()) << ",";
+    key << "|";
     for (const auto& ch : model.channels)
     {
         const auto it = channels.find (ch.id);
@@ -599,6 +617,14 @@ void GraphBuilder::publish()
     snap->order.erase (std::remove_if (snap->order.begin(), snap->order.end(), [&] (int t) { return t < 0 || t >= (int) snap->tracks.size(); }),
                        snap->order.end());
     snap->timeline = currentTimeline;
+    for (const auto& [fwd, rev] : clipSamples)
+    {
+        snap->clipSamples.push_back ({ fwd.get(), rev.get() });
+        if (fwd != nullptr)
+            snap->keepAlive.push_back (std::const_pointer_cast<SampleData> (fwd));
+        if (rev != nullptr)
+            snap->keepAlive.push_back (std::const_pointer_cast<SampleData> (rev));
+    }
     snap->automation = bindAutomation();
     snap->latency = plan.total;
     if (plan.total > 0)

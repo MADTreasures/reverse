@@ -163,6 +163,13 @@ struct GraphSnapshot
     /** Track indices in processing order (senders before targets, the master last). */
     std::vector<int> order;
     std::shared_ptr<const Timeline> timeline;
+    /** Timeline::samples resolved (forward, reversed; null while not loaded). */
+    struct ClipSample
+    {
+        const SampleData* forward = nullptr;
+        const SampleData* reversed = nullptr;
+    };
+    std::vector<ClipSample> clipSamples;
     std::unique_ptr<AutomationBinding> automation;
     /** How far the output lags behind the transport (plugin delay compensation); the
         metronome is delayed by it to stay in time with the music. */

@@ -5,10 +5,13 @@ export interface SampleEntry {
   id: string;
   name: string;
   buffer: AudioBuffer;
-  source: 'factory' | 'user';
+  /** 'derived': an audio clip's variant (clipVariants.ts), recomputed instead of saved. */
+  source: 'factory' | 'user' | 'derived';
   /** Original encoded file for user samples, written into saved projects. */
   bytes?: Uint8Array;
   fileName?: string;
+  /** Derived samples: the source buffer they were computed from. */
+  derivedFrom?: AudioBuffer;
 }
 
 /** Decoded audio for factory and user samples, shared by live playback and offline rendering. */
@@ -42,6 +45,10 @@ export class SamplePool {
 
   userEntries(): SampleEntry[] {
     return [...this.entries.values()].filter((e) => e.source === 'user');
+  }
+
+  derivedEntries(): SampleEntry[] {
+    return [...this.entries.values()].filter((e) => e.source === 'derived');
   }
 
   clearUserSamples(): void {

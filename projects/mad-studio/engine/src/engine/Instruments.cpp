@@ -552,12 +552,19 @@ void SamplerInstrument::killAll (const BlockContext& ctx, int offset)
         kill (v, at);
 }
 
+const SampleData* SamplerInstrument::sampleFor (const NoteEvent& e, bool reverse) const noexcept
+{
+    if (e.sampleOverride)
+        return reverse ? e.sampleReversed : e.sample;
+    return reverse ? reversed.load() : forward.load();
+}
+
 void SamplerInstrument::collectChokes (const NoteEvent& e, const BlockContext& ctx, ChokeList& out) const noexcept
 {
     if (e.kind != NoteEvent::Kind::noteOn)
         return;
     const int c = ctx.chunkOf (e.offset);
-    const auto* sample = params[sampler::reverse].value (ctx, c) >= 0.5f ? reversed.load() : forward.load();
+    const auto* sample = sampleFor (e, params[sampler::reverse].value (ctx, c) >= 0.5f);
     if (sample == nullptr || sample->numFrames <= 0)
         return;
     const double duration = sample->durationSeconds();
@@ -612,7 +619,7 @@ void SamplerInstrument::handleEvent (const NoteEvent& e, const BlockContext& ctx
 
     const int c = ctx.chunkOf (e.offset);
     const auto P = [&] (int i) { return (double) params[(size_t) i].value (ctx, c); };
-    const auto* sample = P (sampler::reverse) >= 0.5 ? reversed.load() : forward.load();
+    const auto* sample = sampleFor (e, P (sampler::reverse) >= 0.5);
     if (sample == nullptr || sample->numFrames <= 0)
         return;
 
@@ -691,6 +698,8 @@ void SamplerInstrument::handleEvent (const NoteEvent& e, const BlockContext& ctx
     v->noteGains = sample->numChannels > 1 ? dsp::stereoPanGains (notePan) : dsp::monoPanGains (notePan);
     v->loopStart = startSec * sample->sampleRate;
     v->loopEnd = (double) sample->numFrames;
+    v->clip = e.clip;
+    v->clipDuration = std::max (0.0, e.lengthSeconds);
     v->chokeGroup = std::max (0, (int) std::lround (P (sampler::chokeGroup)));
     v->cutSelf = P (sampler::cutSelf) >= 0.5;
 
@@ -783,7 +792,9 @@ bool SamplerInstrument::render (const BlockContext& ctx, float* left, float* rig
             int64_t i1 = i0 + 1;
             if (i1 >= s.numFrames)
                 i1 = v.loop ? (int64_t) v.loopStart : i0;
-            const float env = v.env.next();
+            float env = v.env.next();
+            if (v.clip.active)
+                env *= notes::clipEnvelopeAt (v.clip, ((double) (ctx.blockStart + i) - v.startTime) / sampleRate, v.clipDuration);
             const float a = (float) (d0[i0] + (d0[i1] - d0[i0]) * frac);
             if (twoChannels)
             {

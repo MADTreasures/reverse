@@ -1,13 +1,15 @@
 import { useEffect, useMemo, useRef, useState, type DragEvent, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type WheelEvent as ReactWheelEvent } from 'react';
 import { engine } from '../../audio/engine';
+import { ensureClipVariants, suspendClipVariants } from '../../audio/clipVariants';
+import { CLIP_GAIN_MAX_DB, CLIP_GAIN_MIN_DB, CLIP_PITCH_RANGE, CLIP_STRETCH_MAX, CLIP_STRETCH_MIN } from '../../model/clips';
 import { segmentMidValue } from '../../model/automation';
 import { describeTarget, fromNorm } from '../../model/automationTargets';
 import { findPattern, songLength } from '../../model/patterns';
 import { foldIntoLoop } from '../../model/timeline';
 import { PALETTE, PALETTE_NAMES } from '../../model/colors';
-import { SNAP_OPTIONS, formatPosition, gridLineTicks, snapFloor, snapLabel, snapRound, snapTicks, ticksPerBar, type SnapId } from '../../model/timing';
+import { SNAP_OPTIONS, formatPosition, gridLineTicks, secondsToTicks, snapFloor, snapLabel, snapRound, snapTicks, ticksPerBar, ticksToSeconds, type SnapId } from '../../model/timing';
 import { makeId } from '../../model/ids';
-import type { AutomationChannel, Clip, Id, Project } from '../../model/types';
+import type { AudioClip, AutomationChannel, Clip, Id, Project } from '../../model/types';
 import { createAudioClip, importAudioFiles } from '../../project/projectIO';
 import {
   addClip,
@@ -34,6 +36,7 @@ import {
   sliceClips,
   setUi,
   toggleTrackMute,
+  updateAudioClips,
   updateClips,
 } from '../../store/actions';
 import { addAutomationPoint, moveAutomationPoint, placeAutomationClip, setPointTension } from '../../store/automationActions';
@@ -45,10 +48,11 @@ import { IconEraser, IconMute, IconPencil, IconPlaylist, IconSelect, IconSlice, 
 import { audioFilesFromDrop, getDragItem, hasDragItem, hasFiles, sampleInfoFor } from '../dnd';
 import { setHint } from '../hint';
 import { registerWindowKeys } from '../keyboard';
-import { promptDialog, showMenu, type MenuItem } from '../overlays';
+import { openClipProperties, promptDialog, showMenu, toast, type MenuItem } from '../overlays';
 import { WindowFrame } from '../workspace/WindowFrame';
 import { focusWindow, openChannelEditor, openPianoRoll, openWindow } from '../workspace/windows';
-import { CLIP_ICON_W, RULER_H, TRACK_LED_W, TRACK_W, automationClipView, drawPlaylist, tickAtX, trackAtY, xOfTick, yOfTrack, type PlaylistViewport } from './draw';
+import { chopClip, normalizeClips } from './audioClipTools';
+import { CLIP_ICON_W, RULER_H, TRACK_LED_W, TRACK_W, audioClipHandles, automationClipView, drawPlaylist, tickAtX, trackAtY, xOfTick, yOfTrack, type PlaylistViewport } from './draw';
 import { PlaylistPicker, usePick } from './PlaylistPicker';
 
 const EDGE = 7;
@@ -65,7 +69,71 @@ type Drag =
   | { kind: 'loop'; anchor: number; rawTick: number; x0: number; prev: { start: number; end: number } | null; moved: boolean }
   | { kind: 'pan'; x: number; y: number; scrollTick: number; scrollY: number }
   | { kind: 'autoPoint'; key: string; channelId: Id; clipId: Id; index: number; view: CurveView }
-  | { kind: 'autoTension'; key: string; channelId: Id; index: number; startY: number; startTension: number };
+  | { kind: 'autoTension'; key: string; channelId: Id; index: number; startY: number; startTension: number }
+  | { kind: 'clipFade'; key: string; clipId: Id; side: 'in' | 'out' }
+  | { kind: 'clipTension'; key: string; clipId: Id; side: 'in' | 'out'; startY: number; startTension: number }
+  | { kind: 'clipGain'; key: string; clipId: Id; startY: number; startGain: number };
+
+/** An audio clip's handles (FL Studio): fade triangles, tension circles, gain semi-circle. */
+type AudioHandle = 'fadeIn' | 'fadeOut' | 'tensionIn' | 'tensionOut' | 'gain';
+
+const HANDLE_HINTS: Record<AudioHandle, string> = {
+  fadeIn: 'Fade in – drag sideways (Alt: no snap), Alt+click: reset, right-click: options',
+  fadeOut: 'Fade out – drag sideways (Alt: no snap), Alt+click: reset, right-click: options',
+  tensionIn: 'Fade-in curve – drag up or down, Alt+click: reset',
+  tensionOut: 'Fade-out curve – drag up or down, Alt+click: reset',
+  gain: 'Clip gain – drag up or down (+36 dB … -∞), Alt+click: reset, right-click: normalize',
+};
+
+/** Resets one handle's property (FL Studio: Alt+click). */
+function resetHandle(clipId: Id, handle: AudioHandle): void {
+  updateAudioClips([clipId], (c) => {
+    if (handle === 'fadeIn') delete c.fadeIn;
+    else if (handle === 'fadeOut') delete c.fadeOut;
+    else if (handle === 'tensionIn') delete c.fadeInTension;
+    else if (handle === 'tensionOut') delete c.fadeOutTension;
+    else delete c.gain;
+  });
+}
+
+/** Right-click menu of an audio clip handle (FL Studio). */
+function handleMenu(project: Project, clip: AudioClip, handle: AudioHandle, selection: Set<string>): MenuItem[] {
+  const group = [...new Set([clip.id, ...project.clips.filter((c) => selection.has(c.id) && c.kind === 'audio').map((c) => c.id)])];
+  if (handle === 'gain') {
+    return [
+      { label: 'Clip gain', header: true },
+      { label: 'Reset gain', onClick: () => resetHandle(clip.id, 'gain') },
+      { label: 'Normalize selection individually', onClick: () => normalizeClips(group, false) },
+      { label: 'Normalize selection as a group', onClick: () => normalizeClips(group, true) },
+      {
+        label: 'Type in value…',
+        onClick: async () => {
+          const text = await promptDialog('Clip gain (dB)', String(clip.gain ?? 0));
+          const v = text === null ? NaN : Number(text.replace(',', '.').replace(/[^\d.+-]/g, ''));
+          if (Number.isFinite(v)) updateAudioClips([clip.id], (c) => void (c.gain = v));
+        },
+      },
+    ];
+  }
+  const fade = handle === 'fadeIn' || handle === 'tensionIn' ? 'in' : 'out';
+  const bpm = project.bpm;
+  return [
+    { label: fade === 'in' ? 'Fade in' : 'Fade out', header: true },
+    { label: `Reset fade ${fade}`, onClick: () => resetHandle(clip.id, fade === 'in' ? 'fadeIn' : 'fadeOut') },
+    { label: 'Reset curve', onClick: () => resetHandle(clip.id, fade === 'in' ? 'tensionIn' : 'tensionOut') },
+    {
+      label: 'Type in value…',
+      onClick: async () => {
+        const ticks = (fade === 'in' ? clip.fadeIn : clip.fadeOut) ?? 0;
+        const text = await promptDialog(`Fade ${fade} (ms)`, String(Math.round(ticksToSeconds(ticks, bpm) * 1000)));
+        const v = text === null ? NaN : Number(text.replace(',', '.').replace(/[^\d.]/g, ''));
+        if (!Number.isFinite(v)) return;
+        const t = Math.round(secondsToTicks(v / 1000, bpm));
+        updateAudioClips([clip.id], (c) => void (fade === 'in' ? (c.fadeIn = t) : (c.fadeOut = t)));
+      },
+    },
+  ];
+}
 
 let clipboard: Clip[] = [];
 
@@ -136,10 +204,41 @@ function clipMenu(project: Project, clip: Clip, select: (ids: Set<string>) => vo
   }
   const channel = project.channels.find((c) => c.id === clip.channelId);
   const similar = project.clips.filter((c) => c.kind === clip.kind && c.channelId === clip.channelId);
+  const audio: MenuItem[] =
+    clip.kind === 'audio'
+      ? [
+          { label: 'Clip properties…', shortcut: 'Alt+dbl-click', onClick: () => openClipProperties(clip.id) },
+          { label: 'Reverse', shortcut: '9', checked: clip.reverse === true, onClick: () => updateAudioClips([clip.id], (c) => void (c.reverse = !c.reverse)) },
+          { label: 'Normalize', onClick: () => normalizeClips([clip.id], false) },
+          {
+            label: 'Chop',
+            submenu: (['dull', 'medium', 'sharp'] as const).map((k) => ({
+              label: k[0].toUpperCase() + k.slice(1),
+              onClick: () => {
+                const cuts = chopClip(clip.id, k);
+                toast(cuts ? `Chopped into ${cuts + 1} clips.` : 'No beats found to chop at.');
+              },
+            })),
+          },
+          {
+            label: 'Reset fades',
+            disabled: !clip.fadeIn && !clip.fadeOut,
+            onClick: () =>
+              updateAudioClips([clip.id], (c) => {
+                delete c.fadeIn;
+                delete c.fadeOut;
+                delete c.fadeInTension;
+                delete c.fadeOutTension;
+              }),
+          },
+          { separator: true },
+        ]
+      : [];
   return [
     { label: clip.kind === 'audio' ? 'Audio clip' : 'Automation clip', header: true },
     muted,
     { separator: true },
+    ...audio,
     { label: 'Rename…', disabled: !channel, onClick: () => void promptDialog('Rename', channel?.name ?? '').then((n) => n && setChannelProps(clip.channelId, { name: n })) },
     { label: 'Change color', submenu: PALETTE.map((c, i) => ({ label: PALETTE_NAMES[i], swatch: c, onClick: () => setChannelProps(clip.channelId, { color: c }) })) },
     { label: 'Random color', onClick: () => setChannelProps(clip.channelId, { color: randomColor(channel?.color) }) },
@@ -291,6 +390,24 @@ export function Playlist() {
     return hit ? { ch, cv, hit } : null;
   };
 
+  /** The audio clip handle at (x, y), if any. */
+  const audioHandleAt = (clip: Clip, x: number, y: number): AudioHandle | null => {
+    if (clip.kind !== 'audio') return null;
+    const ti = project.tracks.findIndex((t) => t.id === clip.trackId);
+    if (ti < 0) return null;
+    const hd = audioClipHandles(vp, clip, xOfTick(vp, clip.start), yOfTrack(vp, ti) + 1, view.trackHeight - 3);
+    if (!hd) return null;
+    const near = (p: { x: number; y: number } | null, r: number) => !!p && Math.hypot(x - p.x, y - p.y) <= r;
+    if (near(hd.fadeInTension, 5)) return 'tensionIn';
+    if (near(hd.fadeOutTension, 5)) return 'tensionOut';
+    if (y >= hd.top - 2 && y <= hd.top + 9) {
+      if (Math.abs(x - hd.fadeInX) <= 6 && x >= hd.left) return 'fadeIn';
+      if (Math.abs(x - hd.fadeOutX) <= 6 && x <= hd.right) return 'fadeOut';
+    }
+    if (near(hd.gain, 7) && y <= hd.bottom + 1) return 'gain';
+    return null;
+  };
+
   const setAutoFocus = (next: { clipId: string; point: number | null; handle: number | null } | null) => {
     const cur = autoFocus.current;
     if (cur?.clipId === next?.clipId && cur?.point === next?.point && cur?.handle === next?.handle) return;
@@ -353,6 +470,28 @@ export function Playlist() {
     if (hit && e.button === 0 && editTool && onClipIcon(hit.clip, x, y)) {
       drag.current = null;
       showMenu(e, clipMenu(project, hit.clip, (ids) => setSelected(ids)));
+      return;
+    }
+    const handle = hit && editTool ? audioHandleAt(hit.clip, x, y) : null;
+    if (hit && handle && hit.clip.kind === 'audio') {
+      const clip = hit.clip;
+      if (e.button === 2) {
+        drag.current = null;
+        showMenu(e, handleMenu(project, clip, handle, selected));
+        return;
+      }
+      if (e.button !== 0) return;
+      if (e.altKey) {
+        resetHandle(clip.id, handle);
+        return;
+      }
+      const key = gestureKey('clip-handle');
+      if (handle === 'fadeIn' || handle === 'fadeOut') drag.current = { kind: 'clipFade', key, clipId: clip.id, side: handle === 'fadeIn' ? 'in' : 'out' };
+      else if (handle === 'gain') drag.current = { kind: 'clipGain', key, clipId: clip.id, startY: e.clientY, startGain: clip.gain ?? 0 };
+      else {
+        const side = handle === 'tensionIn' ? 'in' : 'out';
+        drag.current = { kind: 'clipTension', key, clipId: clip.id, side, startY: e.clientY, startTension: (side === 'in' ? clip.fadeInTension : clip.fadeOutTension) ?? 0 };
+      }
       return;
     }
     const auto = hit && !hit.edge ? automationAt(hit.clip, x, y) : null;
@@ -448,6 +587,7 @@ export function Playlist() {
       let anchor = hit.clip.id;
       if (hit.edge) {
         setSelected(sel);
+        if (view.stretch) suspendClipVariants(true);
         drag.current = { kind: 'resize', key, side: hit.edge, originTick: tick, orig, anchor };
         return;
       }
@@ -501,6 +641,12 @@ export function Playlist() {
       if (hit && onClipIcon(hit.clip, x, y)) {
         e.currentTarget.style.cursor = 'pointer';
         setHint(`${clipName(project, hit.clip)} – clip menu`);
+        return;
+      }
+      const handle = hit ? audioHandleAt(hit.clip, x, y) : null;
+      if (handle) {
+        e.currentTarget.style.cursor = handle === 'fadeIn' || handle === 'fadeOut' ? 'ew-resize' : 'ns-resize';
+        setHint(HANDLE_HINTS[handle]);
         return;
       }
       const auto = hit && !hit.edge ? automationAt(hit.clip, x, y) : null;
@@ -648,6 +794,30 @@ export function Playlist() {
         );
         break;
       }
+      case 'clipFade': {
+        const clip = project.clips.find((c) => c.id === d.clipId);
+        if (!clip || clip.kind !== 'audio') break;
+        const left = xOfTick(vp, clip.start);
+        const right = xOfTick(vp, clip.start + clip.length);
+        const raw = (d.side === 'in' ? x - left : right - x) / vp.pxPerTick;
+        const other = (d.side === 'in' ? clip.fadeOut : clip.fadeIn) ?? 0;
+        const ticks = Math.max(0, Math.min(clip.length - other, e.altKey ? Math.round(raw) : snapRound(raw, grid)));
+        updateAudioClips([clip.id], (c) => void (d.side === 'in' ? (c.fadeIn = ticks) : (c.fadeOut = ticks)), { coalesce: d.key, label: 'playlist clip fade' });
+        break;
+      }
+      case 'clipTension': {
+        const t = Math.max(-1, Math.min(1, d.startTension + (e.clientY - d.startY) / 80));
+        updateAudioClips([d.clipId], (c) => void (d.side === 'in' ? (c.fadeInTension = t) : (c.fadeOutTension = t)), { coalesce: d.key, label: 'playlist clip fade curve' });
+        break;
+      }
+      case 'clipGain': {
+        let db = Math.round((d.startGain + (d.startY - e.clientY) * 0.25) * 10) / 10;
+        if (db < -60) db = CLIP_GAIN_MIN_DB; // FL Studio: very low levels snap to -∞
+        db = Math.min(CLIP_GAIN_MAX_DB, db);
+        setHint(`Clip gain ${db <= CLIP_GAIN_MIN_DB ? '-∞' : `${db > 0 ? '+' : ''}${db.toFixed(1)}`} dB`);
+        updateAudioClips([d.clipId], (c) => void (c.gain = db), { coalesce: d.key, label: 'playlist clip gain' });
+        break;
+      }
       case 'resize': {
         const anchor = d.orig.get(d.anchor);
         if (!anchor) break;
@@ -657,6 +827,21 @@ export function Playlist() {
             for (const c of list) {
               const o = d.orig.get(c.id);
               if (!o) continue;
+              if (view.stretch && c.kind === 'audio' && o.kind === 'audio') {
+                // Stretch clips: the new length stretches the audio (offset and fades scale along).
+                const base = o.stretch ?? 1;
+                const wanted = d.side === 'right' ? snapRound(o.start + o.length + delta, g) - o.start : o.start + o.length - snapRound(o.start + delta, g);
+                const next = Math.min(CLIP_STRETCH_MAX, Math.max(CLIP_STRETCH_MIN, (base * Math.max(g, wanted)) / o.length));
+                const ratio = next / base;
+                c.length = Math.max(1, Math.round(o.length * ratio));
+                if (d.side === 'left') c.start = Math.max(0, o.start + o.length - c.length);
+                c.offset = Math.round(o.offset * ratio);
+                if (o.fadeIn) c.fadeIn = Math.round(o.fadeIn * ratio);
+                if (o.fadeOut) c.fadeOut = Math.round(o.fadeOut * ratio);
+                if (Math.abs(next - 1) < 1e-6) delete c.stretch;
+                else c.stretch = Math.round(next * 10000) / 10000;
+                continue;
+              }
               if (d.side === 'right') {
                 const end = snapRound(o.start + o.length + delta, g);
                 c.length = Math.max(g, end - o.start);
@@ -679,6 +864,10 @@ export function Playlist() {
   const onPointerUp = () => {
     const d = drag.current;
     drag.current = null;
+    if (d?.kind === 'resize' && view.stretch) {
+      suspendClipVariants(false);
+      ensureClipVariants(useStore.getState().project);
+    }
     if (d?.kind === 'loop' && !d.moved && d.prev) {
       // A right-click outside the time selection extends it to the clicked position.
       const { start, end } = d.prev;
@@ -698,6 +887,11 @@ export function Playlist() {
     }
     const hit = clipAt(x, y);
     if (!hit) return;
+    if (hit.clip.kind === 'audio' && e.altKey) {
+      // FL Studio: Alt+double-click opens the clip properties, a double-click the channel settings.
+      openClipProperties(hit.clip.id);
+      return;
+    }
     if (hit.clip.kind === 'pattern') {
       // FL Studio opens the pattern in the piano roll.
       selectPattern(hit.clip.patternId);
@@ -785,6 +979,19 @@ export function Playlist() {
             return true;
           }
         }
+        // FL Studio (typing keyboard off): 7 / 8 repitch the selected audio clips, 9 reverses them.
+        const audioIds = chosen.filter((c) => c.kind === 'audio').map((c) => c.id);
+        if (!mod && !e.altKey && audioIds.length && !useStore.getState().ui.typingKeyboard) {
+          if (e.code === 'Digit7' || e.code === 'Digit8') {
+            const step = e.code === 'Digit7' ? -1 : 1;
+            updateAudioClips(audioIds, (c) => void (c.pitch = Math.max(-CLIP_PITCH_RANGE, Math.min(CLIP_PITCH_RANGE, (c.pitch ?? 0) + step))), { label: 'playlist repitch clips' });
+            return true;
+          }
+          if (e.code === 'Digit9') {
+            updateAudioClips(audioIds, (c) => void (c.reverse = !c.reverse), { label: 'playlist reverse clips' });
+            return true;
+          }
+        }
         if ((e.key === 'Delete' || e.key === 'Backspace') && !mod && chosen.length) {
           deleteClips(chosen.map((c) => c.id));
           setSelected(new Set());
@@ -864,6 +1071,14 @@ export function Playlist() {
           </option>
         ))}
       </select>
+      <button
+        className={`btn ${view.stretch ? 'active' : ''}`}
+        aria-pressed={view.stretch === true}
+        data-hint="Stretch clips: resizing an audio clip stretches it (same pitch) instead of trimming it"
+        onClick={() => setView({ stretch: !view.stretch })}
+      >
+        ↔ Stretch
+      </button>
       <span className="faint">Right-click in an automation clip to add points</span>
     </>
   );

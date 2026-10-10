@@ -95,6 +95,23 @@ public:
         e.audioClip = ev.audioClip;
         e.clipOffsetSeconds = ev.audioClip ? ev.sampleOffset * secondsPerTick : 0.0;
         e.props = ev.props;
+        if (ev.audioClip)
+        {
+            // Audio clip instance: variant sample (graph.ts trigger(): opts.sample), gain and fades.
+            if (ev.clip.sample >= 0)
+            {
+                e.sampleOverride = true;
+                if (snap != nullptr && (size_t) ev.clip.sample < snap->clipSamples.size())
+                {
+                    e.sample = snap->clipSamples[(size_t) ev.clip.sample].forward;
+                    e.sampleReversed = snap->clipSamples[(size_t) ev.clip.sample].reversed;
+                }
+            }
+            const bool shaped = ev.clip.gain < 1.0f || ev.clip.gain > 1.0f || ev.clip.fadeIn > 0.0 || ev.clip.fadeOut > 0.0;
+            if (shaped)
+                e.clip = { true, ev.clip.gain, ev.clip.fadeIn * secondsPerTick, ev.clip.fadeOut * secondsPerTick, ev.clip.fadeInTension,
+                           ev.clip.fadeOutTension };
+        }
         // Slide bends in seconds at the tempo the note starts with (graph.ts trigger(): pitchCurve(…, spt)).
         e.numBends = bends != nullptr ? (int) std::min<uint32_t> (ev.bendCount, (uint32_t) maxNoteBends) : 0;
         for (int i = 0; i < e.numBends; ++i)

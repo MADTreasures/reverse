@@ -15,12 +15,14 @@ import { factorySampleInfo } from '../model/factory';
 import { makeId } from '../model/ids';
 import { MAX_POLYPHONY, channelSettings, isDefault as isDefaultSettings } from '../model/channelSettings';
 import { DEFAULT_SEND, SIDECHAIN_SEND, routedNeighbours, trackRoutes, wouldCycle } from '../model/routing';
+import { CLIP_GAIN_MAX_DB, CLIP_GAIN_MIN_DB, CLIP_PITCH_RANGE, CLIP_STRETCH_MAX, CLIP_STRETCH_MIN } from '../model/clips';
 import { clampPluginOffset, clampTrackOffset } from '../model/latency';
 import { findPattern, isStepNote, patternLength, stepIndex, stepKey } from '../model/patterns';
 import { findPreset } from '../model/presets';
 import type { ScaleSpec } from '../model/scales';
 import { MAX_BPM, MIN_BPM, TICKS_PER_STEP, ticksPerBar } from '../model/timing';
 import type {
+  AudioClip,
   Channel,
   ChannelSettings,
   Clip,
@@ -752,6 +754,60 @@ export function updateClips(recipe: (clips: Draft<Clip>[]) => void, opts?: EditO
   }, { label: 'playlist edit clip', ...opts });
 }
 
+/** Audio clip instance properties (FL Studio: fade, tension and gain handles, clip properties). */
+export type AudioClipProps = Pick<AudioClip, 'gain' | 'fadeIn' | 'fadeOut' | 'fadeInTension' | 'fadeOutTension' | 'pitch' | 'fine' | 'reverse' | 'stretch'>;
+
+/** Clamps a clip's instance properties and removes those at their default. */
+function normalizeAudioClip(c: Draft<AudioClip>): void {
+  const keep = <K extends keyof AudioClipProps>(key: K, value: AudioClipProps[K] | undefined, def: AudioClipProps[K]) => {
+    if (value === undefined || value === def) delete c[key];
+    else c[key] = value as Draft<AudioClip>[K];
+  };
+  const clamp = (v: number | undefined, lo: number, hi: number) => (v === undefined || !Number.isFinite(v) ? undefined : Math.min(hi, Math.max(lo, v)));
+  keep('gain', clamp(c.gain, CLIP_GAIN_MIN_DB, CLIP_GAIN_MAX_DB), 0);
+  keep('fadeIn', clamp(c.fadeIn === undefined ? undefined : Math.round(c.fadeIn), 0, c.length), 0);
+  keep('fadeOut', clamp(c.fadeOut === undefined ? undefined : Math.round(c.fadeOut), 0, c.length), 0);
+  keep('fadeInTension', clamp(c.fadeInTension, -1, 1), 0);
+  keep('fadeOutTension', clamp(c.fadeOutTension, -1, 1), 0);
+  keep('pitch', clamp(c.pitch === undefined ? undefined : Math.round(c.pitch), -CLIP_PITCH_RANGE, CLIP_PITCH_RANGE), 0);
+  keep('fine', clamp(c.fine === undefined ? undefined : Math.round(c.fine), -100, 100), 0);
+  keep('stretch', clamp(c.stretch, CLIP_STRETCH_MIN, CLIP_STRETCH_MAX), 1);
+  keep('reverse', c.reverse ? true : undefined, undefined);
+}
+
+/** Changes the instance properties of audio clips (other clips are ignored). */
+export function updateAudioClips(ids: Id[], recipe: (clip: Draft<AudioClip>) => void, opts?: EditOptions): void {
+  const set = new Set(ids);
+  if (!useStore.getState().project.clips.some((c) => set.has(c.id) && c.kind === 'audio')) return;
+  edit((d) => {
+    for (const c of d.clips) {
+      if (!set.has(c.id) || c.kind !== 'audio') continue;
+      recipe(c);
+      normalizeAudioClip(c);
+    }
+  }, { label: 'playlist audio clip properties', ...opts });
+}
+
+/**
+ * Sets an audio clip's time stretch; the clip's length and offset scale with it so the same audio stays
+ * in the clip (FL Studio: Stretch clips / clip properties).
+ */
+export function setClipStretch(ids: Id[], stretch: number, opts?: EditOptions): void {
+  updateAudioClips(
+    ids,
+    (c) => {
+      const next = Math.min(CLIP_STRETCH_MAX, Math.max(CLIP_STRETCH_MIN, stretch));
+      const ratio = next / (c.stretch ?? 1);
+      c.length = Math.max(1, Math.round(c.length * ratio));
+      c.offset = Math.max(0, Math.round(c.offset * ratio));
+      if (c.fadeIn) c.fadeIn = Math.round(c.fadeIn * ratio);
+      if (c.fadeOut) c.fadeOut = Math.round(c.fadeOut * ratio);
+      c.stretch = next;
+    },
+    { label: 'playlist stretch clip', ...opts },
+  );
+}
+
 export function deleteClips(ids: Id[], opts?: EditOptions): void {
   if (ids.length === 0) return;
   const set = new Set(ids);
@@ -783,7 +839,17 @@ export function sliceClips(ids: Id[], tick: number, opts?: EditOptions): Id[] {
       if (!set.has(c.id) || tick <= c.start || tick >= c.start + c.length) continue;
       const cut = Math.round(tick - c.start);
       const id = makeId('clip');
-      d.clips.push({ ...c, id, start: c.start + cut, length: c.length - cut, offset: c.offset + cut });
+      const right = { ...c, id, start: c.start + cut, length: c.length - cut, offset: c.offset + cut };
+      if (right.kind === 'audio' && c.kind === 'audio') {
+        // The fade-in stays on the left part, the fade-out on the right part.
+        delete right.fadeIn;
+        delete right.fadeInTension;
+        delete c.fadeOut;
+        delete c.fadeOutTension;
+        if (c.fadeIn && c.fadeIn > cut) c.fadeIn = cut;
+        if (right.fadeOut && right.fadeOut > right.length) right.fadeOut = right.length;
+      }
+      d.clips.push(right);
       c.length = cut;
       created.push(id);
     }
