@@ -46,6 +46,7 @@ import { sanitizeCurve01 } from '../paint/curve';
 import type { LayerEffects } from '../paint/effects';
 import { defaultTone, DOT_SHAPES, type ToneEffect } from '../paint/tone';
 import type { GradientFill } from '../paint/gradient';
+import { defaultGrid, sanitizeGrid, type GridSettings } from '../paint/grid';
 import { applyCorrection, correctionLabel, type Correction } from '../paint/tonal';
 import { combine, createMask, expandMask, invertMask, isMaskEmpty, isSelected, maskBounds, rectMask, type Mask, type SelectionOp } from '../paint/mask';
 import { mergeSubTools, type SubTool, type ToolId } from '../paint/tools';
@@ -991,10 +992,47 @@ export function createPerspectiveRuler(points: 1 | 2 | 3): void {
   addRuler({ kind: 'perspective', vps: defaultPerspective(points, doc.width, doc.height) }, getState().activeLayerId, 'Create perspective ruler');
 }
 
-/** View > Snap > Snap to ruler / Snap to special ruler. */
-export function toggleSnap(which: 'ruler' | 'special'): void {
-  setState((s) => (which === 'ruler' ? { snapRuler: !s.snapRuler } : { snapSpecial: !s.snapSpecial }));
+/** View > Snap > Snap to ruler / Snap to special ruler / Snap to grid. */
+export function toggleSnap(which: 'ruler' | 'special' | 'grid'): void {
+  setState((s) => (which === 'ruler' ? { snapRuler: !s.snapRuler } : which === 'special' ? { snapSpecial: !s.snapSpecial } : { snapGrid: !s.snapGrid }));
   engine.requestRender();
+}
+
+const GRID_DEFAULT_KEY = 'mad-paint:grid-default';
+
+/** The grid of a document: its own settings, else the saved default, else the reference's (10 mm, 4 divisions). */
+export function gridOf(doc: PaintDocument): GridSettings {
+  if (doc.grid) return doc.grid;
+  try {
+    const saved = sanitizeGrid(JSON.parse(localStorage.getItem(GRID_DEFAULT_KEY) ?? 'null'), doc.dpi);
+    if (saved) return saved;
+  } catch {
+    // No saved default.
+  }
+  return defaultGrid(doc.dpi);
+}
+
+/** View > Grid/Ruler bar settings; `asDefault` also keeps them for new canvases (Save as default). */
+export function setGridSettings(g: GridSettings, asDefault = false): void {
+  const grid = sanitizeGrid(g, getState().doc.dpi)!;
+  if (asDefault) {
+    try {
+      localStorage.setItem(GRID_DEFAULT_KEY, JSON.stringify(grid));
+    } catch {
+      // Storage unavailable.
+    }
+  }
+  changeDoc('Grid/Ruler bar settings', (doc) => {
+    doc.grid = grid;
+  });
+}
+
+export function toggleGrid(): void {
+  setState((s) => ({ showGrid: !s.showGrid }));
+}
+
+export function toggleRulerBar(): void {
+  setState((s) => ({ showRulerBar: !s.showRulerBar }));
 }
 
 // ------------------------------------------------------------------ dialog previews

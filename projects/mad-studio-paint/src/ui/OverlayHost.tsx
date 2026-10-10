@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { CanvasSizeDialog } from './dialogs/AdjustDialogs';
 import { FilterDialog } from './dialogs/FilterDialog';
+import { GridSettingsDialog } from './dialogs/GridSettingsDialog';
 import { filterSpec } from '../paint/filters';
 import { PressureDialog } from './dialogs/PressureDialog';
 import { DivideFrameDialog, DrawAlongRulerDialog, FrameTemplateDialog, NewFrameFolderDialog } from './dialogs/FrameDialogs';
@@ -80,6 +81,7 @@ export function OverlayHost() {
           {dialog.kind === 'custom' && dialog.id === 'pressure' && <PressureDialog />}
           {dialog.kind === 'filter' && <FilterDialog key={dialog.filter} id={dialog.filter} />}
           {dialog.kind === 'custom' && dialog.id === 'preferences' && <PreferencesDialog />}
+          {dialog.kind === 'custom' && dialog.id === 'gridSettings' && <GridSettingsDialog />}
           {dialog.kind === 'custom' && dialog.id === 'canvasSize' && <CanvasSizeDialog mode="canvas" />}
           {dialog.kind === 'custom' && dialog.id === 'imageResolution' && <CanvasSizeDialog mode="resolution" />}
           {dialog.kind === 'custom' && dialog.id === 'newFrameFolder' && <NewFrameFolderDialog />}

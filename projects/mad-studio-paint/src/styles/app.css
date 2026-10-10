@@ -3238,3 +3238,59 @@ body.canvas-only .modal * {
   margin: 4px 0 0;
   font-size: 11px;
 }
+
+/* View > Ruler bar: along the top and left of the canvas window (presses go through to the canvas). */
+.ruler-bar {
+  position: absolute;
+  top: 0;
+  left: 0;
+  pointer-events: none;
+  z-index: 2;
+}
+
+.ruler-bar.top {
+  width: 100%;
+  height: 18px;
+}
+
+.ruler-bar.left {
+  width: 18px;
+  height: 100%;
+}
+
+/* Grid/Ruler bar settings: start points laid out like the reference (centre between the corners). */
+.grid-settings-body {
+  display: flex;
+  gap: 16px;
+}
+
+.grid-origins {
+  display: grid;
+  grid-template-columns: repeat(3, auto);
+  gap: 6px 14px;
+  margin-bottom: 8px;
+}
+
+.grid-origins .origin-topLeft {
+  grid-area: 1 / 1;
+}
+
+.grid-origins .origin-topRight {
+  grid-area: 1 / 3;
+}
+
+.grid-origins .origin-center {
+  grid-area: 2 / 2;
+}
+
+.grid-origins .origin-bottomLeft {
+  grid-area: 3 / 1;
+}
+
+.grid-origins .origin-bottomRight {
+  grid-area: 3 / 3;
+}
+
+.grid-origins .origin-custom {
+  grid-area: 4 / 1;
+}

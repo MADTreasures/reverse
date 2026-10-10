@@ -168,6 +168,7 @@ Status: ✅ gleich · 🟡 ähnlich/vereinfacht · ❌ fehlt (noch)
 
 | Bereich | Clip Studio Paint (Doku) | MAD Studio Paint | Status | Test |
 | ------- | ------------------------ | ---------------- | ------ | ---- |
+| Raster und Linealleiste | *View → Ruler bar* (⌘R; oben und links, 0 am Startpunkt), *View → Grid*, *View → Grid/Ruler bar settings*: Startpunkt (oben links, oben rechts, Mitte, unten links, unten rechts, eigener in px), Rasterabstand (Standard 10 mm) und Unterteilungen (Standard 4), *Save as default*; *View → Snap → Snap to grid* (⌘3) bei sichtbarem Raster; Raster mit *Move grid* verschieben [GRID, MENU] | gleich ausser *Move grid*; Raster und Linealleiste in Pixeln (Abstand im Dialog in px, Standard 10 mm bei der Dokumentauflösung), die Einstellungen werden im Dokument gespeichert (Rückgängig möglich), *Save as default* gilt für Dokumente ohne eigene; ein Strich, der nahe einer Rasterlinie beginnt, folgt ihr (an Kreuzungen der Linie in Strichrichtung); die Linealleiste zeigt die Zeigerposition und bleibt bei gedrehter Ansicht leer | 🟡 | `View > Grid, Ruler bar …`, Unit: `grid and ruler bar` |
 | Zoomstufen | 3200, 1600, 800, 400, 200, 150, 100, 66.67, 50, 33.33, 25 % … bis 0.78 % [PRF, T684] | gleich (unter 25 % halbierend, nicht belegt) | 🟡 | `zoom steps …` |
 | Drehen | Schritt 5° (einstellbar), −179.9 … 180°, Ansicht spiegeln [NAV, PRF] | gleich | ✅ | `rotation: …` |
 | Mausrad | zoomt [NAV] | Mausrad zoomt; Trackpad: zwei Finger verschieben, Pinch zoomt | 🟡 | – |
@@ -337,6 +338,7 @@ Präfix `M/` = `https://help.clip-studio.com/en-us/manual_en/` (Handbuch Ver. 5.
 | DYN, BS, TS, PB | `M/240_brushes/Customizing_brush_tools.htm`, `…/Brush_Size_palette.htm`, `…/Tool_Sliders_palette.htm`, `…/Drawing_and_painting.htm` |
 | SEL, CW, CS, CSET, CH, EYE | `M/300_color/Selecting_colors.htm`, `…/Color_Wheel_palette.htm`, `…/Color_Slider_palette.htm`, `…/Color_Set_palette.htm`, `…/Color_History_palette.htm`, `…/Eyedropper_Tool.htm` |
 | NAV, CANVAS | `M/270_canvas/Navigating_the_canvas.htm`, `…/Canvas_window.htm` |
+| GRID | `M/270_canvas/Using_the_ruler_bar_and_grid.htm` |
 | LP, BO, OLS, REF, DR, FOL, BL | `M/180_layers/Using_layers.htm`, `…/Basic_operations.htm`, `…/Other_layer_settings.htm`, `…/Reference_layers.htm`, `…/Draft_layers.htm`, `…/Layer_folders.htm`, `…/Blending_modes.htm` |
 | MASK, LPROP | `M/180_layers/Layer_masks.htm`, `…/Layer_properties.htm` |
 | VEC, ERASE | `M/180_layers/Vector_layers.htm`, `M/240_brushes/Eraser_tools.htm` |

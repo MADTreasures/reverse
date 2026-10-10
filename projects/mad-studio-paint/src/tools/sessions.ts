@@ -6,6 +6,7 @@ import { CLOSE_GAP_STEPS, floodFillMask } from '../paint/fill';
 import { combine, ellipseMask, expandMask, isSelected, maskBounds, polygonMask, rectMask, translateMask, type Mask, type SelectionOp } from '../paint/mask';
 import { fromPoints, union, type Rect } from '../paint/rect';
 import { distanceToRuler, isSpecial, perspectiveConstraint, rulerConstraint, rulerLine, symmetryTransforms, type Affine, type Constraint, type Pt, type Ruler } from '../paint/rulers';
+import { gridOrigin, nearestLine } from '../paint/grid';
 import { ellipsePoints, rectPoints, snapAngle, type StrokePoint } from '../paint/stroke';
 import { evalPressureCurve } from '../paint/curve';
 import { DEFAULT_BRUSH, type FillReference, type SubTool } from '../paint/tools';
@@ -101,14 +102,12 @@ function strokeOverlayColor(ctx: CanvasRenderingContext2D): void {
 /** End of the last brush stroke per layer (⇧-click connects from there). */
 let lastStrokeEnd: { layerId: Id; x: number; y: number; pressure: number } | null = null;
 
-type PerspectiveRuler = Extract<Ruler, { kind: 'perspective' }>;
-
 /** How the current rulers shape a stroke that starts at `start`. */
 interface Snap {
   copies: Affine[] | null;
   constrain: Constraint | null;
-  /** Perspective: the direction is chosen once the stroke has moved a little. */
-  perspective: PerspectiveRuler | null;
+  /** Perspective ruler or grid: the direction is chosen once the stroke has moved a little. */
+  choose: ((start: Pt, now: Pt) => Constraint | null) | null;
 }
 
 /**
@@ -118,15 +117,39 @@ interface Snap {
  */
 export function rulerSnap(start: Pt): Snap {
   const s = getState();
-  const none: Snap = { copies: null, constrain: null, perspective: null };
+  const none: Snap = { copies: null, constrain: null, choose: null };
   const rulers = actions.activeRulers(s).map((x) => x.ruler);
   const near = s.snapRuler ? nearRuler(rulers, start) : null;
   const special = s.snapSpecial ? rulers.find(isSpecial) : undefined;
   if (special?.kind === 'symmetry') return { ...none, copies: symmetryTransforms(special), constrain: near };
   if (near) return { ...none, constrain: near };
-  if (special?.kind === 'perspective') return { ...none, perspective: special };
+  if (special?.kind === 'perspective') return { ...none, choose: (a, b) => perspectiveConstraint(special, a, b) };
   const c = special ? rulerConstraint(special, start) : null;
-  return c ? { ...none, constrain: c } : none;
+  if (c) return { ...none, constrain: c };
+  const grid = gridSnap(start);
+  return grid ? { ...none, choose: grid } : none;
+}
+
+/**
+ * View > Snap > Snap to grid (with the grid shown): a stroke starting near a grid line follows it;
+ * near a crossing, the line along the direction the stroke starts in.
+ */
+function gridSnap(start: Pt): ((from: Pt, now: Pt) => Constraint | null) | null {
+  const s = getState();
+  if (!s.snapGrid || !s.showGrid) return null;
+  const g = actions.gridOf(s.doc);
+  const o = gridOrigin(g, s.doc.width, s.doc.height);
+  const reach = 16 / Math.max(0.01, s.view.zoom);
+  const gx = nearestLine(o.x, g.gap, g.divisions, start.x);
+  const gy = nearestLine(o.y, g.gap, g.divisions, start.y);
+  const vertical = Math.abs(start.x - gx) <= reach;
+  const horizontal = Math.abs(start.y - gy) <= reach;
+  if (!vertical && !horizontal) return null;
+  return (from, now) => {
+    const across = Math.abs(now.x - from.x) >= Math.abs(now.y - from.y);
+    if (horizontal && (across || !vertical)) return (p) => ({ x: p.x, y: gy });
+    return (p) => ({ x: gx, y: p.y });
+  };
 }
 
 /** The constraint of the ruler or frame border a stroke starts near (within about 16 screen pixels). */
@@ -208,15 +231,15 @@ export class BrushSession implements ToolSession {
       this.stroke.constrain = this.snap.constrain;
     }
     if (this.lineMode) this.drawLine(p);
-    else if (this.snap.perspective && this.stroke instanceof BrushStroke) this.held = [toStroke(p)];
+    else if (this.snap.choose && this.stroke instanceof BrushStroke) this.held = [toStroke(p)];
     else this.stroke.add(toStroke(p));
   }
 
   /** End point of a straight line, following the rulers. */
   private lineEnd(from: StrokePoint, p: PointerInfo): StrokePoint {
     const end = { ...toStroke(p), pressure: from.pressure };
-    if (this.snap.perspective) {
-      const c = perspectiveConstraint(this.snap.perspective, from, end);
+    if (this.snap.choose) {
+      const c = this.snap.choose(from, end);
       return c ? { ...end, ...c(end) } : end;
     }
     return this.snap.constrain ? { ...end, ...this.snap.constrain(end) } : end;
@@ -239,8 +262,8 @@ export class BrushSession implements ToolSession {
     if (this.held) {
       this.held.push(...points);
       if (Math.hypot(p.sx - this.start.sx, p.sy - this.start.sy) < PERSPECTIVE_DECIDE_PX) return;
-      // The stroke follows the perspective direction closest to how it started.
-      (this.stroke as BrushStroke).constrain = perspectiveConstraint(this.snap.perspective!, this.held[0], toStroke(p));
+      // The stroke follows the perspective direction (or grid line) closest to how it started.
+      (this.stroke as BrushStroke).constrain = this.snap.choose!(this.held[0], toStroke(p));
       const held = this.held;
       this.held = null;
       for (const q of held) this.stroke.add(q);
@@ -309,8 +332,8 @@ export class FigureSession implements ToolSession {
     const shape = this.sub.figureShape ?? 'line';
     if (shape === 'line') {
       const from = { x: x0, y: y0, pressure: 1 };
-      if (this.snap.perspective) {
-        const c = perspectiveConstraint(this.snap.perspective, from, { x: x1, y: y1 });
+      if (this.snap.choose) {
+        const c = this.snap.choose(from, { x: x1, y: y1 });
         if (c) ({ x: x1, y: y1 } = c({ x: x1, y: y1 }));
       } else if (this.snap.constrain) ({ x: x1, y: y1 } = this.snap.constrain({ x: x1, y: y1 }));
       else if (m.shift) ({ x: x1, y: y1 } = snapAngle(x0, y0, x1, y1));

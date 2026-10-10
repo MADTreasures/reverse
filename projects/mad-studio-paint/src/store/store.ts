@@ -92,9 +92,13 @@ export interface PaintState {
   menuHidden: boolean;
   /** The Advanced Tool Settings palette is open. */
   advancedToolSettings: boolean;
-  /** View > Snap: linear rulers and guides / special rulers (symmetry, perspective, …). */
+  /** View > Snap: linear rulers and guides / special rulers (symmetry, perspective, …) / grid. */
   snapRuler: boolean;
   snapSpecial: boolean;
+  snapGrid: boolean;
+  /** View > Grid and View > Ruler bar. */
+  showGrid: boolean;
+  showRulerBar: boolean;
   /** Ruler selected with the Object tool. */
   selectedRuler: { layerId: Id; rulerId: string } | null;
   /** Objects of the active layer selected with the Object tool (vector lines, text boxes, balloons). */
@@ -218,6 +222,9 @@ function initialState(): PaintState {
     advancedToolSettings: false,
     snapRuler: true,
     snapSpecial: true,
+    snapGrid: false,
+    showGrid: false,
+    showRulerBar: false,
     selectedRuler: null,
     selectedObjects: [],
     textEdit: null,

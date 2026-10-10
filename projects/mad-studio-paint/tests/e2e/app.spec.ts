@@ -3763,3 +3763,53 @@ test('Edit > Transform modes: free transform corners, perspective, mesh; Tool Pr
   expect(await alpha(150, 150)).toBe(0);
   expect(errors).toEqual([]);
 });
+
+test('View > Grid, Ruler bar, Grid/Ruler bar settings and Snap to grid', async ({ page }) => {
+  const errors = await boot(page);
+  /** Darkest red of the screen canvas around a document point (lines are one screen pixel wide). */
+  const screenRed = async (x: number, y: number) => {
+    await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
+    const p = await docToScreen(page, x, y);
+    return page.evaluate(
+      ([sx, sy]) => {
+        const c = document.querySelector('[data-testid=paint-canvas]') as HTMLCanvasElement;
+        const r = c.getBoundingClientRect();
+        const dpr = c.width / r.width;
+        const d = c.getContext('2d')!.getImageData(Math.floor((sx - r.left) * dpr) - 1, Math.floor((sy - r.top) * dpr) - 1, 3, 3).data;
+        return Math.min(...[0, 4, 8, 12, 16, 20, 24, 28, 32].map((i) => d[i]));
+      },
+      [p.x, p.y],
+    );
+  };
+  // Settings: a 50 px grid in 2 parts from the top left.
+  await page.getByRole('navigation', { name: 'Main menu' }).getByRole('button', { name: 'View', exact: true }).dispatchEvent('pointerdown');
+  await page.locator('[data-command=gridSettings]').click();
+  const dlg = page.getByRole('dialog', { name: 'Grid/Ruler bar settings' });
+  await expect(dlg.getByRole('radio', { name: 'Top left' })).toBeChecked();
+  await dlg.getByRole('spinbutton', { name: 'Gap' }).fill('50');
+  await dlg.getByRole('spinbutton', { name: 'Number of divisions' }).fill('2');
+  await dlg.getByRole('button', { name: 'OK' }).click();
+  expect(await page.evaluate(() => window.__madPaint.useStore.getState().doc.grid)).toMatchObject({ origin: 'topLeft', gap: 50, divisions: 2 });
+  // The grid shows over the canvas.
+  expect(await screenRed(103, 103)).toBe(255);
+  await page.evaluate(() => window.__madPaint.runCommand('toggleGrid'));
+  expect(await screenRed(100, 112)).toBeLessThan(230);
+  expect(await screenRed(112, 112)).toBe(255);
+  // ⌘R shows the ruler bar.
+  await expect(page.getByTestId('ruler-bar-top')).toHaveCount(0);
+  await page.keyboard.press('ControlOrMeta+r');
+  await expect(page.getByTestId('ruler-bar-top')).toBeVisible();
+  await expect(page.getByTestId('ruler-bar-left')).toBeVisible();
+  // ⌘3 Snap to grid: a stroke starting near a line follows it.
+  await page.keyboard.press('ControlOrMeta+3');
+  expect(await page.evaluate(() => window.__madPaint.useStore.getState().snapGrid)).toBe(true);
+  await thinPen(page);
+  await drag(page, [60, 103], [190, 110], 12);
+  expect(await layerAlpha(page, 180, 100)).toBeGreaterThan(200);
+  expect(await layerAlpha(page, 180, 110)).toBe(0);
+  // Undo removes the stroke, then the settings.
+  await page.keyboard.press('ControlOrMeta+z');
+  await page.keyboard.press('ControlOrMeta+z');
+  expect(await page.evaluate(() => window.__madPaint.useStore.getState().doc.grid)).toBeUndefined();
+  expect(errors).toEqual([]);
+});

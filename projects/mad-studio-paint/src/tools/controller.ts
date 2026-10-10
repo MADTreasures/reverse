@@ -32,6 +32,7 @@ import { correctSession, drawCorrectHover, drawSelectedControlPoints } from './c
 import { drawGradientHandles, drawLineSelection, lineHandleCursor, objectSession } from './objectTool';
 import { drawCameraGuides, drawKeyBox, keyframeTarget, keyHandleCursor } from './keyframeTool';
 import { drawFrameLines } from './frameLines';
+import { drawGrid } from './gridOverlay';
 import { drawLightBox, lightHandleCursor, lightTableSession } from './lightTableTool';
 import { isCameraFolder, tracksOf } from '../model/animation';
 import { balloonSession, textSession } from './textTool';
@@ -232,6 +233,7 @@ class Controller {
     const s = getState();
     // Animation frame lines (output frame, title-safe area, overflow frame) under the rest.
     if (s.doc.outputFrame && s.showFrameLines) drawFrameLines(ctx, this.view, s.doc.outputFrame);
+    if (s.showGrid) drawGrid(ctx, this.view, s.doc, actions.gridOf(s.doc), s.viewport);
     drawRulers(ctx, this.view);
     // 2D camera folders around the current layer: their camera frames (field guides).
     if (s.doc.timeline?.enabled && !s.cameraView) drawCameraGuides(ctx, this.view, tracksOf(s.doc.layers, s.activeLayerId).filter(isCameraFolder));

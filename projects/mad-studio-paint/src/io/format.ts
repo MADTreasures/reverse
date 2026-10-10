@@ -28,6 +28,7 @@ import { PLACEMENT_CHANNELS, removeChannels, sanitizeKeyframes, sanitizeKeyTrack
 import { sanitizeLightLayers } from '../paint/lightTable';
 import { sanitizeSound } from '../paint/sound';
 import { sanitizeOutputFrame } from '../paint/outputFrame';
+import { sanitizeGrid } from '../paint/grid';
 import { sanitizeTimelines } from '../model/timelines';
 
 export const FORMAT = 'mad-studio-paint';
@@ -249,12 +250,14 @@ export function sanitizeDocument(raw: unknown): PaintDocument {
   const height = clampCanvasSide(num(r.height, 1000, 1, 1e6));
   const outputFrame = sanitizeOutputFrame(r.outputFrame, width, height);
   const timelines = timeline ? sanitizeTimelines(r.timelines, layers) : undefined;
+  const dpi = Math.round(num(r.dpi, 72, 1, 2400));
+  const grid = sanitizeGrid(r.grid, dpi);
   return {
     id: str(r.id, 'd-imported', 64),
     name: str(r.name, 'Untitled', 120),
     width,
     height,
-    dpi: Math.round(num(r.dpi, 72, 1, 2400)),
+    dpi,
     paper: { visible: bool(paper.visible, true), color: color(paper.color, '#ffffff') },
     layers: layers.length ? layers : [createRasterLayer('Layer 1')],
     ...(timeline ? { timeline } : {}),
@@ -263,6 +266,7 @@ export function sanitizeDocument(raw: unknown): PaintDocument {
     ...(outputFrame ? { outputFrame } : {}),
     ...(timelines ? { timelines } : {}),
     ...(movieFiles.length ? { movies: movieFiles } : {}),
+    ...(grid ? { grid } : {}),
   };
 }
 

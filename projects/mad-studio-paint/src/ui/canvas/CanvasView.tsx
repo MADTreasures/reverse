@@ -14,6 +14,7 @@ import { getState, useStore } from '../../store/store';
 import { commitTextEdit } from '../../store/textActions';
 import { controller } from '../../tools/controller';
 import type { PointerInfo } from '../../tools/types';
+import { RulerBar } from './RulerBar';
 import { SelectionLauncher } from './SelectionLauncher';
 import { TextEditor } from './TextEditor';
 
@@ -262,7 +263,8 @@ export function CanvasView() {
           s.textEdit !== prev.textEdit ||
           s.snapRuler !== prev.snapRuler ||
           s.snapSpecial !== prev.snapSpecial ||
-          s.showFrameLines !== prev.showFrameLines
+          s.showFrameLines !== prev.showFrameLines ||
+          s.showGrid !== prev.showGrid
         )
           schedule();
       }),
@@ -293,6 +295,7 @@ export function CanvasView() {
   return (
     <div className="canvas-host" ref={hostRef}>
       <canvas ref={canvasRef} className="paint-canvas" data-testid="paint-canvas" />
+      <RulerBar />
       <SelectionLauncher />
       <TextEditor />
     </div>

@@ -53,12 +53,15 @@ function persistPreferences(): void {
       ...(typeof p.timelineShown === 'boolean' ? { timelineShown: p.timelineShown } : {}),
       ...(typeof p.timelineHeight === 'number' && Number.isFinite(p.timelineHeight) ? { timelineHeight: Math.min(700, Math.max(110, p.timelineHeight)) } : {}),
       ...(p.onion ? { onion: sanitizeOnion(p.onion) } : {}),
+      ...(typeof p.showGrid === 'boolean' ? { showGrid: p.showGrid } : {}),
+      ...(typeof p.showRulerBar === 'boolean' ? { showRulerBar: p.showRulerBar } : {}),
+      ...(typeof p.snapGrid === 'boolean' ? { snapGrid: p.snapGrid } : {}),
     });
   } catch {
     // Ignore.
   }
   useStore.subscribe((s, prev) => {
-    const keys = ['workspace', 'showSelectionLauncher', 'loop', 'timelineShown', 'timelineHeight', 'onion'] as const;
+    const keys = ['workspace', 'showSelectionLauncher', 'loop', 'timelineShown', 'timelineHeight', 'onion', 'showGrid', 'showRulerBar', 'snapGrid'] as const;
     if (keys.every((k) => s[k] === prev[k])) return;
     try {
       localStorage.setItem(PREFS_KEY, JSON.stringify(Object.fromEntries(keys.map((k) => [k, s[k]]))));

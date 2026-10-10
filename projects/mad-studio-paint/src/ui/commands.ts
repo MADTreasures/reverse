@@ -233,6 +233,10 @@ export const COMMANDS: Command[] = [
   // View > Snap, Layer > Ruler/Frame
   { id: 'snapRuler', label: 'Snap to ruler', keys: ['Mod+1'], run: () => actions.toggleSnap('ruler'), checked: () => getState().snapRuler },
   { id: 'snapSpecial', label: 'Snap to special ruler', keys: ['Mod+2'], run: () => actions.toggleSnap('special'), checked: () => getState().snapSpecial },
+  { id: 'snapGrid', label: 'Snap to grid', keys: ['Mod+3'], run: () => actions.toggleSnap('grid'), checked: () => getState().snapGrid },
+  { id: 'toggleRulerBar', label: 'Ruler bar', keys: ['Mod+r'], run: () => actions.toggleRulerBar(), checked: () => getState().showRulerBar },
+  { id: 'toggleGrid', label: 'Grid', run: () => actions.toggleGrid(), checked: () => getState().showGrid },
+  { id: 'gridSettings', label: 'Grid/Ruler bar settings…', run: () => openDialog('gridSettings') },
   { id: 'perspective1', label: 'Create perspective ruler: 1-point', run: () => actions.createPerspectiveRuler(1), enabled: hasLayer },
   { id: 'perspective2', label: 'Create perspective ruler: 2-point', run: () => actions.createPerspectiveRuler(2), enabled: hasLayer },
   { id: 'perspective3', label: 'Create perspective ruler: 3-point', run: () => actions.createPerspectiveRuler(3), enabled: hasLayer },

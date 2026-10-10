@@ -11,6 +11,7 @@ import type { Ruler } from '../paint/rulers';
 import type { Correction } from '../paint/tonal';
 import type { FrameBorder } from '../paint/frames';
 import type { GradientFill } from '../paint/gradient';
+import type { GridSettings } from '../paint/grid';
 import type { Balloon, TextBox } from '../paint/text';
 import type { VectorStroke } from '../paint/vector';
 
@@ -262,4 +263,6 @@ export interface PaintDocument {
   timelines?: TimelineSet;
   /** The movie files the movie layers show. */
   movies?: MovieFile[];
+  /** View > Grid/Ruler bar settings (absent: the saved default). */
+  grid?: GridSettings;
 }
