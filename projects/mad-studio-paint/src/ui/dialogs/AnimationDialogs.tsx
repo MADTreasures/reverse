@@ -3,7 +3,8 @@
  * Onion skin settings, and File > Export animation (image sequence, animated GIF, APNG, WebP, movie).
  */
 import { useEffect, useMemo, useState } from 'react';
-import { exportAnimation, exportMovie, type AnimationFormat } from '../../io/documentIO';
+import { celFiles, exportAnimation, exportAnimationCels, exportAudio, exportMovie, type AnimationFormat } from '../../io/documentIO';
+import { CEL_NAME_FORMATS, type CelNameFormat } from '../../io/animationCels';
 import { SEQUENCE_EXT, sequenceNames, type SequenceType } from '../../io/sequence';
 import { hasSound, isCameraFolder, outputRect } from '../../model/animation';
 import { findLayer, flatten } from '../../model/layers';
@@ -948,6 +949,159 @@ export function AssignMultipleDialog() {
         </span>
       </fieldset>
       <Actions />
+    </form>
+  );
+}
+
+/**
+ * File > Export animation > Export animation cels: every cel of every animation folder as an image
+ * (a folder per animation folder, saved together in a ZIP), named like the reference's options.
+ */
+export function AnimationCelsExportDialog() {
+  const doc = useStore((s) => s.doc);
+  const [folder, setFolder] = useState(doc.name || 'Cels');
+  const [format, setFormat] = useState<CelNameFormat>('cel');
+  const [prefix, setPrefix] = useState('');
+  const [suffix, setSuffix] = useState('');
+  const [separator, setSeparator] = useState('_');
+  const [type, setType] = useState<SequenceType>('png');
+  const [area, setArea] = useState<DrawingArea>(doc.outputFrame?.overflow ? 'overflow' : doc.outputFrame ? 'output' : 'canvas');
+  const [drafts, setDrafts] = useState(false);
+  const [frameLines, setFrameLines] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const names = { format, prefix, suffix, separator };
+  const groups = celFiles({ names });
+  const first = groups.find((g) => g.cels.length);
+  const count = groups.reduce((n, g) => n + g.cels.length, 0);
+  return (
+    <form
+      className="modal export-settings"
+      role="dialog"
+      aria-label="Export animation cels"
+      onSubmit={async (e) => {
+        e.preventDefault();
+        setBusy(true);
+        await new Promise((r) => setTimeout(r, 20));
+        const ok = await exportAnimationCels({ folder, names, type, area, drafts, frameLines });
+        setBusy(false);
+        if (ok) closeDialog();
+      }}
+    >
+      <h2>Export animation cels</h2>
+      <fieldset className="group">
+        <legend>File name settings</legend>
+        <div className="form-grid">
+          <label htmlFor="ac-folder">Export folder name</label>
+          <input id="ac-folder" value={folder} onChange={(e) => setFolder(e.target.value.slice(0, 60))} />
+          <label>File name</label>
+          <span data-testid="cel-file-name">{first ? `${first.folderName}/${first.cels[0].file}.${SEQUENCE_EXT[type]}` : '—'}</span>
+          <label htmlFor="ac-format">File name format</label>
+          <select id="ac-format" value={format} onChange={(e) => setFormat(e.target.value as CelNameFormat)}>
+            {CEL_NAME_FORMATS.map(([id, label]) => (
+              <option key={id} value={id}>
+                {label}
+              </option>
+            ))}
+          </select>
+          <label htmlFor="ac-prefix">File prefix</label>
+          <input id="ac-prefix" value={prefix} onChange={(e) => setPrefix(e.target.value.slice(0, 60))} />
+          <label htmlFor="ac-suffix">File suffix</label>
+          <input id="ac-suffix" value={suffix} onChange={(e) => setSuffix(e.target.value.slice(0, 60))} />
+          <label htmlFor="ac-separator">Separator</label>
+          <input id="ac-separator" value={separator} onChange={(e) => setSeparator(e.target.value.slice(0, 8))} />
+        </div>
+      </fieldset>
+      <fieldset className="group">
+        <legend>Export settings</legend>
+        <div className="form-grid">
+          <label htmlFor="ac-type">File format</label>
+          <select id="ac-type" value={type} onChange={(e) => setType(e.target.value as SequenceType)}>
+            {SEQUENCE_TYPES.map(([v, label]) => (
+              <option key={v} value={v}>
+                {label}
+              </option>
+            ))}
+          </select>
+          <label htmlFor="ac-area">Export range</label>
+          <select id="ac-area" value={area} onChange={(e) => setArea(e.target.value as DrawingArea)}>
+            {doc.outputFrame && <option value="output">Output frame</option>}
+            {doc.outputFrame?.overflow && <option value="overflow">Overflow frame</option>}
+            <option value="canvas">Entire canvas</option>
+          </select>
+          <label />
+          <span className="checks">
+            <label className="check">
+              <input type="checkbox" checked={drafts} onChange={(e) => setDrafts(e.target.checked)} /> Export drafts within animation cels
+            </label>
+            {doc.outputFrame && (
+              <label className="check">
+                <input type="checkbox" checked={frameLines} onChange={(e) => setFrameLines(e.target.checked)} /> Export frames
+              </label>
+            )}
+          </span>
+        </div>
+      </fieldset>
+      <p className="muted" data-testid="cel-count">
+        {count} cels in {groups.filter((g) => g.cels.length).length} animation folders, saved together in a ZIP file.
+      </p>
+      <Actions ok={busy ? 'Exporting…' : 'OK'} busy={busy} />
+    </form>
+  );
+}
+
+/** File > Export animation > Audio: the timeline's sound as a WAV file. */
+export function AudioExportDialog() {
+  const doc = useStore((s) => s.doc);
+  const t = doc.timeline ?? DEFAULT_TIMELINE;
+  const [start, setStart] = useState(startOf(t));
+  const [end, setEnd] = useState(endOf(t));
+  const [sampleRate, setSampleRate] = useState(48000);
+  const [bits, setBits] = useState<16 | 24>(16);
+  const [channels, setChannels] = useState(2);
+  const [busy, setBusy] = useState(false);
+  const sound = hasSound(doc);
+  return (
+    <form
+      className="modal"
+      role="dialog"
+      aria-label="Audio export settings"
+      onSubmit={async (e) => {
+        e.preventDefault();
+        setBusy(true);
+        const ok = await exportAudio({ start, end, sampleRate, bits, channels });
+        setBusy(false);
+        if (ok) closeDialog();
+      }}
+    >
+      <h2>Audio export settings</h2>
+      <div className="form-grid">
+        <label>Export frames</label>
+        <span className="with-unit">
+          <input type="number" aria-label="Start frame" min={1} max={end} value={start} onChange={(e) => setStart(clampInt(e.target.value, 1, end, start))} /> to{' '}
+          <input type="number" aria-label="End frame" min={start} max={t.frames} value={end} onChange={(e) => setEnd(clampInt(e.target.value, start, t.frames, end))} /> ({frameLabel(start, t.fps, t.display)} – {frameLabel(end, t.fps, t.display)})
+        </span>
+        <label htmlFor="au-format">Format</label>
+        <select id="au-format" value="wav" disabled>
+          <option value="wav">WAV (.wav)</option>
+        </select>
+        <label>Audio settings</label>
+        <span className="with-unit">
+          <select aria-label="Sampling frequency" value={sampleRate} onChange={(e) => setSampleRate(Number(e.target.value))}>
+            <option value={44100}>44.1 kHz</option>
+            <option value={48000}>48 kHz</option>
+          </select>
+          <select aria-label="Bits" value={bits} onChange={(e) => setBits(Number(e.target.value) as 16 | 24)}>
+            <option value={16}>16 bit</option>
+            <option value={24}>24 bit</option>
+          </select>
+          <select aria-label="Channels" value={channels} onChange={(e) => setChannels(Number(e.target.value))}>
+            <option value={2}>Stereo</option>
+            <option value={1}>Mono</option>
+          </select>
+        </span>
+      </div>
+      {!sound && <p className="muted">The timeline has no audio layers with sound.</p>}
+      <Actions ok={busy ? 'Exporting…' : 'OK'} busy={busy || !sound} />
     </form>
   );
 }

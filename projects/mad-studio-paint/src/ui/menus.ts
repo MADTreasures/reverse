@@ -23,7 +23,7 @@ export const MENUS: MenuSpec[] = [
       '-',
       { label: 'Import', items: ['importImage', 'importAudio', 'importMovie'] },
       { label: 'Export (single layer)', items: ['export-bmp', 'export-jpeg', 'export-png', 'export-webp', 'export-tiff', 'export-tga', '-', 'export-psd', 'export-psb'] },
-      { label: 'Export animation', items: ['exportSequence', 'exportGif', 'exportApng', 'exportWebp', 'exportMovie'] },
+      { label: 'Export animation', items: ['exportSequence', 'exportCels', 'exportGif', 'exportApng', 'exportWebp', 'exportMovie', '-', 'exportSheet', 'exportAudio'] },
       '-',
       'renameCanvas',
       '-',

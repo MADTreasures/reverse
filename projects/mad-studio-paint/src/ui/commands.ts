@@ -1,7 +1,7 @@
 /** Every menu command, its shortcut and handler. Menus (browser and native) and the keyboard use this table. */
 import { flatten } from '../model/layers';
 import { isMac } from '../platform/platform';
-import { importImages, openDocument, saveDocument, saveDuplicate } from '../io/documentIO';
+import { exportExposureSheet, importImages, openDocument, saveDocument, saveDuplicate } from '../io/documentIO';
 import * as actions from '../store/actions';
 import { activeFrameFolder } from '../store/frameActions';
 import * as anim from '../store/animationActions';
@@ -388,6 +388,9 @@ export const COMMANDS: Command[] = [
   { id: 'exportGif', label: 'Animated GIF…', run: () => openDialog('exportGif'), enabled: hasTimeline },
   { id: 'exportApng', label: 'Animated sticker (APNG)…', run: () => openDialog('exportApng'), enabled: hasTimeline },
   { id: 'exportWebp', label: 'Animated WebP…', run: () => openDialog('exportWebp'), enabled: hasTimeline },
+  { id: 'exportCels', label: 'Export animation cels…', run: () => openDialog('exportCels'), enabled: () => flatten(getState().doc.layers).some((l) => l.kind === 'folder' && Boolean(l.animation)) },
+  { id: 'exportSheet', label: 'Exposure sheet…', run: () => void exportExposureSheet(), enabled: hasTimeline },
+  { id: 'exportAudio', label: 'Audio…', run: () => openDialog('exportAudio'), enabled: hasTimeline },
   { id: 'exportMovie', label: 'Movie…', run: () => openDialog('exportMovie'), enabled: hasTimeline },
   { id: 'importAudio', label: 'Audio…', run: () => void pickAudioFile(), enabled: hasTimeline },
   { id: 'importMovie', label: 'Movie…', run: () => void pickMovieFile(), enabled: hasTimeline },

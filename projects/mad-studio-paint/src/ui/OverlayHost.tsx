@@ -8,7 +8,7 @@ import { TonalDialog } from './dialogs/TonalDialog';
 import { PreferencesDialog } from './dialogs/PreferencesDialog';
 import { ExportDialog, ExportPreviewDialog, PsdExportDialog } from './dialogs/ExportDialog';
 import { ColorSettingsDialog } from './dialogs/ColorSettingsDialog';
-import { AnimationExportDialog, AssignMultipleDialog, CameraFolderDialog, CenterCanvasDialog, FrameRateDialog, ManageTimelinesDialog, MovieExportDialog, NewTimelineDialog, OnionSkinDialog, TimelineSettingsDialog } from './dialogs/AnimationDialogs';
+import { AnimationCelsExportDialog, AnimationExportDialog, AssignMultipleDialog, AudioExportDialog, CameraFolderDialog, CenterCanvasDialog, FrameRateDialog, ManageTimelinesDialog, MovieExportDialog, NewTimelineDialog, OnionSkinDialog, TimelineSettingsDialog } from './dialogs/AnimationDialogs';
 import { AboutDialog, ShortcutsDialog } from './dialogs/InfoDialogs';
 import { NewCanvasDialog } from './dialogs/NewCanvasDialog';
 import { closeDialog, closeMenu, useOverlays, type MenuItem } from './overlays';
@@ -69,6 +69,8 @@ export function OverlayHost() {
           {dialog.kind === 'custom' && dialog.id === 'exportApng' && <AnimationExportDialog format="apng" />}
           {dialog.kind === 'custom' && dialog.id === 'exportWebp' && <AnimationExportDialog format="webp" />}
           {dialog.kind === 'custom' && dialog.id === 'exportSequence' && <AnimationExportDialog format="sequence" />}
+          {dialog.kind === 'custom' && dialog.id === 'exportCels' && <AnimationCelsExportDialog />}
+          {dialog.kind === 'custom' && dialog.id === 'exportAudio' && <AudioExportDialog />}
           {dialog.kind === 'custom' && dialog.id === 'exportMovie' && <MovieExportDialog />}
           {dialog.kind === 'custom' && dialog.id === 'about' && <AboutDialog />}
           {dialog.kind === 'custom' && dialog.id === 'shortcuts' && <ShortcutsDialog />}

@@ -20,7 +20,8 @@ import { EXTENSION, IMAGE_EXTENSIONS, isDocumentFileName, isImageFileName, isPsd
 import { idbDelete, idbGet, idbSet } from './idb';
 import { docLightImages } from '../paint/lightTable';
 import { clearSounds, mixSound, setSoundBytes, soundBytes } from '../engine/sounds';
-import { hasSound, soundMix } from '../model/animation';
+import { animationFolders, hasSound, soundMix, type AnimationFolder } from '../model/animation';
+import { celFileName, exposureSheetCsv, uniqueNames, type CelNameFormat } from './animationCels';
 import { usedMovieFiles, usedSoundFiles } from '../store/soundActions';
 import { clearMovies, movieBytes, prepareMovieFrame, setMovieBytes } from '../engine/movies';
 // Type only: the PSD code (and ag-psd) loads when a PSD is opened or saved.
@@ -660,6 +661,154 @@ export async function exportMovie(o: MovieOptions, progress?: (done: number, tot
     const base = doc.name || 'Untitled';
     const filter = o.format === 'mp4' ? { name: 'MPEG-4 movie', extensions: ['mp4'] } : { name: 'QuickTime movie', extensions: ['mov'] };
     const saved = await saveFile(bytes, `${base}.${o.format}`, [filter], null, o.format === 'mp4' ? 'video/mp4' : 'video/quicktime');
+    if (saved) toast(`Exported ${saved.name}`);
+    return Boolean(saved);
+  } catch (err) {
+    toast(`Export failed: ${(err as Error).message}`, 'error');
+    return false;
+  }
+}
+
+// ------------------------------------------------------------------ animation cels, exposure sheet, audio
+
+export interface CelExportOptions {
+  /** Export folder name: the folder in the ZIP that holds a folder per animation folder. */
+  folder: string;
+  names: { format: CelNameFormat; prefix: string; suffix: string; separator: string };
+  type: SequenceType;
+  /** Export range: the output frame, the overflow frame or the entire canvas. */
+  area: DrawingArea;
+  /** Export drafts within animation cels; Export frames (the frame lines). */
+  drafts: boolean;
+  frameLines: boolean;
+}
+
+/** The cels of every animation folder, lowest first (the reference's order), with their file names. */
+export function celFiles(o: Pick<CelExportOptions, 'names'>): { folder: AnimationFolder; folderName: string; cels: { cel: Layer; file: string }[] }[] {
+  const { doc } = getState();
+  // The lowest animation folder first, like the timeline's tracks from the bottom.
+  const folders = [...animationFolders(doc.layers)].reverse();
+  const folderNames = uniqueNames(folders.map((f) => f.name.replace(/[\\/:*?"<>|\u0000-\u001f]/g, '').trim() || 'Animation'));
+  return folders.map((folder, i) => {
+    const cels = [...folder.children].reverse();
+    const files = uniqueNames(cels.map((c, k) => celFileName(o.names, folder.name, c.name, k + 1)));
+    return { folder, folderName: folderNames[i], cels: cels.map((cel, k) => ({ cel, file: files[k] })) };
+  });
+}
+
+/**
+ * File > Export animation > Export animation cels: every cel of every animation folder as an image,
+ * a folder per animation folder (in a ZIP), cropped to the export range.
+ */
+export async function exportAnimationCels(o: CelExportOptions): Promise<boolean> {
+  const { doc } = getState();
+  const groups = celFiles(o);
+  if (!groups.some((g) => g.cels.length)) {
+    toast('The canvas has no animation cels', 'error');
+    return false;
+  }
+  try {
+    const { zipSequence } = await import('./animationExport');
+    const { encodeBmp, encodeTga, encodeTiff } = await import('./imageFormats');
+    const area = areaRect(doc.outputFrame, o.area, doc.width, doc.height);
+    const opaque = o.type === 'jpeg' || o.type === 'bmp';
+    const root = o.folder.replace(/[\\/:*?"<>|\u0000-\u001f]/g, '').trim() || doc.name || 'Cels';
+    const files: { name: string; data: Uint8Array }[] = [];
+    for (const g of groups) {
+      for (const { cel, file } of g.cels) {
+        const full = engine.compositor.layerImage(doc, cel, { skipDraft: !o.drafts });
+        if (o.frameLines && doc.outputFrame) drawExportFrameLines(ctx2d(full), doc.outputFrame);
+        let c = createCanvas(area.w, area.h);
+        ctx2d(c).drawImage(full, area.x, area.y, area.w, area.h, 0, 0, area.w, area.h);
+        if (opaque) c = onWhite(c);
+        const data =
+          o.type === 'png'
+            ? await canvasToBytes(c, 'image/png')
+            : o.type === 'jpeg'
+              ? await canvasToBytes(c, 'image/jpeg', 0.92)
+              : o.type === 'webp'
+                ? await webpBytes(c, true, 1)
+                : o.type === 'bmp'
+                  ? encodeBmp(pixelsOf(c), doc.dpi)
+                  : o.type === 'tiff'
+                    ? encodeTiff(pixelsOf(c), true, doc.dpi)
+                    : encodeTga(pixelsOf(c), true);
+        files.push({ name: `${root}/${g.folderName}/${file}.${SEQUENCE_EXT[o.type]}`, data });
+      }
+    }
+    const bytes = zipSequence(files, o.type === 'bmp' || o.type === 'tiff' || o.type === 'tga');
+    const saved = await saveFile(bytes, `${root}.zip`, [{ name: 'Animation cels (ZIP)', extensions: ['zip'] }], null, 'application/zip');
+    if (saved) toast(`Exported ${files.length} cels to ${saved.name}`);
+    return Boolean(saved);
+  } catch (err) {
+    toast(`Export failed: ${(err as Error).message}`, 'error');
+    return false;
+  }
+}
+
+/** The names of an animation folder's parent folders ("Folder/Sub"). */
+function parentPath(layers: Layer[], id: Id, path: string[] = []): string[] | null {
+  for (const l of layers) {
+    if (l.id === id) return path;
+    if (l.kind === 'folder') {
+      const found = parentPath(l.children, id, [...path, l.name]);
+      if (found) return found;
+    }
+  }
+  return null;
+}
+
+/**
+ * File > Export animation > Exposure sheet: the timeline's cel assignments as CSV, a column per
+ * animation folder (the lowest track on the left), a line per frame.
+ */
+export async function exportExposureSheet(): Promise<boolean> {
+  const { doc } = getState();
+  const t = doc.timeline;
+  const folders = animationFolders(doc.layers);
+  if (!t || !folders.length) {
+    toast('The canvas has no animation folders', 'error');
+    return false;
+  }
+  const columns = [...folders].reverse().map((f) => ({
+    parent: (parentPath(doc.layers, f.id) ?? []).join('/'),
+    name: f.name,
+    track: f.animation,
+    cels: new Map(f.children.map((c) => [c.id, c.name])),
+  }));
+  // With a byte order mark spreadsheets read the cel names right.
+  const bytes = new TextEncoder().encode(`\ufeff${exposureSheetCsv(columns, t.frames)}`);
+  const saved = await saveFile(bytes, `${doc.name || 'Untitled'}.csv`, [{ name: 'Exposure sheet (CSV)', extensions: ['csv'] }], null, 'text/csv');
+  if (saved) toast(`Exported ${saved.name}`);
+  return Boolean(saved);
+}
+
+export interface AudioExportOptions {
+  start: number;
+  end: number;
+  sampleRate: number;
+  bits: 16 | 24;
+  channels: number;
+}
+
+/** File > Export animation > Audio: the sound of the audio layers (and movies) from start to end frame, as WAV. */
+export async function exportAudio(o: AudioExportOptions): Promise<boolean> {
+  const { doc } = getState();
+  const t = doc.timeline;
+  if (!t || !hasSound(doc)) {
+    toast('The timeline has no sound to export', 'error');
+    return false;
+  }
+  try {
+    const buffer = await mixSound(soundMix(doc), o.start, o.end, t.fps, o.sampleRate, o.channels);
+    if (!buffer) {
+      toast('No sound plays between these frames', 'error');
+      return false;
+    }
+    const { encodeWav } = await import('./wav');
+    const data = Array.from({ length: buffer.numberOfChannels }, (_, c) => buffer.getChannelData(c));
+    const bytes = encodeWav(data, buffer.sampleRate, o.bits);
+    const saved = await saveFile(bytes, `${doc.name || 'Untitled'}.wav`, [{ name: 'WAV audio', extensions: ['wav'] }], null, 'audio/wav');
     if (saved) toast(`Exported ${saved.name}`);
     return Boolean(saved);
   } catch (err) {

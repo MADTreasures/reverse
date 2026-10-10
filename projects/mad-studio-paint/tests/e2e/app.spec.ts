@@ -3474,6 +3474,74 @@ test('sound: audio layers with clips, volume keyframes, mute; movies as MP4 and 
   expect(errors).toEqual([]);
 });
 
+test('animation exports: animation cels (a folder per animation folder), exposure sheet (CSV), audio (WAV)', async ({ page }) => {
+  const errors = await boot(page);
+  await page.evaluate(() => delete (window as any).showSaveFilePicker);
+  await page.evaluate(() => void window.__madPaint.runCommand('new'));
+  const dlg = page.getByRole('dialog', { name: 'New canvas' });
+  await dlg.getByLabel('Width').fill('200');
+  await dlg.getByLabel('Height').fill('100');
+  await dlg.getByText('Create animated illustration').click();
+  await dlg.getByLabel('Number of cels').fill('6');
+  await dlg.getByLabel('Frame rate').fill('6');
+  await dlg.getByRole('button', { name: 'OK' }).click();
+  // Folder A: cels 1 (frame 1, a line) and 2 (frame 3); folder B with cel 1 on frame 2.
+  await thinPen(page);
+  await drag(page, [40, 50], [160, 50]);
+  await page.getByTestId('timeline-ruler').locator('.tl-cell').nth(2).click();
+  await page.getByRole('button', { name: 'New animation cel' }).first().click();
+  await page.getByTestId('timeline-ruler').locator('.tl-cell').nth(1).click();
+  await page.evaluate(() => window.__madPaint.runCommand('newAnimationFolder'));
+  await page.getByRole('button', { name: 'New animation cel' }).first().click();
+  const save = async (dialog: ReturnType<Page['getByRole']> | null, run?: () => Promise<unknown>) => {
+    const [dl] = await Promise.all([page.waitForEvent('download'), dialog ? dialog.getByRole('button', { name: 'OK' }).click() : run!()]);
+    return { name: dl.suggestedFilename(), bytes: readFileSync((await dl.path())!) };
+  };
+  // Export animation cels: folder name, Animation folder name + cel name, PNG.
+  await page.evaluate(() => window.__madPaint.runCommand('exportCels'));
+  const ac = page.getByRole('dialog', { name: 'Export animation cels' });
+  await ac.getByLabel('Export folder name').fill('shot1');
+  await ac.getByLabel('File name format').selectOption('folderCel');
+  await expect(ac.getByTestId('cel-file-name')).toHaveText('A/A_1.png');
+  await expect(ac.getByTestId('cel-count')).toContainText('3 cels in 2 animation folders');
+  const z = await save(ac);
+  expect(z.name).toBe('shot1.zip');
+  const files = unzipSync(z.bytes);
+  expect(Object.keys(files).sort()).toEqual(['shot1/A/A_1.png', 'shot1/A/A_2.png', 'shot1/B/B_1.png']);
+  // Cel 1 holds the line; a cel is drawn alone, transparent around it.
+  const alpha = await page.evaluate(async (b64) => {
+    const bmp = await createImageBitmap(new Blob([Uint8Array.from(atob(b64), (c) => c.charCodeAt(0))], { type: 'image/png' }));
+    const c = new OffscreenCanvas(bmp.width, bmp.height);
+    const g = c.getContext('2d')!;
+    g.drawImage(bmp, 0, 0);
+    return [bmp.width, bmp.height, g.getImageData(100, 50, 1, 1).data[3], g.getImageData(100, 80, 1, 1).data[3]];
+  }, Buffer.from(files['shot1/A/A_1.png']).toString('base64'));
+  expect(alpha).toEqual([200, 100, 255, 0]);
+  // Exposure sheet: A on the left (the lowest track), a line per frame.
+  const sheet = await save(null, () => page.evaluate(() => window.__madPaint.runCommand('exportSheet')));
+  expect(sheet.name).toBe('Illustration.csv');
+  const lines = sheet.bytes.toString('utf8').replace(/^\ufeff/, '').split('\r\n');
+  expect(lines.slice(0, 5)).toEqual([',,', 'Frame,A,B', '1,1,', '2,,1', '3,2,']);
+  // Audio: needs sound.
+  const [chooser] = await Promise.all([page.waitForEvent('filechooser'), page.evaluate(() => void window.__madPaint.runCommand('importAudio'))]);
+  await chooser.setFiles({ name: 'beep.wav', mimeType: 'audio/wav', buffer: sineWav(1, 48000, 440) });
+  await expect(page.getByTestId('timeline-audio')).toHaveCount(1);
+  await page.evaluate(() => window.__madPaint.runCommand('exportAudio'));
+  const au = page.getByRole('dialog', { name: 'Audio export settings' });
+  await au.getByLabel('Sampling frequency').selectOption('44100');
+  await au.getByLabel('Channels').selectOption('1');
+  await au.getByLabel('End frame').fill('3');
+  const w = await save(au);
+  expect(w.name).toBe('Illustration.wav');
+  // RIFF/WAVE, mono, 44.1 kHz, 16 bit; frames 1–3 at 6 fps: half a second.
+  expect([w.bytes.subarray(0, 4).toString('latin1'), w.bytes.subarray(8, 12).toString('latin1'), w.bytes.readUInt16LE(22), w.bytes.readUInt32LE(24), w.bytes.readUInt16LE(34)]).toEqual(['RIFF', 'WAVE', 1, 44100, 16]);
+  expect(w.bytes.readUInt32LE(40)).toBe(22050 * 2);
+  let peak = 0;
+  for (let o = 44; o < w.bytes.length; o += 2) peak = Math.max(peak, Math.abs(w.bytes.readInt16LE(o)));
+  expect(peak).toBeGreaterThan(3000);
+  expect(errors).toEqual([]);
+});
+
 test('frame borders snap strokes that start near them, not along their extension', async ({ page }) => {
   await boot(page);
   await page.evaluate(() => window.__madPaint.runCommand('newFrameFolder'));
