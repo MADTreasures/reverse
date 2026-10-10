@@ -28,6 +28,8 @@ interface DragState {
   floating: boolean;
   target: DropTarget | null;
   indicator: Indicator | null;
+  /** The palette a dragged one would be stacked with (shown red all over). */
+  frame?: Indicator;
 }
 
 export const usePaletteDrag = create<{ drag: DragState | null }>(() => ({ drag: null }));
@@ -40,7 +42,7 @@ const EDGE = 14;
 const LINE = 3;
 
 /** Where a palette dragged to a point of the window would go. */
-export function dropTargetAt(x: number, y: number, size: { w: number; h: number }): { target: DropTarget; indicator: Indicator | null } {
+export function dropTargetAt(x: number, y: number, size: { w: number; h: number }): { target: DropTarget; indicator: Indicator | null; frame?: Indicator } {
   // Floating where it is let go, kept inside the window.
   const w = Math.max(160, Math.min(size.w, 520));
   const h = Math.max(120, Math.min(size.h, 360));
@@ -49,7 +51,14 @@ export function dropTargetAt(x: number, y: number, size: { w: number; h: number 
   const float = { target: { kind: 'float', x: fx, y: fy, w, h } as DropTarget, indicator: null };
   if (currentLayout().lockPosition) return float;
   const els = document.elementsFromPoint(x, y).filter((el): el is HTMLElement => el instanceof HTMLElement);
-  // A title bar: stacked with its palettes, before the tab under the pointer's left half.
+  const columnEl = els.find((el) => el.dataset.dockColumn);
+  const cr = columnEl?.getBoundingClientRect();
+  // A dock's left or right edge (also beside a title bar): a new dock column there.
+  if (columnEl && cr && (x < cr.left + EDGE || x > cr.right - EDGE)) {
+    const after = x > cr.right - EDGE;
+    return { target: { kind: 'column', column: columnEl.dataset.dockColumn!, after }, indicator: { x: (after ? cr.right : cr.left) - 1, y: cr.top, w: LINE, h: cr.height } };
+  }
+  // A title bar: stacked with its palettes (the whole palette shows red), before the tab under the pointer's left half.
   const header = els.find((el) => el.dataset.stackTabs);
   if (header) {
     const tabs = [...header.querySelectorAll<HTMLElement>('[data-palette-tab]')];
@@ -59,17 +68,15 @@ export function dropTargetAt(x: number, y: number, size: { w: number; h: number 
     }).length;
     const hr = header.getBoundingClientRect();
     const at = index < tabs.length ? tabs[index].getBoundingClientRect().left : tabs.length ? tabs[tabs.length - 1].getBoundingClientRect().right : hr.left;
-    return { target: { kind: 'tab', stack: header.dataset.stackTabs!, index }, indicator: { x: at - 1, y: hr.top, w: LINE, h: hr.height } };
+    const sr = (header.closest('[data-dock-stack]') ?? header).getBoundingClientRect();
+    return {
+      target: { kind: 'tab', stack: header.dataset.stackTabs!, index },
+      indicator: { x: at - 1, y: hr.top, w: LINE, h: hr.height },
+      frame: { x: sr.left, y: sr.top, w: sr.width, h: sr.height },
+    };
   }
-  const columnEl = els.find((el) => el.dataset.dockColumn);
-  if (columnEl) {
+  if (columnEl && cr) {
     const column = columnEl.dataset.dockColumn!;
-    const cr = columnEl.getBoundingClientRect();
-    // A dock's left or right edge: a new dock column there.
-    if (x < cr.left + EDGE || x > cr.right - EDGE) {
-      const after = x > cr.right - EDGE;
-      return { target: { kind: 'column', column, after }, indicator: { x: (after ? cr.right : cr.left) - 1, y: cr.top, w: LINE, h: cr.height } };
-    }
     // Above or below a palette.
     const stacks = [...columnEl.querySelectorAll<HTMLElement>('[data-dock-stack]')];
     for (let i = 0; i < stacks.length; i++) {
@@ -131,7 +138,7 @@ export function beginFloatingMove(e: ReactPointerEvent, id: PaletteId, label: st
       changeFloating(id, { x: Math.round(rect.x + ev.clientX - sx), y: Math.max(0, Math.round(rect.y + ev.clientY - sy)) });
       const t = dropTargetAt(ev.clientX, ev.clientY, rect);
       const docking = t.target.kind !== 'float';
-      usePaletteDrag.setState({ drag: { id, label, x: ev.clientX, y: ev.clientY, floating: true, target: docking ? t.target : null, indicator: docking ? t.indicator : null } });
+      usePaletteDrag.setState({ drag: { id, label, x: ev.clientX, y: ev.clientY, floating: true, target: docking ? t.target : null, indicator: docking ? t.indicator : null, frame: docking ? t.frame : undefined } });
     },
     () => {
       const d = usePaletteDrag.getState().drag;

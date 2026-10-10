@@ -4827,8 +4827,14 @@ body.canvas-only .modal * {
 
 .drop-indicator {
   position: absolute;
-  background: #e5393599;
-  outline: 1px solid #e53935;
+  background: #e53935;
+}
+
+.drop-frame {
+  position: absolute;
+  background: #e5393533;
+  outline: 2px solid #e53935cc;
+  outline-offset: -2px;
 }
 
 .palette-ghost {

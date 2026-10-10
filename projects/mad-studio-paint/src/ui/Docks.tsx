@@ -215,6 +215,7 @@ export function PaletteDragOverlay() {
   if (!drag) return null;
   return (
     <div className="palette-drag-layer">
+      {drag.frame && <div className="drop-frame" style={{ left: drag.frame.x, top: drag.frame.y, width: drag.frame.w, height: drag.frame.h }} />}
       {drag.indicator && <div className="drop-indicator" style={{ left: drag.indicator.x, top: drag.indicator.y, width: drag.indicator.w, height: drag.indicator.h }} />}
       {!drag.floating && (
         <div className="palette-ghost" style={{ left: drag.x + 8, top: drag.y + 8 }}>
