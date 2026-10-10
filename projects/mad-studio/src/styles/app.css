@@ -2412,3 +2412,45 @@ button.link {
 .strip.routed {
   border-color: #4f8a4b;
 }
+
+/* -------------------------------------------------------------- remote control settings */
+
+.controller-link {
+  width: 420px;
+}
+
+.controller-link .accent {
+  color: var(--accent);
+}
+
+.controller-link-target {
+  margin: 0 0 6px;
+}
+
+.controller-link-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 24px;
+  margin: 0 0 10px;
+  color: var(--text-dim);
+}
+
+.controller-link-status.waiting {
+  color: var(--accent);
+  animation: controller-wait 1.2s ease-in-out infinite;
+}
+
+@keyframes controller-wait {
+  50% {
+    opacity: 0.45;
+  }
+}
+
+.controller-link input[type='number'] {
+  width: 90px;
+}
+
+.modal-actions .spacer {
+  flex: 1;
+}

@@ -35,7 +35,7 @@ const COMMAND_LABELS: [CommandId, string][] = [
   ['save', 'Save'],
   ['saveAs', 'Save as'],
   ['saveNewVersion', 'Save new version'],
-  ['export', 'Export wave file'],
+  ['export', 'Export audio file (WAV, FLAC, MP3, OGG)'],
 ];
 
 const EDITOR_SHORTCUTS: [string, string][] = [
@@ -132,13 +132,16 @@ export function AboutDialog() {
       </h2>
       <p>
         Pattern-based music studio: channel rack with step sequencer, piano roll, playlist arrangement, automation clips,
-        mixer with insert effects and audio recording, synthesizer, sampler and WAV export. The desktop app hosts VST®3
+        mixer with sends, insert effects and audio recording, synthesizer, sampler, MIDI controller links and export to
+        WAV, FLAC, MP3, OGG and MIDI. The desktop app hosts VST®3
         and Audio Unit plug-ins through its native engine{asio ? ' and plays through ASIO® audio interfaces' : ''}.
       </p>
       <p className="dim">
         Independent project inspired by the workflow of classic pattern-based DAWs. All sounds and graphics are original;
         no third-party samples are included – the drum kit is synthesised on start-up. The native engine is built with
-        JUCE (AGPLv3) and the VST3 SDK (MIT){asio ? ', with the ASIO SDK headers (GPLv3)' : ''}.
+        JUCE (AGPLv3) and the VST3 SDK (MIT){asio ? ', with the ASIO SDK headers (GPLv3)' : ''}; its FLAC and Ogg Vorbis
+        encoders come with JUCE (BSD). MP3 export uses LAME (the lamejs port, LGPL-3.0, lame.sourceforge.io). The licence
+        texts ship with the app (<span className="mono">licenses</span> folder).
       </p>
       <div className="brand-logos">
         <VstLogo />

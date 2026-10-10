@@ -212,6 +212,18 @@ Renders the current project/timeline/automation in song mode, faster than real t
 thread while live playback is stopped. Events: `render.progress {requestId, fraction}`,
 `render.done {requestId, path, peak, seconds}` or `error`.
 
+`format` selects the file type (FL Studio's export formats the engine encodes itself):
+
+| `format` | File | Options |
+| -------- | ---- | ------- |
+| `"wav"` (default) | PCM / float WAV | `bitDepth` 16 (TPDF dither), 24 or 32 (float) |
+| `"flac"` | FLAC (JUCE `FlacAudioFormat`, libFLAC compression level 5) | `bitDepth` 16 or 24 |
+| `"ogg"` | Ogg Vorbis (JUCE `OggVorbisAudioFormat`) | `kbps` 32–500 (default 192): the nearest Vorbis quality setting |
+
+Any other `format` is refused with an `error` (`unknown format …`). The renderer of the app sends the
+project, the timeline and the automation lanes inline with `render.start` (see below), so a render
+never disturbs the live state; MP3 is encoded in the app from a 32-bit float WAV render.
+
 ## Plugins (VST3, AU on macOS, LV2 on Linux if enabled)
 
 Project JSON carries plugin instances (see below). The engine creates them on `project.sync`

@@ -15,6 +15,9 @@ struct RenderRequest
     std::shared_ptr<const AutomationData> automation;
     double sampleRate = 48000.0;
     int bitDepth = 24;
+    /** "wav", "flac" (16 or 24 bit) or "ogg" (Ogg Vorbis, `oggKbps` nominal bit rate). */
+    juce::String format = "wav";
+    int oggKbps = 192;
     double startTick = 0.0, endTick = -1.0; // endTick < 0: timeline loop end
     double tailSeconds = 2.0;
     int blockSize = 512;

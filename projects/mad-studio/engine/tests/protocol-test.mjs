@@ -423,6 +423,24 @@ async function testRender(engine) {
   const bar2 = stats(wav.data, 120000, 192000);
   check(bar2.rms < bar1.rms * 0.2, `render does not loop inside the range (bar 2 rms ${bar2.rms.toFixed(4)} vs ${bar1.rms.toFixed(4)})`);
 
+  // FLAC and Ogg Vorbis renders (JUCE's encoders): headers and plausible sizes; an unknown format is refused.
+  for (const [format, magic, extra] of [['flac', 'fLaC', { bitDepth: 24 }], ['ogg', 'OggS', { kbps: 160 }]]) {
+    const p = join(work, `render.${format}`);
+    const d = await engine.request({ type: 'render.start', requestId: `r-${format}`, path: p, sampleRate: 48000, format, startTick: 0, endTick: 384, tailSeconds: 0, ...extra },
+      (m) => (m.type === 'render.done' && m.requestId === `r-${format}`) || (m.type === 'error' && m.request === 'render.start'), 60000, `render ${format}`);
+    check(d.type === 'render.done', `${format} render (${d.message ?? 'ok'})`);
+    if (d.type === 'render.done') {
+      const bytes = readFileSync(p);
+      check(bytes.toString('ascii', 0, 4) === magic, `${format} file starts with ${magic}`);
+      const pcm = 2 * 48000 * 3 * 2; // 2 s of 24-bit stereo
+      check(bytes.length > 1000 && bytes.length < pcm, `${format} file is compressed (${bytes.length} bytes)`);
+      near(d.seconds, 2, 0.01, `${format} render length`);
+    }
+  }
+  const bad = await engine.request({ type: 'render.start', requestId: 'r-bad', path: join(work, 'x.aiff'), format: 'aiff', startTick: 0, endTick: 96 },
+    (m) => m.type === 'error' && m.request === 'render.start', 5000, 'unknown format refused');
+  check(/unknown format/.test(bad.message), `render.start refuses unknown formats (${bad.message})`);
+
   // 16- and 24-bit renders of the same range.
   for (const bits of [16, 24]) {
     const p = join(work, `render${bits}.wav`);
@@ -592,6 +610,11 @@ async function testRouting(engine) {
     near(b / a, 0.25, 0.002, `insert 1 -> insert 2 at send level 0.4 = gain 0.25 (${(b / a).toFixed(4)})`);
     check(stats(routed.data).nonFinite === 0, 'routing with a dropped loop renders finite audio');
   }
+  // An empty route list sends nowhere: the export's "Split mixer tracks" silences the other tracks so.
+  const nowhere = synthOnly(structuredClone(base));
+  nowhere.mixer[1].routes = [];
+  const silent = await render('route-nowhere.wav', nowhere);
+  if (silent) near(stats(silent.data).peak, 0, 1e-6, 'a track with an empty route list is not heard');
 
   // Sidechain: the kick on insert 3 is linked to insert 1 at level 0 (still heard through its master
   // send); a compressor with Sidechain on ducks the sine after every kick.

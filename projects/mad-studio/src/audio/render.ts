@@ -12,6 +12,8 @@ import { ensureClipVariants, holdClipVariants } from './clipVariants';
 
 export interface RenderOptions {
   mode: 'song' | 'pattern';
+  /** Render this project instead of the current one (stems: the project of one mixer track). */
+  project?: Project;
   patternId?: Id | null;
   sampleRate?: number;
   /** Seconds appended after the end for reverb/delay tails. */

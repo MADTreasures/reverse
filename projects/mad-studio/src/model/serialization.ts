@@ -20,6 +20,7 @@ import { DEFAULT_SEND, sanitizeRoutes } from './routing';
 import { SCALES, type ScaleSpec, type ScaleType } from './scales';
 import { CLIP_GAIN_MAX_DB, CLIP_GAIN_MIN_DB, CLIP_PITCH_RANGE, CLIP_STRETCH_MAX, CLIP_STRETCH_MIN } from './clips';
 import { parseSignature } from './markers';
+import { CONTROLLER_MAPPINGS } from './controllerLinks';
 import type {
   Arrangement,
   AudioClip,
@@ -27,6 +28,7 @@ import type {
   AutomationPoint,
   Channel,
   Clip,
+  ControllerLink,
   CurveMode,
   EffectSlot,
   EffectType,
@@ -438,6 +440,7 @@ export function parseProject(raw: unknown): Project {
       return { id: str(a.id, makeId('arr')), name: str(a.name, `Arrangement ${i + 2}`), tracks: t, clips: parseClips(a.clips, new Set(t.map((x) => x.id))), markers: parseMarkers(a.markers) };
     });
   const current = isObj(raw.arrangement) ? { id: str(raw.arrangement.id, makeId('arr')), name: str(raw.arrangement.name, 'Arrangement') } : null;
+  const controllerLinks = parseControllerLinks(raw.controllerLinks);
 
   return {
     format: 'mad-studio',
@@ -458,7 +461,27 @@ export function parseProject(raw: unknown): Project {
     ...(markers.length ? { markers } : {}),
     ...(current ? { arrangement: current } : {}),
     ...(arrangements.length ? { arrangements } : {}),
+    ...(controllerLinks.length ? { controllerLinks } : {}),
   };
+}
+
+/** Controller links (controllerLinks.ts): one per target, valid channel and controller numbers. */
+function parseControllerLinks(v: unknown): ControllerLink[] {
+  const out: ControllerLink[] = [];
+  for (const l of arr(v)) {
+    if (!isObj(l) || typeof l.target !== 'string' || !l.target || out.some((o) => o.target === l.target)) continue;
+    const link: ControllerLink = {
+      id: str(l.id, makeId('cl')),
+      target: l.target,
+      channel: Math.round(num(l.channel, 0, 0, 15)),
+      cc: Math.round(num(l.cc, 0, 0, 127)),
+    };
+    if (bool(l.omni, false)) link.omni = true;
+    if (CONTROLLER_MAPPINGS.some((m) => m.id === l.mapping && m.id !== 'default')) link.mapping = l.mapping as ControllerLink['mapping'];
+    if (bool(l.pickup, false)) link.pickup = true;
+    out.push(link);
+  }
+  return out.slice(0, 1024);
 }
 
 /** Time markers (markers.ts): sorted, clamped, signature markers with a valid signature. */

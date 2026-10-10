@@ -29,6 +29,7 @@
     "engine:stage": "node scripts/stage-engine.mjs"
   },
   "devDependencies": {
+    "@breezystack/lamejs": "1.2.7",
     "@playwright/test": "1.56.1",
     "@types/react": "19.3.0",
     "@types/react-dom": "19.3.0",
@@ -47,7 +48,7 @@
   "build": {
     "appId": "io.github.madtreasures.madstudio",
     "productName": "MAD Studio",
-    "copyright": "Copyright \u00a9 2026 MADTreasures",
+    "copyright": "Copyright © 2026 MADTreasures",
     "directories": {
       "output": "release",
       "buildResources": "build"
@@ -107,6 +108,10 @@
         "filter": [
           "**/*"
         ]
+      },
+      {
+        "from": "public/licenses",
+        "to": "licenses"
       }
     ]
   }

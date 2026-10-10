@@ -1,8 +1,9 @@
 import { describeTarget, fromNorm, toNorm, type TargetRange } from '../../model/automationTargets';
+import { linkOf } from '../../model/controllerLinks';
 import { automationChannelFor, createAutomationClip } from '../../store/automationActions';
 import { endCoalesce, gestureKey } from '../../store/actions';
 import { useStore } from '../../store/store';
-import { promptDialog, toast, type MenuItem } from '../overlays';
+import { openControllerLink, promptDialog, toast, type MenuItem } from '../overlays';
 import { openChannelEditor } from '../workspace/windows';
 
 export interface ControlSpec extends TargetRange {
@@ -30,11 +31,12 @@ function parseTyped(text: string, spec: ControlSpec): number | null {
   return spec.integer ? Math.round(v) : v;
 }
 
-/** FL Studio style control menu: Reset · Automation · Value. */
+/** FL Studio style control menu: Reset · Automation (clip, controller link) · Value. */
 export function controlMenu(spec: ControlSpec): MenuItem[] {
   const project = useStore.getState().project;
   const target = spec.target && describeTarget(project, spec.target) ? spec.target : undefined;
   const existing = target ? automationChannelFor(project, target) : null;
+  const link = target ? linkOf(project, target) : undefined;
   const set = (v: number) => {
     spec.onChange(v, gestureKey('menu'));
     endCoalesce();
@@ -51,6 +53,7 @@ export function controlMenu(spec: ControlSpec): MenuItem[] {
       },
     },
     { label: 'Edit automation clip…', disabled: !existing, onClick: () => existing && openChannelEditor(existing) },
+    { label: 'Link to controller…', shortcut: link ? `CC ${link.cc}` : undefined, disabled: !target, onClick: () => target && openControllerLink(target) },
     { label: 'Value', header: true },
     { label: 'Copy value', onClick: () => void (copied = toNorm(spec, spec.value)) },
     { label: 'Paste value', disabled: copied === null, onClick: () => copied !== null && set(fromNorm(spec, copied)) },

@@ -255,31 +255,6 @@ setTakeHandler((takes, mode) => {
 });
 
 // ---------------------------------------------------------------------------
-// Export
-
-export async function exportWav(opts: {
-  mode: 'song' | 'pattern';
-  sampleRate: number;
-  bitDepth: 16 | 24 | 32;
-  tail: number;
-  loops: number;
-}): Promise<boolean> {
-  const s = useStore.getState();
-  const { wav } = await engine.renderWav({
-    mode: opts.mode,
-    patternId: s.ui.selectedPatternId,
-    sampleRate: opts.sampleRate,
-    tail: opts.tail,
-    loops: opts.loops,
-    bitDepth: opts.bitDepth,
-  });
-  const base = s.project.name.replace(/[\\/:*?"<>|]/g, '_') || 'Untitled';
-  const saved = await saveFile(wav, `${base}.wav`, [{ name: 'WAV audio', extensions: ['wav'] }], null, 'audio/wav');
-  if (saved) toast(`Exported ${saved.name}`);
-  return saved !== null;
-}
-
-// ---------------------------------------------------------------------------
 // Autosave & start-up
 
 let autosaveTimer: ReturnType<typeof setInterval> | null = null;

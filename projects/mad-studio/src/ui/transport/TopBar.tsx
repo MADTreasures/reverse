@@ -33,7 +33,7 @@ import { Knob } from '../controls/Knob';
 import { Meter } from '../controls/Meter';
 import { runCommand, SHORTCUTS, type CommandId } from '../commands';
 import { useHint } from '../hint';
-import { enableMidi } from '../keyboard';
+import { enableMidi } from '../midiInput';
 import { showMenu, toast, type MenuItem } from '../overlays';
 import { addChannelMenu } from '../menus/channelMenus';
 import { scoreLogSize } from '../liveInput';
@@ -57,8 +57,11 @@ function fileMenu(): MenuItem[] {
     cmd('Save as…', 'saveAs'),
     cmd('Save new version', 'saveNewVersion'),
     { separator: true },
-    { label: 'Import', submenu: [cmd('Audio files…', 'importSamples')] },
-    { label: 'Export', submenu: [{ label: 'Audio', header: true }, cmd('Wave file…', 'export')] },
+    { label: 'Import', submenu: [cmd('Audio files…', 'importSamples'), cmd('MIDI file…', 'importMidi')] },
+    {
+      label: 'Export',
+      submenu: [{ label: 'Audio', header: true }, cmd('Audio file (WAV, FLAC, MP3, OGG)…', 'export'), { label: 'MIDI', header: true }, cmd('MIDI file…', 'exportMidi')],
+    },
   ];
 }
 
@@ -158,12 +161,13 @@ function optionsMenu(): MenuItem[] {
     },
     { label: 'MIDI', header: true },
     {
-      label: 'Enable MIDI keyboard input',
+      label: 'Enable MIDI input',
       onClick: () =>
         void enableMidi()
-          .then((n) => toast(n < 0 ? 'MIDI input is already enabled.' : `MIDI enabled – ${n} input${n === 1 ? '' : 's'} found. Notes play on the selected channel.`))
+          .then((n) => toast(n < 0 ? 'MIDI input is already enabled.' : `MIDI enabled – ${n} input${n === 1 ? '' : 's'} found. Notes play on the selected channel, linked controllers move their controls.`))
           .catch((err: unknown) => toast(err instanceof Error ? err.message : 'MIDI is not available.', 'error')),
     },
+    cmd(`Remove all controller links${s.project.controllerLinks?.length ? ` (${s.project.controllerLinks.length})` : ''}`, 'removeControllerLinks', { disabled: !s.project.controllerLinks?.length }),
     { label: 'Switches', header: true },
     cmd('Typing keyboard to piano', 'typingKeyboard', { checked: s.ui.typingKeyboard }),
     cmd('Metronome', 'metronome', { checked: s.transport.metronome }),
@@ -182,6 +186,7 @@ function toolsMenu(): MenuItem[] {
     { label: 'Last tweaked parameter', header: true },
     { label: info ? `Last tweaked: ${info.label}` : 'Last tweaked: –', disabled: true },
     cmd('Create automation clip', 'lastTweakedAutomation', { disabled: !info }),
+    cmd('Link to controller…', 'lastTweakedLink', { disabled: !info }),
     { label: 'Score logger', header: true },
     {
       label: 'Dump score log to selected pattern',

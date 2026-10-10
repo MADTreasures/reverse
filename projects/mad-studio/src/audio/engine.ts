@@ -88,6 +88,16 @@ class EngineFacade implements EngineApi {
   channelActivityAge(channelId: string) {
     return this.impl.channelActivityAge(channelId);
   }
+  /** True when the engine can write FLAC and Ogg Vorbis itself (native engine). */
+  get canEncode(): boolean {
+    return this.impl.renderEncoded !== undefined;
+  }
+
+  renderEncoded(opts: RenderOptions & { format: 'flac' | 'ogg'; bitDepth: 16 | 24; kbps: number }): Promise<Uint8Array> {
+    if (!this.impl.renderEncoded) return Promise.reject(new Error('Ogg Vorbis export needs the desktop app (native engine).'));
+    return this.impl.renderEncoded(opts);
+  }
+
   renderWav(opts: RenderOptions & { bitDepth: WavBitDepth }) {
     return this.impl.renderWav(opts);
   }

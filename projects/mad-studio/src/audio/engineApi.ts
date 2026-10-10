@@ -36,6 +36,8 @@ export interface EngineApi {
   /** Seconds since the channel last triggered a note (Infinity if never). */
   channelActivityAge(channelId: Id): number;
   renderWav(opts: RenderOptions & { bitDepth: WavBitDepth }): Promise<{ wav: Uint8Array; buffer: AudioBuffer }>;
+  /** Native engine only: renders straight into FLAC or Ogg Vorbis (JUCE's encoders). */
+  renderEncoded?(opts: RenderOptions & { format: 'flac' | 'ogg'; bitDepth: 16 | 24; kbps: number }): Promise<Uint8Array>;
   /** Plugins (native engine only). */
   capturePluginStates(): Promise<void>;
   openPluginEditor(key: string, title: string): void;

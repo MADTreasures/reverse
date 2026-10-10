@@ -2,6 +2,8 @@
 
 #include "engine/Wav.h"
 
+#include <juce_audio_formats/juce_audio_formats.h>
+
 #include <cmath>
 
 namespace mad
@@ -113,9 +115,62 @@ RenderResult runRender (const RenderRequest& request, SampleStore& samples, Chan
 }
 } // namespace
 
+namespace
+{
+/** FLAC or Ogg Vorbis through JUCE's audio formats. */
+RenderResult renderCompressed (const RenderRequest& request, SampleStore& samples, ChannelIds& ids, PluginProvider* plugins,
+                               const std::function<void (double)>& progress, const std::atomic<bool>* cancel)
+{
+    RenderResult failed;
+    request.output.getParentDirectory().createDirectory();
+    request.output.deleteFile();
+    std::unique_ptr<juce::OutputStream> stream = std::make_unique<juce::FileOutputStream> (request.output);
+    if (! static_cast<juce::FileOutputStream*> (stream.get())->openedOk())
+    {
+        failed.error = "cannot create " + request.output.getFullPathName();
+        return failed;
+    }
+    std::unique_ptr<juce::AudioFormat> format;
+    auto options = juce::AudioFormatWriterOptions {}.withSampleRate (request.sampleRate).withNumChannels (2);
+    if (request.format == "flac")
+    {
+        format = std::make_unique<juce::FlacAudioFormat>();
+        options = options.withBitsPerSample (request.bitDepth == 16 ? 16 : 24).withQualityOptionIndex (5);
+    }
+    else
+    {
+        format = std::make_unique<juce::OggVorbisAudioFormat>();
+        // The nominal bit rate closest to the request ("64 kbps" … "500 kbps").
+        const auto qualities = format->getQualityOptions();
+        int best = 0;
+        for (int i = 1; i < qualities.size(); ++i)
+            if (std::abs (qualities[i].getIntValue() - request.oggKbps) < std::abs (qualities[best].getIntValue() - request.oggKbps))
+                best = i;
+        options = options.withBitsPerSample (32).withQualityOptionIndex (best);
+    }
+    auto writer = format->createWriterFor (stream, options);
+    if (writer == nullptr)
+    {
+        failed.error = "cannot encode " + request.format + " at " + juce::String (request.sampleRate) + " Hz";
+        return failed;
+    }
+    auto result = runRender (request, samples, ids, plugins, progress, cancel, [&writer] (const float* l, const float* r, int n)
+    {
+        const float* channels[] = { l, r };
+        return writer->writeFromFloatArrays (channels, 2, n);
+    });
+    writer.reset(); // finishes the stream
+    if (! result.ok)
+        request.output.deleteFile();
+    return result;
+}
+} // namespace
+
 RenderResult renderOffline (const RenderRequest& request, SampleStore& samples, ChannelIds& ids, PluginProvider* plugins,
                             const std::function<void (double)>& progress, const std::atomic<bool>* cancel)
 {
+    if (request.format == "flac" || request.format == "ogg")
+        return renderCompressed (request, samples, ids, plugins, progress, cancel);
     WavWriter writer;
     request.output.getParentDirectory().createDirectory();
     if (! writer.open (request.output, request.sampleRate, 2, request.bitDepth))

@@ -538,35 +538,57 @@ export class NativeEngine implements EngineApi {
   // ------------------------------------------------------------------ export
 
   async renderWav(opts: RenderOptions & { bitDepth: WavBitDepth }): Promise<{ wav: Uint8Array; buffer: AudioBuffer }> {
+    const sampleRate = opts.sampleRate ?? this.rate;
+    const bytes = await this.renderFile(opts, { format: 'wav', bitDepth: opts.bitDepth });
+    const buffer = await decodeAudioFile(bytes, sampleRate);
+    return { wav: bytes, buffer };
+  }
+
+  renderEncoded(opts: RenderOptions & { format: 'flac' | 'ogg'; bitDepth: 16 | 24; kbps: number }): Promise<Uint8Array> {
+    return this.renderFile(opts, { format: opts.format, bitDepth: opts.bitDepth, kbps: opts.kbps });
+  }
+
+  /** Renders into a file in the engine (render.start with the timeline, automation and project inline). */
+  private async renderFile(opts: RenderOptions, encoding: { format: 'wav' | 'flac' | 'ogg'; bitDepth: number; kbps?: number }): Promise<Uint8Array> {
     const s = useStore.getState();
+    const project = opts.project ?? s.project;
     const sampleRate = opts.sampleRate ?? this.rate;
     let endTick: number;
+    let timeline: Record<string, unknown>;
+    let lanes: unknown[] = [];
     if (opts.mode === 'pattern') {
-      // Render a pattern repeated `loops` times by sending it as a one-off timeline.
-      const tl = patternTimeline(s.project, opts.patternId ?? s.ui.selectedPatternId);
+      // A pattern repeated `loops` times as a one-off timeline.
+      const tl = patternTimeline(project, opts.patternId ?? s.ui.selectedPatternId);
       const loops = Math.max(1, opts.loops ?? 1);
       const len = tl.end - tl.start;
       const events = Array.from({ length: loops }, (_, k) => tl.events.map((e) => ({ ...e, tick: e.tick + k * len }))).flat();
       endTick = len * loops;
-      this.send({ type: 'timeline.set', mode: 'pattern', loopStart: 0, loopEnd: endTick, events });
-      this.send({ type: 'automation.set', lanes: [] });
+      timeline = { mode: 'pattern', loopStart: 0, loopEnd: endTick, events };
     } else {
-      const tl = songTimeline(s.project);
+      const tl = songTimeline(project);
       endTick = tl.end;
-      this.send({ type: 'timeline.set', mode: 'song', loopStart: tl.start, loopEnd: tl.end, events: tl.events, ...(tl.signatures ? { signatures: tl.signatures } : {}) });
-      this.send({ type: 'automation.set', lanes: this.automation.unitLanes(s.project) });
+      timeline = { mode: 'song', loopStart: tl.start, loopEnd: tl.end, events: tl.events, ...(tl.signatures ? { signatures: tl.signatures } : {}) };
+      lanes = this.automation.unitLanes(project);
     }
-    this.timelineSentFor = null;
-    this.lanesSent = null;
-    try {
-      const path = await this.bridge.tempPath('render.wav');
-      const done = await this.request({ type: 'render.start', path, sampleRate, bitDepth: opts.bitDepth, startTick: 0, endTick, tailSeconds: opts.tail ?? 2 }, 600000);
-      const bytes = await this.bridge.readFile(String(done.path ?? path));
-      const buffer = await decodeAudioFile(bytes, sampleRate);
-      return { wav: bytes, buffer };
-    } finally {
-      this.syncAll();
-    }
+    const path = await this.bridge.tempPath(`render.${encoding.format}`);
+    const done = await this.request(
+      {
+        type: 'render.start',
+        path,
+        sampleRate,
+        format: encoding.format,
+        bitDepth: encoding.bitDepth,
+        ...(encoding.kbps ? { kbps: encoding.kbps } : {}),
+        startTick: 0,
+        endTick,
+        tailSeconds: opts.tail ?? 2,
+        project,
+        timeline,
+        automation: { lanes },
+      },
+      600000,
+    );
+    return this.bridge.readFile(String(done.path ?? path));
   }
 
   // ------------------------------------------------------------------ plugins

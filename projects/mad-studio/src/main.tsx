@@ -13,7 +13,8 @@ import * as actions from './store/actions';
 import { createAutomationClip, updateAutomation } from './store/automationActions';
 import { defaultWindows, useStore, type UiState } from './store/store';
 import { runCommand, type CommandId } from './ui/commands';
-import { enableMidi, installKeyboard } from './ui/keyboard';
+import { installKeyboard } from './ui/keyboard';
+import { enableMidi, handleMidiMessage } from './ui/midiInput';
 import { pluginInstanceFrom } from './ui/menus/pluginMenus';
 import { toast } from './ui/overlays';
 import './styles/base.css';
@@ -122,6 +123,7 @@ async function boot(): Promise<void> {
       updateAutomation,
       usePlugins,
       pluginInstanceFrom,
+      handleMidiMessage,
     },
   });
   native?.ready();

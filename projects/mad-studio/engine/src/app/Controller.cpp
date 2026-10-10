@@ -608,6 +608,10 @@ void Controller::startRender (const juce::var& msg, const juce::var& requestId)
         return fail ("invalid sampleRate");
     const int bits = json::integer (msg, "bitDepth", 24);
     r.bitDepth = (bits == 16 || bits == 24 || bits == 32) ? bits : 24;
+    r.format = json::string (msg, "format", "wav").toLowerCase();
+    if (r.format != "wav" && r.format != "flac" && r.format != "ogg")
+        return fail ("unknown format " + r.format + " (wav, flac or ogg)");
+    r.oggKbps = std::clamp (json::integer (msg, "kbps", 192), 32, 500);
     r.startTick = std::max (0.0, json::number (msg, "startTick", 0.0));
     r.endTick = json::number (msg, "endTick", -1.0);
     r.tailSeconds = std::clamp (json::number (msg, "tailSeconds", 2.0), 0.0, 60.0);

@@ -132,6 +132,41 @@ test('desktop app drives the native engine: playback, VST3 plugins, render, plug
     expect(render.peak).toBeGreaterThan(0.01);
 
     step('render ok');
+    // FLAC and Ogg Vorbis come from the engine's own encoders (the export dialog offers OGG only here).
+    const encoded = await page.evaluate(async () => {
+      const m = window.__madStudio;
+      const base = { mode: 'pattern', patternId: m.useStore.getState().ui.selectedPatternId, loops: 1, sampleRate: 44100, tail: 0.5 };
+      const flac: Uint8Array = await m.engine.renderEncoded({ ...base, format: 'flac', bitDepth: 24, kbps: 0 });
+      const ogg: Uint8Array = await m.engine.renderEncoded({ ...base, format: 'ogg', bitDepth: 16, kbps: 160 });
+      return {
+        canEncode: m.engine.canEncode,
+        flac: String.fromCharCode(...flac.slice(0, 4)),
+        flacBits: (((flac[20] & 1) << 4) | (flac[21] >> 4)) + 1,
+        ogg: String.fromCharCode(...ogg.slice(0, 4)),
+        oggSize: ogg.length,
+      };
+    });
+    expect(encoded).toMatchObject({ canEncode: true, flac: 'fLaC', flacBits: 24, ogg: 'OggS' });
+    expect(encoded.oggSize).toBeGreaterThan(2000);
+    step('FLAC and Ogg Vorbis export ok');
+
+    // MIDI learn: a linked controller moves the master volume; the engine renders with the new value.
+    const learned = await page.evaluate(async () => {
+      const m = window.__madStudio;
+      m.actions.setControllerLink({ target: 'mx:0:volume', channel: 0, cc: 7 });
+      m.handleMidiMessage([0xb0, 7, 0]);
+      const volume = m.useStore.getState().project.mixer[0].volume;
+      const { buffer } = await m.engine.renderWav({ mode: 'pattern', patternId: m.useStore.getState().ui.selectedPatternId, loops: 1, sampleRate: 48000, bitDepth: 16 });
+      let peak = 0;
+      for (let c = 0; c < buffer.numberOfChannels; c++) for (const v of buffer.getChannelData(c)) peak = Math.max(peak, Math.abs(v));
+      m.actions.undo();
+      m.actions.removeControllerLink('mx:0:volume');
+      return { volume, peak, restored: m.useStore.getState().project.mixer[0].volume };
+    });
+    expect(learned.volume).toBe(0);
+    expect(learned.peak).toBeLessThan(1e-4);
+    expect(learned.restored).toBeGreaterThan(0.5);
+    step('MIDI learn ok');
     // Saving stores the plugins' state in the project.
     await page.evaluate(() => window.__madStudio.engine.capturePluginStates());
     const states = await page.evaluate((k) => {

@@ -1,4 +1,6 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Download, type Page } from '@playwright/test';
+import { unzipSync } from 'fflate';
+import { readFileSync } from 'node:fs';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 declare global {
@@ -1094,5 +1096,186 @@ test('playlist time markers, time signatures and arrangements', async ({ page })
   await page.getByRole('button', { name: 'Club mix ▾' }).click();
   await page.getByRole('menuitem', { name: 'Delete' }).click();
   expect((await project()).arrangements.map((a: any) => a.name)).not.toContain('Club mix');
+  expect(errors).toEqual([]);
+});
+
+/** The file a click saves (the browser's save picker is turned off, so saving downloads). */
+async function savedFile(page: Page, click: () => Promise<unknown>): Promise<{ name: string; data: Uint8Array }> {
+  const [download]: [Download, unknown] = await Promise.all([page.waitForEvent('download', { timeout: 60_000 }), click()]);
+  return { name: download.suggestedFilename(), data: new Uint8Array(readFileSync((await download.path())!)) };
+}
+
+async function fileMenu(page: Page, submenu: 'Import' | 'Export', item: string): Promise<void> {
+  await page.locator('.menubar .menu-btn', { hasText: /^File$/i }).click();
+  await page.getByRole('menuitem', { name: submenu }).hover();
+  await page.getByRole('menuitem', { name: item }).click();
+}
+
+/** Peak of a 16-bit PCM WAV file. */
+function wavPeak(data: Uint8Array): number {
+  const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
+  let pos = 12;
+  while (pos + 8 <= data.length) {
+    const id = String.fromCharCode(...data.subarray(pos, pos + 4));
+    const size = view.getUint32(pos + 4, true);
+    if (id === 'data') {
+      let peak = 0;
+      for (let i = pos + 8; i + 1 < pos + 8 + size; i += 2) peak = Math.max(peak, Math.abs(view.getInt16(i, true)) / 32768);
+      return peak;
+    }
+    pos += 8 + size + (size % 2);
+  }
+  throw new Error('no data chunk');
+}
+
+test('export dialog: FLAC, MP3 and split mixer tracks as a ZIP', async ({ page }) => {
+  const errors = await boot(page);
+  await page.evaluate(() => {
+    (window as any).showSaveFilePicker = undefined;
+  });
+  const openExport = async () => {
+    await fileMenu(page, 'Export', 'Audio file (WAV, FLAC, MP3, OGG)…');
+    const dialog = page.getByRole('dialog', { name: 'Export' });
+    await expect(dialog).toBeVisible();
+    await dialog.getByRole('button', { name: /^Pattern/ }).click();
+    await dialog.locator('#export-repeats').selectOption('1');
+    await dialog.locator('#export-tail').selectOption('0');
+    return dialog;
+  };
+
+  // FLAC, 24 bit (lossless, encoded in the app).
+  let dialog = await openExport();
+  await expect(dialog.locator('#export-format option[value="ogg"]')).toBeDisabled(); // needs the desktop app
+  await dialog.locator('#export-format').selectOption('flac');
+  await expect(dialog.locator('#export-depth option')).toHaveCount(2);
+  await dialog.locator('#export-depth').selectOption('24');
+  const flac = await savedFile(page, () => dialog.getByRole('button', { name: 'Render & save' }).click());
+  await expect(dialog).toBeHidden();
+  expect(flac.name).toMatch(/\.flac$/);
+  const f = flac.data;
+  expect(String.fromCharCode(...f.subarray(0, 4))).toBe('fLaC');
+  expect((f[18] << 12) | (f[19] << 4) | (f[20] >> 4)).toBe(44100);
+  expect(((f[20] >> 1) & 7) + 1).toBe(2);
+  expect((((f[20] & 1) << 4) | (f[21] >> 4)) + 1).toBe(24);
+  const frames = (f[22] << 24) * 1 + (f[23] << 16) + (f[24] << 8) + f[25];
+  expect(frames).toBeGreaterThan(44100);
+
+  // MP3, 192 kbps at 48 kHz (LAME).
+  dialog = await openExport();
+  await dialog.locator('#export-format').selectOption('mp3');
+  await expect(dialog.locator('#export-rate option')).toHaveCount(2);
+  await dialog.locator('#export-rate').selectOption('48000');
+  await dialog.locator('#export-bitrate').selectOption('192');
+  const mp3 = await savedFile(page, () => dialog.getByRole('button', { name: 'Render & save' }).click());
+  expect(mp3.name).toMatch(/\.mp3$/);
+  const m = mp3.data;
+  expect(m[0]).toBe(0xff);
+  expect((m[1] >> 5) & 7).toBe(7); // frame sync
+  expect((m[1] >> 3) & 3).toBe(3); // MPEG-1
+  expect((m[1] >> 1) & 3).toBe(1); // layer III
+  expect(m[2] >> 4).toBe(11); // 192 kbps
+  expect((m[2] >> 2) & 3).toBe(1); // 48 kHz
+  expect(m.length).toBeGreaterThan(20_000);
+
+  // WAV stems: the master plus one file per mixer track that carries audio.
+  dialog = await openExport();
+  await dialog.locator('#export-format').selectOption('wav');
+  await dialog.getByLabel('Split mixer tracks').check();
+  const label = await dialog.locator('.cs-check').textContent();
+  const count = Number(/(\d+) files in a ZIP/.exec(label ?? '')?.[1]);
+  expect(count).toBeGreaterThan(3);
+  const zip = await savedFile(page, () => dialog.getByRole('button', { name: 'Render & save' }).click());
+  expect(zip.name).toMatch(/\(stems\)\.zip$/);
+  const files = unzipSync(zip.data);
+  const names = Object.keys(files).sort();
+  expect(names).toHaveLength(count);
+  expect(names[0]).toBe('00 - Master.wav');
+  const s = await state(page);
+  const inserts: number[] = s.project.channels.filter((c: any) => c.kind !== 'automation' && c.mixerTrack > 0).map((c: any) => c.mixerTrack);
+  expect(names.slice(1).map((n) => Number(n.slice(0, 2)))).toEqual([...new Set(inserts)].sort((a, b) => a - b));
+  for (const n of names) {
+    expect(String.fromCharCode(...files[n].subarray(0, 4))).toBe('RIFF');
+    expect(files[n].length).toBe(files[names[0]].length);
+  }
+  expect(wavPeak(files['00 - Master.wav'])).toBeGreaterThan(0.05);
+  expect(names.slice(1).filter((n) => wavPeak(files[n]) > 0.01).length).toBeGreaterThan(0);
+  expect(errors).toEqual([]);
+});
+
+test('MIDI files: export the pattern and the song, import one as a pattern', async ({ page }) => {
+  const errors = await boot(page);
+  await page.evaluate(() => {
+    (window as any).showSaveFilePicker = undefined;
+    window.__madStudio.actions.setTransport({ mode: 'pattern' });
+  });
+  const pattern = await savedFile(page, () => fileMenu(page, 'Export', 'MIDI file…'));
+  expect(pattern.name).toMatch(/\.mid$/);
+  const p = pattern.data;
+  expect(String.fromCharCode(...p.subarray(0, 4))).toBe('MThd');
+  expect([p[8], p[9], p[12], p[13]]).toEqual([0, 1, 0, 96]); // format 1, 96 ticks per quarter
+
+  await page.evaluate(() => window.__madStudio.actions.setTransport({ mode: 'song' }));
+  const song = await savedFile(page, () => fileMenu(page, 'Export', 'MIDI file…'));
+  expect(song.data.length).toBeGreaterThan(p.length);
+  const tracks = (song.data[10] << 8) | song.data[11];
+  const before = await state(page);
+
+  const [chooser] = await Promise.all([page.waitForEvent('filechooser'), fileMenu(page, 'Import', 'MIDI file…')]);
+  await chooser.setFiles({ name: 'groove.mid', mimeType: 'audio/midi', buffer: Buffer.from(song.data) });
+  await expect(page.locator('.toast', { hasText: /Imported \d+ notes on \d+ channels into pattern “groove”/ })).toBeVisible();
+  const after = await state(page);
+  const imported = after.project.patterns.find((x: any) => x.name === 'groove');
+  expect(imported).toBeTruthy();
+  expect(after.project.channels.length - before.project.channels.length).toBe(tracks - 1); // minus the conductor track
+  const notes = Object.values(imported.notes as Record<string, unknown[]>).reduce((n, list) => n + list.length, 0);
+  expect(notes).toBeGreaterThan(50);
+  expect(after.project.bpm).toBe(before.project.bpm); // the song has music: its tempo stays
+  expect(after.ui.selectedPatternId).toBe(imported.id);
+  expect(errors).toEqual([]);
+});
+
+test('MIDI learn: link a knob to a controller, move it, remove the link', async ({ page }) => {
+  const errors = await boot(page);
+  const volume = page.locator('.rack-row').first().locator('.knob').nth(1);
+  await volume.click({ button: 'right' });
+  await page.getByRole('menuitem', { name: 'Link to controller…' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Remote control settings' });
+  await expect(dialog).toContainText('Kick - Channel volume');
+  await expect(dialog.getByRole('button', { name: 'Accept' })).toBeDisabled();
+
+  // Auto detect: the next control change fills in channel and controller.
+  await page.evaluate(() => window.__madStudio.handleMidiMessage([0xb2, 21, 64]));
+  await expect(dialog.getByRole('status')).toHaveText(/Detected controller 21 on channel 3/);
+  await expect(dialog.locator('#cl-cc')).toHaveValue('21');
+  await expect(dialog.locator('#cl-channel')).toHaveValue('2');
+  await dialog.locator('#cl-mapping').selectOption('inverted');
+  await dialog.getByRole('button', { name: 'Accept' }).click();
+  await expect(dialog).toBeHidden();
+  let s = await state(page);
+  const kick = s.project.channels[0];
+  expect(s.project.controllerLinks).toEqual([{ id: expect.any(String), target: `ch:${kick.id}:volume`, channel: 2, cc: 21, mapping: 'inverted' }]);
+
+  // The controller moves the knob (inverted), on its own channel only.
+  await page.evaluate(() => window.__madStudio.handleMidiMessage([0xb2, 21, 127]));
+  expect((await state(page)).project.channels[0].volume).toBe(0);
+  await page.evaluate(() => window.__madStudio.handleMidiMessage([0xb0, 21, 127]));
+  await page.evaluate(() => window.__madStudio.handleMidiMessage([0xb2, 21, 0]));
+  s = await state(page);
+  expect(s.project.channels[0].volume).toBe(1);
+  expect(s.ui.lastTweaked).toBe(`ch:${kick.id}:volume`);
+
+  // The control menu shows the link; Tools › Last tweaked opens the same settings.
+  await volume.click({ button: 'right' });
+  await expect(page.getByRole('menuitem', { name: /Link to controller…\s*CC 21/ })).toBeVisible();
+  await page.keyboard.press('Escape');
+  await page.locator('.menubar .menu-btn', { hasText: /^Tools$/i }).click();
+  await page.getByRole('menuitem', { name: 'Link to controller…' }).click();
+  await expect(dialog).toContainText('Kick - Channel volume');
+  await expect(dialog.locator('#cl-cc')).toHaveValue('21');
+  await dialog.getByRole('button', { name: 'Remove' }).click();
+  await expect(dialog).toBeHidden();
+  expect((await state(page)).project.controllerLinks).toBeUndefined();
+  await page.evaluate(() => window.__madStudio.handleMidiMessage([0xb2, 21, 64]));
+  expect((await state(page)).project.channels[0].volume).toBe(1);
   expect(errors).toEqual([]);
 });

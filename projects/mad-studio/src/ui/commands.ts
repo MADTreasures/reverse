@@ -1,4 +1,6 @@
+import { exportMidiDialog, importMidiDialog } from '../project/midiIO';
 import { songStartTick } from '../model/markers';
+import { describeTarget } from '../model/automationTargets';
 import { engine } from '../audio/engine';
 import { findPattern } from '../model/patterns';
 import { isMac } from '../platform/platform';
@@ -13,6 +15,7 @@ import {
   splitPatternByChannel,
   transposePattern,
   redo,
+  removeAllControllerLinks,
   renamePattern,
   renameProject,
   setChannelProps,
@@ -29,7 +32,7 @@ import { useStore } from '../store/store';
 import { setHint } from './hint';
 import { clearScoreLog, dumpScoreLog } from './liveInput';
 import { sendToFocusedEditor } from './windowKeys';
-import { confirmDialog, openDialog, promptDialog, toast } from './overlays';
+import { confirmDialog, openControllerLink, openDialog, promptDialog, toast } from './overlays';
 import { closeWindow, focusWindow, openWindow, toggleMaximize, toggleWindow } from './workspace/windows';
 
 export type CommandId =
@@ -39,6 +42,8 @@ export type CommandId =
   | 'save'
   | 'saveAs'
   | 'export'
+  | 'exportMidi'
+  | 'importMidi'
   | 'importSamples'
   | 'projectInfo'
   | 'saveNewVersion'
@@ -60,6 +65,8 @@ export type CommandId =
   | 'newPattern'
   | 'newPatternNamed'
   | 'lastTweakedAutomation'
+  | 'lastTweakedLink'
+  | 'removeControllerLinks'
   | 'pluginPicker'
   | 'audioSettings'
   | 'closeAllWindows'
@@ -179,6 +186,12 @@ export async function runCommand(id: CommandId): Promise<void> {
     case 'importSamples':
       await importSamplesDialog();
       return;
+    case 'importMidi':
+      await importMidiDialog();
+      return;
+    case 'exportMidi':
+      await exportMidiDialog();
+      return;
     case 'projectInfo': {
       const name = await promptDialog('Project name', s.project.name);
       if (name) renameProject(name);
@@ -246,6 +259,17 @@ export async function runCommand(id: CommandId): Promise<void> {
       const target = s.ui.lastTweaked;
       if (!target) toast('Move a control first, then use “Last tweaked”.', 'error');
       else if (createAutomationClip(target)) toast('Automation clip created for the last tweaked control.');
+      return;
+    }
+    case 'lastTweakedLink': {
+      const target = s.ui.lastTweaked;
+      if (!target || !describeTarget(s.project, target)) toast('Move a control first, then use “Last tweaked”.', 'error');
+      else openControllerLink(target);
+      return;
+    }
+    case 'removeControllerLinks': {
+      const count = s.project.controllerLinks?.length ?? 0;
+      if (count > 0 && (await confirmDialog('Remove controller links', `Remove all ${count} MIDI controller link${count === 1 ? '' : 's'} of this project?`, 'Remove', true))) removeAllControllerLinks();
       return;
     }
     case 'pluginPicker':

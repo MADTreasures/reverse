@@ -337,6 +337,26 @@ export interface TimeMarker {
   denominator?: number;
 }
 
+/** Mapping formula of a controller link (FL Studio: Remote control settings › Mapping formula). */
+export type ControllerMapping = 'default' | 'inverted' | 'switch' | 'firstHalf' | 'lastHalf';
+
+/** A MIDI controller linked to a control (FL Studio: right-click › Link to controller…); controllerLinks.ts. */
+export interface ControllerLink {
+  id: Id;
+  /** Automation target key of the control (automationTargets.ts). */
+  target: string;
+  /** MIDI channel 0..15. */
+  channel: number;
+  /** Controller (CC) number 0..127. */
+  cc: number;
+  /** Omni: a channel parameter link controls that parameter of the selected channel. */
+  omni?: boolean;
+  /** Absent = default. */
+  mapping?: ControllerMapping;
+  /** Pickup (takeover mode): the control only follows once the controller reaches its value. */
+  pickup?: boolean;
+}
+
 /** A playlist arrangement that is not shown right now (FL Studio: Playlist › Arrangements). */
 export interface Arrangement {
   id: Id;
@@ -448,4 +468,6 @@ export interface Project {
   arrangement?: { id: Id; name: string };
   /** The other arrangements; they share the channels, patterns and mixer (FL Studio). */
   arrangements?: Arrangement[];
+  /** MIDI controllers linked to controls (FL Studio's per-project links); absent = none. */
+  controllerLinks?: ControllerLink[];
 }

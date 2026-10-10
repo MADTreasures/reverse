@@ -6,6 +6,7 @@ import { AudioSettingsDialog } from './dialogs/AudioSettings';
 import { PluginManagerDialog } from './dialogs/PluginManager';
 import { NotePropertiesDialog } from './dialogs/NoteProperties';
 import { AudioClipPropertiesDialog } from './dialogs/AudioClipProperties';
+import { ControllerLinkDialog } from './dialogs/ControllerLinkDialog';
 import { ToolDialog } from './dialogs/ToolDialog';
 
 /** Context menus, modal dialogs and toast notifications. */
@@ -41,6 +42,7 @@ export function OverlayHost() {
           {dialog.kind === 'custom' && dialog.id === 'audio' && <AudioSettingsDialog />}
           {dialog.kind === 'note' && <NotePropertiesDialog patternId={dialog.patternId} channelId={dialog.channelId} noteId={dialog.noteId} />}
           {dialog.kind === 'clip' && <AudioClipPropertiesDialog clipId={dialog.clipId} />}
+          {dialog.kind === 'controllerLink' && <ControllerLinkDialog key={dialog.target} target={dialog.target} />}
           {dialog.kind === 'tool' && (
             <ToolDialog key={dialog.toolId} toolId={dialog.toolId} patternId={dialog.patternId} channelId={dialog.channelId} selected={dialog.selected} ctx={dialog.ctx} />
           )}

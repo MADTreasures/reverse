@@ -26,6 +26,7 @@ type DialogSpec =
   | { kind: 'custom'; id: CustomDialogId }
   | { kind: 'note'; patternId: string; channelId: string; noteId: string }
   | { kind: 'clip'; clipId: string }
+  | { kind: 'controllerLink'; target: string }
   | { kind: 'tool'; toolId: string; patternId: string; channelId: string; selected: string[]; ctx: ToolContext };
 
 interface Toast {
@@ -98,6 +99,11 @@ export function openNoteProperties(patternId: string, channelId: string, noteId:
 /** FL Studio's audio clip properties (Alt+double-click a clip in the playlist). */
 export function openClipProperties(clipId: string): void {
   useOverlays.setState({ dialog: { kind: 'clip', clipId } });
+}
+
+/** FL Studio's Remote control settings (right-click a control › Link to controller…). */
+export function openControllerLink(target: string): void {
+  useOverlays.setState({ dialog: { kind: 'controllerLink', target } });
 }
 
 /** A piano roll tool with parameters (FL Studio: Tools › Arpeggiate… etc.), previewed live. */

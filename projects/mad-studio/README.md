@@ -1,7 +1,7 @@
 # MAD Studio
 
 > **Vorbild:** FL Studio (Image-Line, <https://www.image-line.com/>) · **Plattform:** macOS und Windows (Electron-App), Linux (aus dem Quellcode) und Browser ·
-> **Status:** 🟢 v0.2 – Automation, Audioaufnahme, FL-Bedienung, native Engine mit VST®3/AU-Hosting und Plugin-Latenzausgleich (PDC)
+> **Status:** 🟢 v0.2 – Automation, Audioaufnahme, FL-Bedienung, native Engine mit VST®3/AU-Hosting und Plugin-Latenzausgleich (PDC), Mixer-Routing & Sidechain, Audio-Clip-Bearbeitung, Marker & Arrangements, Export (WAV/FLAC/MP3/OGG, Stems, MIDI), MIDI Learn
 
 [![MAD Studio CI](https://github.com/MADTreasures/reverse/actions/workflows/mad-studio-ci.yml/badge.svg)](https://github.com/MADTreasures/reverse/actions/workflows/mad-studio-ci.yml)
 [![MAD Studio macOS](https://github.com/MADTreasures/reverse/actions/workflows/mad-studio-macos.yml/badge.svg)](https://github.com/MADTreasures/reverse/actions/workflows/mad-studio-macos.yml)
@@ -32,6 +32,7 @@ Start synthetisiert, es sind keine fremden Samples enthalten.
 | **Audio-Clips** | wie in FL Studio pro Clip-Instanz: **Fade-in/-out-Griffe** (Dreiecke an der Oberkante, ziehen; Alt = ohne Snap), **Kurvenspannung** (Kreise), **Gain-Griff** (Halbkreis unten, +36 dB … −∞), Alt+Klick setzt zurück, Rechtsklick: *Reset*, *Type in value…*, **Normalize selection individually / as a group**; **Clip properties** (Alt+Doppelklick): Gain, **Pitch** und **Fine** (Länge bleibt), **Reverse**, **Stretch**, Fades; Tasten **7/8** transponieren, **9** dreht um; **Stretch clips** (Knopf in der Playlist): Kanten ziehen streckt den Clip statt zu trimmen; Clip-Menü mit **Chop** (Beat-Erkennung Dull/Medium/Sharp), Normalize, Reverse, Reset fades; Slicen verteilt die Fades; Pitch/Stretch/Reverse werden einmal als Sample-Variante berechnet (WSOLA-Stretching) und von beiden Engines gleich abgespielt (Paritätstest) |
 | **Marker, Taktarten & Arrangements** | **Zeitmarker** wie in FL (Alt+T, Playlist-Menü › *Time markers*): Fähnchen im Lineal, Klick springt hin, Ziehen verschiebt, Doppelklick benennt um, Rechtsklick: *Rename…*, *Action* (None, **Start** – Home springt dorthin, **Time signature**), **Place loop**, *Delete*; Alt+\* / Alt+/ springt zum nächsten/vorherigen Marker; **Taktartwechsel** (Shift+Alt+T, z. B. 3/4, 6/8, 7/8; mit Zeitauswahl nur für diesen Bereich): Taktnummern, Taktlinien, Positionsanzeige und das **Metronom beider Engines** folgen der Taktart; **Arrangements** (Knopf in der Playlist-Leiste): *Add one*, *Clone*, *Rename…*, *Delete*, Umschalten – sie teilen sich Channel Rack, Patterns und Mixer |
 | **Automation** | Rechtsklick auf jeden Regler → *Create automation clip* (wie in FL): Automation-Kanal im Channel Rack + Clip in der Playlist; Punkte per Rechtsklick setzen, ziehen, Kurven biegen, 13 Kurvenmodi; Tempo-Automation; Reglerbewegungen während der Song-Aufnahme werden aufgezeichnet; *Tools → Last tweaked* |
+| **MIDI Learn** | Rechtsklick auf jeden Regler → **Link to controller…** öffnet wie in FL die *Remote control settings*: am MIDI-Controller drehen (**Auto detect**) oder Kanal und Controller-Nummer eintragen, **Mapping formula** (Default, Inverted, Switch, First half, Last half), **Omni** (steuert denselben Parameter des gewählten Kanals), **Pickup (takeover mode)** (kein Sprung, bis der Controller den Wert erreicht), *Remove conflicts*, *Remove*; auch über *Tools → Last tweaked → Link to controller…*; Links werden im Projekt gespeichert, eine Controller-Bewegung ist ein Undo-Schritt und wird bei der Song-Aufnahme als Automation aufgezeichnet; wirkt auf alle Regler beider Engines und auf Plugin-Parameter |
 | **Aufnahme** | Mikrofon/Line-In: im Mixer-Track-Inspector Eingang wählen (armt die Spur), Record + Play → Audio-Clip in der Playlist (Song-Modus) bzw. Audio-Clip-Kanal (Pattern-Modus); Vorzähler, Latenzkompensation, Monitoring, Auto-unarm; Ordner „Recorded“ im Browser |
 | **Mixer** | Master + 16 Insert-Spuren (erweiterbar bis 64), Fader, Pan, Mute-LED (Ctrl-Klick = Solo, Alt-Klick = Solo samt allen hin- und weggerouteten Spuren), Arm-Taste, Track-Inspector mit Eingang, **10 Effekt-Slots** und Ausgang, Stereo-Pegelanzeigen, **Plugin-Latenzausgleich (PDC)** wie in FL: automatisch, Automationen werden mitkompensiert, Delay-Panel pro Spur (orange = Latenz erkannt, blau = manueller Versatz; *Set in ms / samples / beats*, *Set from*, Mausrad) |
 | **Mixer-Routing & Sidechain** | wie in FL: unter jeder Spur der **Send-Schalter** für die ausgewählte Spur – Klick schickt sie dorthin (nach dem Fader, der Master-Send bleibt), danach wird der Schalter zum **Send-Pegel-Knopf**; Rechtsklick: **Route to this track only**, **Sidechain to this track** (Link mit Pegel 0, der Kompressor der Zielspur hört mit *Sidechain: On* darauf), Remove send; Spurmenü mit *Route selected to this track (only)*, *Sidechain selected to this track*, *Route this track to selected only*, *Reset routing*; Rückkopplungen werden verhindert; Busse beliebig verschachtelt, Latenzausgleich entlang aller Sends; beide Engines klingen gleich (Paritätstest) |
@@ -40,8 +41,8 @@ Start synthetisiert, es sind keine fremden Samples enthalten.
 | **Instrumente** | 3-Oszillator-Synth (Sinus/Dreieck/Säge/Rechteck/Rauschen, Unison, Filter mit Hüllkurve, LFO) mit 14 Presets · Sampler (Root-Key, Feinstimmung, Reverse, One-Shot, Loop, Choke-Gruppen, ADSR) |
 | **Sounds** | 20 synthetisierte Factory-Sounds: Kicks, Snares, Claps, Hi-Hats, Becken, Toms, Percussion, 808-Bass, Riser, Impact |
 | **Transport** | Pattern-/Song-Modus, Tempo (10–522 BPM), Metronom, Aufnahme von Tastatur/MIDI ins Pattern, Positionsanzeige (Takt:Step:Tick oder Zeit) |
-| **Eingabe** | Computertastatur als Klavier (funktioniert auch mit Schweizer/Deutscher QWERTZ-Tastatur), MIDI-Keyboards (Web MIDI) |
-| **Dateien** | Projekte als `.madstudio` (ZIP mit `project.json` und allen eigenen Samples), Autosave & Wiederherstellung, Audio-Import per Drag & Drop (WAV, AIFF, MP3, …), **WAV-Export** (16/24-bit, 32-bit float, 44.1–96 kHz) |
+| **Eingabe** | Computertastatur als Klavier (funktioniert auch mit Schweizer/Deutscher QWERTZ-Tastatur), MIDI-Keyboards und -Controller (Web MIDI) |
+| **Dateien** | Projekte als `.madstudio` (ZIP mit `project.json` und allen eigenen Samples), Autosave & Wiederherstellung, Audio-Import per Drag & Drop (WAV, AIFF, MP3, …); **Export** wie in FL als **WAV** (16/24-bit, 32-bit float), **FLAC** (16/24-bit, verlustfrei), **MP3** (128–320 kbps, LAME) und **OGG Vorbis** (96–320 kbps, Desktop-App), 44.1–96 kHz, Song oder Pattern; **Split mixer tracks**: eine Datei pro Mixer-Spur, die Audio führt (solo, durch ihre Sends), plus Master als ZIP; **MIDI-Dateien**: Export von Song oder Pattern (Format 1, eine Spur pro Kanal, Tempo, Taktarten, Marker), Import von Format 0/1 (jede Spur bzw. jeder MIDI-Kanal wird ein Synth-Kanal auf eigener Mixer-Spur, alle Noten in einem neuen Pattern am Song-Anfang, Tempo und Taktart werden in leere Projekte übernommen) |
 | **Komfort** | Undo/Redo wie in FL Studio 26 (Ctrl/⌘Z rückgängig, Ctrl/⌘⌥Z wiederherstellen, benannte Schritte), Score-Logger (nachträglich ins Pattern übernehmen, was gespielt wurde), frei verschiebbare Fenster wie im Vorbild, Hinweisleiste für jedes Bedienelement, Demo-Song „MAD Groove“ |
 | **Audio-Engines** | Desktop-App: **native Engine** (C++/JUCE, eigener Prozess, CoreAudio · ASIO® und Windows Audio (WASAPI, auch Exklusiv- und Low-Latency-Modus) · DirectSound · ALSA/JACK, VST3/AU, Latenzausgleich, Aufnahme, Offline-Rendering; klingt wie die Web-Engine: Demo-Song innerhalb 0,02 dB RMS); Browser bzw. ohne Engine: Web-Audio-Engine – gleiche Bedienung, automatische Umschaltung |
 
@@ -159,7 +160,13 @@ MIDI-Keyboards funktionieren in der Mac-App automatisch, im Browser (nur Chrome/
    (*Mixer-Menü → Plugin delay compensation*); das Uhr-Symbol unten an jeder Mixer-Spur zeigt die
    Latenz und setzt per Klick oder Mausrad einen manuellen Versatz, das Plugin-Fenster einen
    Latenz-Offset für Plugins, die ihre Latenz falsch melden.
-9. **Exportieren:** *File → Export WAV…* (**⌘R**).
+9. **Exportieren:** *File → Export → Audio file…* (**⌘R**): WAV, FLAC, MP3 oder OGG, Song oder
+   Pattern; *Split mixer tracks* speichert zusätzlich jede Mixer-Spur einzeln (ZIP).
+   *File → Export → MIDI file…* speichert die Noten, *File → Import → MIDI file…* holt eine
+   MIDI-Datei als neues Pattern ins Projekt.
+10. **MIDI-Controller:** Rechtsklick auf einen Regler → *Link to controller…*, am Controller den
+    gewünschten Drehregler oder Fader bewegen → *Accept*. Mit *Pickup* springt der Wert erst mit,
+    wenn der Controller ihn erreicht hat.
 
 Eigene Samples einfach aus dem Finder in das Channel Rack (neuer Kanal), auf einen Kanal
 (Sample ersetzen) oder in die Playlist (Audio-Clip) ziehen.
@@ -176,7 +183,7 @@ Eigene Samples einfach aus dem Finder in das Channel Rack (neuer Kanal), auf ein
 | + / − | Nächstes / vorheriges Pattern | ⌘F4 | Neues Pattern |
 | ⌘Z | Rückgängig (schrittweise, Menü nennt die Aktion) | ⌥⌘Z | Wiederherstellen |
 | ⌘M / ⌘P | Metronom / Aufnahme-Vorzähler | ⌃H | Alles stumm (Panic) |
-| ⌘S / ⇧⌘S / ⌘N | Speichern / unter / neue Version | ⌘O / ⌘R | Öffnen / WAV exportieren |
+| ⌘S / ⇧⌘S / ⌘N | Speichern / unter / neue Version | ⌘O / ⌘R | Öffnen / Audio exportieren |
 | 1 … 0 / ⌘1 … 0 | Kanäle 1–10 stumm / solo | ⌘T | Computertastatur als Klavier |
 | P · B · D · T · C · E | Werkzeug Zeichnen · Malen · Löschen · Stumm · Slice · Auswahl | Q · ⇧Q / ⌘Q | Startzeiten / Starts und Enden quantisieren |
 | ⌘A / ⌘D | Alles wählen / Auswahl aufheben | ⌘C / ⌘V / ⌘B | Kopieren / Einfügen / Duplizieren |
@@ -210,7 +217,7 @@ src/
 │                 Timeline-Berechnung, Presets, Demo-Song, Dateiformat – reine Logik, ohne DOM
 ├── store/        Zustand (zustand + immer) mit Undo/Redo; alle Bearbeitungen laufen über actions.ts
 ├── audio/        Engine: Look-ahead-Scheduler, Synth, Sampler, Mixer-Graph, Effekte,
-│                 Offline-Rendering, WAV-Encoder, synthetisierte Drum-Sounds
+│                 Offline-Rendering, WAV-/FLAC-/MP3-Encoder, synthetisierte Drum-Sounds
 ├── ui/           React-Oberfläche; Piano Roll und Playlist zeichnen auf <canvas>
 ├── project/      Öffnen/Speichern/Import/Export, Autosave
 └── platform/     Brücke zu Electron (Dateidialoge, Menü) bzw. Browser-Fallbacks
@@ -227,7 +234,7 @@ Projektzustand (für Undo). Die Audio-Engine abonniert den Store und gleicht ihr
 Graphen ab: Kanal → Instrument → Kanal-Strip → Mixer-Insert → Effekte → Master. Der Scheduler
 plant Noten etwa 120 ms im Voraus auf die Sample-genaue Audio-Uhr (Look-ahead-Verfahren),
 sodass Timing-Schwankungen der Oberfläche nicht hörbar sind. Dieselbe Graph-Klasse rendert
-offline für den WAV-Export.
+offline für den Export.
 
 In der Desktop-App rechnet stattdessen die **native Engine** in einem eigenen Prozess: Der
 Renderer schickt ihr Projektzustand, fertig berechnete Timeline und Automation als JSON-Zeilen
@@ -277,9 +284,10 @@ Noch nicht enthalten (Roadmap):
 - Latenzausgleich: armierte Spuren werden beim Monitoring mitverzögert (FL kennt dafür
   *Bypass track latency compensation*); keine Eingangs-Latenz pro Spur
 - Plugin-Editoren brauchen ein Fenstersystem (unter Linux ohne Display nur der generische Wrapper)
-- Time-Stretching von Audio-Clips, Takes/Comping, Punch-in
-- Sends/Busse zwischen Mixer-Spuren
-- MIDI-Datei-Import/Export, Import von `.flp`-Projekten (Format ist öffentlich dokumentiert)
+- Takes/Comping, Punch-in
+- Import von `.flp`-Projekten (Format ist öffentlich dokumentiert)
+- MIDI Learn: noch keine relativen (Endlos-)Encoder, Noten-/Pad-Links (*Hold*, *Latch* …),
+  Glättung und globalen Links (FL: *Remote control settings*)
 - Autosave speichert grosse Sample-Sammlungen bei jeder Änderung komplett neu
 
 ## Lizenz der nativen Engine
@@ -299,6 +307,14 @@ der Engine ausgeliefert. Für die Namen „VST“ und „ASIO“ gelten Steinber
 Die Oberfläche (`src/`, `electron/`) läuft in einem eigenen Prozess und spricht mit der
 Engine nur über JSON-Nachrichten; ob das lizenzrechtlich als getrenntes Werk gilt, ist im Zweifel
 juristisch zu klären.
+
+Die Encoder für FLAC und Ogg Vorbis der Engine stammen aus JUCE (libFLAC, libogg/libvorbis unter
+BSD-Lizenz, Texte ebenfalls in `engine/licenses`). Der MP3-Export der App nutzt **LAME** über die
+JavaScript-Portierung `@breezystack/lamejs` (unverändert, **LGPL-3.0**); sie liegt als eigene, nur
+beim MP3-Export geladene Datei im Build und lässt sich austauschen. Die Hinweise zu allen
+JavaScript-Bibliotheken der Oberfläche (React, Zustand, Immer, fflate, lamejs) und die Lizenztexte
+stehen in [public/licenses](public/licenses/THIRD-PARTY-NOTICES.md) und werden mit der App
+ausgeliefert. FLAC kodiert die App auch selbst (eigener Encoder, verifiziert gegen ffmpeg).
 
 ## Rechtliches
 

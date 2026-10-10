@@ -19,16 +19,19 @@ import { DEFAULT_SEND, SIDECHAIN_SEND, routedNeighbours, trackRoutes, wouldCycle
 import { CLIP_GAIN_MAX_DB, CLIP_GAIN_MIN_DB, CLIP_PITCH_RANGE, CLIP_STRETCH_MAX, CLIP_STRETCH_MIN } from '../model/clips';
 import { clampPluginOffset, clampTrackOffset } from '../model/latency';
 import { createMarker, positionAt, signatureMap, type MarkerAction } from '../model/markers';
+import type { MidiImport } from '../model/midiFile';
 import { findPattern, isStepNote, patternLength, stepIndex, stepKey } from '../model/patterns';
 import { findPreset } from '../model/presets';
 import type { ScaleSpec } from '../model/scales';
 import { MAX_BPM, MIN_BPM, TICKS_PER_STEP, ticksPerBar } from '../model/timing';
+import { targetBelongsTo } from '../model/automationTargets';
 import type {
   Arrangement,
   AudioClip,
   Channel,
   ChannelSettings,
   Clip,
+  ControllerLink,
   EffectType,
   Id,
   MixerRoute,
@@ -312,6 +315,7 @@ export function deleteChannel(id: Id): void {
     d.channels = d.channels.filter((c) => c.id !== id);
     for (const p of d.patterns) delete p.notes[id];
     d.clips = d.clips.filter((c) => !((c.kind === 'audio' || c.kind === 'automation') && c.channelId === id));
+    dropControllerLinks(d, { channelId: id });
   }, { label: 'delete channel' });
   const s = useStore.getState();
   useStore.setState({ ui: reconcileUi(s.ui, s.project) });
@@ -1106,6 +1110,93 @@ export function deleteAllMarkers(): void {
 }
 
 // ---------------------------------------------------------------------------
+// MIDI files (FL Studio: File › Import › MIDI file)
+
+/**
+ * Imports a parsed MIDI file as one undo step: a synth channel per track (each on a free mixer insert),
+ * one pattern holding all notes, placed at the start of the song on the first empty playlist track.
+ * The file's tempo and time signature are taken over when the project has no patterns with notes yet.
+ */
+export function importMidiData(midi: MidiImport, name: string): { patternId: Id; channels: number; notes: number } {
+  const project = useStore.getState().project;
+  const empty = project.patterns.every((p) => Object.values(p.notes).every((n) => n.length === 0)) && project.clips.length === 0;
+  const pattern = createPattern(uniqueName(project.patterns.map((p) => p.name), name), paletteColor(project.patterns.length + 5), project.beatsPerBar);
+  const channels: Channel[] = [];
+  let count = 0;
+  edit((d) => {
+    if (empty && midi.bpm) d.bpm = Math.round(Math.min(MAX_BPM, Math.max(MIN_BPM, midi.bpm)) * 1000) / 1000;
+    if (empty && midi.signature && midi.signature.denominator === 4) d.beatsPerBar = Math.min(16, Math.max(1, midi.signature.numerator));
+    for (const [i, track] of midi.tracks.entries()) {
+      const ch = createSynthChannel({ name: uniqueName([...d.channels.map((c) => c.name)], track.name || `MIDI ${i + 1}`), color: paletteColor(d.channels.length) });
+      ch.mixerTrack = firstFreeInsert(d as Project);
+      d.channels.push(ch as Draft<Channel>);
+      channels.push(ch);
+      pattern.notes[ch.id] = track.notes.map((n) => ({ id: makeId('n'), key: n.key, start: n.tick, length: n.length, velocity: Math.max(1 / 127, Math.min(1, n.velocity)) }));
+      count += track.notes.length;
+    }
+    const end = Math.max(0, ...Object.values(pattern.notes).flatMap((list) => list.map((n) => n.start + n.length)));
+    const bar = ticksPerBar(d.beatsPerBar);
+    pattern.minLength = Math.max(bar, Math.ceil(end / bar) * bar);
+    d.patterns.push(pattern as Draft<Pattern>);
+    // The first playlist track without clips, else a new one.
+    const used = new Set(d.clips.map((c) => c.trackId));
+    let track = d.tracks.find((t) => !used.has(t.id));
+    if (!track) {
+      track = createPlaylistTrack(d.tracks.length) as Draft<PlaylistTrack>;
+      d.tracks.push(track);
+    }
+    d.clips.push({ id: makeId('clip'), kind: 'pattern', patternId: pattern.id, trackId: track.id, start: 0, length: pattern.minLength, offset: 0 });
+  }, { label: 'import MIDI file' });
+  useStore.setState((st) => ({ ui: { ...st.ui, selectedPatternId: pattern.id, selectedChannelId: channels[0]?.id ?? st.ui.selectedChannelId } }));
+  return { patternId: pattern.id, channels: channels.length, notes: count };
+}
+
+// ---------------------------------------------------------------------------
+// Controller links (FL Studio: right-click a control › Link to controller…)
+
+/**
+ * Links a MIDI controller to a control (one link per control, replacing the previous one). With
+ * `removeConflicts` (FL Studio: Remove conflicts) other links on the same controller are dropped.
+ */
+export function setControllerLink(link: Omit<ControllerLink, 'id'> & { id?: Id }, opts: { removeConflicts?: boolean } = {}): Id {
+  const id = link.id ?? makeId('cl');
+  const clean: ControllerLink = {
+    id,
+    target: link.target,
+    channel: Math.round(Math.min(15, Math.max(0, link.channel))),
+    cc: Math.round(Math.min(127, Math.max(0, link.cc))),
+    ...(link.omni ? { omni: true } : {}),
+    ...(link.mapping && link.mapping !== 'default' ? { mapping: link.mapping } : {}),
+    ...(link.pickup ? { pickup: true } : {}),
+  };
+  edit((d) => {
+    const others = (d.controllerLinks ?? []).filter((l) => l.target !== clean.target && !(opts.removeConflicts && l.channel === clean.channel && l.cc === clean.cc));
+    d.controllerLinks = [...others, clean];
+  }, { label: 'link to controller' });
+  return id;
+}
+
+export function removeControllerLink(target: string): void {
+  if (!useStore.getState().project.controllerLinks?.some((l) => l.target === target)) return;
+  edit((d) => {
+    d.controllerLinks = (d.controllerLinks ?? []).filter((l) => l.target !== target);
+    if (d.controllerLinks.length === 0) delete d.controllerLinks;
+  }, { label: 'remove controller link' });
+}
+
+export function removeAllControllerLinks(): void {
+  if (!useStore.getState().project.controllerLinks?.length) return;
+  edit((d) => void delete d.controllerLinks, { label: 'remove all controller links' });
+}
+
+/** Drops the links to the controls of a deleted channel or effect slot (inside an edit). */
+function dropControllerLinks(d: Draft<Project>, ids: { channelId?: string; slotId?: string }): void {
+  if (!d.controllerLinks) return;
+  d.controllerLinks = d.controllerLinks.filter((l) => !targetBelongsTo(l.target, ids));
+  if (d.controllerLinks.length === 0) delete d.controllerLinks;
+}
+
+// ---------------------------------------------------------------------------
 // Arrangements (FL Studio: Playlist › Arrangements – they share channels, patterns and the mixer)
 
 const DEFAULT_ARRANGEMENT = { id: 'arr_main', name: 'Arrangement' };
@@ -1413,6 +1504,7 @@ export function removeEffect(trackIndex: number, slotId: Id): void {
   edit((d) => {
     const t = d.mixer[trackIndex];
     if (t) t.effects = t.effects.filter((e) => e.id !== slotId);
+    dropControllerLinks(d, { slotId });
   }, { label: 'mixer remove effect' });
   const s = useStore.getState();
   useStore.setState({ ui: reconcileUi(s.ui, s.project) });
