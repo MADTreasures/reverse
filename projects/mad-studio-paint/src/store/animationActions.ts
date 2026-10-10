@@ -62,6 +62,7 @@ import {
   type Timed,
   type TrackContent,
 } from '../paint/clips';
+import { deleteLabelFrames, insertLabelFrames } from '../paint/labels';
 import { setVolumeKey, volumeAt } from '../paint/sound';
 import { resizeOutputFrame } from '../paint/outputFrame';
 import {
@@ -86,6 +87,7 @@ import {
 import { ensureSurface } from '../engine/surfaces';
 import { startSound, stopSound } from '../engine/sounds';
 import * as actions from './actions';
+import * as labels from './labelActions';
 import { getState, setState, type CelRef, type ClipRef, type CurveRef, type KeyRef, type PaintState } from './store';
 
 /** A track's content: clips, cel assignments, keyframes (placements, or volumes on audio tracks). */
@@ -209,7 +211,7 @@ export function setTimeline(patch: Partial<Timeline>, label = 'Timeline settings
 // ------------------------------------------------------------------ several timelines
 
 /** Clears what is selected on the tracks (another timeline shows other contents). */
-const clearTrackSelections = () => setState({ clipSelection: [], keySelection: [], celSelection: [], graphSelection: [] });
+const clearTrackSelections = () => setState({ clipSelection: [], keySelection: [], celSelection: [], labelSelection: [], graphSelection: [] });
 
 /** Timeline palette (timeline list) / Manage timeline: edits another timeline. */
 export function switchToTimeline(index: number): void {
@@ -314,41 +316,93 @@ function allTracks(layers: Layer[], out: Layer[] = []): Layer[] {
   return out;
 }
 
-/** Applies a track operation to every track: those with clips of their own, and animation folders. */
-function everyTrack(doc: PaintDocument, op: (t: Content) => Content): void {
+/**
+ * Insert frame / Delete frame options: Selected layer only (`track`: only its track changes, the
+ * timeline keeps its length) and Split clip (the clip at the frame is split there first).
+ */
+export interface FrameEdit {
+  track?: Id;
+  split?: boolean;
+}
+
+/** Applies a track operation to every track (only `o.track` when given): those with clips of their own, and animation folders. */
+function everyTrack(doc: PaintDocument, op: (t: Content) => Content, o: FrameEdit = {}): void {
   const frames = doc.timeline?.frames ?? 1;
   for (const l of allTracks(doc.layers)) {
+    if (o.track !== undefined && l.id !== o.track) continue;
     if (!l.clips && !isAnimationFolder(l) && !l.keys) continue;
-    // A track that shows over the whole timeline still does afterwards.
+    // A track that shows over the whole timeline still does afterwards (unless its clip was split).
     const whole = !l.clips;
     const t = trackContent(l, frames);
-    setTrackContent(l, op(whole ? { ...t, clips: [{ start: 1, end: MAX_FRAMES }] } : t) as TrackContent<Keyframe>);
-    if (whole) delete l.clips;
+    const out = op(whole ? { ...t, clips: [{ start: 1, end: MAX_FRAMES }] } : t);
+    setTrackContent(l, out as TrackContent<Keyframe>);
+    if (whole && (!o.split || (out.clips.length === 1 && out.clips[0].start === 1))) delete l.clips;
   }
 }
 
-/** Animation > Timeline > Insert frame / Delete frame at the current frame, on every track. */
-export function insertFrame(count = 1): void {
+/** Split clip: the clip at `frame` split there (the content as it is when there is nothing to split). */
+const splitAt = (t: Content, frame: number, fps: number, split?: boolean): Content => (split ? (splitClip(t, frame, fps) ?? t) : t);
+
+/**
+ * Animation > Timeline > Insert frame at the current frame: clips, cels, keyframes and labels from
+ * there on move back (a clip or ranged label over the frame gets longer; with Split clip the
+ * inserted frames have no clip).
+ */
+export function insertFrame(count = 1, o: FrameEdit = {}): void {
   const { frame } = getState();
+  const n = Math.max(1, Math.round(count));
   actions.changeDoc('Insert frame', (doc) => {
-    if (!doc.timeline) return;
-    everyTrack(doc, (t) => insertClipFrames(t, frame, count));
-    doc.timeline = { ...doc.timeline, frames: Math.min(MAX_FRAMES, doc.timeline.frames + count) };
+    const t = doc.timeline;
+    if (!t) return;
+    everyTrack(doc, (c) => insertClipFrames(splitAt(c, frame, t.fps, o.split), frame, n), o);
+    doc.timeline = { ...t, ...insertLabelFrames(t, frame, n, o.track), ...(o.track === undefined ? { frames: Math.min(MAX_FRAMES, t.frames + n) } : {}) };
   });
-  setState({ clipSelection: [] });
+  setState({ clipSelection: [], labelSelection: [] });
 }
 
-export function deleteFrame(count = 1): void {
+/**
+ * Animation > Timeline > Delete frame from the current frame on: what lies there goes, later
+ * content moves forward (clips and ranged labels get shorter; with Split clip the clip is split
+ * there).
+ */
+export function deleteFrame(count = 1, o: FrameEdit = {}): void {
   const s = getState();
   const t = timelineOf(s);
-  if (!t || t.frames <= 1) return;
-  const n = Math.min(count, t.frames - s.frame + 1, t.frames - 1);
+  if (!t || (t.frames <= 1 && o.track === undefined)) return;
+  const n = Math.max(1, Math.min(Math.round(count), t.frames - s.frame + 1, o.track === undefined ? t.frames - 1 : MAX_FRAMES));
   actions.changeDoc('Delete frame', (doc) => {
-    everyTrack(doc, (c) => deleteClipFrames(c, s.frame, n, t.fps));
-    doc.timeline = { ...t, frames: t.frames - n };
+    everyTrack(doc, (c) => deleteClipFrames(splitAt(c, s.frame, t.fps, o.split), s.frame, n, t.fps), o);
+    doc.timeline = { ...t, ...deleteLabelFrames(t, s.frame, n, o.track), ...(o.track === undefined ? { frames: t.frames - n } : {}) };
   });
-  setState({ clipSelection: [] });
-  setFrame(Math.min(s.frame, t.frames - n));
+  setState({ clipSelection: [], labelSelection: [] });
+  if (o.track === undefined) setFrame(Math.min(s.frame, t.frames - n));
+}
+
+// ------------------------------------------------------------------ move frame
+
+/** Animation > Move frame > Go to specified frame. */
+export const goToFrame = (frame: number) => setFrame(frame);
+
+/** Animation > Move frame > Go to timeline label: the frame with that label. */
+export function goToTimelineLabel(text: string): void {
+  const l = timelineOf()?.labels?.find((x) => x.text === text);
+  if (l) setFrame(l.frame);
+}
+
+/** The keyframe before (-1) or after (1) the current frame on the track edited now, or null. */
+export function neighbourKeyframe(dir: -1 | 1, s: PaintState = getState()): number | null {
+  const id = keyTrackId(s);
+  const t = id ? findLayer(s.doc.layers, maskOwner(id) ?? id) : null;
+  if (!id || !t || !keysOn(t)) return null;
+  const frames = trackKeys(id, s).map((k) => k.frame);
+  const f = dir < 0 ? Math.max(-Infinity, ...frames.filter((x) => x < s.frame)) : Math.min(Infinity, ...frames.filter((x) => x > s.frame));
+  return Number.isFinite(f) ? f : null;
+}
+
+/** Animation > Move frame > Previous keyframe / Next keyframe. */
+export function goToKeyframe(dir: -1 | 1): void {
+  const f = neighbourKeyframe(dir);
+  if (f !== null) setFrame(f);
 }
 
 // ------------------------------------------------------------------ folders and cels
@@ -490,8 +544,8 @@ export function selectNeighbourCel(dir: -1 | 1): void {
 export function selectClip(track: Id, start: number, add = false): void {
   const s = getState();
   const has = s.clipSelection.some((c) => c.track === track && c.start === start);
-  if (!add) setState({ clipSelection: [{ track, start }], celSelection: [] });
-  else setState({ clipSelection: has ? s.clipSelection.filter((c) => !(c.track === track && c.start === start)) : [...s.clipSelection, { track, start }], celSelection: [] });
+  if (!add) setState({ clipSelection: [{ track, start }], celSelection: [], labelSelection: [] });
+  else setState({ clipSelection: has ? s.clipSelection.filter((c) => !(c.track === track && c.start === start)) : [...s.clipSelection, { track, start }], celSelection: [], labelSelection: [] });
 }
 
 export const clearClipSelection = () => {
@@ -966,7 +1020,7 @@ export function selectKeyframe(track: Id, frame: number, add = false, group?: Ch
   const same = (k: KeyRef) => k.track === track && k.frame === frame && k.group === group;
   const ref: KeyRef = { track, frame, ...(group ? { group } : {}) };
   const keySelection = !add ? [ref] : s.keySelection.some(same) ? s.keySelection.filter((k) => !same(k)) : [...s.keySelection, ref];
-  setState({ keySelection, clipSelection: [], celSelection: [] });
+  setState({ keySelection, clipSelection: [], celSelection: [], labelSelection: [] });
   const owner = maskOwner(track);
   if (owner) selectMaskFrame(owner, frame);
   else selectTrackFrame(track, frame);
@@ -1196,7 +1250,7 @@ export function selectAssignedCel(track: Id, frame: number, add = false): void {
   const s = getState();
   const same = (c: CelRef) => c.track === track && c.frame === frame;
   const celSelection = !add ? [{ track, frame }] : s.celSelection.some(same) ? s.celSelection.filter((c) => !same(c)) : [...s.celSelection, { track, frame }];
-  setState({ celSelection, clipSelection: [], keySelection: [] });
+  setState({ celSelection, clipSelection: [], keySelection: [], labelSelection: [] });
   selectTrackFrame(track, frame);
 }
 
@@ -1264,8 +1318,8 @@ export function deleteSelectedCels(): void {
   setState({ celSelection: [] });
 }
 
-/** What Copy put on the timeline clipboard last: a clip (see copySelectedClip), assigned cels or keyframes. */
-let lastCopied: 'clip' | 'cels' | 'keys' | null = null;
+/** What Copy put on the timeline clipboard last: a clip (see copySelectedClip), assigned cels, keyframes or track labels. */
+let lastCopied: 'clip' | 'cels' | 'keys' | 'labels' | null = null;
 let celClipboard: { track: Id; items: { offset: number; cel: Id | null; name: string | null }[] } | null = null;
 let keyClipboard: { track: Id; items: { offset: number; key: Keyframe }[] }[] | null = null;
 
@@ -1378,12 +1432,16 @@ export function pasteKeys(): void {
       k.set(list);
     }
   });
-  setState({ keySelection: pasted, clipSelection: [], celSelection: [] });
+  setState({ keySelection: pasted, clipSelection: [], celSelection: [], labelSelection: [] });
 }
 
-/** Animation > Edit track > Copy: the selected keyframes, assigned cels or clip. */
+/** Animation > Edit track > Copy: the selected track labels, keyframes, assigned cels or clip. */
 export function timelineCopy(): void {
   const s = getState();
+  if (s.labelSelection.length && labels.copySelectedLabels()) {
+    lastCopied = 'labels';
+    return;
+  }
   if (s.keySelection.length ? copySelectedKeys() : s.celSelection.length ? copySelectedCels() : false) return;
   copySelectedClip();
 }
@@ -1391,7 +1449,12 @@ export function timelineCopy(): void {
 /** Animation > Edit track > Cut: copies the selection, then deletes it. */
 export function timelineCut(): void {
   const s = getState();
-  if (s.keySelection.length) {
+  if (s.labelSelection.length) {
+    if (labels.copySelectedLabels()) {
+      lastCopied = 'labels';
+      labels.deleteSelectedLabels();
+    }
+  } else if (s.keySelection.length) {
     if (copySelectedKeys()) deleteKeyframes();
   } else if (s.celSelection.length) {
     if (copySelectedCels()) deleteSelectedCels();
@@ -1400,7 +1463,8 @@ export function timelineCut(): void {
 
 /** Animation > Edit track > Paste: what was copied last, at the current frame. */
 export function timelinePaste(): void {
-  if (lastCopied === 'keys') pasteKeys();
+  if (lastCopied === 'labels') labels.pasteLabels();
+  else if (lastCopied === 'keys') pasteKeys();
   else if (lastCopied === 'cels') pasteCels();
   else pasteCopiedClip();
 }
@@ -1408,10 +1472,11 @@ export function timelinePaste(): void {
 /** Whether there is something to paste in the timeline. */
 export const hasTimelineCopy = () => lastCopied !== null;
 
-/** Animation > Edit track > Delete: the selected keyframes, assigned cels or clips (else the cel assigned at the current frame). */
+/** Animation > Edit track > Delete: the selected track labels, keyframes, assigned cels or clips (else the cel assigned at the current frame). */
 export function timelineDelete(): void {
   const s = getState();
-  if (s.keySelection.length) deleteKeyframes();
+  if (s.labelSelection.length) labels.deleteSelectedLabels();
+  else if (s.keySelection.length) deleteKeyframes();
   else if (s.celSelection.length) deleteSelectedCels();
   else if (s.clipSelection.length) deleteSelectedClips();
   else removeAssignedCel();

@@ -14,6 +14,7 @@ import { ExportDialog, ExportPreviewDialog, PsdExportDialog } from './dialogs/Ex
 import { ColorSettingsDialog } from './dialogs/ColorSettingsDialog';
 import { AnimationCelsExportDialog, AnimationExportDialog, AssignMultipleDialog, AudioExportDialog, CameraFolderDialog, CenterCanvasDialog, FrameRateDialog, ManageTimelinesDialog, MovieExportDialog, NewTimelineDialog, OnionSkinDialog, TimelineSettingsDialog } from './dialogs/AnimationDialogs';
 import { AboutDialog, ShortcutsDialog } from './dialogs/InfoDialogs';
+import { FrameEditDialog, GoToFrameDialog, GoToLabelDialog, TimelineLabelDialog, TrackLabelDialog } from './dialogs/LabelDialogs';
 import { NewCanvasDialog } from './dialogs/NewCanvasDialog';
 import { closeDialog, closeMenu, useOverlays, type MenuItem } from './overlays';
 
@@ -69,6 +70,12 @@ export function OverlayHost() {
           {dialog.kind === 'custom' && dialog.id === 'newTimeline' && <NewTimelineDialog />}
           {dialog.kind === 'custom' && dialog.id === 'frameRate' && <FrameRateDialog />}
           {dialog.kind === 'custom' && dialog.id === 'manageTimelines' && <ManageTimelinesDialog />}
+          {dialog.kind === 'custom' && dialog.id === 'timelineLabel' && <TimelineLabelDialog />}
+          {dialog.kind === 'custom' && dialog.id === 'trackLabel' && <TrackLabelDialog />}
+          {dialog.kind === 'custom' && dialog.id === 'goToFrame' && <GoToFrameDialog />}
+          {dialog.kind === 'custom' && dialog.id === 'goToLabel' && <GoToLabelDialog />}
+          {dialog.kind === 'custom' && dialog.id === 'insertFrame' && <FrameEditDialog mode="insert" />}
+          {dialog.kind === 'custom' && dialog.id === 'deleteFrame' && <FrameEditDialog mode="delete" />}
           {dialog.kind === 'custom' && dialog.id === 'exportGif' && <AnimationExportDialog format="gif" />}
           {dialog.kind === 'custom' && dialog.id === 'exportApng' && <AnimationExportDialog format="apng" />}
           {dialog.kind === 'custom' && dialog.id === 'exportWebp' && <AnimationExportDialog format="webp" />}

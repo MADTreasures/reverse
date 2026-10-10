@@ -12,12 +12,21 @@
  * mask, whose keyframes place the mask). A keyframe that records only some
  * of a row's properties shows small. Click selects (Ctrl/⌘: several), dragging around keyframes
  * selects them (Shift: adds, Ctrl/⌘: takes out); drag to move, Alt+drag to duplicate.
+ *
+ * Labels: timeline labels show on the frame ruler (double-click a frame there to name it or rename
+ * its label; right-click: create, rename or delete). Details (+) also shows a track's label area:
+ * right-click a frame (or right-drag over several) to type a new label (Alt+Enter /
+ * Shift+Alt+Enter: inbetween labels 〇 / ● at the dragged spacing), click to select (Shift,
+ * Ctrl/⌘: several), click a selected one or double-click to edit (empty text deletes), drag to
+ * move (Alt: duplicate), drag an end to change the range. With the area closed the labels show at
+ * the top of the track.
  */
 import { memo, useCallback, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import { isAnimationFolder, isCameraFolder, keysOn, maskTrackId, timelineTracks, trackContent, type AnimationFolder, type TrackRow as Row } from '../../model/animation';
 import type { AudioLayer, Id, Layer } from '../../model/types';
 import { assignmentAt, endOf, entryAt, frameLabel, startOf, startsSecond } from '../../paint/animation';
+import { INBETWEEN_FILLED, INBETWEEN_OPEN, isInbetween, lastFrameOf, MAX_LABEL_TEXT, resizeTrackLabel, timelineLabelAt, trackLabelAt, type TrackLabel } from '../../paint/labels';
 import { timelineIndex, timelineList, timelineName } from '../../model/timelines';
 import { clipIndexAt, type ClipEdge, type Timed, type TrackContent } from '../../paint/clips';
 import { curveInterp, GROUPS, groupInterp, PLACEMENT_CHANNELS, records, touches, TRANSFORM_GROUPS, type Channel, type ChannelGroup, type Interp, type Keyframe } from '../../paint/keyframes';
@@ -26,7 +35,8 @@ import { soundPeaks, soundsVersion, subscribeSounds } from '../../engine/sounds'
 import * as sound from '../../store/soundActions';
 import * as actions from '../../store/actions';
 import * as anim from '../../store/animationActions';
-import { getState, setState, useStore, type ClipRef, type KeyRef } from '../../store/store';
+import * as labels from '../../store/labelActions';
+import { getState, setState, useStore, type ClipRef, type KeyRef, type LabelRef } from '../../store/store';
 import { Icon } from '../controls/Icons';
 import { openDialog, showMenu, type MenuItem } from '../overlays';
 import { GraphEditor, useGraphTrackName } from './GraphEditor';
@@ -67,9 +77,20 @@ function clipItems(): MenuItem[] {
   ];
 }
 
+/** The label commands of the pop-up menu (Animation > Label): on the track and frame clicked. */
+function labelItems(track: Id, frame: number): MenuItem[] {
+  const here = trackLabelAt(getState().doc.timeline?.trackLabels, track, frame);
+  return [
+    { label: 'Create track label…', onClick: () => openDialog('trackLabel') },
+    { label: `Create inbetween track label ${INBETWEEN_OPEN}`, onClick: () => labels.createInbetweenLabel(INBETWEEN_OPEN) },
+    { label: `Create inbetween track label ${INBETWEEN_FILLED}`, onClick: () => labels.createInbetweenLabel(INBETWEEN_FILLED) },
+    { label: 'Delete track label', disabled: !here, onClick: labels.deleteTrackLabel },
+  ];
+}
+
 /** The pop-up menu of a track's frame: for animation folders, assigning a cel first (the reference's pop-up on a frame). */
 function trackMenu(track: Layer, frame: number): MenuItem[] {
-  if (!isAnimationFolder(track)) return clipItems();
+  if (!isAnimationFolder(track)) return [...clipItems(), { separator: true }, ...labelItems(track.id, frame)];
   const entry = entryAt(track.animation, frame);
   return [
     ...track.children.map((c) => ({ label: c.name, checked: entry?.cel === c.id, onClick: () => anim.assignCel(track.id, frame, c.id) })),
@@ -86,6 +107,20 @@ function trackMenu(track: Layer, frame: number): MenuItem[] {
     },
     { separator: true },
     ...clipItems(),
+    { separator: true },
+    ...labelItems(track.id, frame),
+  ];
+}
+
+/** The frame ruler's pop-up menu: timeline labels at the frame clicked. */
+function rulerMenu(frame: number): MenuItem[] {
+  const here = timelineLabelAt(getState().doc.timeline?.labels, frame);
+  return [
+    { label: here ? 'Rename timeline label…' : 'Create timeline label…', onClick: () => openDialog('timelineLabel') },
+    { label: 'Delete timeline label', disabled: !here, onClick: () => labels.deleteTimelineLabel(frame) },
+    { separator: true },
+    { label: 'Go to timeline label…', disabled: !getState().doc.timeline?.labels?.length, onClick: () => openDialog('goToLabel') },
+    { label: 'Go to specified frame…', onClick: () => openDialog('goToFrame') },
   ];
 }
 
@@ -102,12 +137,13 @@ export function openAssignMenu(): void {
   showMenu({ x: box?.left ?? window.innerWidth / 2, y: box ? box.bottom + 2 : window.innerHeight / 2 }, trackMenu(track, s.frame));
 }
 
-/** A clip being dragged: moved (all selected clips), or one edge trimmed or stretched; or keyframes moved (Alt: copied). */
+/** A clip being dragged: moved (all selected clips), or one edge trimmed or stretched; or keyframes, cels or track labels moved (Alt: copied). */
 type Drag =
   | { kind: 'move'; x0: number; delta: number }
   | { kind: 'edge'; track: Id; start: number; edge: ClipEdge; stretch: boolean; frame: number }
   | { kind: 'keys'; x0: number; delta: number; copy: boolean }
-  | { kind: 'cels'; x0: number; delta: number; copy: boolean };
+  | { kind: 'cels'; x0: number; delta: number; copy: boolean }
+  | { kind: 'labels'; x0: number; delta: number; copy: boolean };
 
 const ICONS: Record<Layer['kind'], string> = { raster: 'layer', vector: 'vector', text: 'text', gradient: 'gradient', fill: 'fill', correction: 'correction', folder: 'folder', audio: 'audio', movie: 'movie' };
 const trackIcon = (l: Layer) => (isAnimationFolder(l) ? 'animFolder' : l.kind === 'folder' && l.camera ? 'camera' : l.kind === 'folder' && l.frame ? 'frame' : ICONS[l.kind]);
@@ -135,6 +171,10 @@ interface RowProps {
   /** Frames of this animation folder's selected assigned cels (as they show while dragged). */
   selectedCels: string;
   onCel: (e: React.PointerEvent<HTMLDivElement>, track: Id, frame: number) => void;
+  /** The track's labels (as they show while dragged), and the first frames of its selected ones. */
+  trackLabels: TrackLabel[];
+  selectedLabels: string;
+  onLabel: LabelLaneProps['onLabel'];
 }
 
 /** Selected keyframes of a row: whole keyframes, and "group:frame" of property rows. */
@@ -191,17 +231,212 @@ function KeyMarks({ keys, frames, sel, onKey, track, menu, group, full }: { keys
   );
 }
 
+/** A label typed in the track label area: a new one (right-click or right-drag) or one being edited. */
+interface LabelDraft {
+  frame: number;
+  length: number;
+  text: string;
+  editing: boolean;
+  /** Right-drag: inbetween labels go from where it started, at the dragged spacing (Alt+Enter). */
+  next: number;
+  step: number;
+}
+
+interface LabelLaneProps {
+  track: Id;
+  labels: TrackLabel[];
+  frames: number;
+  /** First frames of the selected labels. */
+  selected: string;
+  onLabel: (e: React.PointerEvent<HTMLDivElement>, track: Id, frame: number) => void;
+}
+
+/** The track label area of a track (Details open): its labels, made and edited there. */
+const LabelLane = memo(function LabelLane({ track, labels: list, frames, selected, onLabel }: LabelLaneProps) {
+  const lane = useRef<HTMLDivElement>(null);
+  const [draft, setDraftState] = useState<LabelDraft | null>(null);
+  // The draft as typed so far: Enter, Esc and losing focus each end it once.
+  const draftRef = useRef<LabelDraft | null>(null);
+  const setDraft = (d: LabelDraft | null) => {
+    draftRef.current = d;
+    setDraftState(d);
+  };
+  const [span, setSpan] = useState<{ from: number; to: number } | null>(null);
+  const [resize, setResize] = useState<{ frame: number; edge: 'start' | 'end'; to: number } | null>(null);
+  const picked = new Set(selected ? selected.split(',').map(Number) : []);
+  const frameAt = (clientX: number) => Math.max(1, Math.min(frames, Math.floor((clientX - (lane.current?.getBoundingClientRect().left ?? 0)) / CELL) + 1));
+  const shown = resize ? resizeTrackLabel(list, track, resize.frame, resize.edge, resize.to) : list;
+  // Which label a pointer press started on, and whether it was selected then (a click on a selected label edits it).
+  const press = useRef<{ frame: number; x: number; selected: boolean } | null>(null);
+
+  const edit = (l: TrackLabel) => setDraft({ frame: l.frame, length: l.length, text: l.text, editing: true, next: l.frame, step: 0 });
+  const commit = () => {
+    const d = draftRef.current;
+    setDraft(null);
+    if (!d) return;
+    if (d.editing) labels.renameLabel(track, d.frame, d.text);
+    else if (d.text.trim()) labels.addLabel(track, d.frame, d.length, d.text);
+  };
+
+  // Right-click on a frame (or right-drag over several): type a new label there.
+  const onDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (e.button !== 2 || (e.target as HTMLElement).closest('.tl-tracklabel, .tl-label-input')) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const from = frameAt(e.clientX);
+    setSpan({ from, to: from });
+    const move = (ev: PointerEvent) => setSpan({ from, to: frameAt(ev.clientX) });
+    const up = (ev: PointerEvent) => {
+      window.removeEventListener('pointermove', move);
+      const to = frameAt(ev.clientX);
+      setSpan(null);
+      const a = Math.min(from, to);
+      anim.selectTrackFrame(track, a);
+      setDraft({ frame: a, length: Math.abs(to - from) + 1, text: '', editing: false, next: from, step: Math.abs(to - from) });
+    };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up, { once: true });
+  };
+
+  const onLabelDown = (e: React.PointerEvent<HTMLDivElement>, l: TrackLabel) => {
+    if (e.button !== 0) return;
+    const box = e.currentTarget.getBoundingClientRect();
+    const atStart = e.clientX - box.left < EDGE;
+    const atEnd = box.right - e.clientX < EDGE;
+    if ((atStart || atEnd) && !e.altKey && !e.shiftKey && !e.ctrlKey && !e.metaKey) {
+      // An end: change the range.
+      e.stopPropagation();
+      e.preventDefault();
+      const edge = atStart ? 'start' : 'end';
+      labels.selectLabel(track, l.frame);
+      setResize({ frame: l.frame, edge, to: edge === 'start' ? l.frame : lastFrameOf(l) });
+      const move = (ev: PointerEvent) => setResize({ frame: l.frame, edge, to: frameAt(ev.clientX) });
+      const up = (ev: PointerEvent) => {
+        window.removeEventListener('pointermove', move);
+        setResize(null);
+        labels.resizeLabel(track, l.frame, edge, frameAt(ev.clientX));
+      };
+      window.addEventListener('pointermove', move);
+      window.addEventListener('pointerup', up, { once: true });
+      return;
+    }
+    press.current = { frame: l.frame, x: e.clientX, selected: picked.has(l.frame) && !e.shiftKey && !e.ctrlKey && !e.metaKey };
+    onLabel(e, track, l.frame);
+  };
+
+  return (
+    <div
+      ref={lane}
+      className="tl-lane tl-label-lane"
+      data-testid="track-label-lane"
+      onPointerDown={onDown}
+      onContextMenu={(e) => e.preventDefault()}
+      onClick={(e) => {
+        if ((e.target as HTMLElement).closest('.tl-tracklabel, .tl-label-input')) return;
+        labels.clearLabelSelection();
+        anim.clearClipSelection();
+        anim.clearKeySelection();
+        anim.selectTrackFrame(track, frameAt(e.clientX));
+      }}
+    >
+      {shown
+        .filter((l) => l.frame <= frames && !(draft?.editing && draft.frame === l.frame))
+        .map((l) => (
+          <div
+            key={`${l.frame}:${l.length}`}
+            className={`tl-tracklabel ${picked.has(l.frame) ? 'selected' : ''} ${isInbetween(l) ? 'inbetween' : ''}`}
+            data-testid="track-label"
+            data-label-track={track}
+            data-frame={l.frame}
+            data-length={l.length}
+            title={`${l.text} (frame ${l.frame}${l.length > 1 ? `–${lastFrameOf(l)}` : ''}): click to select, click again to edit, drag to move (Alt: duplicate), drag an end to change the range`}
+            style={{ left: (l.frame - 1) * CELL, width: Math.min(l.length, frames - l.frame + 1) * CELL }}
+            onPointerDown={(e) => onLabelDown(e, l)}
+            onPointerUp={(e) => {
+              const p = press.current;
+              press.current = null;
+              if (p && p.frame === l.frame && p.selected && Math.abs(e.clientX - p.x) < 3) edit(l);
+            }}
+            onDoubleClick={() => edit(l)}
+            onContextMenu={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              if (!picked.has(l.frame)) labels.selectLabel(track, l.frame);
+              anim.selectTrackFrame(track, l.frame);
+              showMenu({ x: e.clientX, y: e.clientY }, [
+                { label: 'Edit track label', onClick: () => edit(l) },
+                { label: 'Delete track label', onClick: labels.deleteSelectedLabels },
+                { separator: true },
+                { label: 'Cut', onClick: anim.timelineCut },
+                { label: 'Copy', onClick: anim.timelineCopy },
+              ]);
+            }}
+          >
+            {l.text}
+          </div>
+        ))}
+      {span && <div className="tl-label-span" aria-hidden="true" style={{ left: (Math.min(span.from, span.to) - 1) * CELL, width: (Math.abs(span.to - span.from) + 1) * CELL }} />}
+      {draft && (
+        <input
+          className="tl-label-input"
+          aria-label={draft.editing ? 'Track label' : 'New track label'}
+          autoFocus
+          maxLength={MAX_LABEL_TEXT}
+          value={draft.text}
+          style={{ left: (draft.frame - 1) * CELL, width: Math.max(96, draft.length * CELL) }}
+          onFocus={(e) => e.target.select()}
+          onChange={(e) => setDraft({ ...draft, text: e.target.value })}
+          onPointerDown={(e) => e.stopPropagation()}
+          onBlur={commit}
+          onKeyDown={(e) => {
+            e.stopPropagation();
+            if (e.key === 'Escape') {
+              e.preventDefault();
+              setDraft(null);
+            } else if (e.key === 'Enter' && e.altKey && !draft.editing) {
+              // Inbetween labels at regular intervals: one more with each Alt+Enter.
+              e.preventDefault();
+              if (draft.next > frames) return;
+              labels.addLabel(track, draft.next, 1, e.shiftKey ? INBETWEEN_FILLED : INBETWEEN_OPEN, 'Create inbetween track label');
+              setDraft({ ...draft, next: draft.step ? draft.next + draft.step : frames + 1 });
+            } else if (e.key === 'Enter') {
+              e.preventDefault();
+              commit();
+            }
+          }}
+        />
+      )}
+    </div>
+  );
+});
+
+/** A track's labels at the top of the track while its label area is closed (not editable there). */
+function MiniLabels({ labels: list, frames }: { labels: TrackLabel[]; frames: number }) {
+  return (
+    <>
+      {list
+        .filter((l) => l.frame <= frames)
+        .map((l) => (
+          <div key={l.frame} className={`tl-label-mini ${isInbetween(l) ? 'inbetween' : ''}`} data-testid="track-label-mini" title={l.text} style={{ left: (l.frame - 1) * CELL, width: Math.min(l.length, frames - l.frame + 1) * CELL }}>
+            {l.text}
+          </div>
+        ))}
+    </>
+  );
+}
+
 /** The property rows of a track with Details (+) open. */
 function detailRows(transformOpen: boolean): { group: ChannelGroup; indent: number }[] {
   return [...(transformOpen ? TRANSFORM_GROUPS.map((group) => ({ group, indent: 2 })) : []), { group: 'opacity', indent: 1 }];
 }
 
-const TrackRow = memo(function TrackRow({ row, frames, active, selected, selectedKeys, selectedCels, preview, details, transformOpen, maskKeys, maskPreview, maskActive, onGrip, onKey, onCel }: RowProps) {
+const TrackRow = memo(function TrackRow({ row, frames, active, selected, selectedKeys, selectedCels, preview, details, transformOpen, maskKeys, maskPreview, maskActive, onGrip, onKey, onCel, trackLabels, selectedLabels, onLabel }: RowProps) {
   const track = row.layer;
   const content = preview ?? trackContent(track, frames);
   const keyed = keysOn(track);
   const keys = keyed ? ((content.keys ?? []) as Keyframe[]) : [];
   const keySel = parseKeySel(selectedKeys);
+  // Details (+): the track label area, and the keyframe rows when keyframes are on.
   const open = keyed && details;
   const animation = isAnimationFolder(track) ? (content.cels ? { cels: content.cels } : track.animation) : null;
   const starts = new Set(selected ? selected.split(',').map(Number) : []);
@@ -271,11 +506,15 @@ const TrackRow = memo(function TrackRow({ row, frames, active, selected, selecte
           <span className="tl-track-icon">
             <Icon name={trackIcon(track)} size={14} />
           </span>
-          {keyed && (
-            <button className="tl-details" title={open ? 'Hide details' : 'Details: the rows of the properties keyframes record'} aria-label={open ? 'Hide details' : 'Details'} aria-expanded={open} onClick={() => anim.toggleKeyDetails(track.id)}>
-              {open ? '−' : '+'}
-            </button>
-          )}
+          <button
+            className="tl-details"
+            title={details ? 'Hide details' : keyed ? 'Details: the rows of the properties keyframes record, and the track label area' : 'Details: the track label area'}
+            aria-label={details ? 'Hide details' : 'Details'}
+            aria-expanded={details}
+            onClick={() => anim.toggleKeyDetails(track.id)}
+          >
+            {details ? '−' : '+'}
+          </button>
           {open && (
             <button className="tl-twisty" aria-label={transformOpen ? 'Close Transform' : 'Open Transform'} aria-expanded={transformOpen} onClick={() => anim.toggleTransformDetails(track.id)}>
               <Icon name={transformOpen ? 'chevronDown' : 'chevronRight'} size={12} />
@@ -318,6 +557,7 @@ const TrackRow = memo(function TrackRow({ row, frames, active, selected, selecte
               </div>
             ))}
           {animation && <div className="tl-cells">{cells}</div>}
+          {!details && <MiniLabels labels={trackLabels} frames={frames} />}
           <KeyMarks keys={keys} frames={frames} sel={keySel} track={track.id} group={open ? 'transform' : undefined} full={PLACEMENT_CHANNELS} onKey={onKey} menu={menu} />
         </div>
       </div>
@@ -349,6 +589,14 @@ const TrackRow = memo(function TrackRow({ row, frames, active, selected, selecte
           >
             <KeyMarks keys={maskPreview ?? track.mask.keys ?? []} frames={frames} sel={parseKeySel(maskKeys)} track={maskTrackId(track.id)} full={anim.MASK_CHANNELS} onKey={onKey} menu={menu} />
           </div>
+        </div>
+      )}
+      {details && (
+        <div className={`tl-row tl-sub tl-label-row ${active ? 'active' : ''}`} data-testid="timeline-label-area" data-track-id={track.id}>
+          <div className="tl-name" style={{ paddingLeft: 4 + row.depth * 12 + 34 }}>
+            <span className="tl-prop-name">Track label</span>
+          </div>
+          <LabelLane track={track.id} labels={trackLabels} frames={frames} selected={selectedLabels} onLabel={onLabel} />
         </div>
       )}
     </>
@@ -464,6 +712,7 @@ const VOLUME: Channel[] = ['volume'];
 const selectAt = (track: Id, frame: number) => anim.selectTrackFrame(track, frame);
 
 const NO_FILES: SoundFile[] = [];
+const NO_LABELS: TrackLabel[] = [];
 
 /** The current version of a track (rows may hold an older one in a menu). */
 const findTrack = (id: Id) => timelineTracks(getState().doc.layers).find((r) => r.layer.id === id)?.layer ?? null;
@@ -474,8 +723,17 @@ export function TimelinePalette() {
   const timelineNames = useStore(useShallow((s) => timelineList(s.doc).map((t, i) => timelineName(t, i))));
   const timelineIdx = useStore((s) => timelineIndex(s.doc));
   const layers = useStore((s) => s.doc.layers);
-  const { frame, playing, loop, onionSkin, clipSelection, celSelection, height } = useStore(
-    useShallow((s) => ({ frame: s.frame, playing: s.playing, loop: s.loop, onionSkin: s.onionSkin, clipSelection: s.clipSelection, celSelection: s.celSelection, height: s.timelineHeight })),
+  const { frame, playing, loop, onionSkin, clipSelection, celSelection, labelSelection, height } = useStore(
+    useShallow((s) => ({
+      frame: s.frame,
+      playing: s.playing,
+      loop: s.loop,
+      onionSkin: s.onionSkin,
+      clipSelection: s.clipSelection,
+      celSelection: s.celSelection,
+      labelSelection: s.labelSelection,
+      height: s.timelineHeight,
+    })),
   );
   const activeId = useStore((s) => anim.currentTrackId(s));
   const maskKeyed = useStore((s) => anim.maskKeyed(s)?.id ?? null);
@@ -548,6 +806,7 @@ export function TimelinePalette() {
       if (d.kind === 'move') anim.moveSelectedClips(d.delta);
       else if (d.kind === 'keys') anim.moveSelectedKeys(d.delta, d.copy);
       else if (d.kind === 'cels') anim.moveSelectedCels(d.delta, d.copy);
+      else if (d.kind === 'labels') labels.moveSelectedLabels(d.delta, d.copy);
       else anim.dragClipEdge(d.track, d.start, d.edge, d.frame, d.stretch);
     };
     window.addEventListener('pointermove', move);
@@ -622,6 +881,24 @@ export function TimelinePalette() {
     });
   };
 
+  // Track labels: pointer down selects (Shift, Ctrl/⌘: several); dragging moves the selected ones (Alt: duplicates).
+  const onLabel = (e: React.PointerEvent<HTMLDivElement>, track: Id, frame: number) => {
+    if (e.button !== 0) return;
+    e.stopPropagation();
+    e.preventDefault();
+    const add = e.shiftKey || e.ctrlKey || e.metaKey;
+    if (add || !getState().labelSelection.some((r) => r.track === track && r.frame === frame)) labels.selectLabel(track, frame, add);
+    if (add) return;
+    anim.selectTrackFrame(track, frame);
+    const x0 = e.clientX;
+    setDragBoth({ kind: 'labels', x0, delta: 0, copy: e.altKey });
+    follow((ev, cur) => {
+      if (cur.kind !== 'labels') return null;
+      const delta = Math.round((ev.clientX - x0) / CELL);
+      return delta === cur.delta && ev.altKey === cur.copy ? cur : { ...cur, delta, copy: ev.altKey };
+    });
+  };
+
   // Rows keep one handler each (they are memoised); it always sees the current state.
   const gripRef = useRef(onGrip);
   gripRef.current = onGrip;
@@ -632,6 +909,25 @@ export function TimelinePalette() {
   const celRef = useRef(onCel);
   celRef.current = onCel;
   const stableCel = useCallback<RowProps['onCel']>((...args) => celRef.current(...args), []);
+  const labelRef = useRef(onLabel);
+  labelRef.current = onLabel;
+  const stableLabel = useCallback<RowProps['onLabel']>((...args) => labelRef.current(...args), []);
+
+  // Each track's labels (while dragging them: where they would land), one list per track so rows keep their props.
+  const docLabels = timeline?.trackLabels;
+  const labelDrag = drag?.kind === 'labels' ? drag : null;
+  const [ldDelta, ldCopy] = [labelDrag?.delta ?? 0, labelDrag?.copy ?? false];
+  const labelsByTrack = useMemo(() => {
+    const moved = ldDelta ? labels.movedLabels(ldDelta, ldCopy) : null;
+    const out = new Map<Id, TrackLabel[]>();
+    for (const l of moved ?? docLabels ?? []) out.set(l.track, [...(out.get(l.track) ?? []), l]);
+    return out;
+  }, [docLabels, ldDelta, ldCopy]);
+  const labelsOf = (id: Id) =>
+    labelSelection
+      .filter((r: LabelRef) => r.track === id)
+      .map((r) => r.frame + (drag?.kind === 'labels' ? labels.labelDelta(drag.delta) : 0))
+      .join(',');
 
   // What dragged tracks look like before the drop.
 
@@ -729,7 +1025,7 @@ export function TimelinePalette() {
   const onRowsDown = (e: React.PointerEvent<HTMLDivElement>) => {
     const target = e.target as HTMLElement;
     const rowsEl = rowsRef.current;
-    if (e.button !== 0 || !rowsEl || !target.closest('.tl-lane') || target.closest('.tl-key, .tl-clip-grip, [data-assigned]')) return;
+    if (e.button !== 0 || !rowsEl || !target.closest('.tl-lane') || target.closest('.tl-key, .tl-clip-grip, [data-assigned], .tl-tracklabel, .tl-label-input')) return;
     const x0 = e.clientX;
     const y0 = e.clientY;
     const mode = e.shiftKey ? 'add' : e.ctrlKey || e.metaKey ? 'remove' : 'set';
@@ -758,6 +1054,14 @@ export function TimelinePalette() {
         refs.push({ track: el.dataset.keyTrack!, frame: Number(el.dataset.frame), ...(group ? { group } : {}) });
       });
       anim.selectKeyframes(refs, mode);
+      // Track labels inside the rectangle are selected with the keyframes.
+      const picked: LabelRef[] = [];
+      rowsEl.querySelectorAll<HTMLElement>('.tl-tracklabel').forEach((el) => {
+        const b = el.getBoundingClientRect();
+        if (b.right < r.left || b.left > r.right || b.bottom < r.top || b.top > r.bottom) return;
+        picked.push({ track: el.dataset.labelTrack!, frame: Number(el.dataset.frame) });
+      });
+      labels.selectLabels(picked, mode);
     };
     window.addEventListener('pointermove', move);
     window.addEventListener('pointerup', up, { once: true });
@@ -866,6 +1170,7 @@ export function TimelinePalette() {
                 className="tl-cells tl-ruler"
                 data-testid="timeline-ruler"
                 onPointerDown={(e) => {
+                  if (e.button !== 0) return;
                   scrub.current = true;
                   e.currentTarget.setPointerCapture(e.pointerId);
                   anim.setFrame(frameFromEvent(e));
@@ -874,6 +1179,17 @@ export function TimelinePalette() {
                   if (scrub.current) anim.setFrame(frameFromEvent(e));
                 }}
                 onPointerUp={() => (scrub.current = false)}
+                onDoubleClick={(e) => {
+                  if ((e.target as HTMLElement).closest('.tl-range')) return;
+                  anim.setFrame(Math.max(1, Math.min(frames, Math.floor((e.clientX - e.currentTarget.getBoundingClientRect().left) / CELL) + 1)));
+                  openDialog('timelineLabel');
+                }}
+                onContextMenu={(e) => {
+                  e.preventDefault();
+                  const f = Math.max(1, Math.min(frames, Math.floor((e.clientX - e.currentTarget.getBoundingClientRect().left) / CELL) + 1));
+                  anim.setFrame(f);
+                  showMenu({ x: e.clientX, y: e.clientY }, rulerMenu(f));
+                }}
               >
                 {Array.from({ length: frames }, (_, i) => {
                   const f = i + 1;
@@ -883,12 +1199,20 @@ export function TimelinePalette() {
                     <div
                       key={i}
                       className={`tl-cell ${f === frame ? 'current' : ''} ${f < rangeStart || f > rangeEnd ? 'outside' : ''} ${division && f % division === 0 ? 'div' : ''} ${second ? 'second' : ''}`}
-                      title={frameLabel(f, fps, display)}
+                      title={timelineLabelAt(timeline.labels, f) ? `${frameLabel(f, fps, display)}: ${timelineLabelAt(timeline.labels, f)!.text} (double-click to rename)` : `${frameLabel(f, fps, display)} (double-click: timeline label)`}
                     >
                       {timeLike ? ((f - 1) % Math.max(1, Math.round(fps))) + (display === 'secframe' ? 1 : 0) : frameLabel(f, fps, display)}
                     </div>
                   );
                 })}
+                {/* Timeline labels (the frames under them stay clickable; double-click a frame to name it). */}
+                {(timeline.labels ?? [])
+                  .filter((l) => l.frame <= frames)
+                  .map((l) => (
+                    <div key={l.frame} className="tl-tlabel" data-testid="timeline-label" data-frame={l.frame} style={{ left: (l.frame - 1) * CELL }}>
+                      {l.text}
+                    </div>
+                  ))}
                 {/* Start and end frame: drag the blue marks. */}
                 <div className="tl-range start" data-testid="timeline-start" title={`Start frame ${rangeStart}: drag to change`} style={{ left: (rangeStart - 1) * CELL }} onPointerDown={(e) => dragRange(e, 'start')} />
                 <div className="tl-range end" data-testid="timeline-end" title={`End frame ${rangeEnd}: drag to change`} style={{ left: rangeEnd * CELL }} onPointerDown={(e) => dragRange(e, 'end')} />
@@ -930,6 +1254,9 @@ export function TimelinePalette() {
                     onGrip={stableGrip}
                     onKey={stableKey}
                     onCel={stableCel}
+                    trackLabels={labelsByTrack.get(r.layer.id) ?? NO_LABELS}
+                    selectedLabels={labelsOf(r.layer.id)}
+                    onLabel={stableLabel}
                   />
                 ),
               )}

@@ -26,6 +26,16 @@ describe('Exposure sheet', () => {
     );
     expect(csv.split('\r\n')).toEqual([',,"Scene, 1"', 'Frame,A,B', '1,1,', '2,,×', '3,2,', '']);
   });
+
+  it('writes track labels at their first frame, inbetween labels as 〇 / ●', () => {
+    const labels = [
+      { track: 'A', frame: 1, length: 1, text: 'Pan' },
+      { track: 'A', frame: 2, length: 1, text: '〇' },
+      { track: 'A', frame: 3, length: 1, text: '●' },
+    ];
+    const csv = exposureSheetCsv([{ parent: '', name: 'A', track: { cels: [{ frame: 1, cel: 'a1' }, { frame: 3, cel: 'a2' }] }, cels: new Map([['a1', '1'], ['a2', '2']]), labels }], 3);
+    expect(csv.split('\r\n').slice(2, 5)).toEqual(['1,1 Pan', '2,〇', '3,2 ●']);
+  });
 });
 
 describe('WAV', () => {

@@ -29,6 +29,7 @@ import { sanitizeLightLayers } from '../paint/lightTable';
 import { sanitizeSound } from '../paint/sound';
 import { sanitizeOutputFrame } from '../paint/outputFrame';
 import { sanitizeGrid } from '../paint/grid';
+import { pruneLabels } from '../paint/labels';
 import { sanitizeTimelines } from '../model/timelines';
 
 export const FORMAT = 'mad-studio-paint';
@@ -244,7 +245,9 @@ export function sanitizeDocument(raw: unknown): PaintDocument {
     seen.add(t.id);
   }
   const paper = (r.paper && typeof r.paper === 'object' ? r.paper : {}) as Record<string, unknown>;
-  const timeline = sanitizeTimeline(r.timeline);
+  // Track labels only for tracks the document has.
+  const rawTimeline = sanitizeTimeline(r.timeline);
+  const timeline = rawTimeline && pruneLabels(rawTimeline, new Set(flatten(layers).map((l) => l.id)));
   const general = sanitizeLightLayers((r.lightTable as Record<string, unknown> | undefined)?.general);
   const width = clampCanvasSide(num(r.width, 1000, 1, 1e6));
   const height = clampCanvasSide(num(r.height, 1000, 1, 1e6));

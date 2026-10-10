@@ -92,7 +92,8 @@ export const MENUS: MenuSpec[] = [
       },
       { label: 'Animation curve', items: ['graphEditor', 'unpairHandles'] },
       { label: 'Timeline', items: ['newTimeline', 'timelineSettings', 'frameRate', 'manageTimelines', 'enableTimeline', '-', 'insertFrame', 'deleteFrame'] },
-      { label: 'Move frame', items: ['firstFrame', 'prevFrame', 'nextFrame', 'lastFrame'] },
+      { label: 'Label', items: ['createTimelineLabel', 'deleteTimelineLabel', '-', 'createTrackLabel', 'inbetweenOpen', 'inbetweenFilled', 'deleteTrackLabel'] },
+      { label: 'Move frame', items: ['firstFrame', 'lastFrame', 'prevFrame', 'nextFrame', '-', 'prevKeyframe', 'nextKeyframe', '-', 'goToFrame', 'goToLabel'] },
       '-',
       { label: 'Show animation cels', items: ['onionSkin', 'onionSkinSettings', '-', 'cameraView'] },
       {

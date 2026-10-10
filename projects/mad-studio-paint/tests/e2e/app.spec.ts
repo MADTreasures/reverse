@@ -3545,6 +3545,155 @@ test('animation exports: animation cels (a folder per animation folder), exposur
   expect(errors).toEqual([]);
 });
 
+test('labels: timeline labels, track labels with a range, inbetween labels 〇/●, go to label or frame, insert frame; exposure sheet, saved', async ({ page }) => {
+  const errors = await boot(page);
+  await page.evaluate(() => delete (window as any).showSaveFilePicker);
+  await page.evaluate(() => void window.__madPaint.runCommand('new'));
+  const dlg = page.getByRole('dialog', { name: 'New canvas' });
+  await dlg.getByLabel('Width').fill('200');
+  await dlg.getByLabel('Height').fill('100');
+  await dlg.getByText('Create animated illustration').click();
+  await dlg.getByLabel('Number of cels').fill('8');
+  await dlg.getByLabel('Frame rate').fill('8');
+  await dlg.getByRole('button', { name: 'OK' }).click();
+  const ruler = page.getByTestId('timeline-ruler');
+  const frameNow = () => page.evaluate(() => window.__madPaint.useStore.getState().frame);
+  const timeline = () => page.evaluate(() => window.__madPaint.useStore.getState().doc.timeline);
+  const trackLabels = async () => ((await timeline()).trackLabels ?? []).map((l: any) => `${l.frame}+${l.length}:${l.text}`).join(' ');
+  // Timeline labels on frames 3 and 6; a text only once.
+  const timelineLabel = async (frame: number, text: string) => {
+    await ruler.locator('.tl-cell').nth(frame - 1).click();
+    await page.evaluate(() => window.__madPaint.runCommand('createTimelineLabel'));
+    const d = page.getByRole('dialog', { name: 'Create timeline label' });
+    await d.getByLabel('Label name').fill(text);
+    return d;
+  };
+  await (await timelineLabel(3, 'Jump')).getByRole('button', { name: 'OK' }).click();
+  const twice = await timelineLabel(6, 'Jump');
+  await expect(twice.getByRole('alert')).toBeVisible();
+  await expect(twice.getByRole('button', { name: 'OK' })).toBeDisabled();
+  await twice.getByLabel('Label name').fill('Land');
+  await twice.getByRole('button', { name: 'OK' }).click();
+  await expect(page.getByTestId('timeline-label')).toHaveText(['Jump', 'Land']);
+  await expect(page.locator('[data-testid=timeline-label][data-frame="6"]')).toHaveText('Land');
+  // Move frame > Go to timeline label / Go to specified frame.
+  await ruler.locator('.tl-cell').nth(0).click();
+  await page.evaluate(() => window.__madPaint.runCommand('goToLabel'));
+  const go = page.getByRole('dialog', { name: 'Go to timeline label' });
+  await go.getByRole('option', { name: 'Land' }).click();
+  await go.getByRole('button', { name: 'OK' }).click();
+  expect(await frameNow()).toBe(6);
+  await page.evaluate(() => window.__madPaint.runCommand('goToFrame'));
+  const gf = page.getByRole('dialog', { name: 'Go to specified frame' });
+  await gf.getByLabel('Frame number').fill('2');
+  await gf.getByRole('button', { name: 'OK' }).click();
+  expect(await frameNow()).toBe(2);
+  // Track label over frames 2–3 (Range), inbetween labels 〇 on 5 and ● on 6.
+  await page.evaluate(() => window.__madPaint.runCommand('createTrackLabel'));
+  const tl = page.getByRole('dialog', { name: 'Create track label' });
+  await tl.getByLabel('Label name').fill('Pan');
+  await tl.getByText('Range').click();
+  await tl.getByRole('spinbutton', { name: 'Range' }).fill('2');
+  await tl.getByRole('button', { name: 'OK' }).click();
+  await ruler.locator('.tl-cell').nth(4).click();
+  await page.evaluate(() => window.__madPaint.runCommand('inbetweenOpen'));
+  await ruler.locator('.tl-cell').nth(5).click();
+  await page.evaluate(() => window.__madPaint.runCommand('inbetweenFilled'));
+  expect(await trackLabels()).toBe('2+2:Pan 5+1:〇 6+1:●');
+  // With the label area closed they show at the top of the track.
+  await expect(page.getByTestId('track-label-mini')).toHaveCount(3);
+  // Details (+) opens the track label area: right-click frame 8 and type a label.
+  await page.locator('[data-testid=timeline-track][data-track="A"] .tl-details').click();
+  const lane = page.locator('[data-testid=timeline-label-area] [data-testid=track-label-lane]');
+  const box = (await lane.boundingBox())!;
+  const at = (f: number) => box.x + (f - 0.5) * 24;
+  await page.mouse.click(at(8), box.y + box.height / 2, { button: 'right' });
+  await expect(lane.getByRole('textbox', { name: 'New track label' })).toBeFocused();
+  await page.keyboard.type('End');
+  await page.keyboard.press('Enter');
+  expect(await trackLabels()).toBe('2+2:Pan 5+1:〇 6+1:● 8+1:End');
+  const label = (f: number) => lane.locator(`[data-testid=track-label][data-frame="${f}"]`);
+  // Drag the end of Pan from frame 3 to frame 4.
+  const pan = (await label(2).boundingBox())!;
+  await page.mouse.move(pan.x + pan.width - 2, pan.y + pan.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(at(4), pan.y + pan.height / 2, { steps: 4 });
+  await page.mouse.up();
+  expect(await trackLabels()).toBe('2+3:Pan 5+1:〇 6+1:● 8+1:End');
+  // Drag 〇 from frame 5 to frame 7; Alt-drag End from frame 8 to frame 1 duplicates it.
+  const dragLabel = async (from: number, to: number, alt = false) => {
+    const b = (await label(from).boundingBox())!;
+    if (alt) await page.keyboard.down('Alt');
+    await page.mouse.move(b.x + b.width / 2, b.y + b.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(at(to), b.y + b.height / 2, { steps: 5 });
+    await page.mouse.up();
+    if (alt) await page.keyboard.up('Alt');
+  };
+  await dragLabel(5, 7);
+  expect(await trackLabels()).toBe('2+3:Pan 6+1:● 7+1:〇 8+1:End');
+  await dragLabel(8, 1, true);
+  expect(await trackLabels()).toBe('1+1:End 2+3:Pan 6+1:● 7+1:〇 8+1:End');
+  // A click on a selected label edits it: emptying the text deletes it.
+  await label(7).click();
+  await expect(label(7)).toHaveClass(/selected/);
+  await label(7).click();
+  const input = lane.getByRole('textbox', { name: 'Track label' });
+  await input.fill('');
+  await input.press('Enter');
+  expect(await trackLabels()).toBe('1+1:End 2+3:Pan 6+1:● 8+1:End');
+  // Exposure sheet: track labels at their first frame, inbetween marks as they are.
+  const [dl] = await Promise.all([page.waitForEvent('download'), page.evaluate(() => window.__madPaint.runCommand('exportSheet'))]);
+  const lines = readFileSync((await dl.path())!).toString('utf8').replace(/^\ufeff/, '').split('\r\n');
+  expect(lines.slice(2, 10)).toEqual(['1,1 End', '2,Pan', '3,', '4,', '5,', '6,●', '7,', '8,End']);
+  // Insert frame (2 frames at frame 2): labels from there on move back; a range over it gets longer.
+  await ruler.locator('.tl-cell').nth(2).click();
+  await page.evaluate(() => window.__madPaint.runCommand('insertFrame'));
+  const ins = page.getByRole('dialog', { name: 'Insert frame' });
+  await ins.getByLabel('Number of frames').fill('2');
+  await ins.getByRole('button', { name: 'OK' }).click();
+  let t = await timeline();
+  expect([t.frames, t.labels.map((l: any) => l.frame)]).toEqual([10, [5, 8]]);
+  expect(await trackLabels()).toBe('1+1:End 2+5:Pan 8+1:● 10+1:End');
+  // One undo step.
+  await page.keyboard.press('ControlOrMeta+z');
+  t = await timeline();
+  expect([t.frames, t.labels.map((l: any) => l.frame)]).toEqual([8, [3, 6]]);
+  // Delete frame on the selected layer only: the timeline keeps its length and labels, the track's labels move.
+  await page.locator('[data-testid=timeline-track][data-track="A"] .tl-cell[data-frame="4"]').click();
+  await page.evaluate(() => window.__madPaint.runCommand('deleteFrame'));
+  const del = page.getByRole('dialog', { name: 'Delete frame' });
+  await del.getByLabel('Selected layer only').check();
+  await del.getByRole('button', { name: 'OK' }).click();
+  t = await timeline();
+  expect([t.frames, t.labels.map((l: any) => l.frame)]).toEqual([8, [3, 6]]);
+  expect(await trackLabels()).toBe('1+1:End 2+2:Pan 5+1:● 7+1:End');
+  await page.keyboard.press('ControlOrMeta+z');
+  // Move frame > Next keyframe / Previous keyframe on the current track.
+  for (const f of [2, 5]) {
+    await ruler.locator('.tl-cell').nth(f - 1).click();
+    await page.getByRole('button', { name: 'Add keyframe' }).click();
+  }
+  await ruler.locator('.tl-cell').nth(0).click();
+  await page.evaluate(() => window.__madPaint.runCommand('nextKeyframe'));
+  expect(await frameNow()).toBe(2);
+  await page.evaluate(() => window.__madPaint.runCommand('nextKeyframe'));
+  expect(await frameNow()).toBe(5);
+  await page.evaluate(() => window.__madPaint.runCommand('prevKeyframe'));
+  expect(await frameNow()).toBe(2);
+  // Delete timeline label (frame 3), and the labels are saved.
+  await ruler.locator('.tl-cell').nth(2).click();
+  await page.evaluate(() => window.__madPaint.runCommand('deleteTimelineLabel'));
+  const back = await page.evaluate(async () => {
+    const m = window.__madPaint;
+    await m.openFileBytes({ name: 'labels.madpaint', data: await m.buildDocumentBytes() });
+    const x = m.useStore.getState().doc.timeline;
+    return [x.labels.map((l: any) => `${l.frame}:${l.text}`), x.trackLabels.length];
+  });
+  expect(back).toEqual([['6:Land'], 4]);
+  expect(errors).toEqual([]);
+});
+
 test('frame borders snap strokes that start near them, not along their extension', async ({ page }) => {
   await boot(page);
   await page.evaluate(() => window.__madPaint.runCommand('newFrameFolder'));

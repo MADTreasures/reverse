@@ -4,6 +4,7 @@
  * separator, like the reference's) and the exposure sheet as CSV. Pure, unit tested.
  */
 import { entryAt, type AnimationTrack } from '../paint/animation';
+import type { TrackLabel } from '../paint/labels';
 import type { Id } from '../model/types';
 
 export type CelNameFormat = 'cel' | 'number' | 'folderCel' | 'folderNumber';
@@ -46,6 +47,8 @@ export interface SheetColumn {
   track: AnimationTrack;
   /** Cel names by id. */
   cels: Map<Id, string>;
+  /** The track's labels: their text at their first frame (inbetween track labels: 〇 / ●). */
+  labels?: TrackLabel[];
 }
 
 const csvCell = (s: string) => (/[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s);
@@ -53,7 +56,8 @@ const csvCell = (s: string) => (/[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"
 /**
  * Exposure sheet (CSV): the first line has the animation folders' parents, the second their names,
  * then one line per frame (numbered from 1) with the cel assigned there in each column (an empty
- * assignment: ×; a cel that holds: nothing).
+ * assignment: ×; a cel that holds: nothing) and the track label starting there (inbetween track
+ * labels as 〇 / ●), after a space when both are there.
  */
 export function exposureSheetCsv(columns: SheetColumn[], frames: number): string {
   const lines: string[][] = [
@@ -65,7 +69,9 @@ export function exposureSheetCsv(columns: SheetColumn[], frames: number): string
       String(f),
       ...columns.map((c) => {
         const e = entryAt(c.track, f);
-        return !e ? '' : e.cel === null ? '×' : (c.cels.get(e.cel) ?? '');
+        const cel = !e ? '' : e.cel === null ? '×' : (c.cels.get(e.cel) ?? '');
+        const label = c.labels?.find((l) => l.frame === f)?.text ?? '';
+        return [cel, label].filter(Boolean).join(' ');
       }),
     ]);
   }

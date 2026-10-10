@@ -6,6 +6,7 @@
  * tested.
  */
 import type { Id } from '../model/types';
+import { sanitizeTimelineLabels, sanitizeTrackLabels, type TimelineLabel, type TrackLabel } from './labels';
 
 export interface Timeline {
   /** Animation > Timeline > Enable timeline. Off: every cel shows, like in a normal folder. */
@@ -23,6 +24,9 @@ export interface Timeline {
   display?: FrameDisplay;
   /** Division line every this many frames (0 or absent: none). */
   division?: number;
+  /** Animation > Label: timeline labels (by frame) and track labels (by track and frame). */
+  labels?: TimelineLabel[];
+  trackLabels?: TrackLabel[];
 }
 
 /** Frame number (from 1), Frame number (from 0), Seconds + frame, Time code. */
@@ -326,8 +330,12 @@ export function sanitizeTimeline(raw: unknown): Timeline | undefined {
     ...(end !== undefined && end < frames ? { end } : {}),
     ...(r.display === 'frame0' || r.display === 'secframe' || r.display === 'timecode' ? { display: r.display } : {}),
     ...(typeof r.division === 'number' && r.division >= 1 ? { division: Math.round(num(r.division, 0, 1, 100)) } : {}),
+    ...withList('labels', sanitizeTimelineLabels(r.labels, frames)),
+    ...withList('trackLabels', sanitizeTrackLabels(r.trackLabels, frames)),
   };
 }
+
+const withList = <K extends string, T>(key: K, list: T[] | undefined) => (list ? ({ [key]: list } as Record<K, T[]>) : {});
 
 /** A track from a file; cel ids are checked against the folder's layers by the caller. */
 export function sanitizeTrack(raw: unknown): AnimationTrack | undefined {

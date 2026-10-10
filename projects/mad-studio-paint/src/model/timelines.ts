@@ -10,6 +10,7 @@
 import { MAX_FRAMES, sanitizeTimeline, type CelAssignment, type Timeline } from '../paint/animation';
 import { sanitizeClips, type Clip } from '../paint/clips';
 import { removeChannels, sanitizeKeyframes, sanitizeKeyTrack, PLACEMENT_CHANNELS, type Keyframe, type KeyTrack } from '../paint/keyframes';
+import { pruneLabels, scaleLabels } from '../paint/labels';
 import { flatten } from './layers';
 import type { Id, Layer, PaintDocument } from './types';
 
@@ -210,6 +211,7 @@ export function changeFrameRate(doc: PaintDocument, fps: number, rescale: boolea
     frames,
     ...(t.start !== undefined ? { start: Math.min(frames, scaled(t.start, k)) } : {}),
     ...(t.end !== undefined ? { end: Math.min(frames, Math.round(t.end * k)) } : {}),
+    ...scaleLabels(t, k, frames),
   };
 }
 
@@ -248,8 +250,9 @@ export function sanitizeTimelines(raw: unknown, layers: Layer[]): TimelineSet | 
   for (const o of Array.isArray(r.others) ? r.others.slice(0, 100) : []) {
     if (!o || typeof o !== 'object') continue;
     const x = o as Record<string, unknown>;
-    const timeline = sanitizeTimeline(x.timeline);
-    if (!timeline) continue;
+    const raw = sanitizeTimeline(x.timeline);
+    if (!raw) continue;
+    const timeline = pruneLabels(raw, new Set(byId.keys()));
     const tracks: Record<Id, TrackData> = {};
     const rawTracks = x.tracks && typeof x.tracks === 'object' ? (x.tracks as Record<string, unknown>) : {};
     for (const [id, value] of Object.entries(rawTracks)) {

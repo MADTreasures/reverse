@@ -8,6 +8,7 @@ import { DEFAULT_SUB_TOOLS, type SubTool, type ToolId, type WorkspaceId } from '
 import type { TextBox } from '../paint/text';
 import { DEFAULT_ONION, type OnionSkin } from '../paint/animation';
 import type { Channel, ChannelGroup, Interp } from '../paint/keyframes';
+import type { LabelRef } from '../paint/labels';
 
 export interface ViewState {
   /** Screen pixels per document pixel. */
@@ -128,6 +129,8 @@ export interface PaintState {
   keySelection: KeyRef[];
   /** Assigned cels selected in the Timeline palette: their animation folder and frame. */
   celSelection: CelRef[];
+  /** Track labels selected in the Timeline palette: their track and first frame. */
+  labelSelection: LabelRef[];
   /** Keyframe interpolation for new keyframes (Timeline palette). */
   keyInterp: Interp;
   /** Edit layers with active keyframes: the current track is drawn as it is and can be drawn on. */
@@ -193,6 +196,8 @@ export interface CelRef {
   frame: number;
 }
 
+export type { LabelRef };
+
 export const initialView: ViewState = { zoom: 1, rotation: 0, flipH: false, flipV: false, panX: 0, panY: 0 };
 
 function initialState(): PaintState {
@@ -245,6 +250,7 @@ function initialState(): PaintState {
     timelineHeight: 190,
     clipSelection: [],
     celSelection: [],
+    labelSelection: [],
     keySelection: [],
     keyInterp: 'linear',
     editKeyed: false,

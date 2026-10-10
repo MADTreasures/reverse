@@ -3044,6 +3044,106 @@ button.rgb-readout {
   border-radius: 3px 0 0 3px;
 }
 
+/* Labels (Animation > Label): timeline labels on the ruler, track labels in a track's label area */
+.tl-tlabel {
+  position: absolute;
+  z-index: 1;
+  top: 2px;
+  max-width: calc(var(--cell) * 8);
+  height: 16px;
+  padding: 0 4px;
+  overflow: hidden;
+  border: 1px solid #6c9e2e;
+  border-radius: 2px;
+  background: #36580f;
+  color: #c9ef8a;
+  font-size: 11px;
+  line-height: 14px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  pointer-events: none;
+}
+
+.tl-label-lane {
+  cursor: context-menu;
+}
+
+.tl-tracklabel,
+.tl-label-mini {
+  position: absolute;
+  top: 3px;
+  bottom: 3px;
+  overflow: hidden;
+  padding: 0 3px;
+  border-radius: 2px;
+  font-size: 11px;
+  line-height: 14px;
+  text-align: center;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tl-tracklabel {
+  z-index: 2;
+  border: 1px solid #6c9e2e;
+  background: #3d6614;
+  color: #f2ffe0;
+  cursor: grab;
+}
+
+.tl-tracklabel.selected {
+  border-color: #e5484d;
+  box-shadow: 0 0 0 1px #e5484d;
+}
+
+.tl-tracklabel.inbetween,
+.tl-label-mini.inbetween {
+  font-size: 12px;
+}
+
+/* closed label area: the labels at the top of the track, not editable there */
+.tl-label-mini {
+  z-index: 2;
+  top: 0;
+  bottom: auto;
+  height: 9px;
+  padding: 0 2px;
+  border: 1px solid var(--line-soft);
+  background: var(--bg-4);
+  color: var(--text-dim);
+  font-size: 8px;
+  line-height: 7px;
+  pointer-events: none;
+}
+
+.tl-label-span {
+  position: absolute;
+  z-index: 2;
+  top: 3px;
+  bottom: 3px;
+  border: 1px dashed #6c9e2e;
+  background: color-mix(in srgb, #3d6614 35%, transparent);
+  pointer-events: none;
+}
+
+.tl-label-input {
+  position: absolute;
+  z-index: 5;
+  top: 1px;
+  height: 19px;
+  padding: 0 4px;
+  border: 1px solid var(--accent-strong);
+  border-radius: 2px;
+  background: var(--bg-1);
+  color: var(--text);
+  font-size: 12px;
+}
+
+.label-list {
+  min-width: 240px;
+  margin-bottom: 12px;
+}
+
 /* frame templates */
 
 .template-list {

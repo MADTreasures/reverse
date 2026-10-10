@@ -5,6 +5,7 @@ import { exportExposureSheet, importImages, openDocument, saveDocument, saveDupl
 import * as actions from '../store/actions';
 import { activeFrameFolder } from '../store/frameActions';
 import * as anim from '../store/animationActions';
+import * as labels from '../store/labelActions';
 import * as light from '../store/lightTableActions';
 import * as sound from '../store/soundActions';
 import { copy, cut, hasClip, pasteImage } from '../store/clipboard';
@@ -12,6 +13,7 @@ import { drawingColor, getState, setState } from '../store/store';
 import { cancelTransform, confirmTransform, flipTransform, isTransforming, startTransform } from '../tools/transform';
 import { CORRECTIONS, correctionLabel, defaultCorrection, type CorrectionType } from '../paint/tonal';
 import { FILTERS } from '../paint/filters';
+import { INBETWEEN_FILLED, INBETWEEN_OPEN } from '../paint/labels';
 import { applyFilterNow } from '../store/filterActions';
 import { openDialog, openFilterDialog, openTonalDialog, promptDialog } from './overlays';
 import { openAssignMenu } from './palettes/TimelinePalette';
@@ -389,12 +391,23 @@ export const COMMANDS: Command[] = [
   { id: 'frameRate', label: 'Change frame rate…', run: () => openDialog('frameRate'), enabled: () => Boolean(getState().doc.timeline) },
   { id: 'manageTimelines', label: 'Manage timeline…', run: () => openDialog('manageTimelines'), enabled: () => Boolean(getState().doc.timeline) },
   { id: 'enableTimeline', label: 'Enable timeline', run: () => anim.toggleTimeline(), checked: () => Boolean(getState().doc.timeline?.enabled), enabled: () => Boolean(getState().doc.timeline) },
-  { id: 'insertFrame', label: 'Insert frame', run: () => anim.insertFrame(), enabled: hasTimeline },
-  { id: 'deleteFrame', label: 'Delete frame', run: () => anim.deleteFrame(), enabled: () => (getState().doc.timeline?.frames ?? 0) > 1 },
+  { id: 'insertFrame', label: 'Insert frame…', run: () => openDialog('insertFrame'), enabled: hasTimeline },
+  { id: 'deleteFrame', label: 'Delete frame…', run: () => openDialog('deleteFrame'), enabled: hasTimeline },
   { id: 'firstFrame', label: 'Go to start', run: () => anim.firstFrame(), enabled: hasTimeline },
   { id: 'prevFrame', label: 'Go to previous frame', run: () => anim.previousFrame(), enabled: hasTimeline },
   { id: 'nextFrame', label: 'Go to next frame', run: () => anim.nextFrame(), enabled: hasTimeline },
   { id: 'lastFrame', label: 'Go to end', run: () => anim.lastFrame(), enabled: hasTimeline },
+  { id: 'prevKeyframe', label: 'Previous keyframe', run: () => anim.goToKeyframe(-1), enabled: () => anim.neighbourKeyframe(-1) !== null },
+  { id: 'nextKeyframe', label: 'Next keyframe', run: () => anim.goToKeyframe(1), enabled: () => anim.neighbourKeyframe(1) !== null },
+  { id: 'goToFrame', label: 'Go to specified frame…', run: () => openDialog('goToFrame'), enabled: hasTimeline },
+  { id: 'goToLabel', label: 'Go to timeline label…', run: () => openDialog('goToLabel'), enabled: () => Boolean(getState().doc.timeline?.labels?.length) },
+  // Label
+  { id: 'createTimelineLabel', label: 'Create timeline label…', run: () => openDialog('timelineLabel'), enabled: hasTimeline },
+  { id: 'deleteTimelineLabel', label: 'Delete timeline label', run: () => labels.deleteTimelineLabel(), enabled: () => labels.currentTimelineLabel() !== undefined },
+  { id: 'createTrackLabel', label: 'Create track label…', run: () => openDialog('trackLabel'), enabled: () => labels.hasLabelTrack() },
+  { id: 'inbetweenOpen', label: `Create inbetween track label ${INBETWEEN_OPEN}`, run: () => labels.createInbetweenLabel(INBETWEEN_OPEN), enabled: () => labels.hasLabelTrack() },
+  { id: 'inbetweenFilled', label: `Create inbetween track label ${INBETWEEN_FILLED}`, run: () => labels.createInbetweenLabel(INBETWEEN_FILLED), enabled: () => labels.hasLabelTrack() },
+  { id: 'deleteTrackLabel', label: 'Delete track label', run: () => labels.deleteTrackLabel(), enabled: () => labels.currentTrackLabel() !== undefined },
   { id: 'playStop', label: 'Play/Stop', run: () => anim.togglePlay(), enabled: hasTimeline, checked: () => getState().playing },
   { id: 'loopPlay', label: 'Loop play', run: () => anim.toggleLoop(), checked: () => getState().loop },
   { id: 'onionSkin', label: 'Enable onion skin', run: () => anim.toggleOnionSkin(), checked: () => getState().onionSkin, enabled: hasTimeline },

@@ -167,6 +167,7 @@ export function loadDocument(doc: PaintDocument, images: Map<Id, HTMLCanvasEleme
     playing: false,
     clipSelection: [],
     celSelection: [],
+    labelSelection: [],
     keySelection: [],
     lightSelection: null,
     lightPicked: [],

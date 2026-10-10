@@ -22,6 +22,7 @@ import { docLightImages } from '../paint/lightTable';
 import { clearSounds, mixSound, setSoundBytes, soundBytes } from '../engine/sounds';
 import { animationFolders, hasSound, soundMix, type AnimationFolder } from '../model/animation';
 import { celFileName, exposureSheetCsv, uniqueNames, type CelNameFormat } from './animationCels';
+import { labelsOfTrack } from '../paint/labels';
 import { usedMovieFiles, usedSoundFiles } from '../store/soundActions';
 import { clearMovies, movieBytes, prepareMovieFrame, setMovieBytes } from '../engine/movies';
 // Type only: the PSD code (and ag-psd) loads when a PSD is opened or saved.
@@ -775,6 +776,7 @@ export async function exportExposureSheet(): Promise<boolean> {
     name: f.name,
     track: f.animation,
     cels: new Map(f.children.map((c) => [c.id, c.name])),
+    labels: labelsOfTrack(t.trackLabels, f.id),
   }));
   // With a byte order mark spreadsheets read the cel names right.
   const bytes = new TextEncoder().encode(`\ufeff${exposureSheetCsv(columns, t.frames)}`);
