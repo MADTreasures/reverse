@@ -3865,3 +3865,82 @@ test('colour palettes: HLS triangle, RGB/HSV/CMYK slider tabs, several colour se
   expect(await page.evaluate(() => window.__madPaint.useStore.getState().colorSets.sets.find((s: any) => s.name === 'Mine').colors)).toEqual(['#123456']);
   expect(errors).toEqual([]);
 });
+
+test('fill sub tools: drag over several areas, Enclose and fill, Lasso fill, Leftover pen', async ({ page }) => {
+  const errors = await boot(page);
+  // Line art on the bottom layer: three closed squares (outlines 2 px wide), colours on a new layer.
+  await page.evaluate(() => {
+    const a = window.__madPaint.actions;
+    const boxes = [
+      [40, 40, 120, 120],
+      [160, 40, 240, 120],
+      [280, 40, 300, 60],
+    ];
+    const outline = (i: number) => {
+      const x = i % 400;
+      const y = Math.floor(i / 400);
+      return boxes.some(([x0, y0, x1, y1]) => x >= x0 && x <= x1 && y >= y0 && y <= y1 && (x < x0 + 2 || x > x1 - 2 || y < y0 + 2 || y > y1 - 2));
+    };
+    a.setDrawingColor('#000000');
+    a.setSelection({ width: 400, height: 300, data: new Uint8Array(400 * 300).map((_: number, i: number) => (outline(i) ? 255 : 0)) });
+    a.fillWithColor();
+    a.deselect();
+    a.addRasterLayer();
+    a.setDrawingColor('#ff0000');
+    a.setTool('fill');
+  });
+  const colours = (x: number, y: number) => layerAlpha(page, x, y);
+  // Refer other layers: dragging from one square into the next fills both in one step.
+  await page.evaluate(() => window.__madPaint.actions.setSubTool('fill', 'fill-others'));
+  await drag(page, [80, 80], [200, 80], 10);
+  expect(await colours(80, 80)).toBe(255);
+  expect(await colours(200, 80)).toBe(255);
+  expect(await colours(140, 80)).toBe(255);
+  await page.keyboard.press('ControlOrMeta+z');
+  expect(await colours(80, 80)).toBe(0);
+  expect(await colours(200, 80)).toBe(0);
+
+  // Enclose and fill: a lasso round the first square fills it, not the background.
+  await page.evaluate(() => window.__madPaint.actions.setSubTool('fill', 'fill-enclose'));
+  const lasso = async (pts: [number, number][]) => {
+    const first = await docToScreen(page, ...pts[0]);
+    await page.mouse.move(first.x, first.y);
+    await page.mouse.down();
+    for (const p of [...pts.slice(1), pts[0]]) {
+      const q = await docToScreen(page, ...p);
+      await page.mouse.move(q.x, q.y, { steps: 6 });
+    }
+    await page.mouse.up();
+  };
+  await lasso([
+    [30, 30],
+    [130, 30],
+    [130, 130],
+    [30, 130],
+  ]);
+  expect(await colours(80, 80)).toBe(255);
+  expect(await colours(35, 35)).toBe(0);
+  expect(await colours(200, 80)).toBe(0);
+  // To darkest pixel: the colour reaches under the line.
+  expect(await colours(41, 80)).toBe(255);
+  await page.keyboard.press('ControlOrMeta+z');
+
+  // Lasso fill: the lasso itself is filled.
+  await page.evaluate(() => window.__madPaint.actions.setSubTool('fill', 'fill-lasso'));
+  await lasso([
+    [150, 150],
+    [250, 150],
+    [250, 250],
+    [150, 250],
+  ]);
+  expect(await colours(200, 200)).toBe(255);
+  expect(await colours(140, 200)).toBe(0);
+  await page.keyboard.press('ControlOrMeta+z');
+
+  // Leftover pen: brushing over the small square fills it.
+  await page.evaluate(() => window.__madPaint.actions.setSubTool('fill', 'fill-leftover'));
+  await drag(page, [285, 50], [296, 52], 6);
+  expect(await colours(290, 50)).toBe(255);
+  expect(await colours(270, 50)).toBe(0);
+  expect(errors).toEqual([]);
+});

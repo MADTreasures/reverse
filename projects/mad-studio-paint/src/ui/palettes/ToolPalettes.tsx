@@ -39,6 +39,7 @@ import {
   type TransformMode,
 } from '../../tools/transform';
 import { INTERPOLATIONS, type Interpolation } from '../../paint/warp';
+import { FILL_TARGETS, SCALING_MODES, type FillTarget, type ScalingMode } from '../../paint/fill';
 
 /** Last tool used per palette button (for buttons that hold several tools). */
 const lastTool = new Map<string, ToolId>();
@@ -291,12 +292,39 @@ export function ToolProperty() {
               ))}
             </select>
           </div>
-          <label className="check prop-check">
-            <input type="checkbox" checked={f.contiguous} onChange={(e) => update({ fill: { ...f, contiguous: e.target.checked } })} />
-            Follow adjacent pixels
-          </label>
+          {(!f.mode || f.mode === 'click') && (
+            <label className="check prop-check">
+              <input type="checkbox" checked={f.contiguous} onChange={(e) => update({ fill: { ...f, contiguous: e.target.checked } })} />
+              Follow adjacent pixels
+            </label>
+          )}
+          {f.mode === 'leftover' && <PropSlider label="Brush Size" value={f.size ?? 30} min={2} max={500} log onChange={(v) => update({ fill: { ...f, size: v } })} />}
+          {(f.mode === 'enclose' || f.mode === 'leftover') && (
+            <div className="prop-row">
+              <span className="prop-label">Target color</span>
+              <select className="prop-select" aria-label="Target color" value={f.target ?? 'transparent'} onChange={(e) => update({ fill: { ...f, target: e.target.value as FillTarget } })}>
+                {FILL_TARGETS.map(([id, label]) => (
+                  <option key={id} value={id}>
+                    {label}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
           <PropSlider testId="prop-tolerance" label="Color margin" value={f.tolerance} min={0} max={100} unit="%" onChange={(v) => update({ fill: { ...f, tolerance: v } })} />
           <PropSlider label="Area scaling" value={f.expand} min={-20} max={20} unit="px" onChange={(v) => update({ fill: { ...f, expand: v } })} />
+          {f.expand !== 0 && (
+            <div className="prop-row">
+              <span className="prop-label">Scaling mode</span>
+              <select className="prop-select" aria-label="Scaling mode" value={f.scaling ?? 'round'} onChange={(e) => update({ fill: { ...f, scaling: e.target.value as ScalingMode } })}>
+                {SCALING_MODES.map(([id, label]) => (
+                  <option key={id} value={id}>
+                    {label}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
           {more && (
             <label className="check prop-check">
               <input type="checkbox" checked={f.alphaOnly} onChange={(e) => update({ fill: { ...f, alphaOnly: e.target.checked } })} />

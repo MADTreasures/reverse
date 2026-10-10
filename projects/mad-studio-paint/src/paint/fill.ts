@@ -147,3 +147,193 @@ function plainFill(pixels: Uint8ClampedArray | Uint8Array, width: number, height
   }
   return mask;
 }
+
+// ------------------------------------------------------------------ closed areas (Enclose and fill, Leftover pen)
+
+/**
+ * Which pixels a closed-area fill treats as fillable (Target color, as in the reference's
+ * Advanced fill): transparent ones, white and transparent ones, ones up to half opaque (Treat
+ * semi-transparent as transparent), or all colours (each area of one colour on its own).
+ */
+export type FillTarget = 'transparent' | 'whiteTransparent' | 'semiTransparent' | 'all';
+
+export const FILL_TARGETS: [FillTarget, string][] = [
+  ['all', 'Target all colors'],
+  ['transparent', 'Only transparent'],
+  ['whiteTransparent', 'Only white and transparent'],
+  ['semiTransparent', 'Treat semi-transparent as transparent'],
+];
+
+/** Area scaling: square or round corners, or up to the darkest (most opaque) pixels of the lines. */
+export type ScalingMode = 'rectangle' | 'round' | 'darkest';
+
+export const SCALING_MODES: [ScalingMode, string][] = [
+  ['round', 'Round'],
+  ['rectangle', 'Rectangle'],
+  ['darkest', 'To darkest pixel'],
+];
+
+function fillableMap(pixels: Uint8ClampedArray | Uint8Array, n: number, target: FillTarget, tolerance: number): Uint8Array {
+  const tol = Math.round((Math.max(0, Math.min(100, tolerance)) / 100) * 255);
+  const out = new Uint8Array(n);
+  for (let p = 0, i = 0; p < n; p++, i += 4) {
+    const a = pixels[i + 3];
+    if (target === 'semiTransparent') out[p] = a <= 128 + tol / 2 ? 1 : 0;
+    else if (target === 'whiteTransparent') out[p] = a <= tol || (a >= 255 - tol && Math.min(pixels[i], pixels[i + 1], pixels[i + 2]) >= 255 - Math.max(8, tol)) ? 1 : 0;
+    else out[p] = a <= tol ? 1 : 0;
+  }
+  return out;
+}
+
+/**
+ * Enclose and fill / Leftover pen: every closed area that lies entirely inside `area` (the lasso
+ * or the brushed path). Areas that reach outside it – the background around a drawing – stay.
+ * Close gap thickens the lines first so that small breaks do not let an area leak.
+ */
+export function enclosedFillMask(
+  pixels: Uint8ClampedArray | Uint8Array,
+  width: number,
+  height: number,
+  area: Mask,
+  opts: { target: FillTarget; tolerance: number; closeGap?: number },
+): Mask {
+  const n = width * height;
+  const out = createMask(width, height);
+  const gap = Math.max(0, Math.round(opts.closeGap ?? 0));
+  const seen = new Uint8Array(n);
+  const queue = new Int32Array(n);
+  const comp: number[] = [];
+  let walls: Mask | null = null;
+  let passable: Uint8Array;
+  let sameColour: ((a: number, b: number) => boolean) | null = null;
+  if (opts.target === 'all') {
+    passable = new Uint8Array(n).fill(1);
+    const tol = Math.round((Math.max(0, Math.min(100, opts.tolerance)) / 100) * 255);
+    sameColour = (a, b) => distance(pixels, a * 4, pixels[b * 4], pixels[b * 4 + 1], pixels[b * 4 + 2], pixels[b * 4 + 3], false) <= tol;
+  } else {
+    const fillable = fillableMap(pixels, n, opts.target, opts.tolerance);
+    passable = fillable;
+    if (gap > 0) {
+      walls = createMask(width, height);
+      for (let p = 0; p < n; p++) walls.data[p] = fillable[p] ? 0 : 255;
+      const thick = dilate(walls, gap);
+      passable = new Uint8Array(n);
+      for (let p = 0; p < n; p++) passable[p] = fillable[p] && !thick.data[p] ? 1 : 0;
+    }
+  }
+  // Seeds: every passable pixel inside the area.
+  for (let start = 0; start < n; start++) {
+    if (!area.data[start] || seen[start] || !passable[start]) continue;
+    let head = 0;
+    let tail = 0;
+    queue[tail++] = start;
+    seen[start] = 1;
+    comp.length = 0;
+    let leaks = false;
+    while (head < tail) {
+      const p = queue[head++];
+      comp.push(p);
+      if (!area.data[p]) leaks = true;
+      const x = p % width;
+      const neighbours = [x > 0 ? p - 1 : -1, x < width - 1 ? p + 1 : -1, p - width, p + width];
+      for (const q of neighbours) {
+        if (q < 0 || q >= n || seen[q] || !passable[q]) continue;
+        // All colours: an area is one colour (within the tolerance of where it started).
+        if (sameColour && !sameColour(q, start)) continue;
+        seen[q] = 1;
+        queue[tail++] = q;
+      }
+    }
+    if (leaks) continue;
+    for (const p of comp) out.data[p] = 255;
+  }
+  if (walls && gap > 0) {
+    // Grow back towards the real lines (as far as the gap thickened them), never into them.
+    const grown = dilate(out, gap);
+    for (let p = 0; p < n; p++) if (walls.data[p] || !area.data[p]) grown.data[p] = 0;
+    return grown;
+  }
+  return out;
+}
+
+/** How dark a pixel is, 0..255: opacity times darkness (lines are dark and opaque). */
+function darkness(pixels: Uint8ClampedArray | Uint8Array, p: number): number {
+  const i = p * 4;
+  const lum = 0.299 * pixels[i] + 0.587 * pixels[i + 1] + 0.114 * pixels[i + 2];
+  return (pixels[i + 3] * (255 - lum * 0.75)) / 255;
+}
+
+/**
+ * Area scaling by `px` pixels. Rectangle grows with a square, Round with a disc; To darkest
+ * pixel grows into the lines only uphill, up to their darkest (most opaque) pixels.
+ */
+export function scaleArea(mask: Mask, px: number, mode: ScalingMode, pixels?: Uint8ClampedArray | Uint8Array): Mask {
+  const r = Math.round(px);
+  if (r === 0) return { ...mask, data: mask.data.slice() };
+  if (mode === 'rectangle') return expandSquare(mask, r);
+  if (mode === 'darkest' && r > 0 && pixels) return growToDarkest(mask, r, pixels);
+  return expandRound(mask, r);
+}
+
+function expandSquare(mask: Mask, r: number): Mask {
+  if (r > 0) return dilate(mask, r);
+  const inv = createMask(mask.width, mask.height);
+  for (let i = 0; i < inv.data.length; i++) inv.data[i] = mask.data[i] ? 0 : 255;
+  const grown = dilate(inv, -r);
+  const out = createMask(mask.width, mask.height);
+  for (let i = 0; i < out.data.length; i++) out.data[i] = grown.data[i] ? 0 : mask.data[i];
+  return out;
+}
+
+/** Disc-shaped growing (r > 0) or shrinking (r < 0), by distances to the nearest pixel of the other side. */
+function expandRound(mask: Mask, r: number): Mask {
+  const { width: w, height: h } = mask;
+  const grow = r > 0;
+  const rr = Math.abs(r);
+  const out = createMask(w, h);
+  // Squared distance to the nearest set (growing) or unset (shrinking) pixel, row then column.
+  const INF = 1e9;
+  const d = new Float64Array(w * h);
+  for (let i = 0; i < d.length; i++) d[i] = (mask.data[i] ? 1 : 0) === (grow ? 1 : 0) ? 0 : INF;
+  const f = new Float64Array(Math.max(w, h));
+  const lineDt = (get: (k: number) => number, set: (k: number, v: number) => void, len: number) => {
+    // Brute force within the radius is enough (r is small).
+    for (let k = 0; k < len; k++) f[k] = get(k);
+    for (let k = 0; k < len; k++) {
+      let best = f[k];
+      for (let j = Math.max(0, k - rr); j <= Math.min(len - 1, k + rr); j++) best = Math.min(best, f[j] + (j - k) * (j - k));
+      set(k, best);
+    }
+  };
+  for (let y = 0; y < h; y++) lineDt((x) => (d[y * w + x] === 0 ? 0 : INF), (x, v) => (d[y * w + x] = v), w);
+  for (let x = 0; x < w; x++) lineDt((y) => d[y * w + x], (y, v) => (d[y * w + x] = v), h);
+  const lim = rr * rr;
+  for (let i = 0; i < d.length; i++) {
+    const near = d[i] <= lim;
+    out.data[i] = grow ? (mask.data[i] || near ? 255 : 0) : mask.data[i] && !near ? mask.data[i] : 0;
+  }
+  return out;
+}
+
+function growToDarkest(mask: Mask, steps: number, pixels: Uint8ClampedArray | Uint8Array): Mask {
+  const { width: w, height: h } = mask;
+  const out = { ...mask, data: mask.data.slice() };
+  let frontier: number[] = [];
+  for (let p = 0; p < w * h; p++) if (out.data[p]) frontier.push(p);
+  for (let s = 0; s < steps && frontier.length; s++) {
+    const next: number[] = [];
+    for (const p of frontier) {
+      const dp = darkness(pixels, p);
+      const x = p % w;
+      for (const q of [x > 0 ? p - 1 : -1, x < w - 1 ? p + 1 : -1, p - w, p + w]) {
+        if (q < 0 || q >= w * h || out.data[q]) continue;
+        // Only uphill (towards the line's core); never past its darkest pixel.
+        if (darkness(pixels, q) + 4 < dp) continue;
+        out.data[q] = 255;
+        next.push(q);
+      }
+    }
+    frontier = next;
+  }
+  return out;
+}

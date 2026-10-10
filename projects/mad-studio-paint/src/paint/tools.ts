@@ -1,4 +1,5 @@
 /** Tools, sub tools (presets) and their settings. Sub tools are user-editable and persisted. */
+import type { FillTarget, ScalingMode } from './fill';
 import { LINEAR, sanitizeCurve01, type CurvePoint } from './curve';
 import { DEFAULT_TEXT_STYLE, sanitizeTextStyle, type BalloonShape, type TextStyle } from './text';
 import { sanitizeGradientStops, type GradientSpec } from './gradient';
@@ -153,6 +154,17 @@ export interface FillSettings {
   contiguous: boolean;
   /** Close gap: step 0 (off) … 5. */
   closeGap: number;
+  /** How the area grows or shrinks with Area scaling (default: round). */
+  scaling?: ScalingMode;
+  /**
+   * The sub tool's way of filling: click (and drag over several areas), Enclose and fill (lasso
+   * around closed areas), Lasso fill (fill the lasso), Leftover pen (brush over small leftovers).
+   */
+  mode?: 'click' | 'enclose' | 'lasso' | 'leftover';
+  /** Closed-area fills: which pixels count as the area (Target color). */
+  target?: FillTarget;
+  /** Leftover pen: brush diameter in px. */
+  size?: number;
 }
 
 export interface BrushSettings {
@@ -672,6 +684,9 @@ export const DEFAULT_SUB_TOOLS: SubTool[] = [
   // Fill & gradient
   { id: 'fill-layer', tool: 'fill', name: 'Refer only to editing layer', fill: { ...FILL_LAYER } },
   { id: 'fill-others', tool: 'fill', name: 'Refer other layers', fill: { ...FILL_OTHERS } },
+  { id: 'fill-enclose', tool: 'fill', name: 'Enclose and fill', fill: { ...FILL_OTHERS, mode: 'enclose', target: 'transparent', expand: 2, scaling: 'darkest' } },
+  { id: 'fill-lasso', tool: 'fill', name: 'Lasso fill', fill: { ...FILL_LAYER, mode: 'lasso', closeGap: 0 } },
+  { id: 'fill-leftover', tool: 'fill', name: 'Leftover pen', fill: { ...FILL_OTHERS, mode: 'leftover', target: 'transparent', expand: 2, scaling: 'darkest', size: 30 } },
   {
     id: 'grad-transparent',
     tool: 'gradient',

@@ -2,8 +2,8 @@
 import { hexToRgb } from '../model/color';
 import { findLayer, flatten, isEffectivelyVisible } from '../model/layers';
 import type { GradientLayer, Id, VectorLayer } from '../model/types';
-import { CLOSE_GAP_STEPS, floodFillMask } from '../paint/fill';
-import { combine, ellipseMask, expandMask, isSelected, maskBounds, polygonMask, rectMask, translateMask, type Mask, type SelectionOp } from '../paint/mask';
+import { CLOSE_GAP_STEPS, enclosedFillMask, floodFillMask, scaleArea } from '../paint/fill';
+import { combine, createMask, ellipseMask, isSelected, maskBounds, polygonMask, rectMask, translateMask, type Mask, type SelectionOp } from '../paint/mask';
 import { fromPoints, union, type Rect } from '../paint/rect';
 import { distanceToRuler, isSpecial, perspectiveConstraint, rulerConstraint, rulerLine, symmetryTransforms, type Affine, type Constraint, type Pt, type Ruler } from '../paint/rulers';
 import { gridOrigin, nearestLine } from '../paint/grid';
@@ -497,27 +497,32 @@ export class VectorEraseSession implements ToolSession {
 /** "Refer multiple" toggled for one click (⇧ with the fill tool, ⌘ with auto select). */
 const toggled = (ref: FillReference): FillReference => (ref === 'layer' ? 'all' : 'layer');
 
-function regionMask(sub: SubTool, p: PointerInfo, toggleReference: boolean): Mask | null {
+function regionMask(sub: SubTool, p: PointerInfo, toggleReference: boolean, pixels?: ImageData): Mask | null {
   const s = getState();
   const opts = sub.fill!;
-  const reference = toggleReference ? toggled(opts.reference) : opts.reference;
-  const pixels = referencePixels(s.doc, actions.editTarget(s)?.surfaceId ?? s.activeLayerId, reference);
-  let mask = floodFillMask(pixels.data, s.doc.width, s.doc.height, p.x, p.y, {
+  const ref = pixels ?? fillReference(sub, toggleReference);
+  let mask = floodFillMask(ref.data, s.doc.width, s.doc.height, p.x, p.y, {
     tolerance: opts.tolerance,
     alphaOnly: opts.alphaOnly,
     contiguous: opts.contiguous,
     closeGap: CLOSE_GAP_STEPS[Math.max(0, Math.min(5, Math.round(opts.closeGap ?? 0)))],
   });
-  if (opts.expand) mask = expandMask(mask, opts.expand);
+  if (opts.expand) mask = scaleArea(mask, opts.expand, opts.scaling ?? 'round', ref.data);
   return mask;
 }
 
-export function fillAt(sub: SubTool, p: PointerInfo): void {
-  const target = rasterTarget();
-  if (!target || !sub.fill) return;
+/** The pixels a fill looks at: the editing layer, all layers or the reference layers (⇧ toggles). */
+function fillReference(sub: SubTool, toggleReference: boolean): ImageData {
   const s = getState();
-  let mask = regionMask(sub, p, p.shift);
-  if (!mask) return;
+  const reference = toggleReference ? toggled(sub.fill!.reference) : sub.fill!.reference;
+  return referencePixels(s.doc, actions.editTarget(s)?.surfaceId ?? s.activeLayerId, reference);
+}
+
+/** Fills `mask` (inside the selection) with the drawing colour – or erases it with the transparent colour – as one undo step. */
+function paintMask(sub: SubTool, mask: Mask): void {
+  const target = rasterTarget();
+  if (!target) return;
+  const s = getState();
   if (s.selection) mask = combine(s.selection, mask, 'intersect');
   const bounds = maskBounds(mask);
   if (!bounds) return;
@@ -543,6 +548,234 @@ export function fillAt(sub: SubTool, p: PointerInfo): void {
     engine.invalidate(patch.rect);
     actions.commitPixels(sub.name, [patch]);
     if (!transparent && !actions.editingMask(s)) actions.addColorToHistory(drawingColor(s.colors));
+  }
+}
+
+export function fillAt(sub: SubTool, p: PointerInfo): void {
+  if (!rasterTarget() || !sub.fill) return;
+  const mask = regionMask(sub, p, p.shift);
+  if (mask) paintMask(sub, mask);
+}
+
+/** A mask drawn over the canvas in the drawing colour (preview of a fill before it is applied). */
+function maskPreview(mask: Mask, color: string): HTMLCanvasElement {
+  const c = createCanvas(mask.width, mask.height);
+  const rgb = hexToRgb(color) ?? { r: 0, g: 0, b: 0 };
+  const img = new ImageData(mask.width, mask.height);
+  for (let i = 0, q = 0; i < mask.data.length; i++, q += 4) {
+    if (!mask.data[i]) continue;
+    img.data[q] = rgb.r;
+    img.data[q + 1] = rgb.g;
+    img.data[q + 2] = rgb.b;
+    img.data[q + 3] = Math.round(mask.data[i] * 0.85);
+  }
+  ctx2d(c).putImageData(img, 0, 0);
+  return c;
+}
+
+function drawPreview(ctx: CanvasRenderingContext2D, view: OverlayView, preview: HTMLCanvasElement | null): void {
+  if (!preview) return;
+  ctx.save();
+  const [a, b, c, d, e, f] = view.matrix;
+  ctx.setTransform(ctx.getTransform().multiply(new DOMMatrix([a, b, c, d, e, f])));
+  ctx.imageSmoothingEnabled = false;
+  ctx.drawImage(preview, 0, 0);
+  ctx.restore();
+}
+
+/**
+ * Fill tool, click mode: clicking fills an area; dragging fills every area the pointer passes
+ * over (one undo step), like the reference.
+ */
+export class FillSession implements ToolSession {
+  private mask: Mask | null = null;
+  private pixels: ImageData;
+  private preview: HTMLCanvasElement | null = null;
+  readonly cursor = 'crosshair';
+
+  static create(sub: SubTool, p: PointerInfo): FillSession | null {
+    if (!rasterTarget() || !sub.fill) return null;
+    return new FillSession(sub, p);
+  }
+
+  private constructor(
+    private sub: SubTool,
+    private start: PointerInfo,
+  ) {
+    this.pixels = fillReference(sub, start.shift);
+    this.add(start);
+  }
+
+  private add(p: PointerInfo): void {
+    const { width, height } = getState().doc;
+    const x = Math.floor(p.x);
+    const y = Math.floor(p.y);
+    if (x < 0 || y < 0 || x >= width || y >= height) return;
+    if (this.mask?.data[y * width + x]) return;
+    const region = regionMask(this.sub, p, this.start.shift, this.pixels);
+    if (!region) return;
+    this.mask = this.mask ? combine(this.mask, region, 'add') : region;
+    this.preview = maskPreview(this.mask, drawingColor(getState().colors));
+  }
+
+  move(p: PointerInfo, coalesced: PointerInfo[]): void {
+    for (const q of coalesced.length ? coalesced : [p]) this.add(q);
+  }
+
+  up(p: PointerInfo): void {
+    this.add(p);
+    if (this.mask) paintMask(this.sub, this.mask);
+  }
+
+  cancel(): void {}
+
+  overlay(ctx: CanvasRenderingContext2D, view: OverlayView): void {
+    drawPreview(ctx, view, this.preview);
+  }
+}
+
+/**
+ * Enclose and fill (fills the closed areas inside the lasso) and Lasso fill (fills the lasso
+ * itself): drag around the area.
+ */
+export class LassoFillSession implements ToolSession {
+  private points: Pt[] = [];
+  readonly cursor = 'crosshair';
+
+  static create(sub: SubTool, p: PointerInfo): LassoFillSession | null {
+    if (!rasterTarget() || !sub.fill) return null;
+    return new LassoFillSession(sub, p);
+  }
+
+  private constructor(
+    private sub: SubTool,
+    private start: PointerInfo,
+  ) {
+    this.points.push({ x: start.x, y: start.y });
+  }
+
+  move(p: PointerInfo, coalesced: PointerInfo[]): void {
+    for (const q of coalesced.length ? coalesced : [p]) this.points.push({ x: q.x, y: q.y });
+  }
+
+  up(p: PointerInfo): void {
+    this.move(p, []);
+    if (this.points.length < 3) return;
+    const { doc } = getState();
+    const lasso = polygonMask(doc.width, doc.height, this.points);
+    const f = this.sub.fill!;
+    if (f.mode === 'lasso') {
+      paintMask(this.sub, lasso);
+      return;
+    }
+    const pixels = fillReference(this.sub, this.start.shift);
+    let mask = enclosedFillMask(pixels.data, doc.width, doc.height, lasso, {
+      target: f.target ?? 'transparent',
+      tolerance: f.tolerance,
+      closeGap: CLOSE_GAP_STEPS[Math.max(0, Math.min(5, Math.round(f.closeGap ?? 0)))],
+    });
+    if (f.expand) mask = scaleArea(mask, f.expand, f.scaling ?? 'round', pixels.data);
+    paintMask(this.sub, mask);
+  }
+
+  cancel(): void {}
+
+  overlay(ctx: CanvasRenderingContext2D, view: OverlayView): void {
+    ctx.save();
+    strokeOverlayColor(ctx);
+    ctx.beginPath();
+    this.points.forEach((q, i) => {
+      const s = applyMatrix(view.matrix, q.x, q.y);
+      if (i === 0) ctx.moveTo(s.x, s.y);
+      else ctx.lineTo(s.x, s.y);
+    });
+    ctx.stroke();
+    ctx.restore();
+  }
+}
+
+/** Leftover pen: brush over small unfilled spots; closed areas inside the brushed path get filled. */
+export class LeftoverSession implements ToolSession {
+  private area: Mask;
+  private paintCanvas: HTMLCanvasElement;
+  private last: Pt;
+  readonly cursor = 'crosshair';
+
+  static create(sub: SubTool, p: PointerInfo): LeftoverSession | null {
+    if (!rasterTarget() || !sub.fill) return null;
+    return new LeftoverSession(sub, p);
+  }
+
+  private constructor(
+    private sub: SubTool,
+    private start: PointerInfo,
+  ) {
+    const { doc } = getState();
+    this.area = createMask(doc.width, doc.height);
+    this.paintCanvas = createCanvas(doc.width, doc.height);
+    this.last = { x: start.x, y: start.y };
+    this.dab(this.last, this.last);
+  }
+
+  private get radius(): number {
+    return Math.max(1, (this.sub.fill!.size ?? 30) / 2);
+  }
+
+  /** Marks the brushed path (a thick line from a to b) in the area and on the preview. */
+  private dab(a: Pt, b: Pt): void {
+    const ctx = ctx2d(this.paintCanvas);
+    ctx.strokeStyle = 'rgba(80, 220, 90, 0.55)';
+    ctx.lineCap = 'round';
+    ctx.lineWidth = this.radius * 2;
+    ctx.beginPath();
+    ctx.moveTo(a.x, a.y);
+    ctx.lineTo(b.x + (a.x === b.x && a.y === b.y ? 0.01 : 0), b.y);
+    ctx.stroke();
+    const { width, height } = this.area;
+    const r = this.radius;
+    const x0 = Math.max(0, Math.floor(Math.min(a.x, b.x) - r));
+    const x1 = Math.min(width - 1, Math.ceil(Math.max(a.x, b.x) + r));
+    const y0 = Math.max(0, Math.floor(Math.min(a.y, b.y) - r));
+    const y1 = Math.min(height - 1, Math.ceil(Math.max(a.y, b.y) + r));
+    const dx = b.x - a.x;
+    const dy = b.y - a.y;
+    const len2 = dx * dx + dy * dy;
+    for (let y = y0; y <= y1; y++) {
+      for (let x = x0; x <= x1; x++) {
+        const px = x + 0.5;
+        const py = y + 0.5;
+        const t = len2 > 0 ? Math.max(0, Math.min(1, ((px - a.x) * dx + (py - a.y) * dy) / len2)) : 0;
+        if ((px - a.x - t * dx) ** 2 + (py - a.y - t * dy) ** 2 <= r * r) this.area.data[y * width + x] = 255;
+      }
+    }
+  }
+
+  move(p: PointerInfo, coalesced: PointerInfo[]): void {
+    for (const q of coalesced.length ? coalesced : [p]) {
+      const next = { x: q.x, y: q.y };
+      this.dab(this.last, next);
+      this.last = next;
+    }
+  }
+
+  up(p: PointerInfo): void {
+    this.move(p, []);
+    const { doc } = getState();
+    const f = this.sub.fill!;
+    const pixels = fillReference(this.sub, this.start.shift);
+    let mask = enclosedFillMask(pixels.data, doc.width, doc.height, this.area, {
+      target: f.target ?? 'transparent',
+      tolerance: f.tolerance,
+      closeGap: CLOSE_GAP_STEPS[Math.max(0, Math.min(5, Math.round(f.closeGap ?? 0)))],
+    });
+    if (f.expand) mask = scaleArea(mask, f.expand, f.scaling ?? 'round', pixels.data);
+    paintMask(this.sub, mask);
+  }
+
+  cancel(): void {}
+
+  overlay(ctx: CanvasRenderingContext2D, view: OverlayView): void {
+    drawPreview(ctx, view, this.paintCanvas);
   }
 }
 

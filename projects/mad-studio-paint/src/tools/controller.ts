@@ -15,9 +15,11 @@ import {
   BrushSizeSession,
   EyedropperSession,
   FigureSession,
-  fillAt,
+  FillSession,
   GradientSession,
   HandSession,
+  LassoFillSession,
+  LeftoverSession,
   MoveSession,
   pickLayerAt,
   PolylineSelect,
@@ -166,8 +168,9 @@ class Controller {
       case 'figure':
         return FigureSession.create(sub, p);
       case 'fill':
-        fillAt(sub, p);
-        return null;
+        if (sub.fill?.mode === 'enclose' || sub.fill?.mode === 'lasso') return LassoFillSession.create(sub, p);
+        if (sub.fill?.mode === 'leftover') return LeftoverSession.create(sub, p);
+        return FillSession.create(sub, p);
       case 'gradient':
         return GradientSession.create(sub, p);
       case 'select':
