@@ -1271,6 +1271,24 @@ void testAudioClips()
     s.near (rms (l, 0, 48000), 0.0, 1.0e-6, "a variant that is not loaded is silent");
 }
 
+/** The limiter clips to its ceiling in the 2x oversampled domain; the decimation filter can ring above
+    it by at most the L1 norm of its taps. The protocol stress test bounds the master by that. */
+void testLimiterBound()
+{
+    auto& s = *suite;
+    // juce::dsp::Oversampling, filterHalfBandFIREquiripple, max quality, first 2x stage (down filter).
+    auto coeffs = juce::dsp::FilterDesign<float>::designFIRLowpassHalfBandEquirippleMethod (0.06f, -75.0f);
+    double l1 = 0.0, sum = 0.0;
+    for (int i = 0; i < coeffs->coefficients.size(); ++i)
+    {
+        l1 += std::abs ((double) coeffs->coefficients[i]);
+        sum += (double) coeffs->coefficients[i];
+    }
+    s.near (sum, 1.0, 1.0e-3, "decimation filter: unity gain at DC");
+    const double worst = std::pow (10.0, -0.5 / 20.0) * l1;
+    s.check (worst < 1.7, str ("limiter at -0.5 dBFS stays below the stress test's bound 1.7 (worst case %g)", worst));
+}
+
 void testCompensationDelay()
 {
     auto& s = *suite;
@@ -1399,6 +1417,7 @@ bool runSelfTests()
     s.run ("plugin delay compensation along mixer sends", testRoutedLatencyPlan);
     s.run ("mixer routing: sends, order, sidechain", testMixerRouting);
     s.run ("audio clips: gain, fades, variant samples", testAudioClips);
+    s.run ("limiter overshoot bound (oversampled clipper)", testLimiterBound);
     s.run ("compensation delay line", testCompensationDelay);
     s.run ("compensated automation across a loop wrap", testLoopedCompensation);
     collectSampleGarbage();

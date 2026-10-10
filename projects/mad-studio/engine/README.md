@@ -201,7 +201,9 @@ a window that cuts the bass's first note: Chromium's FIR oversampler in the mast
 
 `probe-compressor.mjs` and `probe-limiter.mjs` in the same folder measure single Chromium nodes. The
 limiter (like the browser's) overshoots its ceiling on heavily clipped material because the 2x
-oversampler's downsampling filter rings: +0.78 dB in Chromium, +0.86 dB natively for loud noise.
+oversampler's downsampling filter rings: +0.78 dB in Chromium, +0.86 dB natively for loud noise. The
+guaranteed bound is the ceiling times the L1 norm of the decimation filter (1.78 for JUCE's half-band
+equiripple FIR), which the self-test checks and the protocol stress test uses.
 
 ## Architecture
 

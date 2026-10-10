@@ -1250,8 +1250,10 @@ async function testStress(engine, plugins) {
   };
 
   // The limiter clips to -0.5 dBFS in its 2x oversampled domain; like Chromium's WaveShaper, the
-  // downsampling filter rings above that on heavily clipped material, so allow +1 dBFS.
-  const limiterBound = 1.12;
+  // downsampling filter rings above that on heavily clipped material. Loud noise overshoots by about
+  // +0.9 dB, but the guaranteed bound is the ceiling times the L1 norm of the decimation filter
+  // (1.78, checked in the self-test): 0.944 * 1.78 = 1.68. Anything above means the limiter was bypassed.
+  const limiterBound = 1.7;
 
   const s0 = engine.messages.length;
   engine.send({ type: 'project.sync', project });
