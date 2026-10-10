@@ -20,7 +20,26 @@ import {
 } from '../model/animation';
 import { createFolder, createRasterLayer, findLayer, flatten, locate } from '../model/layers';
 import type { AudioLayer, Id, Layer, PaintDocument } from '../model/types';
-import { assignAt, celAt, DEFAULT_TIMELINE, emptyTrack, endOf, entryAt, MAX_FRAMES, nextCelName, nextTrackName, removeAt, startOf, type OnionSkin, type Timeline } from '../paint/animation';
+import {
+  assignAt,
+  assignMultiple,
+  celAt,
+  DEFAULT_TIMELINE,
+  emptyTrack,
+  endOf,
+  entryAt,
+  MAX_FRAMES,
+  moveAssignments,
+  nextCelName,
+  nextTrackName,
+  pasteAssignments,
+  removeAt,
+  startOf,
+  type CelAssignment,
+  type MultipleAssignment,
+  type OnionSkin,
+  type Timeline,
+} from '../paint/animation';
 import { addTimeline, changeFrameRate, deleteTimeline, moveTimeline, nextTimelineName, switchTimeline, timelineIndex, timelineList } from '../model/timelines';
 import {
   clipIndexAt,
@@ -67,7 +86,7 @@ import {
 import { ensureSurface } from '../engine/surfaces';
 import { startSound, stopSound } from '../engine/sounds';
 import * as actions from './actions';
-import { getState, setState, type ClipRef, type CurveRef, type KeyRef, type PaintState } from './store';
+import { getState, setState, type CelRef, type ClipRef, type CurveRef, type KeyRef, type PaintState } from './store';
 
 /** A track's content: clips, cel assignments, keyframes (placements, or volumes on audio tracks). */
 type Content = TrackContent<Timed>;
@@ -176,6 +195,9 @@ export function setTimeline(patch: Partial<Timeline>, label = 'Timeline settings
       const end = Math.max(start, Math.min(t.frames, Math.round(t.end ?? t.frames)));
       delete t.start;
       delete t.end;
+      // Defaults are left out: frame numbers from 1, no division lines.
+      if (!t.display || t.display === 'frame1') delete t.display;
+      if (!t.division) delete t.division;
       doc.timeline = { ...t, ...(start > 1 ? { start } : {}), ...(end < t.frames ? { end } : {}) };
     },
     key ? { key } : {},
@@ -187,7 +209,7 @@ export function setTimeline(patch: Partial<Timeline>, label = 'Timeline settings
 // ------------------------------------------------------------------ several timelines
 
 /** Clears what is selected on the tracks (another timeline shows other contents). */
-const clearTrackSelections = () => setState({ clipSelection: [], keySelection: [], graphSelection: [] });
+const clearTrackSelections = () => setState({ clipSelection: [], keySelection: [], celSelection: [], graphSelection: [] });
 
 /** Timeline palette (timeline list) / Manage timeline: edits another timeline. */
 export function switchToTimeline(index: number): void {
@@ -200,9 +222,16 @@ export function switchToTimeline(index: number): void {
 }
 
 /** Animation > Timeline > New timeline: the canvas's first one, or another one (empty) after the edited one. */
-export function newTimeline(settings: Pick<Timeline, 'fps' | 'frames'> & { name?: string }): void {
+export function newTimeline(settings: Pick<Timeline, 'fps' | 'frames' | 'display' | 'division'> & { name?: string }): void {
   const s = getState();
-  const timeline: Timeline = { enabled: true, fps: settings.fps, frames: settings.frames, name: settings.name || nextTimelineName(s.doc) };
+  const timeline: Timeline = {
+    enabled: true,
+    fps: settings.fps,
+    frames: settings.frames,
+    name: settings.name || nextTimelineName(s.doc),
+    ...(settings.display && settings.display !== 'frame1' ? { display: settings.display } : {}),
+    ...(settings.division ? { division: settings.division } : {}),
+  };
   actions.changeDoc('New timeline', (doc) => addTimeline(doc, timeline));
   clearTrackSelections();
   setState({ timelineShown: true });
@@ -407,6 +436,28 @@ export function assignCel(folderId: Id, frame: number, celId: Id | null): void {
   selectTrackFrame(folderId, frame);
 }
 
+/**
+ * Animation > Edit track > Assign multiple cels: the cels one after another from `from` on (see
+ * assignMultiple); the assigned frames lie in clips.
+ */
+export function assignMultipleCels(folderId: Id, from: number, o: MultipleAssignment): void {
+  const s = getState();
+  const folder = findLayer(s.doc.layers, folderId);
+  if (!isAnimationFolder(folder) || !s.doc.timeline) return;
+  if (!o.cels.length) {
+    setState({ hint: 'No cels to assign' });
+    return;
+  }
+  actions.changeDoc('Assign multiple cels', (doc) => {
+    const f = findLayer(doc.layers, folderId);
+    if (!isAnimationFolder(f) || !doc.timeline) return;
+    const next = assignMultiple(f.animation, from, doc.timeline.frames, o);
+    for (const a of next.cels) if (a.cel !== null && a.frame >= from && !f.animation.cels.some((b) => b.frame === a.frame && b.cel === a.cel)) withClipAt(f, a.frame, doc.timeline.frames);
+    f.animation = next;
+  });
+  selectTrackFrame(folderId, from);
+}
+
 /** Animation > Edit track > Delete: removes the assignment at the frame; the cel before shows on. */
 export function removeAssignedCel(folderId?: Id, frame = getState().frame): void {
   const folder = folderId ? findLayer(getState().doc.layers, folderId) : activeTrack();
@@ -439,8 +490,8 @@ export function selectNeighbourCel(dir: -1 | 1): void {
 export function selectClip(track: Id, start: number, add = false): void {
   const s = getState();
   const has = s.clipSelection.some((c) => c.track === track && c.start === start);
-  if (!add) setState({ clipSelection: [{ track, start }] });
-  else setState({ clipSelection: has ? s.clipSelection.filter((c) => !(c.track === track && c.start === start)) : [...s.clipSelection, { track, start }] });
+  if (!add) setState({ clipSelection: [{ track, start }], celSelection: [] });
+  else setState({ clipSelection: has ? s.clipSelection.filter((c) => !(c.track === track && c.start === start)) : [...s.clipSelection, { track, start }], celSelection: [] });
 }
 
 export const clearClipSelection = () => {
@@ -569,18 +620,20 @@ let clipboard: { track: Id; copy: ClipCopy<Timed>; names: Map<Id, string>; sound
 export const hasCopiedClip = () => clipboard !== null;
 
 /** Copy (clip): the selected clip, or the one at the current frame. */
-export function copySelectedClip(): void {
+export function copySelectedClip(): boolean {
   const s = getState();
   const c = commandClip(s);
   const copy = c ? copyClipContent(contentOf(c.track, s.doc.timeline?.frames ?? 1), c.index) : null;
   if (!c || !copy) {
     setState({ hint: NO_CLIP });
-    return;
+    return false;
   }
   const names = new Map<Id, string>();
   if (c.track.layer.kind === 'folder') for (const cel of c.track.layer.children) names.set(cel.id, cel.name);
   clipboard = { track: c.track.id, copy, names, sound: c.track.sound };
+  lastCopied = 'clip';
   setState({ hint: 'Clip copied: select a frame and use Paste clip' });
+  return true;
 }
 
 /**
@@ -913,7 +966,7 @@ export function selectKeyframe(track: Id, frame: number, add = false, group?: Ch
   const same = (k: KeyRef) => k.track === track && k.frame === frame && k.group === group;
   const ref: KeyRef = { track, frame, ...(group ? { group } : {}) };
   const keySelection = !add ? [ref] : s.keySelection.some(same) ? s.keySelection.filter((k) => !same(k)) : [...s.keySelection, ref];
-  setState({ keySelection, clipSelection: [] });
+  setState({ keySelection, clipSelection: [], celSelection: [] });
   const owner = maskOwner(track);
   if (owner) selectMaskFrame(owner, frame);
   else selectTrackFrame(track, frame);
@@ -925,7 +978,7 @@ export function selectKeyframes(refs: KeyRef[], mode: 'set' | 'add' | 'remove' =
   const id = (k: KeyRef) => `${k.track}|${k.frame}|${k.group ?? ''}`;
   const these = new Set(refs.map(id));
   const rest = s.keySelection.filter((k) => !these.has(id(k)));
-  setState({ keySelection: mode === 'set' ? refs : mode === 'add' ? [...rest, ...refs] : rest, clipSelection: [] });
+  setState({ keySelection: mode === 'set' ? refs : mode === 'add' ? [...rest, ...refs] : rest, clipSelection: [], celSelection: [] });
 }
 
 export const clearKeySelection = () => {
@@ -1134,4 +1187,232 @@ export const toggleOnionSkin = () => setState((s) => ({ onionSkin: !s.onionSkin 
 
 export function setOnion(patch: Partial<OnionSkin>): void {
   setState((s) => ({ onion: { ...s.onion, ...patch } }));
+}
+
+// ------------------------------------------------------------------ assigned cels, the timeline clipboard
+
+/** Selects an assigned cel in the Timeline palette (`add`: Ctrl/⌘ or Shift, adds it or takes it out). */
+export function selectAssignedCel(track: Id, frame: number, add = false): void {
+  const s = getState();
+  const same = (c: CelRef) => c.track === track && c.frame === frame;
+  const celSelection = !add ? [{ track, frame }] : s.celSelection.some(same) ? s.celSelection.filter((c) => !same(c)) : [...s.celSelection, { track, frame }];
+  setState({ celSelection, clipSelection: [], keySelection: [] });
+  selectTrackFrame(track, frame);
+}
+
+export const clearCelSelection = () => {
+  if (getState().celSelection.length) setState({ celSelection: [] });
+};
+
+/** The selected assigned cels by animation folder (frames that still have an assignment). */
+function selectedCels(s: PaintState): { folder: AnimationFolder; frames: number[] }[] {
+  const byTrack = new Map<Id, number[]>();
+  for (const c of s.celSelection) byTrack.set(c.track, [...(byTrack.get(c.track) ?? []), c.frame]);
+  const out: { folder: AnimationFolder; frames: number[] }[] = [];
+  for (const [id, frames] of byTrack) {
+    const f = findLayer(s.doc.layers, id);
+    if (!isAnimationFolder(f)) continue;
+    const kept = frames.filter((fr) => entryAt(f.animation, fr));
+    if (kept.length) out.push({ folder: f, frames: kept });
+  }
+  return out;
+}
+
+/** Dragging assigned cels: the move nearest to `delta` that keeps every one inside the timeline. */
+export function celMoveDelta(delta: number, s: PaintState = getState()): number {
+  const frames = selectedCels(s).flatMap((x) => x.frames);
+  const last = s.doc.timeline?.frames ?? 1;
+  if (!frames.length) return 0;
+  return Math.max(1 - Math.min(...frames), Math.min(last - Math.max(...frames), delta));
+}
+
+/** Drags the selected assigned cels by `delta` frames (Alt: duplicates them), within their tracks. */
+export function moveSelectedCels(delta: number, copy = false): void {
+  const s = getState();
+  const d = celMoveDelta(delta, s);
+  const sel = selectedCels(s);
+  if (!d || !sel.length) return;
+  actions.changeDoc(copy ? 'Duplicate assigned cel' : 'Move assigned cel', (doc) => {
+    for (const { folder, frames } of sel) {
+      const f = findLayer(doc.layers, folder.id);
+      if (!isAnimationFolder(f) || !doc.timeline) continue;
+      f.animation = moveAssignments(f.animation, frames, d, copy);
+      for (const fr of frames) withClipAt(f, fr + d, doc.timeline.frames);
+    }
+  });
+  setState({ celSelection: s.celSelection.map((c) => ({ ...c, frame: c.frame + d })) });
+}
+
+/** An animation folder's assignments as they would be after dragging the selected cels (preview). */
+export function movedCels(id: Id, delta: number, copy: boolean, s: PaintState = getState()): CelAssignment[] | null {
+  const x = selectedCels(s).find((c) => c.folder.id === id);
+  const d = celMoveDelta(delta, s);
+  return x && d ? moveAssignments(x.folder.animation, x.frames, d, copy).cels : null;
+}
+
+/** Delete: the selected assigned cels (the cels before them show on). */
+export function deleteSelectedCels(): void {
+  const s = getState();
+  const sel = selectedCels(s);
+  if (!sel.length) return;
+  actions.changeDoc('Delete assigned cel', (doc) => {
+    for (const { folder, frames } of sel) {
+      const f = findLayer(doc.layers, folder.id);
+      if (isAnimationFolder(f)) for (const fr of frames) f.animation = removeAt(f.animation, fr);
+    }
+  });
+  setState({ celSelection: [] });
+}
+
+/** What Copy put on the timeline clipboard last: a clip (see copySelectedClip), assigned cels or keyframes. */
+let lastCopied: 'clip' | 'cels' | 'keys' | null = null;
+let celClipboard: { track: Id; items: { offset: number; cel: Id | null; name: string | null }[] } | null = null;
+let keyClipboard: { track: Id; items: { offset: number; key: Keyframe }[] }[] | null = null;
+
+/** Copy (assigned cels): the selected ones of the first track with a selection. */
+export function copySelectedCels(): boolean {
+  const sel = selectedCels(getState())[0];
+  if (!sel) return false;
+  const first = Math.min(...sel.frames);
+  const name = (id: Id | null) => (id === null ? null : (sel.folder.children.find((c) => c.id === id)?.name ?? null));
+  const items = [...sel.frames].sort((a, b) => a - b).map((fr) => {
+    const cel = entryAt(sel.folder.animation, fr)?.cel ?? null;
+    return { offset: fr - first, cel, name: name(cel) };
+  });
+  celClipboard = { track: sel.folder.id, items };
+  lastCopied = 'cels';
+  return true;
+}
+
+/**
+ * Paste (assigned cels) at the current frame of the current animation folder. In another folder
+ * its cels of the same names are assigned; missing ones are made (empty), like pasting a clip.
+ */
+export function pasteCels(): void {
+  const s = getState();
+  const folder = activeTrack(s);
+  const cb = celClipboard;
+  if (!cb || !folder || !s.doc.timeline) {
+    setState({ hint: cb ? 'Select a frame of an animation folder to paste the assigned cels' : 'Copy assigned cels first' });
+    return;
+  }
+  const frame = s.frame;
+  actions.changeDoc('Paste assigned cel', (doc) => {
+    const f = findLayer(doc.layers, folder.id);
+    if (!isAnimationFolder(f) || !doc.timeline) return;
+    let items = cb.items;
+    if (cb.track !== f.id) {
+      const byName = new Map(f.children.map((c) => [c.name, c.id]));
+      items = cb.items.map((it) => {
+        if (it.cel === null) return it;
+        const name = it.name ?? nextCelName(f.children.map((c) => c.name));
+        let id = byName.get(name);
+        if (!id) {
+          const cel = createRasterLayer(name);
+          f.children.unshift(cel);
+          ensureSurface(cel.id, doc.width, doc.height);
+          byName.set(name, cel.id);
+          id = cel.id;
+        }
+        return { ...it, cel: id };
+      });
+    }
+    const last = frame + Math.max(...items.map((i) => i.offset));
+    if (last > doc.timeline.frames) doc.timeline = { ...doc.timeline, frames: Math.min(MAX_FRAMES, last) };
+    f.animation = pasteAssignments(f.animation, items, frame);
+    for (const it of items) if (it.cel !== null) withClipAt(f, frame + it.offset, doc.timeline.frames);
+  });
+  setState({ celSelection: cb.items.map((it) => ({ track: folder.id, frame: frame + it.offset })), clipSelection: [], keySelection: [] });
+}
+
+/** Copy (keyframes): the selected keyframes (on a property row: that property's part), relative to the first. */
+export function copySelectedKeys(): boolean {
+  const s = getState();
+  const targets = keyTargets(s);
+  if (!targets.length) return false;
+  const first = Math.min(...targets.flatMap((t) => t.frames));
+  const byTrack = new Map<Id, { offset: number; key: Keyframe }[]>();
+  for (const t of targets) {
+    const list = keysOfTrack(s.doc, t.track)?.list ?? [];
+    for (const k of list) {
+      if (!t.frames.includes(k.frame)) continue;
+      const values = t.channels ? Object.fromEntries(t.channels.filter((c) => k.values[c] !== undefined).map((c) => [c, k.values[c]!])) : k.values;
+      if (!Object.keys(values).length) continue;
+      byTrack.set(t.track, [...(byTrack.get(t.track) ?? []), { offset: k.frame - first, key: { ...k, values } }]);
+    }
+  }
+  if (!byTrack.size) return false;
+  keyClipboard = [...byTrack].map(([track, items]) => ({ track, items }));
+  lastCopied = 'keys';
+  return true;
+}
+
+/**
+ * Paste (keyframes) at the current frame: keyframes copied from one track go to the current track
+ * with keyframes on (else back to their own); from several tracks, each to its own. They need a
+ * clip where they land.
+ */
+export function pasteKeys(): void {
+  const s = getState();
+  const cb = keyClipboard;
+  if (!cb || !s.doc.timeline) {
+    setState({ hint: 'Copy keyframes first' });
+    return;
+  }
+  const current = keyTrackId(s);
+  const frame = s.frame;
+  const pasted: KeyRef[] = [];
+  actions.changeDoc('Paste keyframe', (doc) => {
+    for (const part of cb) {
+      const track = cb.length === 1 && current ? current : part.track;
+      const k = keysOfTrack(doc, track);
+      if (!k || !doc.timeline) continue;
+      let list = k.list;
+      for (const { offset, key } of part.items) {
+        const f = frame + offset;
+        list = recordKey(list, f, key.values, key.interp);
+        pasted.push({ track, frame: f });
+        const l = findLayer(doc.layers, track);
+        if (l?.clips && l.kind !== 'audio') setTrackContent(l, ensureClipAt(trackContent(l, doc.timeline.frames), f, doc.timeline.frames, true));
+      }
+      k.set(list);
+    }
+  });
+  setState({ keySelection: pasted, clipSelection: [], celSelection: [] });
+}
+
+/** Animation > Edit track > Copy: the selected keyframes, assigned cels or clip. */
+export function timelineCopy(): void {
+  const s = getState();
+  if (s.keySelection.length ? copySelectedKeys() : s.celSelection.length ? copySelectedCels() : false) return;
+  copySelectedClip();
+}
+
+/** Animation > Edit track > Cut: copies the selection, then deletes it. */
+export function timelineCut(): void {
+  const s = getState();
+  if (s.keySelection.length) {
+    if (copySelectedKeys()) deleteKeyframes();
+  } else if (s.celSelection.length) {
+    if (copySelectedCels()) deleteSelectedCels();
+  } else if (copySelectedClip()) deleteSelectedClips();
+}
+
+/** Animation > Edit track > Paste: what was copied last, at the current frame. */
+export function timelinePaste(): void {
+  if (lastCopied === 'keys') pasteKeys();
+  else if (lastCopied === 'cels') pasteCels();
+  else pasteCopiedClip();
+}
+
+/** Whether there is something to paste in the timeline. */
+export const hasTimelineCopy = () => lastCopied !== null;
+
+/** Animation > Edit track > Delete: the selected keyframes, assigned cels or clips (else the cel assigned at the current frame). */
+export function timelineDelete(): void {
+  const s = getState();
+  if (s.keySelection.length) deleteKeyframes();
+  else if (s.celSelection.length) deleteSelectedCels();
+  else if (s.clipSelection.length) deleteSelectedClips();
+  else removeAssignedCel();
 }

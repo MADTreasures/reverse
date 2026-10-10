@@ -117,6 +117,8 @@ export interface PaintState {
   clipSelection: ClipRef[];
   /** Keyframes selected in the Timeline palette: their track and frame. */
   keySelection: KeyRef[];
+  /** Assigned cels selected in the Timeline palette: their animation folder and frame. */
+  celSelection: CelRef[];
   /** Keyframe interpolation for new keyframes (Timeline palette). */
   keyInterp: Interp;
   /** Edit layers with active keyframes: the current track is drawn as it is and can be drawn on. */
@@ -177,6 +179,11 @@ export interface ClipRef {
   start: number;
 }
 
+export interface CelRef {
+  track: Id;
+  frame: number;
+}
+
 export const initialView: ViewState = { zoom: 1, rotation: 0, flipH: false, flipV: false, panX: 0, panY: 0 };
 
 function initialState(): PaintState {
@@ -223,6 +230,7 @@ function initialState(): PaintState {
     timelineShown: false,
     timelineHeight: 190,
     clipSelection: [],
+    celSelection: [],
     keySelection: [],
     keyInterp: 'linear',
     editKeyed: false,

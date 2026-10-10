@@ -2291,6 +2291,100 @@ test('animation exports: animated WebP, APNG sticker options, image sequence typ
   expect(errors).toEqual([]);
 });
 
+test('timeline: frame display and division lines, Assign multiple cels, dragging and copying assigned cels and keyframes', async ({ page }) => {
+  const errors = await boot(page);
+  await page.evaluate(() => void window.__madPaint.runCommand('new'));
+  const dlg = page.getByRole('dialog', { name: 'New canvas' });
+  await dlg.getByLabel('Width').fill('400');
+  await dlg.getByLabel('Height').fill('300');
+  await dlg.getByText('Create animated illustration').click();
+  await dlg.getByLabel('Number of cels').fill('8');
+  await dlg.getByLabel('Frame rate').fill('8');
+  await dlg.getByRole('button', { name: 'OK' }).click();
+  // Cels 1, 2 and 3 (on frames 1, 2 and 3).
+  await page.getByRole('button', { name: 'New animation cel' }).first().click();
+  await page.getByRole('button', { name: 'New animation cel' }).first().click();
+  const cels = () =>
+    page.evaluate(() => {
+      const a = window.__madPaint.useStore.getState().doc.layers[0];
+      return a.animation.cels.map((x: any) => `${x.frame}:${x.cel ? a.children.find((c: any) => c.id === x.cel).name : '-'}`).join(' ');
+    });
+  expect(await cels()).toBe('1:1 2:2 3:3');
+  const ruler = page.getByTestId('timeline-ruler');
+  // Change settings: frames as seconds + frame, a division line every 4 frames.
+  await page.evaluate(() => window.__madPaint.runCommand('timelineSettings'));
+  const settings = page.getByRole('dialog', { name: 'Change timeline settings' });
+  await settings.getByLabel('Frame display').selectOption('secframe');
+  await settings.getByLabel('Division line').fill('4');
+  await settings.getByRole('button', { name: 'OK' }).click();
+  await ruler.locator('.tl-cell').nth(2).click();
+  await expect(page.getByTestId('timeline-frame')).toHaveText('0+3');
+  await expect(ruler.locator('.tl-cell').nth(3)).toHaveClass(/div/);
+  await expect(ruler.locator('.tl-cell').nth(0)).toHaveClass(/second/);
+  await page.evaluate(() => window.__madPaint.anim.setTimeline({ display: 'timecode' }));
+  await expect(page.getByTestId('timeline-frame')).toHaveText('00:00:02');
+  // Assign multiple cels from frame 1: cels 1 to 3, two frames each, repeated to the end.
+  await ruler.locator('.tl-cell').nth(0).click();
+  await page.evaluate(() => window.__madPaint.runCommand('assignMultiple'));
+  const am = page.getByRole('dialog', { name: 'Assign multiple cels' });
+  await expect(am.getByTestId('assign-multiple-cels')).toHaveText('1, 2, 3');
+  await am.getByLabel('Number of frames').fill('2');
+  await am.getByLabel('Repeat to end').check();
+  await am.getByRole('button', { name: 'OK' }).click();
+  expect(await cels()).toBe('1:1 3:2 5:3 7:1');
+  // Dragging the cel on frame 3 to frame 4; Alt-dragging the one on frame 5 to frame 6 duplicates it.
+  const cell = (f: number) => page.locator(`[data-testid=timeline-track][data-track="A"] .tl-cell[data-frame="${f}"]`);
+  const dragCell = async (from: number, to: number, alt = false) => {
+    const a = (await cell(from).boundingBox())!;
+    const b = (await cell(to).boundingBox())!;
+    if (alt) await page.keyboard.down('Alt');
+    await page.mouse.move(a.x + a.width / 2, a.y + a.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(b.x + b.width / 2, b.y + b.height / 2, { steps: 4 });
+    await page.mouse.up();
+    if (alt) await page.keyboard.up('Alt');
+  };
+  await dragCell(3, 4);
+  expect(await cels()).toBe('1:1 4:2 5:3 7:1');
+  await dragCell(5, 6, true);
+  expect(await cels()).toBe('1:1 4:2 5:3 6:3 7:1');
+  // Copy the cels on frames 1 and 4 (Ctrl/⌘-click) and paste them on frame 5.
+  await cell(1).click();
+  await cell(4).click({ modifiers: ['ControlOrMeta'] });
+  await expect(page.locator('[data-testid=timeline-track][data-track="A"] .tl-cell.picked')).toHaveCount(2);
+  await page.evaluate(() => window.__madPaint.runCommand('trackCopy'));
+  await ruler.locator('.tl-cell').nth(4).click();
+  await page.evaluate(() => window.__madPaint.runCommand('trackPaste'));
+  expect(await cels()).toBe('1:1 4:2 5:1 6:3 7:1 8:2');
+  // Delete: the selected (pasted) cels.
+  await page.evaluate(() => window.__madPaint.runCommand('trackDelete'));
+  expect(await cels()).toBe('1:1 4:2 6:3 7:1');
+  // Keyframes: copied from frame 1, pasted on frame 3.
+  await ruler.locator('.tl-cell').nth(0).click();
+  await page.getByRole('button', { name: 'Add keyframe' }).click();
+  const keyOf = () => page.evaluate(() => window.__madPaint.useStore.getState().doc.layers[0].keys.frames.map((k: any) => k.frame));
+  expect(await keyOf()).toEqual([1]);
+  await page.locator('[data-testid=timeline-track][data-track="A"] [data-testid=timeline-key][data-frame="1"]').click();
+  await page.evaluate(() => window.__madPaint.runCommand('trackCopy'));
+  await ruler.locator('.tl-cell').nth(2).click();
+  await page.evaluate(() => window.__madPaint.runCommand('trackPaste'));
+  expect(await keyOf()).toEqual([1, 3]);
+  // Cut moves one: frame 3 → frame 6.
+  await page.evaluate(() => window.__madPaint.runCommand('trackCut'));
+  await ruler.locator('.tl-cell').nth(5).click();
+  await page.evaluate(() => window.__madPaint.runCommand('trackPaste'));
+  expect(await keyOf()).toEqual([1, 6]);
+  // Saved with the document: display and division line.
+  const back = await page.evaluate(async () => {
+    const m = window.__madPaint;
+    await m.openFileBytes({ name: 'tl.madpaint', data: await m.buildDocumentBytes() });
+    const t = m.useStore.getState().doc.timeline;
+    return [t.display, t.division];
+  });
+  expect(back).toEqual(['timecode', 4]);
+  expect(errors).toEqual([]);
+});
+
 test('animation clips: trim, first and last displayed frame, merge, split, move, delete, copy and paste', async ({ page }) => {
   const errors = await boot(page);
   await page.evaluate(() => void window.__madPaint.runCommand('new'));
@@ -2965,7 +3059,7 @@ test('several timelines, start and end frame, change frame rate, manage timeline
   // Manage timeline: move Timeline 2 up, then delete it.
   await page.evaluate(() => window.__madPaint.runCommand('manageTimelines'));
   const mg = page.getByRole('dialog', { name: 'Manage timeline' });
-  const items = mg.getByRole('option');
+  const items = mg.getByRole('listbox', { name: 'Timelines' }).getByRole('option');
   await expect(items).toHaveCount(2);
   await items.nth(1).click();
   await mg.getByRole('button', { name: 'Move up' }).click();

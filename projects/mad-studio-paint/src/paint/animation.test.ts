@@ -1,20 +1,25 @@
 import { describe, expect, it } from 'vitest';
 import {
   assignAt,
+  assignMultiple,
   celAt,
   deleteFrames,
   emptyTrack,
+  frameLabel,
   insertFrames,
+  moveAssignments,
   nextCelName,
   nextTrackName,
   onionCels,
   onionOpacity,
+  pasteAssignments,
   pruneTrack,
   remapTrack,
   removeAt,
   sanitizeOnion,
   sanitizeTimeline,
   sanitizeTrack,
+  startsSecond,
   tintOnion,
   DEFAULT_ONION,
   type AnimationTrack,
@@ -111,5 +116,76 @@ describe('animation files', () => {
       ],
     });
     expect(sanitizeOnion({ before: 99, mode: 'mono', prevColor: 'red' })).toEqual({ ...DEFAULT_ONION, before: 10, mode: 'mono' });
+  });
+});
+
+describe('timeline frame display and Assign multiple cels', () => {
+  it('labels frames as numbers from 1 or 0, seconds + frame or a time code', () => {
+    expect([frameLabel(1, 24), frameLabel(1, 24, 'frame0'), frameLabel(25, 24, 'frame0')]).toEqual(['1', '0', '24']);
+    expect([frameLabel(1, 24, 'secframe'), frameLabel(24, 24, 'secframe'), frameLabel(25, 24, 'secframe')]).toEqual(['0+1', '0+24', '1+1']);
+    expect([frameLabel(1, 24, 'timecode'), frameLabel(26, 24, 'timecode'), frameLabel(24 * 61 + 3, 24, 'timecode')]).toEqual(['00:00:00', '00:01:01', '01:01:02']);
+    expect([startsSecond(1, 8), startsSecond(8, 8), startsSecond(9, 8)]).toEqual([true, false, true]);
+  });
+
+  it('assigns cels one after another, repeated, with gaps and skipped cels', () => {
+    const base = track([1, 'x']);
+    // Cels a, b, c for 2 frames each from frame 3: a 3–4, b 5–6, c 7–8; x shows before.
+    expect(assignMultiple(base, 3, 20, { cels: ['a', 'b', 'c'], frames: 2, repeats: 1, gap: 0, skip: 0 }).cels).toEqual([
+      { frame: 1, cel: 'x' },
+      { frame: 3, cel: 'a' },
+      { frame: 5, cel: 'b' },
+      { frame: 7, cel: 'c' },
+      // What showed after the stretch shows on.
+      { frame: 9, cel: 'x' },
+    ]);
+    // To the end of the timeline, skipping every other cel, one empty frame between.
+    expect(assignMultiple(emptyTrack(), 1, 7, { cels: ['1', '2', '3'], frames: 1, repeats: Infinity, gap: 1, skip: 1 }).cels).toEqual([
+      { frame: 1, cel: '1' },
+      { frame: 2, cel: null },
+      { frame: 3, cel: '3' },
+      { frame: 4, cel: null },
+      { frame: 5, cel: '1' },
+      { frame: 6, cel: null },
+      { frame: 7, cel: '3' },
+    ]);
+    // Assignments inside the stretch are replaced; later ones stay.
+    expect(assignMultiple(track([1, 'x'], [2, 'y'], [9, 'z']), 1, 10, { cels: ['a'], frames: 3, repeats: 2, gap: 0, skip: 0 }).cels).toEqual([
+      { frame: 1, cel: 'a' },
+      { frame: 4, cel: 'a' },
+      { frame: 7, cel: 'y' },
+      { frame: 9, cel: 'z' },
+    ]);
+    expect(assignMultiple(base, 3, 20, { cels: [], frames: 2, repeats: 1, gap: 0, skip: 0 })).toBe(base);
+  });
+
+  it('reads the display and division line safely', () => {
+    expect(sanitizeTimeline({ fps: 24, frames: 48, display: 'timecode', division: 6 })).toMatchObject({ display: 'timecode', division: 6 });
+    expect(sanitizeTimeline({ fps: 24, frames: 48, display: 'hours', division: -2 })).toEqual({ enabled: true, fps: 24, frames: 48 });
+  });
+});
+
+describe('moving, duplicating and pasting assigned cels', () => {
+  it('moves assignments, replacing what is where they land; Alt duplicates', () => {
+    const t = track([1, 'a'], [3, 'b'], [5, 'c']);
+    expect(moveAssignments(t, [3], 2).cels).toEqual([
+      { frame: 1, cel: 'a' },
+      { frame: 5, cel: 'b' },
+    ]);
+    expect(moveAssignments(t, [1, 3], 1, true).cels).toEqual([
+      { frame: 1, cel: 'a' },
+      { frame: 2, cel: 'a' },
+      { frame: 3, cel: 'b' },
+      { frame: 4, cel: 'b' },
+      { frame: 5, cel: 'c' },
+    ]);
+    expect(moveAssignments(t, [3], 0)).toBe(t);
+  });
+
+  it('pastes copied assignments at a frame', () => {
+    expect(pasteAssignments(track([1, 'a']), [{ offset: 0, cel: 'b' }, { offset: 2, cel: null }], 4).cels).toEqual([
+      { frame: 1, cel: 'a' },
+      { frame: 4, cel: 'b' },
+      { frame: 6, cel: null },
+    ]);
   });
 });

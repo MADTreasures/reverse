@@ -8,7 +8,7 @@ import { TonalDialog } from './dialogs/TonalDialog';
 import { PreferencesDialog } from './dialogs/PreferencesDialog';
 import { ExportDialog, ExportPreviewDialog, PsdExportDialog } from './dialogs/ExportDialog';
 import { ColorSettingsDialog } from './dialogs/ColorSettingsDialog';
-import { AnimationExportDialog, CameraFolderDialog, CenterCanvasDialog, FrameRateDialog, ManageTimelinesDialog, MovieExportDialog, NewTimelineDialog, OnionSkinDialog, TimelineSettingsDialog } from './dialogs/AnimationDialogs';
+import { AnimationExportDialog, AssignMultipleDialog, CameraFolderDialog, CenterCanvasDialog, FrameRateDialog, ManageTimelinesDialog, MovieExportDialog, NewTimelineDialog, OnionSkinDialog, TimelineSettingsDialog } from './dialogs/AnimationDialogs';
 import { AboutDialog, ShortcutsDialog } from './dialogs/InfoDialogs';
 import { NewCanvasDialog } from './dialogs/NewCanvasDialog';
 import { closeDialog, closeMenu, useOverlays, type MenuItem } from './overlays';
@@ -61,6 +61,7 @@ export function OverlayHost() {
           {dialog.kind === 'custom' && dialog.id === 'onionSkin' && <OnionSkinDialog />}
           {dialog.kind === 'custom' && dialog.id === 'cameraFolder' && <CameraFolderDialog />}
           {dialog.kind === 'custom' && dialog.id === 'centerCanvas' && <CenterCanvasDialog />}
+          {dialog.kind === 'custom' && dialog.id === 'assignMultiple' && <AssignMultipleDialog />}
           {dialog.kind === 'custom' && dialog.id === 'newTimeline' && <NewTimelineDialog />}
           {dialog.kind === 'custom' && dialog.id === 'frameRate' && <FrameRateDialog />}
           {dialog.kind === 'custom' && dialog.id === 'manageTimelines' && <ManageTimelinesDialog />}

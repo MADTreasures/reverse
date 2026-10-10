@@ -17,7 +17,7 @@ import { memo, useCallback, useMemo, useRef, useState, useSyncExternalStore } fr
 import { useShallow } from 'zustand/react/shallow';
 import { isAnimationFolder, isCameraFolder, keysOn, maskTrackId, timelineTracks, trackContent, type AnimationFolder, type TrackRow as Row } from '../../model/animation';
 import type { AudioLayer, Id, Layer } from '../../model/types';
-import { assignmentAt, endOf, entryAt, startOf } from '../../paint/animation';
+import { assignmentAt, endOf, entryAt, frameLabel, startOf, startsSecond } from '../../paint/animation';
 import { timelineIndex, timelineList, timelineName } from '../../model/timelines';
 import { clipIndexAt, type ClipEdge, type Timed, type TrackContent } from '../../paint/clips';
 import { curveInterp, GROUPS, groupInterp, PLACEMENT_CHANNELS, records, touches, TRANSFORM_GROUPS, type Channel, type ChannelGroup, type Interp, type Keyframe } from '../../paint/keyframes';
@@ -53,8 +53,9 @@ function clipItems(): MenuItem[] {
     { label: 'Split clip', onClick: anim.splitClipAtFrame },
     { label: 'Merge clips', onClick: anim.mergeSelectedClips },
     { separator: true },
-    { label: 'Copy clip', onClick: anim.copySelectedClip },
-    { label: 'Paste clip', disabled: !anim.hasCopiedClip(), onClick: anim.pasteCopiedClip },
+    { label: 'Cut', onClick: anim.timelineCut },
+    { label: 'Copy', onClick: anim.timelineCopy },
+    { label: 'Paste', disabled: !anim.hasTimelineCopy(), onClick: anim.timelinePaste },
     { label: selected ? 'Delete clips' : 'Delete clip', onClick: anim.deleteSelectedClips },
     { separator: true },
     { label: 'Add keyframe', onClick: anim.addKeyframe },
@@ -105,7 +106,8 @@ export function openAssignMenu(): void {
 type Drag =
   | { kind: 'move'; x0: number; delta: number }
   | { kind: 'edge'; track: Id; start: number; edge: ClipEdge; stretch: boolean; frame: number }
-  | { kind: 'keys'; x0: number; delta: number; copy: boolean };
+  | { kind: 'keys'; x0: number; delta: number; copy: boolean }
+  | { kind: 'cels'; x0: number; delta: number; copy: boolean };
 
 const ICONS: Record<Layer['kind'], string> = { raster: 'layer', vector: 'vector', text: 'text', gradient: 'gradient', fill: 'fill', correction: 'correction', folder: 'folder', audio: 'audio', movie: 'movie' };
 const trackIcon = (l: Layer) => (isAnimationFolder(l) ? 'animFolder' : l.kind === 'folder' && l.camera ? 'camera' : l.kind === 'folder' && l.frame ? 'frame' : ICONS[l.kind]);
@@ -130,6 +132,9 @@ interface RowProps {
   maskActive: boolean;
   onGrip: (e: React.PointerEvent<HTMLDivElement>, track: Id, start: number, lane: HTMLElement) => void;
   onKey: (e: React.PointerEvent<HTMLDivElement>, track: Id, frame: number, group?: ChannelGroup) => void;
+  /** Frames of this animation folder's selected assigned cels (as they show while dragged). */
+  selectedCels: string;
+  onCel: (e: React.PointerEvent<HTMLDivElement>, track: Id, frame: number) => void;
 }
 
 /** Selected keyframes of a row: whole keyframes, and "group:frame" of property rows. */
@@ -191,7 +196,7 @@ function detailRows(transformOpen: boolean): { group: ChannelGroup; indent: numb
   return [...(transformOpen ? TRANSFORM_GROUPS.map((group) => ({ group, indent: 2 })) : []), { group: 'opacity', indent: 1 }];
 }
 
-const TrackRow = memo(function TrackRow({ row, frames, active, selected, selectedKeys, preview, details, transformOpen, maskKeys, maskPreview, maskActive, onGrip, onKey }: RowProps) {
+const TrackRow = memo(function TrackRow({ row, frames, active, selected, selectedKeys, selectedCels, preview, details, transformOpen, maskKeys, maskPreview, maskActive, onGrip, onKey, onCel }: RowProps) {
   const track = row.layer;
   const content = preview ?? trackContent(track, frames);
   const keyed = keysOn(track);
@@ -200,6 +205,7 @@ const TrackRow = memo(function TrackRow({ row, frames, active, selected, selecte
   const open = keyed && details;
   const animation = isAnimationFolder(track) ? (content.cels ? { cels: content.cels } : track.animation) : null;
   const starts = new Set(selected ? selected.split(',').map(Number) : []);
+  const pickedCels = new Set(selectedCels ? selectedCels.split(',').map(Number) : []);
   const lane = useRef<HTMLDivElement>(null);
   const frameAt = (clientX: number) => Math.floor((clientX - (lane.current?.getBoundingClientRect().left ?? 0)) / CELL) + 1;
   const menu = (e: React.MouseEvent, f: number) => {
@@ -219,12 +225,17 @@ const TrackRow = memo(function TrackRow({ row, frames, active, selected, selecte
       cells.push(
         <div
           key={f}
-          className={`tl-cell ${kind}`}
+          className={`tl-cell ${kind} ${pickedCels.has(f) ? 'picked' : ''}`}
           data-frame={f}
-          title={cel ? `Frame ${f}: ${cel.name}` : `Frame ${f}`}
+          data-assigned={entry ? '' : undefined}
+          title={cel ? `Frame ${f}: ${cel.name} (drag to move, Alt: duplicate; Ctrl/⌘ or Shift: select several)` : `Frame ${f}`}
+          // An assigned cel is selected (and dragged) on pointer down.
+          onPointerDown={entry ? (e) => onCel(e, track.id, f) : undefined}
           onClick={() => {
+            if (entry) return;
             anim.clearClipSelection();
             anim.clearKeySelection();
+            anim.clearCelSelection();
             anim.selectTrackFrame(track.id, f);
           }}
           onDoubleClick={(e) => showMenu({ x: e.clientX, y: e.clientY }, trackMenu(track, f))}
@@ -463,8 +474,8 @@ export function TimelinePalette() {
   const timelineNames = useStore(useShallow((s) => timelineList(s.doc).map((t, i) => timelineName(t, i))));
   const timelineIdx = useStore((s) => timelineIndex(s.doc));
   const layers = useStore((s) => s.doc.layers);
-  const { frame, playing, loop, onionSkin, clipSelection, height } = useStore(
-    useShallow((s) => ({ frame: s.frame, playing: s.playing, loop: s.loop, onionSkin: s.onionSkin, clipSelection: s.clipSelection, height: s.timelineHeight })),
+  const { frame, playing, loop, onionSkin, clipSelection, celSelection, height } = useStore(
+    useShallow((s) => ({ frame: s.frame, playing: s.playing, loop: s.loop, onionSkin: s.onionSkin, clipSelection: s.clipSelection, celSelection: s.celSelection, height: s.timelineHeight })),
   );
   const activeId = useStore((s) => anim.currentTrackId(s));
   const maskKeyed = useStore((s) => anim.maskKeyed(s)?.id ?? null);
@@ -513,6 +524,10 @@ export function TimelinePalette() {
   const enabled = Boolean(timeline?.enabled);
   const frames = timeline?.frames ?? 0;
   const fps = timeline?.fps ?? 24;
+  // Frames as numbers or as time; division lines.
+  const display = timeline?.display ?? 'frame1';
+  const timeLike = display === 'secframe' || display === 'timecode';
+  const division = timeline?.division ?? 0;
   const frameFromEvent = (e: React.PointerEvent<HTMLDivElement>) => {
     const box = e.currentTarget.getBoundingClientRect();
     return Math.floor((e.clientX - box.left) / CELL) + 1;
@@ -532,6 +547,7 @@ export function TimelinePalette() {
       if (!d) return;
       if (d.kind === 'move') anim.moveSelectedClips(d.delta);
       else if (d.kind === 'keys') anim.moveSelectedKeys(d.delta, d.copy);
+      else if (d.kind === 'cels') anim.moveSelectedCels(d.delta, d.copy);
       else anim.dragClipEdge(d.track, d.start, d.edge, d.frame, d.stretch);
     };
     window.addEventListener('pointermove', move);
@@ -589,6 +605,23 @@ export function TimelinePalette() {
     });
   };
 
+  // Assigned cels: pointer down selects (Ctrl/⌘ or Shift: several); dragging moves them (Alt: duplicates).
+  const onCel = (e: React.PointerEvent<HTMLDivElement>, track: Id, frame: number) => {
+    if (e.button !== 0) return;
+    e.stopPropagation();
+    const add = e.ctrlKey || e.metaKey || e.shiftKey;
+    if (add || !getState().celSelection.some((c) => c.track === track && c.frame === frame)) anim.selectAssignedCel(track, frame, add);
+    else anim.selectTrackFrame(track, frame);
+    if (add) return;
+    const x0 = e.clientX;
+    setDragBoth({ kind: 'cels', x0, delta: 0, copy: e.altKey });
+    follow((ev, cur) => {
+      if (cur.kind !== 'cels') return null;
+      const delta = Math.round((ev.clientX - x0) / CELL);
+      return delta === cur.delta && ev.altKey === cur.copy ? cur : { ...cur, delta, copy: ev.altKey };
+    });
+  };
+
   // Rows keep one handler each (they are memoised); it always sees the current state.
   const gripRef = useRef(onGrip);
   gripRef.current = onGrip;
@@ -596,6 +629,9 @@ export function TimelinePalette() {
   const keyRef = useRef(onKey);
   keyRef.current = onKey;
   const stableKey = useCallback<RowProps['onKey']>((...args) => keyRef.current(...args), []);
+  const celRef = useRef(onCel);
+  celRef.current = onCel;
+  const stableCel = useCallback<RowProps['onCel']>((...args) => celRef.current(...args), []);
 
   // What dragged tracks look like before the drop.
 
@@ -610,6 +646,15 @@ export function TimelinePalette() {
       return out;
     }
     const ids = [...rows.map((r) => r.layer.id), ...rows.filter((r) => r.layer.mask).map((r) => maskTrackId(r.layer.id))];
+    if (drag.kind === 'cels') {
+      if (!drag.delta) return out;
+      for (const id of ids) {
+        const cels = celSelection.some((c) => c.track === id) ? anim.movedCels(id, drag.delta, drag.copy, s) : null;
+        const t = cels ? anim.trackContentOf(id, s) : null;
+        if (t && cels) out.set(id, { ...t, cels });
+      }
+      return out;
+    }
     if (drag.kind === 'keys') {
       if (!drag.delta) return out;
       for (const id of ids) {
@@ -629,7 +674,13 @@ export function TimelinePalette() {
       out.set(id, { ...t, clips: t.clips.map((c) => (starts.includes(c.start) ? { ...c, start: c.start + d, end: c.end + d } : c)) });
     }
     return out;
-  }, [drag, rows, fps, timeline, clipSelection, keySelection]);
+  }, [drag, rows, fps, timeline, clipSelection, keySelection, celSelection]);
+
+  const celsOf = (id: Id) =>
+    celSelection
+      .filter((c) => c.track === id)
+      .map((c) => c.frame + (drag?.kind === 'cels' ? anim.celMoveDelta(drag.delta) : 0))
+      .join(',');
 
   const keysOf = (id: Id) =>
     keySelection
@@ -678,7 +729,7 @@ export function TimelinePalette() {
   const onRowsDown = (e: React.PointerEvent<HTMLDivElement>) => {
     const target = e.target as HTMLElement;
     const rowsEl = rowsRef.current;
-    if (e.button !== 0 || !rowsEl || !target.closest('.tl-lane') || target.closest('.tl-key, .tl-clip-grip')) return;
+    if (e.button !== 0 || !rowsEl || !target.closest('.tl-lane') || target.closest('.tl-key, .tl-clip-grip, [data-assigned]')) return;
     const x0 = e.clientX;
     const y0 = e.clientY;
     const mode = e.shiftKey ? 'add' : e.ctrlKey || e.metaKey ? 'remove' : 'set';
@@ -788,14 +839,17 @@ export function TimelinePalette() {
         <span className="spacer" />
         {timeline && (
           <button className="tl-info" title="Current frame / start frame / end frame (Animation > Timeline > Change settings)" onClick={() => openDialog('timelineSettings')}>
-            <span data-testid="timeline-frame">{frame}</span> / {startOf(timeline)} / {endOf(timeline)} · {timeline.fps} fps{enabled ? '' : ' · off'}
+            <span data-testid="timeline-frame">{frameLabel(frame, fps, display)}</span> / {frameLabel(startOf(timeline), fps, display)} / {frameLabel(endOf(timeline), fps, display)} · {timeline.fps} fps{enabled ? '' : ' · off'}
           </button>
         )}
       </div>
       {!timeline ? (
         <div className="timeline-empty">This canvas has no timeline. New animation folder makes one (with a track); Animation &gt; Timeline &gt; New timeline sets its frame rate and length.</div>
       ) : (
-        <div className={`timeline-body ${enabled ? '' : 'disabled'} ${drag ? 'dragging' : ''}`} style={{ ['--cell' as string]: `${CELL}px`, ['--frames' as string]: frames }}>
+        <div
+          className={`timeline-body ${enabled ? '' : 'disabled'} ${drag ? 'dragging' : ''} ${division ? 'divided' : ''}`}
+          style={{ ['--cell' as string]: `${CELL}px`, ['--frames' as string]: frames, ['--division' as string]: division || 1 }}
+        >
           <div
             ref={rowsRef}
             className="tl-rows"
@@ -821,11 +875,20 @@ export function TimelinePalette() {
                 }}
                 onPointerUp={() => (scrub.current = false)}
               >
-                {Array.from({ length: frames }, (_, i) => (
-                  <div key={i} className={`tl-cell ${i + 1 === frame ? 'current' : ''} ${i + 1 < rangeStart || i + 1 > rangeEnd ? 'outside' : ''}`}>
-                    {i + 1}
-                  </div>
-                ))}
+                {Array.from({ length: frames }, (_, i) => {
+                  const f = i + 1;
+                  // As time, the ruler numbers the frames of each second and marks where a second starts.
+                  const second = timeLike && startsSecond(f, fps);
+                  return (
+                    <div
+                      key={i}
+                      className={`tl-cell ${f === frame ? 'current' : ''} ${f < rangeStart || f > rangeEnd ? 'outside' : ''} ${division && f % division === 0 ? 'div' : ''} ${second ? 'second' : ''}`}
+                      title={frameLabel(f, fps, display)}
+                    >
+                      {timeLike ? ((f - 1) % Math.max(1, Math.round(fps))) + (display === 'secframe' ? 1 : 0) : frameLabel(f, fps, display)}
+                    </div>
+                  );
+                })}
                 {/* Start and end frame: drag the blue marks. */}
                 <div className="tl-range start" data-testid="timeline-start" title={`Start frame ${rangeStart}: drag to change`} style={{ left: (rangeStart - 1) * CELL }} onPointerDown={(e) => dragRange(e, 'start')} />
                 <div className="tl-range end" data-testid="timeline-end" title={`End frame ${rangeEnd}: drag to change`} style={{ left: rangeEnd * CELL }} onPointerDown={(e) => dragRange(e, 'end')} />
@@ -863,8 +926,10 @@ export function TimelinePalette() {
                     maskKeys={r.layer.mask ? keysOf(maskTrackId(r.layer.id)) : ''}
                     maskPreview={(previews.get(maskTrackId(r.layer.id))?.keys as Keyframe[] | undefined) ?? null}
                     maskActive={maskKeyed === r.layer.id}
+                    selectedCels={celsOf(r.layer.id)}
                     onGrip={stableGrip}
                     onKey={stableKey}
+                    onCel={stableCel}
                   />
                 ),
               )}

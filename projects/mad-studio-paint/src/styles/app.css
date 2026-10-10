@@ -2462,6 +2462,22 @@
   color: #fff;
 }
 
+/* Division lines (every N frames) and, with frames shown as time, where each second starts */
+.tl-ruler .tl-cell.div {
+  border-right-color: var(--text-faint);
+}
+
+.tl-ruler .tl-cell.second {
+  box-shadow: inset 2px 0 0 var(--text-faint);
+  color: var(--text);
+}
+
+.timeline-body.divided .tl-lane {
+  background-image:
+    repeating-linear-gradient(to right, transparent 0 calc(var(--cell) * var(--division) - 1px), var(--text-faint) calc(var(--cell) * var(--division) - 1px) calc(var(--cell) * var(--division))),
+    repeating-linear-gradient(to right, transparent 0 calc(var(--cell) - 1px), var(--line) calc(var(--cell) - 1px) var(--cell));
+}
+
 .tl-cell.start,
 .tl-cell.hold {
   background-image: linear-gradient(var(--bg-4), var(--bg-4));
@@ -2479,6 +2495,16 @@
 
 .tl-cell.blank {
   color: var(--text-faint);
+}
+
+/* Assigned cels: selected ones, and the hint that they can be dragged */
+.tl-lane .tl-cell[data-assigned] {
+  cursor: grab;
+}
+
+.tl-lane .tl-cell.picked {
+  background-color: var(--accent-soft);
+  box-shadow: inset 0 0 0 1px var(--accent);
 }
 
 .tl-cell.off {

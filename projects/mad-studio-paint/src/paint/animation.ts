@@ -19,7 +19,40 @@ export interface Timeline {
   /** Start and end frame: playback and exports cover start … end (default: every frame). */
   start?: number;
   end?: number;
+  /** How the Timeline palette shows frames (Playback time in New / New timeline; default: from 1). */
+  display?: FrameDisplay;
+  /** Division line every this many frames (0 or absent: none). */
+  division?: number;
 }
+
+/** Frame number (from 1), Frame number (from 0), Seconds + frame, Time code. */
+export type FrameDisplay = 'frame1' | 'frame0' | 'secframe' | 'timecode';
+
+export const FRAME_DISPLAYS: [FrameDisplay, string][] = [
+  ['frame1', 'Frame number (from 1)'],
+  ['frame0', 'Frame number (from 0)'],
+  ['secframe', 'Seconds + frame'],
+  ['timecode', 'Time code'],
+];
+
+const pad2 = (n: number) => String(n).padStart(2, '0');
+
+/**
+ * A frame as the timeline shows it: its number (from 1 or from 0), seconds + frame within the
+ * second ("0+1" is the first frame), or a time code (minutes:seconds:frame, frames from 0).
+ */
+export function frameLabel(frame: number, fps: number, display: FrameDisplay = 'frame1'): string {
+  if (display === 'frame1') return String(frame);
+  if (display === 'frame0') return String(frame - 1);
+  const rate = Math.max(1, Math.round(fps));
+  const sec = Math.floor((frame - 1) / rate);
+  const rest = (frame - 1) % rate;
+  if (display === 'secframe') return `${sec}+${rest + 1}`;
+  return `${pad2(Math.floor(sec / 60))}:${pad2(sec % 60)}:${pad2(rest)}`;
+}
+
+/** Whether the ruler marks a frame (the first of a second when frames are shown as time). */
+export const startsSecond = (frame: number, fps: number) => (frame - 1) % Math.max(1, Math.round(fps)) === 0;
 
 /** The start frame (1 when not set). */
 export const startOf = (t: Timeline): number => Math.max(1, Math.min(t.frames, t.start ?? 1));
@@ -67,6 +100,91 @@ export function assignAt(track: AnimationTrack, frame: number, cel: Id | null): 
   cels.push({ frame, cel });
   cels.sort((a, b) => a.frame - b.frame);
   return { cels };
+}
+
+/** Animation > Edit track > Assign multiple cels: the settings of the dialog. */
+export interface MultipleAssignment {
+  /** The cels to assign in order (the dialog's start … end cel). */
+  cels: Id[];
+  /** Frames each cel shows. */
+  frames: number;
+  /** Times the cels are assigned one after another (Infinity: to the end of the timeline). */
+  repeats: number;
+  /** Add empty frames between cels: how many. */
+  gap: number;
+  /** Skip cel numbers: cels left out after each assigned one. */
+  skip: number;
+}
+
+/**
+ * Assign multiple cels > Assign by value: the cels named with numbers from `start` to `end` (either
+ * way round), in that order. `cels`: id and name.
+ */
+export function celsByNumber(cels: { id: Id; name: string }[], start: number, end: number): Id[] {
+  const numbered = cels.filter((c) => /^\d+$/.test(c.name.trim())).map((c) => ({ id: c.id, n: Number(c.name.trim()) }));
+  const lo = Math.min(start, end);
+  const hi = Math.max(start, end);
+  const picked = numbered.filter((c) => c.n >= lo && c.n <= hi).sort((a, b) => a.n - b.n);
+  return (start <= end ? picked : picked.reverse()).map((c) => c.id);
+}
+
+/** Assign by cel name: the cels from `first` to `last` in their order (either way round). */
+export function celsBetween(ids: Id[], first: Id, last: Id): Id[] {
+  const a = ids.indexOf(first);
+  const b = ids.indexOf(last);
+  if (a < 0 || b < 0) return [];
+  return a <= b ? ids.slice(a, b + 1) : ids.slice(b, a + 1).reverse();
+}
+
+/**
+ * Assign multiple cels from `from` on (up to `last`): each cel for `frames` frames (empty frames
+ * between them when `gap`), the whole run `repeats` times. Assignments in that stretch are
+ * replaced; the frames after it show what they showed before.
+ */
+export function assignMultiple(track: AnimationTrack, from: number, last: number, o: MultipleAssignment): AnimationTrack {
+  const picked = o.cels.filter((_, i) => i % (Math.max(0, o.skip) + 1) === 0);
+  const each = Math.max(1, Math.round(o.frames));
+  const gap = Math.max(0, Math.round(o.gap));
+  const added: CelAssignment[] = [];
+  let f = from;
+  for (let r = 0; picked.length && r < o.repeats && f <= last; r++) {
+    for (const cel of picked) {
+      if (f > last) break;
+      added.push({ frame: f, cel });
+      f += each;
+      if (gap && f <= last) {
+        added.push({ frame: f, cel: null });
+        f += gap;
+      }
+    }
+  }
+  if (!added.length) return track;
+  const end = Math.min(f, last + 1);
+  // What showed right after the stretch keeps showing there.
+  const after = assignmentAt(track, end);
+  const kept = track.cels.filter((a) => a.frame < from || a.frame >= end);
+  const cels = [...kept, ...added];
+  if (end <= last && after && after.frame < end && !kept.some((a) => a.frame === end)) cels.push({ frame: end, cel: after.cel });
+  return { cels: cels.sort((a, b) => a.frame - b.frame) };
+}
+
+/**
+ * Dragging assigned cels on the timeline: the assignments at `frames` move by `delta` (with `copy`
+ * they are duplicated there), replacing what is assigned where they land.
+ */
+export function moveAssignments(track: AnimationTrack, frames: number[], delta: number, copy = false): AnimationTrack {
+  if (!delta) return track;
+  const moved = track.cels.filter((a) => frames.includes(a.frame)).map((a) => ({ ...a, frame: Math.max(1, a.frame + delta) }));
+  const landed = new Set(moved.map((a) => a.frame));
+  const stay = track.cels.filter((a) => (copy || !frames.includes(a.frame)) && !landed.has(a.frame));
+  return { cels: [...stay, ...moved].sort((a, b) => a.frame - b.frame) };
+}
+
+/** Pasting assigned cels: each at `frame` plus its offset, replacing what is assigned there. */
+export function pasteAssignments(track: AnimationTrack, items: { offset: number; cel: Id | null }[], frame: number): AnimationTrack {
+  let out = track;
+  for (const it of items) out = assignAt(out, Math.max(1, frame + it.offset), it.cel);
+  return out;
 }
 
 /** Removes the assignment at `frame`; the cel before it then shows on (like Delete on an assigned cel). */
@@ -206,6 +324,8 @@ export function sanitizeTimeline(raw: unknown): Timeline | undefined {
     ...(typeof r.name === 'string' && r.name ? { name: r.name.slice(0, 60) } : {}),
     ...(start !== undefined && start > 1 ? { start } : {}),
     ...(end !== undefined && end < frames ? { end } : {}),
+    ...(r.display === 'frame0' || r.display === 'secframe' || r.display === 'timecode' ? { display: r.display } : {}),
+    ...(typeof r.division === 'number' && r.division >= 1 ? { division: Math.round(num(r.division, 0, 1, 100)) } : {}),
   };
 }
 

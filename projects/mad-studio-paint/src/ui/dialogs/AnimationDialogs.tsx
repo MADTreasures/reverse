@@ -7,7 +7,7 @@ import { exportAnimation, exportMovie, type AnimationFormat } from '../../io/doc
 import { SEQUENCE_EXT, sequenceNames, type SequenceType } from '../../io/sequence';
 import { hasSound, isCameraFolder, outputRect } from '../../model/animation';
 import { findLayer, flatten } from '../../model/layers';
-import { DEFAULT_TIMELINE, endOf, MAX_FPS, MAX_FRAMES, startOf, type OnionMode, type Timeline } from '../../paint/animation';
+import { celsBetween, celsByNumber, DEFAULT_TIMELINE, endOf, FRAME_DISPLAYS, frameLabel, MAX_FPS, MAX_FRAMES, startOf, type FrameDisplay, type OnionMode, type Timeline } from '../../paint/animation';
 import { nextTimelineName, timelineIndex, timelineList, timelineName } from '../../model/timelines';
 import { areaRect, type DrawingArea } from '../../paint/outputFrame';
 import type { PaintDocument } from '../../model/types';
@@ -40,6 +40,8 @@ export function NewTimelineDialog() {
   const [name, setName] = useState(nextTimelineName(doc));
   const [fps, setFps] = useState(doc.timeline?.fps ?? DEFAULT_TIMELINE.fps);
   const [frames, setFrames] = useState(doc.timeline?.frames ?? DEFAULT_TIMELINE.frames);
+  const [display, setDisplay] = useState<FrameDisplay>(doc.timeline?.display ?? 'frame1');
+  const [division, setDivision] = useState(doc.timeline?.division ?? 0);
   return (
     <form
       className="modal"
@@ -47,7 +49,7 @@ export function NewTimelineDialog() {
       aria-label="New timeline"
       onSubmit={(e) => {
         e.preventDefault();
-        anim.newTimeline({ name: name.trim(), fps, frames });
+        anim.newTimeline({ name: name.trim(), fps, frames, display, division });
         closeDialog();
       }}
     >
@@ -63,10 +65,31 @@ export function NewTimelineDialog() {
         <input id="tl-frames" type="number" min={1} max={MAX_FRAMES} value={frames} onChange={(e) => setFrames(clampInt(e.target.value, 1, MAX_FRAMES, frames))} />
         <label>Playback time</label>
         <span>{(frames / fps).toFixed(2)} s</span>
+        <DisplayFields display={display} division={division} onDisplay={setDisplay} onDivision={setDivision} />
       </div>
       {doc.timeline && <p className="muted">The canvas keeps its other timelines; the new one starts empty.</p>}
       <Actions />
     </form>
+  );
+}
+
+/** How the Timeline palette shows frames (Playback time) and its division lines. */
+function DisplayFields({ display, division, onDisplay, onDivision }: { display: FrameDisplay; division: number; onDisplay: (d: FrameDisplay) => void; onDivision: (n: number) => void }) {
+  return (
+    <>
+      <label htmlFor="tl-display">Frame display</label>
+      <select id="tl-display" value={display} onChange={(e) => onDisplay(e.target.value as FrameDisplay)}>
+        {FRAME_DISPLAYS.map(([id, label]) => (
+          <option key={id} value={id}>
+            {label}
+          </option>
+        ))}
+      </select>
+      <label htmlFor="tl-division">Division line</label>
+      <span className="with-unit">
+        <input id="tl-division" type="number" min={0} max={100} value={division} onChange={(e) => onDivision(clampInt(e.target.value, 0, 100, division))} /> frames (0: none)
+      </span>
+    </>
   );
 }
 
@@ -88,7 +111,22 @@ function TimelineFields({ value, onChange }: { value: Timeline; onChange: (t: Ti
       <span className="with-unit">
         <input type="number" aria-label="Start frame" min={1} max={end} value={start} onChange={(e) => onChange({ ...value, start: clampInt(e.target.value, 1, end, start) })} /> –{' '}
         <input type="number" aria-label="End frame" min={start} max={value.frames} value={end} onChange={(e) => onChange({ ...value, end: clampInt(e.target.value, start, value.frames, end) })} />
+        <span data-testid="timeline-range-label">
+          ({frameLabel(start, value.fps, value.display)} – {frameLabel(end, value.fps, value.display)})
+        </span>
       </span>
+      <DisplayFields
+        display={value.display ?? 'frame1'}
+        division={value.division ?? 0}
+        onDisplay={(d) => {
+          const { display: _d, ...rest } = value;
+          onChange(d === 'frame1' ? rest : { ...rest, display: d });
+        }}
+        onDivision={(n) => {
+          const { division: _n, ...rest } = value;
+          onChange(n ? { ...rest, division: n } : rest);
+        }}
+      />
     </>
   );
 }
@@ -104,7 +142,7 @@ export function TimelineSettingsDialog() {
       aria-label="Change timeline settings"
       onSubmit={(e) => {
         e.preventDefault();
-        anim.setTimeline({ ...t, name: t.name?.trim() || undefined });
+        anim.setTimeline({ ...t, name: t.name?.trim() || undefined, display: t.display, division: t.division });
         closeDialog();
       }}
     >
@@ -791,6 +829,124 @@ export function CenterCanvasDialog() {
         <label htmlFor="center-value">Position</label>
         <input id="center-value" type="number" min={0} max={100} value={value} onChange={(e) => set(clampInt(e.target.value, 0, 100, value))} />
       </div>
+      <Actions />
+    </form>
+  );
+}
+
+/**
+ * Animation > Edit track > Assign multiple cels: from the current frame on, the cels from a start to
+ * an end number (or cel), each for a number of frames, repeated, with empty frames between them or
+ * cel numbers skipped.
+ */
+export function AssignMultipleDialog() {
+  const folder = anim.activeTrack();
+  const frame = getState().frame;
+  // Cels in the order the reference lists them: the lowest layer first.
+  const cels = folder ? [...folder.children].reverse().map((c) => ({ id: c.id, name: c.name })) : [];
+  const numbers = cels.map((c) => c.name.trim()).filter((n) => /^\d+$/.test(n)).map(Number);
+  const [byName, setByName] = useState(numbers.length === 0);
+  const [startNumber, setStartNumber] = useState(numbers.length ? Math.min(...numbers) : 1);
+  const [endNumber, setEndNumber] = useState(numbers.length ? Math.max(...numbers) : 1);
+  const [first, setFirst] = useState(cels[0]?.id ?? '');
+  const [last, setLast] = useState(cels[cels.length - 1]?.id ?? '');
+  const [frames, setFrames] = useState(1);
+  const [repeat, setRepeat] = useState(false);
+  const [repeats, setRepeats] = useState(2);
+  const [toEnd, setToEnd] = useState(false);
+  const [gapOn, setGapOn] = useState(false);
+  const [gap, setGap] = useState(1);
+  const [skipOn, setSkipOn] = useState(false);
+  const [skip, setSkip] = useState(1);
+  if (!folder) return null;
+  const picked = byName ? celsBetween(cels.map((c) => c.id), first, last) : celsByNumber(cels, startNumber, endNumber);
+  return (
+    <form
+      className="modal"
+      role="dialog"
+      aria-label="Assign multiple cels"
+      onSubmit={(e) => {
+        e.preventDefault();
+        anim.assignMultipleCels(folder.id, frame, { cels: picked, frames, repeats: toEnd ? Infinity : repeat ? repeats : 1, gap: gapOn ? gap : 0, skip: skipOn ? skip : 0 });
+        closeDialog();
+      }}
+    >
+      <h2>Assign multiple cels</h2>
+      <p className="muted">
+        {folder.name}: from frame {frame} on
+      </p>
+      <fieldset className="group">
+        <legend>How to assign</legend>
+        <label className="check">
+          <input type="radio" name="am-how" checked={!byName} onChange={() => setByName(false)} /> Assign by value
+        </label>
+        <label className="check">
+          <input type="radio" name="am-how" checked={byName} onChange={() => setByName(true)} /> Assign by cel name
+        </label>
+      </fieldset>
+      <fieldset className="group">
+        <legend>Assign cels</legend>
+        <div className="form-grid">
+          {byName ? (
+            <>
+              <label htmlFor="am-first">Start cel</label>
+              <select id="am-first" value={first} onChange={(e) => setFirst(e.target.value)}>
+                {cels.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name}
+                  </option>
+                ))}
+              </select>
+              <label htmlFor="am-last">End cel</label>
+              <select id="am-last" value={last} onChange={(e) => setLast(e.target.value)}>
+                {cels.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name}
+                  </option>
+                ))}
+              </select>
+            </>
+          ) : (
+            <>
+              <label htmlFor="am-start">Start number</label>
+              <input id="am-start" type="number" min={0} max={9999} value={startNumber} onChange={(e) => setStartNumber(clampInt(e.target.value, 0, 9999, startNumber))} />
+              <label htmlFor="am-end">End number</label>
+              <input id="am-end" type="number" min={0} max={9999} value={endNumber} onChange={(e) => setEndNumber(clampInt(e.target.value, 0, 9999, endNumber))} />
+            </>
+          )}
+          <label htmlFor="am-frames">Number of frames</label>
+          <input id="am-frames" type="number" min={1} max={MAX_FRAMES} value={frames} onChange={(e) => setFrames(clampInt(e.target.value, 1, MAX_FRAMES, frames))} />
+          <label>Cels</label>
+          <span data-testid="assign-multiple-cels">{picked.length ? picked.map((id) => cels.find((c) => c.id === id)?.name).join(', ') : 'none'}</span>
+        </div>
+      </fieldset>
+      <fieldset className="group">
+        <legend>Repeat settings</legend>
+        <span className="with-unit">
+          <label className="check">
+            <input type="checkbox" checked={repeat} disabled={toEnd} onChange={(e) => setRepeat(e.target.checked)} /> Number of repeats
+          </label>
+          <input type="number" aria-label="Repeats" min={1} max={100} value={repeats} disabled={!repeat || toEnd} onChange={(e) => setRepeats(clampInt(e.target.value, 1, 100, repeats))} />
+        </span>
+        <label className="check">
+          <input type="checkbox" checked={toEnd} onChange={(e) => setToEnd(e.target.checked)} /> Repeat to end
+        </label>
+      </fieldset>
+      <fieldset className="group">
+        <legend>Advanced settings</legend>
+        <span className="with-unit">
+          <label className="check">
+            <input type="checkbox" checked={gapOn} onChange={(e) => setGapOn(e.target.checked)} /> Add empty frames between cels
+          </label>
+          <input type="number" aria-label="Empty frames" min={1} max={100} value={gap} disabled={!gapOn} onChange={(e) => setGap(clampInt(e.target.value, 1, 100, gap))} />
+        </span>
+        <span className="with-unit">
+          <label className="check">
+            <input type="checkbox" checked={skipOn} onChange={(e) => setSkipOn(e.target.checked)} /> Skip cel numbers
+          </label>
+          <input type="number" aria-label="Cels to skip" min={1} max={100} value={skip} disabled={!skipOn} onChange={(e) => setSkip(clampInt(e.target.value, 1, 100, skip))} />
+        </span>
+      </fieldset>
       <Actions />
     </form>
   );
