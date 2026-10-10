@@ -4052,3 +4052,49 @@ test('Shrink selection: a lasso round a drawing selects the drawing', async ({ p
   expect(sel).toEqual({ inside: 255, line: 255, empty: 0 });
   expect(errors).toEqual([]);
 });
+
+test('brush dynamics: Velocity makes fast strokes thinner', async ({ page }) => {
+  const errors = await boot(page);
+  await page.evaluate(() => {
+    const m = window.__madPaint;
+    m.actions.setTool('pen');
+    const s = m.useStore.getState();
+    const sub = s.subTools.find((t: any) => t.id === s.activeSub.pen);
+    m.actions.updateSubTool(sub.id, { brush: { ...sub.brush, size: 16, sizePressure: false, sizeVelocity: true, minSize: 0.2, stabilization: 0 } });
+  });
+  // The popover shows the setting.
+  await page.locator('[data-testid=subtool-panel] .palette-tab', { hasText: 'Tool Settings' }).click();
+  const thickness = (x: number, y0: number) =>
+    page.evaluate(
+      ([px, py]) => {
+        const m = window.__madPaint;
+        const id = m.useStore.getState().activeLayerId;
+        let n = 0;
+        for (let y = py - 12; y <= py + 12; y++) if ((m.engine.sampleLayer(id, px, y)?.[3] ?? 0) > 100) n++;
+        return n;
+      },
+      [x, y0],
+    );
+  // Slow: small steps with pauses.
+  const a = await docToScreen(page, 40, 80);
+  const b = await docToScreen(page, 360, 80);
+  await page.mouse.move(a.x, a.y);
+  await page.mouse.down();
+  for (let i = 1; i <= 30; i++) {
+    await page.mouse.move(a.x + ((b.x - a.x) * i) / 30, a.y);
+    await page.waitForTimeout(30);
+  }
+  await page.mouse.up();
+  // Fast: the same distance in a few quick moves.
+  const c = await docToScreen(page, 40, 200);
+  const d = await docToScreen(page, 360, 200);
+  await page.mouse.move(c.x, c.y);
+  await page.mouse.down();
+  for (let i = 1; i <= 4; i++) await page.mouse.move(c.x + ((d.x - c.x) * i) / 4, c.y);
+  await page.mouse.up();
+  const slow = await thickness(200, 80);
+  const fast = await thickness(200, 200);
+  expect(slow).toBeGreaterThan(10);
+  expect(fast).toBeLessThan(slow * 0.7);
+  expect(errors).toEqual([]);
+});

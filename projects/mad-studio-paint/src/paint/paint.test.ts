@@ -3,7 +3,7 @@ import { floodFillMask } from './fill';
 import { HistoryStack } from './history';
 import { combine, createMask, ellipseMask, expandMask, invertMask, isMaskEmpty, maskBounds, maskOutline, polygonMask, rectMask, translateMask } from './mask';
 import { circleBounds, intersect, union } from './rect';
-import { dabAlpha, ellipsePoints, interpolateDabs, polygonPoints, pressureCurve, rectPoints, roundCorners, snapAngle, Stabilizer, stabilizerWindow } from './stroke';
+import { dabAlpha, ellipsePoints, interpolateDabs, polygonPoints, velocityFactor, pressureCurve, rectPoints, roundCorners, snapAngle, Stabilizer, stabilizerWindow } from './stroke';
 import { DEFAULT_SUB_TOOLS, mergeSubTools, toolForKey } from './tools';
 
 const count = (m: { data: Uint8Array }) => m.data.reduce((n, v) => n + (v ? 1 : 0), 0);
@@ -256,5 +256,22 @@ describe('figure shapes', () => {
       expect(p.x).toBeGreaterThanOrEqual(0);
       expect(p.x).toBeLessThanOrEqual(100);
     }
+  });
+});
+
+describe('velocity dynamics', () => {
+  it('thins out faster strokes down to the minimum value', () => {
+    expect(velocityFactor(0, 0.2)).toBe(1);
+    expect(velocityFactor(undefined, 0.2)).toBe(1);
+    expect(velocityFactor(4, 0.2)).toBeCloseTo(0.2);
+    expect(velocityFactor(40, 0.2)).toBeCloseTo(0.2);
+    const mid = velocityFactor(2, 0.2);
+    expect(mid).toBeGreaterThan(0.2);
+    expect(mid).toBeLessThan(1);
+  });
+
+  it('carries the speed into the dabs between two points', () => {
+    const { dabs } = interpolateDabs({ x: 0, y: 0, pressure: 1, speed: 0 }, { x: 10, y: 0, pressure: 1, speed: 2 }, 5, 0);
+    expect(dabs.map((d) => d.speed)).toEqual([1, 2]);
   });
 });

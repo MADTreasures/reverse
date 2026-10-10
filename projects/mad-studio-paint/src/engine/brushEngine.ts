@@ -7,7 +7,7 @@ import { amountAt, densityFactor, nextDab, type Paint } from '../paint/mixing';
 import { linePath, strokeBounds, type VectorPoint, type VectorStroke } from '../paint/vector';
 import { circleBounds, inflate, intersect, union, type Rect } from '../paint/rect';
 import { affineAngle, applyAffine, type Affine, type Constraint } from '../paint/rulers';
-import { dabAlpha, interpolateDabs, pressureCurve, seededRandom, Stabilizer, stabilizerWindow, taperFactor, type Dab, type StrokePoint } from '../paint/stroke';
+import { dabAlpha, interpolateDabs, pressureCurve, seededRandom, Stabilizer, stabilizerWindow, taperFactor, velocityFactor, type Dab, type StrokePoint } from '../paint/stroke';
 import { applyPaper, tipIndex } from '../paint/materials';
 import type { BrushSettings, TipFlip } from '../paint/tools';
 import { createCanvas, ctx2d, type Ctx } from './canvas';
@@ -343,6 +343,7 @@ export class BrushStroke implements Stroke {
     const b = this.brush;
     let f = b.sizePressure ? b.minSize + (1 - b.minSize) * evalPressureCurve(b.sizeCurve, p.pressure) : 1;
     if (b.sizeTilt) f *= 1 + (p.tilt ?? 0);
+    if (b.sizeVelocity) f *= velocityFactor(p.speed, b.minSize);
     if (b.taperSize) f *= taperFactor(d, total, b.taperStart, b.taperEnd);
     return f;
   }
@@ -352,6 +353,7 @@ export class BrushStroke implements Stroke {
     const b = this.brush;
     let f = b.opacityPressure ? b.minDensity + (1 - b.minDensity) * evalPressureCurve(b.densityCurve, p.pressure) : 1;
     if (b.densityTilt) f *= 1 - 0.7 * (p.tilt ?? 0);
+    if (b.densityVelocity) f *= velocityFactor(p.speed, b.minDensity);
     if (b.taperDensity) f *= taperFactor(d, total, b.taperStart, b.taperEnd);
     return f;
   }

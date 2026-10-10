@@ -18,7 +18,7 @@ const setBrush = (sub: SubTool, patch: Partial<BrushSettings>) => actions.update
 
 /** True when a setting reacts to anything but its slider. */
 export function dynamicsOn(b: BrushSettings, kind: DynamicsKind): boolean {
-  return kind === 'size' ? b.sizePressure || b.sizeTilt || b.sizeRandom > 0 : b.opacityPressure || b.densityTilt || b.densityRandom > 0;
+  return kind === 'size' ? b.sizePressure || b.sizeTilt || Boolean(b.sizeVelocity) || b.sizeRandom > 0 : b.opacityPressure || b.densityTilt || Boolean(b.densityVelocity) || b.densityRandom > 0;
 }
 
 /** Pen pressure (minimum value + graph), tilt and random for brush size or brush density. */
@@ -29,13 +29,14 @@ function DynamicsControls({ sub, kind }: { sub: SubTool; kind: DynamicsKind }) {
   const min = size ? b.minSize : b.minDensity;
   const curve = size ? b.sizeCurve : b.densityCurve;
   const tilt = size ? b.sizeTilt : b.densityTilt;
+  const velocity = Boolean(size ? b.sizeVelocity : b.densityVelocity);
   const random = size ? b.sizeRandom : b.densityRandom;
   return (
     <div className="dynamics" data-testid={`${kind}-dynamics`}>
       <label className="check">
         <input type="checkbox" checked={pressure} onChange={(e) => setBrush(sub, size ? { sizePressure: e.target.checked } : { opacityPressure: e.target.checked })} /> Pen pressure
       </label>
-      {pressure && (
+      {(pressure || velocity) && (
         <>
           <PropSlider
             label="Minimum value"
@@ -45,16 +46,21 @@ function DynamicsControls({ sub, kind }: { sub: SubTool; kind: DynamicsKind }) {
             unit="%"
             onChange={(v) => setBrush(sub, size ? { minSize: v / 100 } : { minDensity: v / 100 })}
           />
-          <CurveEditor
-            label={`${size ? 'Brush size' : 'Brush density'} pressure graph`}
-            testId={`${kind}-curve`}
-            points={curve}
-            onChange={(pts) => setBrush(sub, size ? { sizeCurve: pts } : { densityCurve: pts })}
-          />
+          {pressure && (
+            <CurveEditor
+              label={`${size ? 'Brush size' : 'Brush density'} pressure graph`}
+              testId={`${kind}-curve`}
+              points={curve}
+              onChange={(pts) => setBrush(sub, size ? { sizeCurve: pts } : { densityCurve: pts })}
+            />
+          )}
         </>
       )}
       <label className="check" title={size ? 'Leaning the pen widens the stroke' : 'Leaning the pen makes the stroke lighter'}>
         <input type="checkbox" checked={tilt} onChange={(e) => setBrush(sub, size ? { sizeTilt: e.target.checked } : { densityTilt: e.target.checked })} /> Tilt
+      </label>
+      <label className="check" title={size ? 'Faster strokes are thinner' : 'Faster strokes are lighter'}>
+        <input type="checkbox" checked={velocity} onChange={(e) => setBrush(sub, size ? { sizeVelocity: e.target.checked } : { densityVelocity: e.target.checked })} /> Velocity
       </label>
       <PropSlider label="Random" value={Math.round(random * 100)} min={0} max={100} unit="%" onChange={(v) => setBrush(sub, size ? { sizeRandom: v / 100 } : { densityRandom: v / 100 })} />
     </div>

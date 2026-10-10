@@ -205,6 +205,9 @@ export interface BrushSettings {
   /** Tilting the pen widens the stroke / makes it lighter (shading with the side of a pencil). */
   sizeTilt: boolean;
   densityTilt: boolean;
+  /** Velocity: faster strokes are thinner / lighter, down to the minimum value. */
+  sizeVelocity?: boolean;
+  densityVelocity?: boolean;
   /** Random variation per dab, 0..1. */
   sizeRandom: number;
   densityRandom: number;
@@ -857,6 +860,8 @@ export function sanitizeBrush(raw: unknown): BrushSettings {
     opacityPressure: b.opacityPressure === true,
     sizeTilt: b.sizeTilt === true,
     densityTilt: b.densityTilt === true,
+    sizeVelocity: b.sizeVelocity === true,
+    densityVelocity: b.densityVelocity === true,
     taperSize: b.taperSize !== false,
     taperDensity: b.taperDensity === true,
     watercolorEdge: b.watercolorEdge === true,

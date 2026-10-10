@@ -9,6 +9,16 @@ export interface StrokePoint {
   tilt?: number;
   /** Direction the pen leans, radians (0 = right, clockwise like canvas coordinates). */
   azimuth?: number;
+  /** How fast the pen moves, screen pixels per millisecond (for the Velocity dynamics). */
+  speed?: number;
+}
+
+/** Velocity dynamics: 1 when slow, down to `min` from about 4 screen px/ms (a fast flick). */
+export function velocityFactor(speed: number | undefined, min: number): number {
+  const v = Math.max(0, speed ?? 0);
+  const t = Math.min(1, v / 4);
+  const eased = t * t * (3 - 2 * t);
+  return 1 - (1 - Math.max(0, Math.min(1, min))) * eased;
 }
 
 export interface Dab extends StrokePoint {
@@ -38,7 +48,8 @@ export function interpolateDabs(
   while (t <= dist) {
     const f = t / dist;
     const tilt = from.tilt !== undefined && to.tilt !== undefined ? from.tilt + (to.tilt - from.tilt) * f : to.tilt;
-    dabs.push({ x: from.x + dx * f, y: from.y + dy * f, pressure: from.pressure + (to.pressure - from.pressure) * f, tilt, azimuth: to.azimuth, angle });
+    const speed = from.speed !== undefined && to.speed !== undefined ? from.speed + (to.speed - from.speed) * f : to.speed;
+    dabs.push({ x: from.x + dx * f, y: from.y + dy * f, pressure: from.pressure + (to.pressure - from.pressure) * f, tilt, azimuth: to.azimuth, speed, angle });
     t += step;
   }
   return { dabs, carry: dist - (t - step) };
@@ -75,8 +86,8 @@ export class Stabilizer {
       sp += q.pressure * w;
       sw += w;
     });
-    // Tilt is not averaged: it follows the pen directly.
-    return (this.last = { x: sx / sw, y: sy / sw, pressure: sp / sw, tilt: p.tilt, azimuth: p.azimuth });
+    // Tilt and speed are not averaged: they follow the pen directly.
+    return (this.last = { x: sx / sw, y: sy / sw, pressure: sp / sw, tilt: p.tilt, azimuth: p.azimuth, speed: p.speed });
   }
 
   /** Points that close the lag between the smoothed line and the last raw point (pen-up). */
@@ -87,7 +98,7 @@ export class Stabilizer {
     const out: StrokePoint[] = [];
     for (let i = 1; i <= steps; i++) {
       const f = i / steps;
-      out.push({ x: from.x + (target.x - from.x) * f, y: from.y + (target.y - from.y) * f, pressure: from.pressure + (target.pressure - from.pressure) * f });
+      out.push({ x: from.x + (target.x - from.x) * f, y: from.y + (target.y - from.y) * f, pressure: from.pressure + (target.pressure - from.pressure) * f, speed: target.speed });
     }
     return out;
   }

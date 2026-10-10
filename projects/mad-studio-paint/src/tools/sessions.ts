@@ -184,6 +184,9 @@ export class BrushSession implements ToolSession {
   private stroke: Stroke;
   private start: PointerInfo;
   private last: PointerInfo;
+  /** Pen speed for the Velocity dynamics (screen px/ms, smoothed) and the sample it was measured from. */
+  private speed = 0;
+  private prev: { sx: number; sy: number; time: number } | null = null;
   private lineMode: boolean;
   /** ⇧-click: the straight line starts at the end of the previous stroke. */
   private connectFrom: StrokePoint | null;
@@ -234,7 +237,17 @@ export class BrushSession implements ToolSession {
     }
     if (this.lineMode) this.drawLine(p);
     else if (this.snap.choose && this.stroke instanceof BrushStroke) this.held = [toStroke(p)];
-    else this.stroke.add(toStroke(p));
+    else this.stroke.add(this.withSpeed(p));
+  }
+
+  /** A stroke point with the pen's speed. */
+  private withSpeed(p: PointerInfo): StrokePoint {
+    if (this.prev) {
+      const dt = p.time - this.prev.time;
+      if (dt > 0) this.speed += (Math.hypot(p.sx - this.prev.sx, p.sy - this.prev.sy) / dt - this.speed) * 0.35;
+    }
+    this.prev = { sx: p.sx, sy: p.sy, time: p.time };
+    return { ...toStroke(p), speed: this.speed };
   }
 
   /** End point of a straight line, following the rulers. */
@@ -260,7 +273,7 @@ export class BrushSession implements ToolSession {
       this.drawLine(p);
       return;
     }
-    const points = (coalesced.length ? coalesced : [p]).map(toStroke);
+    const points = (coalesced.length ? coalesced : [p]).map((q) => this.withSpeed(q));
     if (this.held) {
       this.held.push(...points);
       if (Math.hypot(p.sx - this.start.sx, p.sy - this.start.sy) < PERSPECTIVE_DECIDE_PX) return;
