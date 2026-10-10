@@ -22,6 +22,23 @@ import { Icon } from '../controls/Icons';
 import { PropSlider } from '../controls/PropSlider';
 import { DynamicsPopover, dynamicsOn, type DynamicsKind } from './BrushSettingsPanels';
 import { ColorIcons } from './ColorWheel';
+import {
+  cancelTransform,
+  confirmTransform,
+  flipTransform,
+  REFERENCE_POINTS,
+  resetTransform,
+  setTransformMode,
+  setTransformNumbers,
+  setTransformPivot,
+  setTransformPrefs,
+  TRANSFORM_MODES,
+  useTransformInfo,
+  type ReferencePoint,
+  type TransformInfo,
+  type TransformMode,
+} from '../../tools/transform';
+import { INTERPOLATIONS, type Interpolation } from '../../paint/warp';
 
 /** Last tool used per palette button (for buttons that hold several tools). */
 const lastTool = new Map<string, ToolId>();
@@ -184,12 +201,14 @@ const REFERENCE_LABELS: Record<FillReference, string> = {
 
 const AA_LEVELS = ['None', 'Weak', 'Medium', 'Strong'];
 
-/** Settings of the selected sub tool. */
+/** Settings of the selected sub tool (or of the transform in progress). */
 export function ToolProperty() {
   const sub = useStore((s) => currentSubTool(s));
   const advanced = useStore((s) => s.advancedToolSettings);
+  const transform = useTransformInfo((s) => s.info);
   const [more, setMore] = useState(false);
   const [dyn, setDyn] = useState<{ kind: DynamicsKind; at: { x: number; y: number } } | null>(null);
+  if (transform) return <TransformSettings info={transform} />;
   const openDynamics = (kind: DynamicsKind) => (e: React.MouseEvent<HTMLButtonElement>) => {
     const r = e.currentTarget.getBoundingClientRect();
     setDyn({ kind, at: { x: r.right + 6, y: r.top - 8 } });
@@ -1140,6 +1159,102 @@ export function BrushSizePalette() {
           <span className="size-label">{v}</span>
         </button>
       ))}
+    </div>
+  );
+}
+
+/** Tool Property while transforming ("Editing transformation settings"), like the reference. */
+function TransformSettings({ info }: { info: TransformInfo }) {
+  const affineMode = info.mode === 'scaleRotate' || info.mode === 'scale' || info.mode === 'rotate';
+  const numbers = (patch: { x?: number; y?: number; angle?: number }) => {
+    if (!info.scale || info.angle === null) return;
+    let x = patch.x ?? info.scale.x;
+    let y = patch.y ?? info.scale.y;
+    // Keep aspect ratio: the other value follows.
+    if (info.keepAspect && patch.x !== undefined && info.scale.x !== 0) y = info.scale.y * (x / info.scale.x);
+    else if (info.keepAspect && patch.y !== undefined && info.scale.y !== 0) x = info.scale.x * (y / info.scale.y);
+    setTransformNumbers(x, y, patch.angle ?? info.angle);
+  };
+  return (
+    <div className="tool-property transform-settings" data-testid="transform-settings">
+      <div className="prop-title">
+        <span className="prop-tool-name">Editing transformation settings</span>
+      </div>
+      <div className="transform-buttons">
+        <button className="icon-btn" title="Reset transformation" aria-label="Reset transformation" onClick={resetTransform}>
+          <Icon name="resetRotation" />
+        </button>
+        <button className="icon-btn" title="Flip horizontal" aria-label="Flip horizontal" onClick={() => flipTransform(true)}>
+          <Icon name="flipH" />
+        </button>
+        <button className="icon-btn" title="Flip vertical" aria-label="Flip vertical" onClick={() => flipTransform(false)}>
+          <Icon name="flipV" />
+        </button>
+        <button className="icon-btn" title="Confirm transformation" aria-label="Confirm transformation" onClick={confirmTransform}>
+          <Icon name="check" />
+        </button>
+        <button className="icon-btn" title="Cancel transformation" aria-label="Cancel transformation" onClick={cancelTransform}>
+          <Icon name="close" />
+        </button>
+      </div>
+      <div className="prop-row">
+        <span className="prop-label">Mode</span>
+        <select className="prop-select" aria-label="Transformation mode" value={info.mode} onChange={(e) => setTransformMode(e.target.value as TransformMode)}>
+          {TRANSFORM_MODES.map((m) => (
+            <option key={m.id} value={m.id}>
+              {m.label}
+            </option>
+          ))}
+        </select>
+      </div>
+      <div className="prop-row">
+        <span className="prop-label">Reference point</span>
+        <select className="prop-select" aria-label="Reference point" value={info.reference} onChange={(e) => setTransformPrefs({ reference: e.target.value as ReferencePoint })}>
+          {REFERENCE_POINTS.map(([id, label]) => (
+            <option key={id} value={id}>
+              {label}
+            </option>
+          ))}
+        </select>
+      </div>
+      <PropSlider label="Position X" value={Math.round(info.pivot.x)} min={-8000} max={16000} onChange={(v) => setTransformPivot(v, info.pivot.y)} />
+      <PropSlider label="Position Y" value={Math.round(info.pivot.y)} min={-8000} max={16000} onChange={(v) => setTransformPivot(info.pivot.x, v)} />
+      <label className="check prop-check">
+        <input type="checkbox" checked={info.scaleWidth} onChange={(e) => setTransformPrefs({ scaleWidth: e.target.checked })} /> Change vector width
+      </label>
+      <label className="check prop-check">
+        <input type="checkbox" checked={info.keepOriginal} onChange={(e) => setTransformPrefs({ keepOriginal: e.target.checked })} /> Keep original image
+      </label>
+      {affineMode && info.scale && info.angle !== null && (
+        <>
+          <PropSlider label="Scale ratio W" value={Number(info.scale.x.toFixed(1))} min={-1000} max={1000} step={0.1} decimals={1} unit="%" onChange={(v) => numbers({ x: v || 0.1 })} />
+          <PropSlider label="Scale ratio H" value={Number(info.scale.y.toFixed(1))} min={-1000} max={1000} step={0.1} decimals={1} unit="%" onChange={(v) => numbers({ y: v || 0.1 })} />
+        </>
+      )}
+      {(info.mode === 'scaleRotate' || info.mode === 'scale') && (
+        <label className="check prop-check">
+          <input type="checkbox" checked={info.keepAspect} onChange={(e) => setTransformPrefs({ keepAspect: e.target.checked })} /> Keep aspect ratio
+        </label>
+      )}
+      {affineMode && info.scale && info.angle !== null && (
+        <PropSlider label="Rotation angle" value={Number(info.angle.toFixed(1))} min={-180} max={180} step={0.1} decimals={1} onChange={(v) => numbers({ angle: v })} />
+      )}
+      {info.mode === 'mesh' && (
+        <>
+          <PropSlider label="Number of horizontal lattice points" value={info.latticeX} min={2} max={16} onChange={(v) => setTransformPrefs({ latticeX: v })} />
+          <PropSlider label="Number of vertical lattice points" value={info.latticeY} min={2} max={16} onChange={(v) => setTransformPrefs({ latticeY: v })} />
+        </>
+      )}
+      <div className="prop-row">
+        <span className="prop-label">Interpolation method</span>
+        <select className="prop-select" aria-label="Interpolation method" value={info.interpolation} onChange={(e) => setTransformPrefs({ interpolation: e.target.value as Interpolation })}>
+          {INTERPOLATIONS.map(([id, label]) => (
+            <option key={id} value={id}>
+              {label}
+            </option>
+          ))}
+        </select>
+      </div>
     </div>
   );
 }

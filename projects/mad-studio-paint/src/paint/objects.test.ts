@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { contentBounds, idsTouching, pickObject, removeObjects, transformContent, type Content } from './objects';
+import { contentBounds, idsTouching, localAffine, pickObject, removeObjects, transformContent, warpContent, type Content } from './objects';
 import { DEFAULT_TEXT_STYLE, type Balloon, type TextBox } from './text';
 import { DEFAULT_BRUSH } from './tools';
 
@@ -37,5 +37,29 @@ describe('layer objects', () => {
     expect(box.x).toBeLessThanOrEqual(200);
     expect(box.x + box.w).toBeGreaterThanOrEqual(240);
     expect(removeObjects(content, new Set(['b', 'l']))).toMatchObject({ strokes: [], balloons: [] });
+  });
+});
+
+describe('non-affine transforms of objects', () => {
+  it('maps line points exactly and widths by the local scale', () => {
+    const c: Content = { strokes: [line('a', 10), line('b', 40)], texts: [], balloons: [], panels: [{ id: 'p', points: [{ x: 0, y: 0 }, { x: 10, y: 0 }, { x: 10, y: 10 }] }] };
+    // A perspective-like map: rows further down are wider.
+    const map = (p: { x: number; y: number }) => ({ x: p.x * (1 + p.y / 100), y: p.y * 2 });
+    const out = warpContent(c, new Set(['a', 'p']), map);
+    expect(out.strokes[0].points.map((p) => [Math.round(p.x * 1e9) / 1e9, p.y])).toEqual([
+      [0, 20],
+      [55, 20],
+      [110, 20],
+    ]);
+    // Untouched objects stay; the width follows the area scale near the line (≈ √(1.1 · 2)).
+    expect(out.strokes[1]).toBe(c.strokes[1]);
+    expect(out.strokes[0].brush.size).toBeCloseTo(4 * Math.sqrt(1.1 * 2), 1);
+    expect(out.panels[0].points[2].x).toBeCloseTo(11, 9);
+    expect(out.panels[0].points[2].y).toBe(20);
+  });
+
+  it('approximates a map by its local affine part', () => {
+    const m = localAffine((p) => ({ x: 2 * p.x + 3, y: p.y - p.x }), { x: 5, y: 5 });
+    expect(m.map((v) => Math.round(v * 1e6) / 1e6)).toEqual([2, -1, 0, 1, 3, 0]);
   });
 });

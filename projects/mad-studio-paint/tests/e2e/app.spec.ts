@@ -262,7 +262,8 @@ test('free transform: ⌘T, drag to move, Enter confirms', async ({ page }) => {
   expect(await layerAlpha(page, 50, 50)).toBe(255);
   await page.keyboard.press('ControlOrMeta+t');
   expect((await state(page)).hint).toContain('Enter');
-  await drag(page, [50, 50], [250, 150]);
+  // (The + in the middle is the reference point: grab the image beside it.)
+  await drag(page, [40, 60], [240, 160]);
   await page.keyboard.press('Enter');
   expect(await layerAlpha(page, 50, 50)).toBe(0);
   expect(await layerAlpha(page, 250, 150)).toBe(255);
@@ -1427,9 +1428,9 @@ test('Move layer, ⌘T and Flip move vector lines, not pixels; Select overlappin
   await drag(page, [200, 150], [230, 170], 6);
   expect(await first()).toEqual({ x: 130, y: 120, size: 6 });
   expect(await layerAlpha(page, 150, 120)).toBeGreaterThan(200);
-  // ⌘T, drag inside the box, Enter.
+  // ⌘T, drag inside the box (beside the reference point in the middle), Enter.
   await page.keyboard.press('ControlOrMeta+t');
-  await drag(page, [160, 170], [160, 190], 6);
+  await drag(page, [150, 180], [150, 200], 6);
   await page.keyboard.press('Enter');
   expect(await first()).toEqual({ x: 130, y: 140, size: 6 });
   await page.keyboard.press('ControlOrMeta+z');
@@ -3685,5 +3686,80 @@ test('Filter menu: previewed filters, filters without settings, the centre × on
   await expect(perlin).toBeHidden();
   expect(await alpha(300, 20)).toBe(255);
   expect(await alpha(300, 280)).toBe(0);
+  expect(errors).toEqual([]);
+});
+
+test('Edit > Transform modes: free transform corners, perspective, mesh; Tool Property settings and flip', async ({ page }) => {
+  const errors = await boot(page);
+  // A black square 100..199 on a transparent layer.
+  await page.evaluate(() => {
+    const a = window.__madPaint.actions;
+    a.setDrawingColor('#000000');
+    a.setSelection({ width: 400, height: 300, data: new Uint8Array(400 * 300).map((_: number, i: number) => (i % 400 >= 100 && i % 400 < 200 && i >= 100 * 400 && i < 200 * 400 ? 255 : 0)) });
+    a.fillWithColor();
+    a.deselect();
+  });
+  const alpha = (x: number, y: number) => layerAlpha(page, x, y);
+  const settings = page.getByTestId('transform-settings');
+  // Edit > Transform has the reference's modes.
+  await openMenu(page, 'Edit', 'Transform', 'freeTransform');
+  await page.locator('[data-testid=subtool-panel] .palette-tab', { hasText: 'Tool Settings' }).click();
+  await expect(settings).toBeVisible();
+  await expect(settings.getByRole('combobox', { name: 'Transformation mode' })).toHaveValue('free');
+  // Free transform: a corner goes anywhere.
+  await drag(page, [100, 100], [60, 60]);
+  await page.keyboard.press('Enter');
+  await expect(settings).toBeHidden();
+  expect(await alpha(70, 75)).toBe(255);
+  expect(await alpha(150, 150)).toBe(255);
+  expect(await alpha(70, 190)).toBe(0);
+  await page.keyboard.press('ControlOrMeta+z');
+  expect(await alpha(70, 75)).toBe(0);
+  expect(await alpha(100, 100)).toBe(255);
+
+  // Perspective (chosen in the Tool Property palette): the top corners move towards each other.
+  await page.keyboard.press('ControlOrMeta+t');
+  await settings.getByRole('combobox', { name: 'Transformation mode' }).selectOption('perspective');
+  await drag(page, [100, 100], [130, 100]);
+  await page.keyboard.press('Enter');
+  expect(await alpha(110, 103)).toBe(0);
+  expect(await alpha(150, 103)).toBe(255);
+  expect(await alpha(188, 103)).toBe(0);
+  expect(await alpha(103, 196)).toBe(255);
+  await page.keyboard.press('ControlOrMeta+z');
+
+  // Mesh transformation: a 4 × 4 lattice; dragging a lattice point bends the square.
+  await openMenu(page, 'Edit', 'Transform', 'transformMesh');
+  await expect(settings.getByRole('spinbutton', { name: 'Number of horizontal lattice points' })).toHaveValue('4');
+  await drag(page, [100, 133.3], [60, 133.3]);
+  await page.keyboard.press('Enter');
+  expect(await alpha(75, 133)).toBe(255);
+  expect(await alpha(75, 198)).toBe(0);
+  await page.keyboard.press('ControlOrMeta+z');
+
+  // Scale ratio and flip in the Tool Property palette; the reference point sits in the middle.
+  await page.keyboard.press('ControlOrMeta+t');
+  await expect(settings.getByRole('spinbutton', { name: 'Position X' })).toHaveValue('150');
+  await settings.getByRole('spinbutton', { name: 'Scale ratio W' }).fill('50');
+  // Keep aspect ratio: the height follows.
+  await expect(settings.getByRole('spinbutton', { name: 'Scale ratio H' })).toHaveValue('50');
+  await settings.getByRole('button', { name: 'Confirm transformation' }).click();
+  expect(await alpha(130, 130)).toBe(255);
+  expect(await alpha(110, 110)).toBe(0);
+  await page.keyboard.press('ControlOrMeta+z');
+  // Dragging the + moves the reference point.
+  await page.keyboard.press('ControlOrMeta+t');
+  await drag(page, [150, 150], [170, 120]);
+  await expect(settings.getByRole('combobox', { name: 'Reference point' })).toHaveValue('free');
+  await expect(settings.getByRole('spinbutton', { name: 'Position X' })).toHaveValue('170');
+  expect(await alpha(150, 150)).toBe(255);
+  await page.keyboard.press('Escape');
+  // Flip around a reference point on the left edge: the square lands left of it.
+  await page.keyboard.press('ControlOrMeta+t');
+  await settings.getByRole('combobox', { name: 'Reference point' }).selectOption('left');
+  await settings.getByRole('button', { name: 'Flip horizontal' }).click();
+  await page.keyboard.press('Enter');
+  expect(await alpha(50, 150)).toBe(255);
+  expect(await alpha(150, 150)).toBe(0);
   expect(errors).toEqual([]);
 });

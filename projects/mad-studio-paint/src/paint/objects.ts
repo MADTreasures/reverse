@@ -88,6 +88,42 @@ export function transformContent(c: Content, which: Set<string> | null, m: Affin
   };
 }
 
+/** The affine map that best matches `map` near `p` (from finite differences). */
+export function localAffine(map: (p: Pt) => Pt, p: Pt, step = 1): Affine {
+  const c = map(p);
+  const ex = map({ x: p.x + step, y: p.y });
+  const ey = map({ x: p.x, y: p.y + step });
+  const a = (ex.x - c.x) / step;
+  const b = (ex.y - c.y) / step;
+  const cc = (ey.x - c.x) / step;
+  const d = (ey.y - c.y) / step;
+  return [a, b, cc, d, c.x - a * p.x - cc * p.y, c.y - b * p.x - d * p.y];
+}
+
+/**
+ * Applies a non-affine map (perspective, mesh) to the objects in `which`: line and frame points
+ * follow it exactly; line widths, text and balloons follow its local affine approximation.
+ */
+export function warpContent(c: Content, which: Set<string> | null, map: (p: Pt) => Pt, opts: TransformOptions = {}): Content {
+  const picked = (id: string) => !which || which.has(id);
+  const carried = textsIn(
+    c,
+    c.balloons.filter((b) => picked(b.id)),
+  );
+  const centre = (pts: Pt[]): Pt => ({ x: pts.reduce((s, p) => s + p.x, 0) / Math.max(1, pts.length), y: pts.reduce((s, p) => s + p.y, 0) / Math.max(1, pts.length) });
+  return {
+    strokes: c.strokes.map((s) => {
+      if (!picked(s.id)) return s;
+      const [shaped] = transformStrokes([s], localAffine(map, centre(s.points)), opts.scaleWidth ?? true);
+      return { ...shaped, points: s.points.map((p, i) => ({ ...shaped.points[i], ...map(p) })) };
+    }),
+    balloons: c.balloons.map((b) => (picked(b.id) ? transformBalloon(b, localAffine(map, { x: b.x + b.w / 2, y: b.y + b.h / 2 }), opts.scaleLine) : b)),
+    texts: c.texts.map((t) => (picked(t.id) || carried.has(t.id) ? transformText(t, localAffine(map, textCenter(t)), opts.scaleText ?? !t.wrap) : t)),
+    panels: c.panels.map((p) => (picked(p.id) ? { ...p, points: p.points.map(map) } : p)),
+    ...(c.gradient ? { gradient: picked(GRADIENT_ID) ? { ...c.gradient, a: map(c.gradient.a), b: map(c.gradient.b) } : c.gradient } : {}),
+  };
+}
+
 /** Bounds of the objects in `which` (all when null). */
 export function contentBounds(c: Content, which: Set<string> | null = null): Box | null {
   const picked = (id: string) => !which || which.has(id);

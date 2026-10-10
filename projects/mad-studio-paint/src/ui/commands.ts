@@ -9,7 +9,7 @@ import * as light from '../store/lightTableActions';
 import * as sound from '../store/soundActions';
 import { copy, cut, hasClip, pasteImage } from '../store/clipboard';
 import { drawingColor, getState, setState } from '../store/store';
-import { cancelTransform, confirmTransform, isTransforming, startTransform } from '../tools/transform';
+import { cancelTransform, confirmTransform, flipTransform, isTransforming, startTransform } from '../tools/transform';
 import { CORRECTIONS, correctionLabel, defaultCorrection, type CorrectionType } from '../paint/tonal';
 import { FILTERS } from '../paint/filters';
 import { applyFilterNow } from '../store/filterActions';
@@ -35,6 +35,8 @@ const canEdit = () => actions.editBlocker() === null;
 /** Text layers cannot be drawn on, but can be moved, flipped and transformed. */
 const canTransform = () => actions.transformBlocker() === null;
 const notTransforming = () => !isTransforming();
+/** Edit > Transform starts a transform, or switches the mode of the one in progress. */
+const canStartTransform = () => isTransforming() || canTransform();
 const hasLayer = () => actions.activeLayer() !== null;
 const hasMask = () => Boolean(actions.activeLayer()?.mask);
 
@@ -163,14 +165,21 @@ export const COMMANDS: Command[] = [
   },
   { id: 'clearOutside', label: 'Delete outside selected area', keys: ['Shift+backspace', 'Shift+delete'], run: () => actions.clearOutsideSelection(), enabled: () => canEdit() && hasSelection() },
   { id: 'fill', label: 'Fill', keys: ['Alt+backspace', 'Alt+delete'], run: () => actions.fillWithColor(), enabled: canEdit },
-  { id: 'transform', label: 'Transform: Scale up/Scale down/Rotate', keys: ['Mod+t'], run: () => void startTransform('scaleRotate'), enabled: () => canTransform() && notTransforming() },
-  { id: 'freeTransform', label: 'Transform: Free transform', keys: ['Mod+Shift+t'], run: () => void startTransform('free'), enabled: () => canTransform() && notTransforming() },
+  { id: 'transform', label: 'Scale up/Scale down/Rotate', keys: ['Mod+t'], run: () => void startTransform('scaleRotate'), enabled: canStartTransform },
+  { id: 'transformScale', label: 'Scale up/Scale down', run: () => void startTransform('scale'), enabled: canStartTransform },
+  { id: 'transformRotate', label: 'Rotate', run: () => void startTransform('rotate'), enabled: canStartTransform },
+  { id: 'freeTransform', label: 'Free transform', keys: ['Mod+Shift+t'], run: () => void startTransform('free'), enabled: canStartTransform },
+  { id: 'transformDistort', label: 'Distort', run: () => void startTransform('distort'), enabled: canStartTransform },
+  { id: 'transformSkew', label: 'Skew', run: () => void startTransform('skew'), enabled: canStartTransform },
+  { id: 'transformPerspective', label: 'Perspective', run: () => void startTransform('perspective'), enabled: canStartTransform },
+  { id: 'transformMesh', label: 'Mesh transformation', run: () => void startTransform('mesh'), enabled: canStartTransform },
   { id: 'confirmTransform', label: 'Confirm transform', keys: ['enter'], run: () => confirmTransform(), enabled: () => isTransforming() },
   { id: 'cancelTransform', label: 'Cancel transform', keys: ['escape'], run: () => cancelTransform(), enabled: () => isTransforming() },
   { id: 'canvasSize', label: 'Change canvas size…', run: () => openDialog('canvasSize'), enabled: notTransforming },
   { id: 'imageResolution', label: 'Change image resolution…', run: () => openDialog('imageResolution'), enabled: notTransforming },
-  { id: 'flipLayerH', label: 'Flip layer horizontal', run: () => actions.flipLayer(true), enabled: canTransform },
-  { id: 'flipLayerV', label: 'Flip layer vertical', run: () => actions.flipLayer(false), enabled: canTransform },
+  // While transforming they flip the box at its reference point.
+  { id: 'flipLayerH', label: 'Flip horizontal', run: () => (isTransforming() ? flipTransform(true) : actions.flipLayer(true)), enabled: canStartTransform },
+  { id: 'flipLayerV', label: 'Flip vertical', run: () => (isTransforming() ? flipTransform(false) : actions.flipLayer(false)), enabled: canStartTransform },
   // Layer
   { id: 'newRasterLayer', label: 'New raster layer', keys: ['Mod+Shift+n'], run: () => void actions.addRasterLayer() },
   { id: 'newVectorLayer', label: 'New vector layer', run: () => void actions.addVectorLayer() },
