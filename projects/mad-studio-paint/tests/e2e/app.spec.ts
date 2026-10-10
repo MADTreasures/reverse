@@ -4493,3 +4493,77 @@ test('selection functions: color gamut, expand/shrink with corner type, blur bor
   ]);
   expect(errors).toEqual([]);
 });
+
+test('Magnetic lasso: a rough lasso round a drawing snaps to its outline; also for Lasso fill', async ({ page }) => {
+  const errors = await boot(page);
+  // A black frame (4 px wide) from (100, 100) to (300, 250) on the layer.
+  await selectTool(page, 'select');
+  await drag(page, [100, 100], [300, 250]);
+  await page.evaluate(() => {
+    const a = window.__madPaint.actions;
+    a.setDrawingColor('#000000');
+    a.fillWithColor();
+    a.growSelection(-4);
+    a.clearLayer();
+    a.deselect();
+  });
+  const bounds = () =>
+    page.evaluate(() => {
+      const m = window.__madPaint.useStore.getState().selection;
+      if (!m) return null;
+      let x0 = Infinity;
+      let x1 = -1;
+      let y0 = Infinity;
+      let y1 = -1;
+      for (let i = 0; i < m.data.length; i++) {
+        if (m.data[i] < 128) continue;
+        const x = i % m.width;
+        const y = Math.floor(i / m.width);
+        x0 = Math.min(x0, x);
+        x1 = Math.max(x1, x);
+        y0 = Math.min(y0, y);
+        y1 = Math.max(y1, y);
+      }
+      return [x0, y0, x1, y1];
+    });
+  /** A lasso a few pixels outside the frame, all the way round. */
+  const lasso = async (d: number) => {
+    const pts: [number, number][] = [];
+    const [l, t, r, b] = [100 - d, 100 - d, 300 + d, 250 + d];
+    for (let x = l; x <= r; x += 10) pts.push([x, t]);
+    for (let y = t; y <= b; y += 10) pts.push([r, y]);
+    for (let x = r; x >= l; x -= 10) pts.push([x, b]);
+    for (let y = b; y >= t; y -= 10) pts.push([l, y]);
+    const s = await Promise.all(pts.map(([x, y]) => docToScreen(page, x, y)));
+    await page.mouse.move(s[0].x, s[0].y);
+    await page.mouse.down();
+    for (const p of s.slice(1)) await page.mouse.move(p.x, p.y);
+    await page.mouse.up();
+  };
+  // A plain lasso keeps where it was drawn …
+  await page.evaluate(() => window.__madPaint.actions.setSubTool('select', 'sel-lasso'));
+  await lasso(6);
+  const plain = (await bounds())!;
+  expect(plain[0]).toBeLessThanOrEqual(95);
+  await page.keyboard.press('ControlOrMeta+d');
+  // … the magnetic one hugs the frame's outside edge.
+  await page.evaluate(() => window.__madPaint.actions.setSubTool('select', 'sel-magnetic'));
+  await page.getByRole('button', { name: 'Tool Settings', exact: true }).click();
+  await expect(page.getByLabel('Magnetic lasso')).toBeChecked();
+  await lasso(6);
+  const snapped = (await bounds())!;
+  for (const [got, want] of snapped.map((v, i) => [v, [99, 99, 300, 250][i]])) expect(Math.abs(got - want)).toBeLessThanOrEqual(1);
+  await page.keyboard.press('ControlOrMeta+d');
+  // Lasso fill with the magnet on: the fill stops at the frame.
+  await page.evaluate(() => {
+    const a = window.__madPaint.actions;
+    a.setSubTool('fill', 'fill-lasso');
+    a.updateSubTool('fill-lasso', { magnet: 3 });
+    a.setDrawingColor('#ff0000');
+  });
+  await lasso(6);
+  const alpha = (x: number, y: number) => page.evaluate(([px, py]) => window.__madPaint.engine.sampleLayer(window.__madPaint.useStore.getState().activeLayerId, px, py)?.[3] ?? -1, [x, y]);
+  expect(await alpha(99, 150)).toBe(255);
+  expect(await alpha(94, 150)).toBe(0);
+  expect(errors).toEqual([]);
+});

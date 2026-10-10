@@ -296,6 +296,8 @@ export interface SubTool {
   /** Zoom tool: a click zooms out instead of in. */
   zoomOut?: boolean;
   fill?: FillSettings;
+  /** Lasso, Lasso fill, Enclose and fill: Magnetic lasso strength 1 … 5 (0 or absent: off). */
+  magnet?: number;
 
   /** Rectangle / ellipse start from the centre. */
   fromCenter?: boolean;
@@ -690,6 +692,7 @@ export const DEFAULT_SUB_TOOLS: SubTool[] = [
   { id: 'sel-lasso', tool: 'select', name: 'Lasso', selectShape: 'lasso' },
   { id: 'sel-polyline', tool: 'select', name: 'Polyline', selectShape: 'polyline' },
   { id: 'sel-shrink', tool: 'select', name: 'Shrink selection', selectShape: 'shrink', fill: { ...FILL_OTHERS, mode: 'enclose', target: 'transparent', expand: 0, closeGap: 1 } },
+  { id: 'sel-magnetic', tool: 'select', name: 'Magnetic lasso', selectShape: 'lasso', magnet: 3 },
   { id: 'sel-pen', tool: 'select', name: 'Selection pen', selectShape: 'pen', brush: brush({ size: 30, sizePressure: false, hardness: 1, antiAlias: 1, stabilization: 0 }) },
   { id: 'sel-erase', tool: 'select', name: 'Erase selection', selectShape: 'erase', brush: brush({ size: 30, sizePressure: false, hardness: 1, antiAlias: 1, stabilization: 0, mode: 'erase' }) },
   { id: 'auto-layer', tool: 'autoSelect', name: 'Refer to editing layer only', fill: { ...FILL_LAYER, closeGap: 0 } },
@@ -780,6 +783,9 @@ export const DEFAULT_SUB_TOOLS: SubTool[] = [
 export const subToolsOf = (subTools: SubTool[], tool: ToolId) => subTools.filter((s) => s.tool === tool);
 
 /** Keeps user edits but adds sub tools introduced by newer versions and drops unknown ones. */
+/** Sub tools drawn with a lasso (they can use the Magnetic lasso). */
+export const usesLasso = (t: SubTool): boolean => t.selectShape === 'lasso' || t.fill?.mode === 'lasso' || t.fill?.mode === 'enclose';
+
 export function mergeSubTools(saved: unknown): SubTool[] {
   if (!Array.isArray(saved)) return structuredClone(DEFAULT_SUB_TOOLS);
   const byId = new Map<string, SubTool>();
@@ -800,6 +806,7 @@ export function mergeSubTools(saved: unknown): SubTool[] {
       ...(def.figureCorners !== undefined && typeof s.figureCorners === 'number' && Number.isFinite(s.figureCorners) ? { figureCorners: Math.max(3, Math.min(100, Math.round(s.figureCorners))) } : {}),
       ...(def.figureRound !== undefined && typeof s.figureRound === 'number' && Number.isFinite(s.figureRound) ? { figureRound: Math.max(0, Math.min(100, s.figureRound)) } : {}),
       ...(def.figureFill !== undefined && (s.figureFill === 'line' || s.figureFill === 'fill' || s.figureFill === 'both') ? { figureFill: s.figureFill } : {}),
+      ...(usesLasso(def) && typeof s.magnet === 'number' && Number.isFinite(s.magnet) ? { magnet: Math.max(0, Math.min(5, Math.round(s.magnet))) } : {}),
       ...(def.tool === 'eraser' && (s.vectorErase === 'touched' || s.vectorErase === 'intersection' || s.vectorErase === 'whole') ? { vectorErase: s.vectorErase } : {}),
       ...(def.tool === 'eraser' && typeof s.vectorReferAll === 'boolean' ? { vectorReferAll: s.vectorReferAll } : {}),
       ...(def.scaleLineWidth !== undefined && typeof s.scaleLineWidth === 'boolean' ? { scaleLineWidth: s.scaleLineWidth } : {}),

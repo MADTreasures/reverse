@@ -24,6 +24,7 @@ import { getSurface } from '../engine/surfaces';
 import * as actions from '../store/actions';
 import { drawingColor, getState, setState } from '../store/store';
 import { referencePixels } from './reference';
+import { edgeMap, hasAny, inkMap, magnetRadius, snapToEdge } from '../paint/magnet';
 import { CurveInput } from './curveInput';
 import { sampleCurve } from '../paint/curves';
 import type { Modifiers, OverlayView, PointerInfo, ToolSession } from './types';
@@ -817,6 +818,34 @@ export class FillSession implements ToolSession {
  * Enclose and fill (fills the closed areas inside the lasso) and Lasso fill (fills the lasso
  * itself): drag around the area.
  */
+/**
+ * Magnetic lasso: lasso points snap to the empty side of the lines of the reference layers (or,
+ * without any there, of the editing layer), within a distance set by the strength.
+ */
+class Magnet {
+  private constructor(
+    private edges: Uint8Array,
+    private w: number,
+    private h: number,
+    private radius: number,
+  ) {}
+
+  static of(sub: SubTool): Magnet | null {
+    if (!sub.magnet) return null;
+    const s = getState();
+    const { width: w, height: h } = s.doc;
+    const edit = actions.editTarget(s)?.surfaceId ?? s.activeLayerId;
+    let ink = inkMap(referencePixels(s.doc, edit, 'reference').data, w, h);
+    if (!hasAny(ink)) ink = inkMap(referencePixels(s.doc, edit, 'layer').data, w, h);
+    // The strength is a distance on screen.
+    return new Magnet(edgeMap(ink, w, h), w, h, magnetRadius(sub.magnet) / Math.max(0.01, s.view.zoom));
+  }
+
+  snap(x: number, y: number): Pt {
+    return snapToEdge(this.edges, this.w, this.h, x, y, this.radius);
+  }
+}
+
 export class LassoFillSession implements ToolSession {
   private points: Pt[] = [];
   readonly cursor = 'crosshair';
@@ -826,15 +855,22 @@ export class LassoFillSession implements ToolSession {
     return new LassoFillSession(sub, p);
   }
 
+  private magnet: Magnet | null;
+
   private constructor(
     private sub: SubTool,
     private start: PointerInfo,
   ) {
-    this.points.push({ x: start.x, y: start.y });
+    this.magnet = Magnet.of(sub);
+    this.points.push(this.at(start));
+  }
+
+  private at(p: Pt): Pt {
+    return this.magnet ? this.magnet.snap(p.x, p.y) : { x: p.x, y: p.y };
   }
 
   move(p: PointerInfo, coalesced: PointerInfo[]): void {
-    for (const q of coalesced.length ? coalesced : [p]) this.points.push({ x: q.x, y: q.y });
+    for (const q of coalesced.length ? coalesced : [p]) this.points.push(this.at(q));
   }
 
   up(p: PointerInfo): void {
@@ -1113,6 +1149,8 @@ export class SelectSession implements ToolSession {
   private shiftAtStart: boolean;
   readonly cursor = 'crosshair';
 
+  private magnet: Magnet | null;
+
   constructor(
     private sub: SubTool,
     p: PointerInfo,
@@ -1121,7 +1159,8 @@ export class SelectSession implements ToolSession {
     this.last = p;
     this.op = selectionOpFor(p);
     this.shiftAtStart = p.shift;
-    this.points.push({ x: p.x, y: p.y });
+    this.magnet = sub.selectShape === 'lasso' || sub.selectShape === 'shrink' ? Magnet.of(sub) : null;
+    this.points.push(this.magnet ? this.magnet.snap(p.x, p.y) : { x: p.x, y: p.y });
   }
 
   modifiers(m: Modifiers): void {
@@ -1131,7 +1170,7 @@ export class SelectSession implements ToolSession {
   move(p: PointerInfo): void {
     this.last = p;
     this.travelled = Math.max(this.travelled, Math.hypot(p.sx - this.start.sx, p.sy - this.start.sy));
-    if (this.sub.selectShape === 'lasso' || this.sub.selectShape === 'shrink') this.points.push({ x: p.x, y: p.y });
+    if (this.sub.selectShape === 'lasso' || this.sub.selectShape === 'shrink') this.points.push(this.magnet ? this.magnet.snap(p.x, p.y) : { x: p.x, y: p.y });
   }
 
   private box(): Rect {

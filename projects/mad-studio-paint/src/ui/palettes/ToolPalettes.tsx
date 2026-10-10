@@ -17,7 +17,7 @@ import { GradientBar } from '../controls/GradientBar';
 import { tipAlphaUrl } from '../../engine/materials';
 import { openDialog } from '../overlays';
 import { openColorSettings } from '../dialogs/ColorSettingsDialog';
-import { entryForTool, isSpecialCurve, PALETTE_ENTRIES, PALETTE_LAYOUT, subToolsOf, toolInfo, type CorrectSettings, type FigureFill, type FillReference, type SubTool, type ToolId } from '../../paint/tools';
+import { entryForTool, isSpecialCurve, PALETTE_ENTRIES, PALETTE_LAYOUT, subToolsOf, toolInfo, usesLasso, type CorrectSettings, type FigureFill, type FillReference, type SubTool, type ToolId } from '../../paint/tools';
 import { Icon } from '../controls/Icons';
 import { PropSlider } from '../controls/PropSlider';
 import { DynamicsPopover, dynamicsOn, type DynamicsKind } from './BrushSettingsPanels';
@@ -280,6 +280,15 @@ export function ToolProperty() {
             onPressure={openDynamics('density')}
           />
         </>
+      )}
+      {usesLasso(sub) && (
+        <div className="prop-row column">
+          <label className="check prop-check" title="The lasso snaps to the lines of the reference layer (else of the editing layer)">
+            <input type="checkbox" checked={Boolean(sub.magnet)} onChange={(e) => update({ magnet: e.target.checked ? 3 : 0 })} />
+            Magnetic lasso
+          </label>
+          {Boolean(sub.magnet) && <PropSlider testId="prop-magnet" label="Magnet strength" value={sub.magnet ?? 3} min={1} max={5} onChange={(v) => update({ magnet: v })} />}
+        </div>
       )}
       {f && (
         <>
