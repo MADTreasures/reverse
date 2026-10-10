@@ -3319,6 +3319,8 @@ test('light table: layers dragged from the Layer palette, reordering, two select
       const py = 150 + l.y;
       return [Math.round(a * px + c * py + e), Math.round(b * px + d * py + f)];
     });
+  // After Cancel the view's matrix is back on the next frames.
+  await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
   const keyOnScreen = await screenOf();
   await page.evaluate(() => window.__madPaint.runCommand('centerCanvas'));
   await center.getByRole('button', { name: 'OK' }).click();
@@ -3328,8 +3330,8 @@ test('light table: layers dragged from the Layer palette, reordering, two select
     [19.7, -3.5, -10],
     [-19.7, 3.5, 10],
   ]);
-  await page.waitForTimeout(50);
-  expect(await screenOf()).toEqual(keyOnScreen);
+  // The view's matrix follows the store on the next frame.
+  await expect.poll(screenOf).toEqual(keyOnScreen);
   // One undo step for the light table layers.
   await page.evaluate(() => window.__madPaint.actions.undo());
   expect(await placements()).toEqual([
