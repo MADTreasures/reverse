@@ -151,6 +151,12 @@ function onKeyDown(e: KeyboardEvent): void {
     }
     return;
   }
+  // Tool dialogs preview their result live: Space still starts and stops playback to listen to it.
+  if (overlays.dialog?.kind === 'tool' && e.code === 'Space' && !isTextInput(e.target)) {
+    e.preventDefault();
+    void runCommand('playPause');
+    return;
+  }
   if (overlays.dialog || isTextInput(e.target)) return;
 
   const s = useStore.getState();

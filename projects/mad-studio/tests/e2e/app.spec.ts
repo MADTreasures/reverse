@@ -417,6 +417,78 @@ test('piano roll: note properties – event lane, properties window, colour grou
   expect(drawn.slide).toBeUndefined();
 });
 
+test('piano roll tools: glue and quick chop, arpeggiate with live preview, stamps, scale snap, chord progression', async ({ page }) => {
+  await boot(page);
+  const roll = await openLeadInPianoRoll(page);
+  const set = (notes: any[]) =>
+    page.evaluate(({ patternId, channelId, notes }) => window.__madStudio.actions.setChannelNotes(patternId, channelId, notes, 'test'), {
+      patternId: roll.patternId,
+      channelId: roll.channelId,
+      notes,
+    });
+  const keysAt = (list: any[]) => list.map((n: any) => [n.start, n.key, n.length]);
+
+  // Glue (Ctrl+G) joins touching notes, quick chop (Ctrl+U) slices by the snap (Main = Line at this zoom).
+  await set([
+    { id: 'a', key: 60, start: 0, length: 24, velocity: 0.8 },
+    { id: 'b', key: 60, start: 24, length: 24, velocity: 0.8 },
+  ]);
+  await page.mouse.click(roll.at(0, 60).x + 2, roll.box.y + 10); // a click in the ruler focuses the piano roll
+  await page.keyboard.press('ControlOrMeta+g');
+  expect(keysAt(await roll.notes())).toEqual([[0, 60, 48]]);
+  await page.keyboard.press('ControlOrMeta+u');
+  const chopped = await roll.notes();
+  expect(chopped.length).toBeGreaterThan(1);
+  expect(chopped.reduce((sum: number, n: any) => sum + n.length, 0)).toBe(48);
+
+  // Arpeggiate (Alt+A): the dialog previews live, Cancel restores, Accept is one undo step.
+  await set([60, 64, 67].map((key) => ({ id: `c${key}`, key, start: 0, length: 96, velocity: 0.8 })));
+  await page.keyboard.press('Alt+a');
+  const dialog = page.getByRole('dialog', { name: 'Arpeggiate' });
+  await expect(dialog).toBeVisible();
+  await expect.poll(async () => (await roll.notes()).length).toBe(4);
+  await dialog.getByRole('button', { name: 'Cancel' }).click();
+  await expect(dialog).toBeHidden();
+  expect(keysAt(await roll.notes())).toEqual([[0, 60, 96], [0, 64, 96], [0, 67, 96]]);
+  await page.keyboard.press('Alt+a');
+  await dialog.getByLabel('Pattern').selectOption('down');
+  await expect.poll(async () => (await roll.notes()).map((n: any) => n.key)).toEqual([67, 64, 60, 67]);
+  await dialog.getByRole('button', { name: 'Accept' }).click();
+  await page.keyboard.press('ControlOrMeta+z');
+  expect(keysAt(await roll.notes())).toEqual([[0, 60, 96], [0, 64, 96], [0, 67, 96]]);
+
+  // Stamp: a minor chord with one click, then normal entry again.
+  await set([]);
+  const win = page.locator('[data-window="pianoRoll"]');
+  await win.getByRole('button', { name: 'Stamp' }).click();
+  await page.getByRole('menuitem', { name: 'Chords' }).hover();
+  await page.getByRole('menuitem', { name: /^\S* ?Minor$/ }).click();
+  const p = roll.at(96 + 4, 57);
+  await page.mouse.click(p.x, p.y);
+  expect((await roll.notes()).map((n: any) => n.key)).toEqual([57, 60, 64]);
+  expect((await state(page)).ui.pianoRoll.stamp).toBeNull();
+
+  // Scale highlighting: C major with snap to scale; drawing on C#5 lands on D5.
+  await win.getByRole('button', { name: 'Scale' }).click();
+  await page.getByRole('menuitem', { name: 'Major (Ionian)' }).click();
+  expect((await state(page)).project.scale).toEqual({ root: 0, type: 'major' });
+  await win.getByRole('button', { name: 'Scale' }).click();
+  await page.getByRole('menuitem', { name: 'Snap to scale' }).click();
+  const q = roll.at(288 + 4, 61);
+  await page.mouse.click(q.x, q.y);
+  expect((await roll.notes()).filter((n: any) => n.start === 288).map((n: any) => n.key)).toEqual([62]);
+
+  // Chord progression (Alt+P) in the project key: four bars of triads from the last click.
+  await set([]);
+  await page.keyboard.press('Alt+p');
+  const chords = page.getByRole('dialog', { name: 'Generate chord progression' });
+  await expect(chords).toBeVisible();
+  await chords.getByRole('button', { name: 'Accept' }).click();
+  const generated = await roll.notes();
+  expect(generated).toHaveLength(12);
+  expect(generated.every((n: any) => [0, 2, 4, 5, 7, 9, 11].includes(n.key % 12))).toBe(true);
+});
+
 test('playlist: clip menu and mute tool mute clips, track menu inserts a track, double-click opens the piano roll', async ({ page }) => {
   await boot(page);
   await page.evaluate(() => window.__madStudio.actions.setUi((d: any) => void (d.windows.channelRack.open = false)));

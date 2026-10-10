@@ -15,6 +15,7 @@ import { MAX_BPM, MIN_BPM, ticksPerBar } from './timing';
 import { CURVE_MODES } from './automation';
 import { MAX_PLUGIN_LATENCY_OFFSET, MAX_TRACK_LATENCY_OFFSET_MS } from './latency';
 import { NOTE_COLOR_COUNT, NOTE_PROPS, setNoteValue } from './notes';
+import { SCALES, type ScaleSpec, type ScaleType } from './scales';
 import type {
   AutomationData,
   AutomationPoint,
@@ -401,5 +402,11 @@ export function parseProject(raw: unknown): Project {
     samples,
     pdc: bool(raw.pdc, true),
     pdcAutomation: bool(raw.pdcAutomation, true),
+    ...parseScale(raw.scale),
   };
+}
+
+function parseScale(v: unknown): { scale?: ScaleSpec } {
+  if (!isObj(v) || typeof v.type !== 'string' || !SCALES.some((s) => s.type === v.type)) return {};
+  return { scale: { root: Math.round(num(v.root, 0, 0, 11)), type: v.type as ScaleType } };
 }

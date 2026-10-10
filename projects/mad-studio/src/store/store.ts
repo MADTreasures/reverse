@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { DEFAULT_VELOCITY, createEmptyProject } from '../model/defaults';
 import type { NotePropKey, NoteStyle } from '../model/notes';
+import type { StampId } from '../model/scales';
 import type { SnapId } from '../model/timing';
 import type { Id, Project } from '../model/types';
 
@@ -41,6 +42,10 @@ export interface PianoRollView {
   /** Note property shown and edited in the event lane under the notes. */
   lane: NotePropKey;
   ghostNotes: boolean;
+  /** Chord or scale placed by the next click (FL Studio: Stamp; one use, then normal entry). */
+  stamp: StampId | null;
+  /** Drawn and moved notes land on keys of the project's scale. */
+  scaleSnap: boolean;
 }
 
 export interface PlaylistView {
@@ -145,7 +150,7 @@ export function defaultWindows(width = 1400, height = 820): Record<string, Windo
   return {
     playlist: { open: true, x: 0, y: 0, w, h, z: 1, maximized: true },
     channelRack: { open: true, x: 36, y: 34, w: Math.min(780, w - 72), h: Math.min(440, h - 60), z: 3 },
-    pianoRoll: { open: false, x: 70, y: 60, w: Math.min(980, w - 100), h: Math.min(520, h - 90), z: 2 },
+    pianoRoll: { open: false, x: 70, y: 60, w: Math.min(1180, w - 100), h: Math.min(520, h - 90), z: 2 },
     mixer: { open: false, x: 50, y: Math.max(40, h - 430), w: Math.min(1060, w - 80), h: 400, z: 2 },
   };
 }
@@ -174,6 +179,8 @@ export function initialUi(project: Project): UiState {
       noteColor: 0,
       noteType: 'normal',
       lane: 'velocity',
+      stamp: null,
+      scaleSnap: false,
       ghostNotes: true,
     },
     playlist: { snap: 'main', pxPerTick: 0.18, trackHeight: 44, scrollTick: 0, scrollY: 0, tool: 'draw' },

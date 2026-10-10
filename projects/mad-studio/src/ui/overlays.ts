@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import type { ToolContext } from '../model/noteTools';
 
 export interface MenuItem {
   label?: string;
@@ -23,7 +24,8 @@ type DialogSpec =
   | { kind: 'prompt'; title: string; value: string; resolve: (v: string | null) => void }
   | { kind: 'confirm'; title: string; message: string; okLabel: string; danger: boolean; resolve: (v: boolean) => void }
   | { kind: 'custom'; id: CustomDialogId }
-  | { kind: 'note'; patternId: string; channelId: string; noteId: string };
+  | { kind: 'note'; patternId: string; channelId: string; noteId: string }
+  | { kind: 'tool'; toolId: string; patternId: string; channelId: string; selected: string[]; ctx: ToolContext };
 
 interface Toast {
   id: number;
@@ -90,6 +92,11 @@ export function openDialog(id: CustomDialogId): void {
 /** FL Studio's note properties (double-click a note in the piano roll). */
 export function openNoteProperties(patternId: string, channelId: string, noteId: string): void {
   useOverlays.setState({ dialog: { kind: 'note', patternId, channelId, noteId } });
+}
+
+/** A piano roll tool with parameters (FL Studio: Tools › Arpeggiate… etc.), previewed live. */
+export function openToolDialog(toolId: string, patternId: string, channelId: string, selected: string[], ctx: ToolContext): void {
+  useOverlays.setState({ dialog: { kind: 'tool', toolId, patternId, channelId, selected, ctx } });
 }
 
 export function closeDialog(): void {

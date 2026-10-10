@@ -548,7 +548,21 @@ body.electron.mac .topbar input {
   gap: 10px;
   flex: 1;
   min-width: 0;
-  overflow: hidden;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+}
+
+.window-toolbar::-webkit-scrollbar {
+  display: none;
+}
+
+.window-toolbar > * {
+  flex-shrink: 0;
+}
+
+.tb-select.note-type.active {
+  color: var(--accent);
 }
 
 .window-buttons {
@@ -1484,6 +1498,47 @@ body.electron.mac .topbar input {
   display: grid;
   place-items: center;
   background: #05070999;
+}
+
+/* Tool dialogs: the piano roll stays visible so the live preview can be seen. */
+.modal-backdrop.clear {
+  place-items: start end;
+  padding: 70px 30px 0 0;
+  background: transparent;
+}
+
+.tool-dialog .tool-description {
+  margin: -4px 0 12px;
+  color: var(--text-dim);
+  font-size: 12px;
+}
+
+.tool-options {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.tool-choice {
+  display: grid;
+  grid-template-columns: 110px 1fr;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+}
+
+.tool-bool {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+}
+
+.tool-knobs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  padding: 4px 0 8px;
 }
 
 .modal {

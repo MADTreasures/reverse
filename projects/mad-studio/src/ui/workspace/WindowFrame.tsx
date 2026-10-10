@@ -71,7 +71,16 @@ export function WindowFrame({ id, title, icon, toolbar, children, className = ''
       >
         {icon && <span className="window-icon">{icon}</span>}
         <span className="window-name">{title}</span>
-        <div className="window-toolbar" onPointerDown={(e) => e.stopPropagation()} onDoubleClick={(e) => e.stopPropagation()}>
+        <div
+          className="window-toolbar"
+          onPointerDown={(e) => e.stopPropagation()}
+          onDoubleClick={(e) => e.stopPropagation()}
+          onWheel={(e) => {
+            // A toolbar wider than its window scrolls sideways with the mouse wheel.
+            const el = e.currentTarget;
+            if (el.scrollWidth > el.clientWidth && Math.abs(e.deltaY) > Math.abs(e.deltaX)) el.scrollLeft += e.deltaY;
+          }}
+        >
           {toolbar}
         </div>
         <div className="window-buttons" onPointerDown={(e) => e.stopPropagation()}>

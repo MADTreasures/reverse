@@ -25,6 +25,7 @@ Start synthetisiert, es sind keine fremden Samples enthalten.
 | ------- | -------- |
 | **Channel Rack** | Step-Sequencer (malen, Rechtsklick löscht, ⌥+Mausrad = Velocity), Lautstärke/Pan, Mute/Solo (Rechtsklick auf die LED), Mixer-Routing, Swing, Pattern-Länge, „Fill each 2/4/8 steps“, Rotate, Noten eines Kanals kopieren/einfügen, Mini-Piano-Roll-Vorschau; Klick auf den Kanalnamen öffnet/schliesst das Kanalfenster |
 | **Piano Roll** | Werkzeuge Zeichnen/Malen/Löschen/Mute (T)/Slice/Auswahl, Verschieben, Länge ziehen, Shift+Ziehen klont, Klick auf eine Note übernimmt Länge, Velocity und Noteneigenschaften für neue Noten, Doppelklick = Noteneigenschaften, ⌥+Mausrad = Velocity, Snap wie in FL (Main/Line/Cell …, zoomabhängiges Raster), Ghost Notes, Quantisieren, Legato, Kopieren/Einfügen/Duplizieren, Transponieren, Klick ins Lineal setzt die Startposition im Pattern |
+| **Piano-Roll-Werkzeuge** | Tools-Menü wie in FL Studio mit denselben Kürzeln: Quick legato, Articulate, Quick quantize / Quantize (Stärke, Enden), Quick chop / Chop, Glue, Arpeggiate (Muster, Zeit, Gate, Oktaven), Strum (Zeit, Spannung, Richtung, Velocity-Abfall), Flam, Claw machine, Limit, Flip, Randomize (mit Seed), Scale levels, LFO, **Akkordfolge erzeugen**, **Riff machine**; Dialoge zeigen das Ergebnis live (Space spielt ab), Accept = ein Undo-Schritt, Abbrechen stellt alles wieder her; **Stempel** für 19 Akkorde und alle Skalen; **Skalen-Hervorhebung** (Grundton + 13 Skalen, im Projekt gespeichert) mit **Snap to scale** |
 | **Noteneigenschaften** | wie in FL Studio: Velocity, **Release**, **Pan**, **Fine pitch** (±1200 Cent), **Mod X/Y** (Filter-Cutoff/-Resonanz des Synths), 16 **Farbgruppen**, **Slide-Noten** (gleiten die klingenden Noten ihrer Farbgruppe zur eigenen Tonhöhe, ein Akkord behält seine Form), **Portamento-Noten**, stumme Noten; Event-Spur unter den Noten mit wählbarer Eigenschaft (Rechts-Ziehen setzt zurück); Plugins bekommen die Farbgruppe als MIDI-Kanal und Release als Note-off-Velocity; beide Audio-Engines klingen gleich (Paritätstest) |
 | **Playlist** | Picker-Panel (Patterns, Audio-Clips, Automation-Clips), platzieren, verschieben, Länge ändern (Pattern läuft in Schleife), links trimmen, Shift+Ziehen klont, Werkzeuge Mute (T) und Slice (C), Clip-Menü (stumm, Quell-Pattern, *Make unique* …), Spurmenü (einfügen, klonen, löschen, verschieben, alle Clips stumm …), Doppelklick auf Pattern-Clip öffnet die Piano Roll, Song-Position per Klick ins Lineal, **Zeitbereich per Rechts-Ziehen im Lineal – die Wiedergabe loopt darin** |
 | **Automation** | Rechtsklick auf jeden Regler → *Create automation clip* (wie in FL): Automation-Kanal im Channel Rack + Clip in der Playlist; Punkte per Rechtsklick setzen, ziehen, Kurven biegen, 13 Kurvenmodi; Tempo-Automation; Reglerbewegungen während der Song-Aufnahme werden aufgezeichnet; *Tools → Last tweaked* |
@@ -171,10 +172,13 @@ Eigene Samples einfach aus dem Finder in das Channel Rack (neuer Kanal), auf ein
 | ⌘M / ⌘P | Metronom / Aufnahme-Vorzähler | ⌃H | Alles stumm (Panic) |
 | ⌘S / ⇧⌘S / ⌘N | Speichern / unter / neue Version | ⌘O / ⌘R | Öffnen / WAV exportieren |
 | 1 … 0 / ⌘1 … 0 | Kanäle 1–10 stumm / solo | ⌘T | Computertastatur als Klavier |
-| P · B · D · T · E | Werkzeug Zeichnen · Malen · Löschen · Stumm (Playlist) · Auswahl | Q · ⌥Q | Quantisieren |
+| P · B · D · T · C · E | Werkzeug Zeichnen · Malen · Löschen · Stumm · Slice · Auswahl | Q · ⇧Q / ⌘Q | Startzeiten / Starts und Enden quantisieren |
 | ⌘A / ⌘D | Alles wählen / Auswahl aufheben | ⌘C / ⌘V / ⌘B | Kopieren / Einfügen / Duplizieren |
 | ⇧↑ ↓ / ⌘↑ ↓ | Noten um Halbton / Oktave transponieren | ⇧← → | Auswahl verschieben (Pfeile allein scrollen) |
 | ⌘L (Piano Roll) | Legato | Home | Songposition an den Anfang |
+| ⌘U / ⌘G | Quick chop / Glue | ⌥Q · ⌥U · ⌥L | Quantize… · Chop… · Articulate… |
+| ⌥A · ⌥S · ⌥F · ⌥W | Arpeggiate · Strum · Flam · Claw machine | ⌥K · ⌥Y · ⌥R · ⌥X · ⌥O | Limit · Flip · Randomize · Scale levels · LFO |
+| ⌥P · ⌥E | Akkordfolge erzeugen · Riff machine | Space im Tool-Dialog | Vorschau anhören |
 | ⇧+Ziehen | Noten/Clips klonen | Entf | Auswahl löschen |
 | ⌥C / ⌥Entf / ⌘L (Channel Rack) | Kanal klonen / löschen / auf freie Mixer-Spur | ⌘ + Mausrad | Horizontal zoomen |
 

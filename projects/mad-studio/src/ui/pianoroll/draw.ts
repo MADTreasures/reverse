@@ -1,4 +1,5 @@
 import { noteColor, notePropSpec, noteValue, type NotePropKey } from '../../model/notes';
+import { inScale, type ScaleSpec } from '../../model/scales';
 import { TICKS_PER_STEP, isBlackKey, noteName, ticksPerBar, PPQ } from '../../model/timing';
 import type { Note } from '../../model/types';
 
@@ -55,6 +56,8 @@ export interface RollScene {
   patternStart: number;
   /** Note property shown in the event lane. */
   lane: NotePropKey;
+  /** Scale highlighting: rows outside the scale are darker, the root rows lighter. */
+  scale: ScaleSpec | null;
 }
 
 /** Event lane geometry: values from `laneTop` (max) to `laneTop + laneH` (min). */
@@ -95,7 +98,8 @@ export function drawRoll(ctx: CanvasRenderingContext2D, v: RollView, s: RollScen
   const bottomKey = keyAtY(v, bottom - 1);
   for (let key = bottomKey; key <= topKey; key++) {
     const y = yOfKey(v, key);
-    ctx.fillStyle = isBlackKey(key) ? '#25333c' : '#2b3a44';
+    if (s.scale) ctx.fillStyle = !inScale(key, s.scale) ? '#1f2a31' : (key - s.scale.root) % 12 === 0 ? '#33475a' : '#2b3a44';
+    else ctx.fillStyle = isBlackKey(key) ? '#25333c' : '#2b3a44';
     ctx.fillRect(KEYS_W, y, width - KEYS_W, rowHeight);
     if (key % 12 === 0) {
       ctx.fillStyle = '#ffffff10';

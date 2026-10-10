@@ -16,6 +16,7 @@ import { makeId } from '../model/ids';
 import { clampPluginOffset, clampTrackOffset } from '../model/latency';
 import { findPattern, patternLength, stepKey } from '../model/patterns';
 import { findPreset } from '../model/presets';
+import type { ScaleSpec } from '../model/scales';
 import { MAX_BPM, MIN_BPM, TICKS_PER_STEP, ticksPerBar } from '../model/timing';
 import type {
   Channel,
@@ -905,6 +906,60 @@ export function setMixerTrackProps(index: number, patch: MixerPatch, opts?: Edit
     if (patch.solo !== undefined && index > 0) t.solo = patch.solo;
     if (patch.latencyOffset !== undefined) t.latencyOffset = clampTrackOffset(patch.latencyOffset);
   }, { label: 'mixer track settings', ...opts });
+}
+
+// ---------------------------------------------------------------------------
+// Piano roll tools
+
+/** Replaces a channel's notes in a pattern as one undo step (quick tools: glue, quick chop …). */
+export function setChannelNotes(patternId: Id, channelId: Id, notes: readonly Note[], label: string): void {
+  edit((d) => {
+    const p = patternOf(d, patternId);
+    if (!p) return;
+    if (notes.length) p.notes[channelId] = sortNotes(notes.map((n) => ({ ...n })));
+    else delete p.notes[channelId];
+  }, { label });
+}
+
+/**
+ * Replaces a channel's notes without an undo step: the live preview of a tool dialog. The dialog
+ * finishes with commitPreview() (one undo step) or restores the original notes the same way.
+ */
+export function previewNotes(patternId: Id, channelId: Id, notes: readonly Note[]): void {
+  const s = useStore.getState();
+  const next = produce(s.project, (d) => {
+    const p = patternOf(d, patternId);
+    if (!p) return;
+    if (notes.length) p.notes[channelId] = sortNotes(notes.map((n) => ({ ...n })));
+    else delete p.notes[channelId];
+  });
+  if (next !== s.project) useStore.setState({ project: next });
+}
+
+/** Records a previewed change as one undo step; `before` is the project before the preview started. */
+export function commitPreview(before: Project, label: string): void {
+  const s = useStore.getState();
+  if (before === s.project) return;
+  useStore.setState({
+    past: [...s.past.slice(-(MAX_UNDO - 1)), before],
+    pastLabels: [...s.pastLabels.slice(-(MAX_UNDO - 1)), label],
+    future: [],
+    futureLabels: [],
+    coalesceKey: null,
+    dirty: true,
+  });
+}
+
+function sortNotes<T extends { start: number; key: number }>(notes: T[]): T[] {
+  return notes.sort((a, b) => a.start - b.start || a.key - b.key);
+}
+
+/** Key of the song (FL Studio: piano roll › Helpers › Scale highlighting). */
+export function setProjectScale(scale: ScaleSpec | null): void {
+  edit((d) => {
+    if (scale) d.scale = { root: Math.round(scale.root) % 12, type: scale.type };
+    else delete d.scale;
+  }, { label: 'scale highlighting' });
 }
 
 // ---------------------------------------------------------------------------

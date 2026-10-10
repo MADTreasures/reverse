@@ -213,3 +213,25 @@ export const IconClock = (p: IconProps) => (
     <path d="M8 4.75V8l2.25 1.5" />
   </Svg>
 );
+/** Piano roll tools menu: a wrench. */
+export const IconTools = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M10.5 2.5a3 3 0 0 0-2.8 4.1L2.8 11.5a1.2 1.2 0 0 0 1.7 1.7l4.9-4.9a3 3 0 0 0 4.1-2.8l-1.7 1.2-1.6-1.6 1.2-1.7a3 3 0 0 0-.9-.4z" />
+  </Svg>
+);
+/** Stamp (chords and scales in one click). */
+export const IconStamp = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M6.5 2.5h3v3.2l2.5 1.8v2h-8v-2l2.5-1.8zM3 12.5h10" />
+  </Svg>
+);
+/** Scale highlighting: a stack of keys with a marker. */
+export const IconScale = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M3 3h10M3 6.3h10M3 9.6h10M3 13h10" strokeOpacity={0.45} />
+    <circle cx="5" cy="3" r="1.3" fill="currentColor" stroke="none" />
+    <circle cx="9" cy="6.3" r="1.3" fill="currentColor" stroke="none" />
+    <circle cx="6.5" cy="9.6" r="1.3" fill="currentColor" stroke="none" />
+    <circle cx="11" cy="13" r="1.3" fill="currentColor" stroke="none" />
+  </Svg>
+);

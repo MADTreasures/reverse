@@ -4,6 +4,8 @@
  * Times are expressed in ticks (see timing.ts, PPQ = 96).
  */
 
+import type { ScaleSpec } from './scales';
+
 export type Id = string;
 
 export type WaveType = 'sine' | 'triangle' | 'sawtooth' | 'square' | 'noise';
@@ -360,4 +362,6 @@ export interface Project {
   pdc: boolean;
   /** Read automation of parameters behind latent plugins that much earlier (› Compensate automations). */
   pdcAutomation: boolean;
+  /** Key of the song for the piano roll's scale highlighting, snap to scale and generators; absent = none. */
+  scale?: ScaleSpec;
 }

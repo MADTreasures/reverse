@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type WheelEvent as ReactWheelEvent } from 'react';
 import { engine } from '../../audio/engine';
+import { NOTE_TOOLS, findTool, glue, quickChop, quickQuantize, stampNotes, type ToolContext } from '../../model/noteTools';
 import { NOTE_COLOR_COUNT, NOTE_PROPS, noteColor, notePropSpec, noteStyleOf, noteValue, setNoteValue, type NotePropKey } from '../../model/notes';
+import { CHORDS, PITCH_CLASSES, SCALES, scaleLabel, snapToScale, stampIntervals, stampLabel, type ScaleType, type StampId } from '../../model/scales';
 import { findPattern, patternLength } from '../../model/patterns';
 import { PPQ, SNAP_OPTIONS, formatDuration, formatPosition, gridLineTicks, noteName, snapFloor, snapLabel, snapRound, snapTicks, type SnapId } from '../../model/timing';
 import type { Note } from '../../model/types';
@@ -11,6 +13,8 @@ import {
   gestureKey,
   legatoNotes,
   selectChannel,
+  setChannelNotes,
+  setProjectScale,
   setTransport,
   setUi,
   sliceNotes,
@@ -18,10 +22,10 @@ import {
 } from '../../store/actions';
 import { useStore, type NoteType, type ToolId } from '../../store/store';
 import { prepareCanvas, useElementSize, useFrame } from '../animation';
-import { IconBrush, IconEraser, IconGhost, IconMute, IconPencil, IconPiano, IconSelect, IconSlice } from '../controls/Icons';
+import { IconBrush, IconEraser, IconGhost, IconMute, IconPencil, IconPiano, IconScale, IconSelect, IconSlice, IconStamp, IconTools } from '../controls/Icons';
 import { setHint } from '../hint';
 import { registerWindowKeys } from '../keyboard';
-import { openNoteProperties, showMenu } from '../overlays';
+import { openNoteProperties, openToolDialog, showMenu, toast, type MenuItem } from '../overlays';
 import { WindowFrame } from '../workspace/WindowFrame';
 import { KEYS_W, RULER_H, drawRoll, gridBottom, keyAtY, laneValueAtY, maxScrollY, tickAtX, xOfTick, type RollView } from './draw';
 
@@ -50,6 +54,7 @@ export function PianoRoll() {
   const patternId = useStore((s) => s.ui.selectedPatternId);
   const pattern = useStore((s) => findPattern(s.project, s.ui.selectedPatternId));
   const beatsPerBar = useStore((s) => s.project.beatsPerBar);
+  const scale = useStore((s) => s.project.scale ?? null);
   const view = useStore((s) => s.ui.pianoRoll);
   const notes = (pattern && channel ? pattern.notes[channel.id] : undefined) ?? EMPTY;
   const [selected, setSelected] = useState<Set<string>>(() => new Set());
@@ -80,8 +85,8 @@ export function PianoRoll() {
   }, [view.ghostNotes, pattern, channels, channel?.id]);
 
   // Everything the canvas needs, read by the animation loop.
-  const scene = useRef({ rollView, notes, selected, ghosts, color: channel?.color ?? '#888', patLen, beatsPerBar, lineTicks, patternStart, lane: view.lane, pressed: null as number | null });
-  scene.current = { ...scene.current, rollView, notes, selected, ghosts, color: channel?.color ?? '#888', patLen, beatsPerBar, lineTicks, patternStart, lane: view.lane };
+  const scene = useRef({ rollView, notes, selected, ghosts, color: channel?.color ?? '#888', patLen, beatsPerBar, lineTicks, patternStart, lane: view.lane, scale, pressed: null as number | null });
+  scene.current = { ...scene.current, rollView, notes, selected, ghosts, color: channel?.color ?? '#888', patLen, beatsPerBar, lineTicks, patternStart, lane: view.lane, scale };
   dirty.current = true;
 
   useEffect(() => setSelected(new Set()), [channelId, patternId]);
@@ -111,6 +116,7 @@ export function PianoRoll() {
       lineTicks: sc.lineTicks,
       patternStart: sc.patternStart,
       lane: sc.lane,
+      scale: sc.scale,
     });
   });
 
@@ -176,8 +182,9 @@ export function PianoRoll() {
   };
 
   /** A new note with the template: last clicked note's style, colour group and note type (FL Studio). */
+  const snapKey = (key: number, direction = 0) => (view.scaleSnap && scale ? snapToScale(key, scale, direction) : key);
   const newNote = (key: number, start: number, length = view.noteLength): Omit<Note, 'id'> => {
-    const n: Omit<Note, 'id'> = { key, start, length, velocity: view.noteVelocity, ...view.noteStyle };
+    const n: Omit<Note, 'id'> = { key: snapKey(key), start, length, velocity: view.noteVelocity, ...view.noteStyle };
     if (view.noteColor > 0) n.color = view.noteColor;
     if (view.noteType === 'slide') n.slide = true;
     else if (view.noteType === 'porta') n.porta = true;
@@ -206,6 +213,67 @@ export function PianoRoll() {
       { coalesce: key, label: `piano roll ${spec.label.toLowerCase()}` },
     );
     setHint(`${spec.label}: ${spec.format(value)}`);
+  };
+
+  /** What the tools need to know about the piano roll (FL Studio: the tools follow the snap). */
+  const toolContext = (): ToolContext => ({ grid, beatsPerBar, patternLength: patLen, scale, position: lastClick.current ?? 0 });
+  const runQuick = (label: string, fn: (list: Note[], sel: Set<string>) => Note[]) => {
+    if (!channel) return;
+    setChannelNotes(patternId, channel.id, fn(notes, selected), `piano roll ${label}`);
+  };
+  const openTool = (id: string) => {
+    if (!channel) return;
+    const tool = findTool(id);
+    if (!tool) return;
+    if (tool.id !== 'chords' && tool.id !== 'riff' && notes.length === 0) {
+      toast('The channel has no notes in this pattern.');
+      return;
+    }
+    openToolDialog(id, patternId, channel.id, [...selected].filter((sid) => notes.some((n) => n.id === sid)), toolContext());
+  };
+  const toolsMenu = (at: { clientX: number; clientY: number }) =>
+    showMenu(at, [
+      { label: 'Tools', header: true },
+      ...NOTE_TOOLS.filter((t) => t.id === 'riff' || t.id === 'chords').map((t) => ({ label: t.label, shortcut: t.shortcut, onClick: () => openTool(t.id) })),
+      { separator: true },
+      { label: 'Quick legato', shortcut: 'Ctrl+L', onClick: () => channel && legatoNotes(patternId, channel.id, selected) },
+      ...NOTE_TOOLS.filter((t) => t.id === 'articulate').map((t) => ({ label: t.label, shortcut: t.shortcut, onClick: () => openTool(t.id) })),
+      { separator: true },
+      { label: 'Quick quantize', shortcut: 'Ctrl+Q', onClick: () => runQuick('quick quantize', (l, sel) => quickQuantize(l, sel, grid, true)) },
+      { label: 'Quick quantize start times', shortcut: 'Shift+Q', onClick: () => runQuick('quick quantize', (l, sel) => quickQuantize(l, sel, grid, false)) },
+      ...NOTE_TOOLS.filter((t) => t.id === 'quantize').map((t) => ({ label: t.label, shortcut: t.shortcut, onClick: () => openTool(t.id) })),
+      { separator: true },
+      { label: 'Quick chop', shortcut: 'Ctrl+U', onClick: () => runQuick('quick chop', (l, sel) => quickChop(l, sel, grid)) },
+      ...NOTE_TOOLS.filter((t) => t.id === 'chop').map((t) => ({ label: t.label, shortcut: t.shortcut, onClick: () => openTool(t.id) })),
+      { label: 'Glue', shortcut: 'Ctrl+G', onClick: () => runQuick('glue', glue) },
+      { separator: true },
+      ...NOTE_TOOLS.filter((t) => !['riff', 'chords', 'articulate', 'quantize', 'chop'].includes(t.id)).map((t) => ({ label: t.label, shortcut: t.shortcut, onClick: () => openTool(t.id) })),
+    ]);
+  const stampMenu = (at: { clientX: number; clientY: number }) => {
+    const choose = (stamp: StampId | null) => setView({ stamp });
+    showMenu(at, [
+      { label: 'Stamp (the next click places it)', header: true },
+      { label: 'None', radio: true, checked: view.stamp === null, onClick: () => choose(null) },
+      { label: 'Chords', submenu: CHORDS.map((c) => ({ label: c.label, radio: true, checked: view.stamp === `chord:${c.id}`, onClick: () => choose(`chord:${c.id}`) })) },
+      { label: 'Scales', submenu: SCALES.map((sc) => ({ label: sc.label, radio: true, checked: view.stamp === `scale:${sc.type}`, onClick: () => choose(`scale:${sc.type}`) })) },
+    ]);
+  };
+  const scaleMenu = (at: { clientX: number; clientY: number }) => {
+    const root = scale?.root ?? 0;
+    const items: MenuItem[] = [
+      { label: 'Scale highlighting', header: true },
+      { label: 'Off', radio: true, checked: !scale, onClick: () => setProjectScale(null) },
+      { label: 'Root', submenu: PITCH_CLASSES.map((name, i) => ({ label: name, radio: true, checked: scale?.root === i, onClick: () => setProjectScale({ root: i, type: scale?.type ?? 'major' }) })) },
+      ...SCALES.filter((sc) => sc.type !== 'chromatic').map((sc) => ({
+        label: sc.label,
+        radio: true,
+        checked: scale?.type === sc.type,
+        onClick: () => setProjectScale({ root, type: sc.type as ScaleType }),
+      })),
+      { separator: true },
+      { label: 'Snap to scale', checked: view.scaleSnap, disabled: !scale, onClick: () => setView({ scaleSnap: !view.scaleSnap }) },
+    ];
+    showMenu(at, items);
   };
 
   const laneMenu = (at: { clientX: number; clientY: number }) =>
@@ -342,6 +410,17 @@ export function PianoRoll() {
       drag.current = { kind: 'paint', key: gk, row: key, last: start };
       return;
     }
+    if (view.stamp) {
+      // Stamp: the whole chord (or scale) at once, its root on the clicked key; then normal entry again.
+      const start = snapFloor(Math.max(0, tick), g);
+      const base = newNote(key, start);
+      const { key: root, start: s0, length, ...style } = base;
+      const ids = addNotes(patternId, channel.id, stampNotes(stampIntervals(view.stamp), root, s0, length, style), { label: `piano roll stamp ${stampLabel(view.stamp).toLowerCase()}` });
+      setSelected(new Set(ids));
+      startPreview(root, velocity);
+      setView({ stamp: null });
+      return;
+    }
     // Draw: create a note and keep dragging it.
     const gk = gestureKey('draw');
     const start = snapFloor(Math.max(0, tick), g);
@@ -449,6 +528,7 @@ export function PianoRoll() {
         const rawStart = anchor.start + (tick - d.originTick);
         const dt = Math.max(-Math.min(...[...d.orig.values()].map((n) => n.start)), snapRound(rawStart, g) - anchor.start);
         let dk = key - d.originKey;
+        if (view.scaleSnap && scale) dk = snapKey(anchor.key + dk, dk) - anchor.key;
         const keys = [...d.orig.values()].map((n) => n.key);
         dk = Math.max(-Math.min(...keys), Math.min(127 - Math.max(...keys), dk));
         if (d.clone) {
@@ -569,12 +649,12 @@ export function PianoRoll() {
   // ------------------------------------------------------------ keyboard
 
   const scrollBy = (ticks: number, rows: number) => setView({ scrollTick: view.scrollTick + ticks, scrollY: view.scrollY + rows * view.rowHeight });
-  const keyState = useRef({ notes, selected, channel, patternId, grid, beatsPerBar, scrollBy });
-  keyState.current = { notes, selected, channel, patternId, grid, beatsPerBar, scrollBy };
+  const keyState = useRef({ notes, selected, channel, patternId, grid, beatsPerBar, scrollBy, openTool, runQuick });
+  keyState.current = { notes, selected, channel, patternId, grid, beatsPerBar, scrollBy, openTool, runQuick };
   useEffect(
     () =>
       registerWindowKeys('pianoRoll', (e) => {
-        const { notes: list, selected: sel, channel: ch, patternId: pid, grid: g, scrollBy: scroll } = keyState.current;
+        const { notes: list, selected: sel, channel: ch, patternId: pid, grid: g, scrollBy: scroll, openTool: tool, runQuick: quick } = keyState.current;
         if (!ch) return false;
         const mod = e.metaKey || e.ctrlKey;
         const plain = !mod && !e.altKey && !e.shiftKey;
@@ -620,6 +700,28 @@ export function PianoRoll() {
         if (mod && !e.shiftKey && e.code === 'KeyL') {
           legatoNotes(pid, ch.id, sel);
           return true;
+        }
+        // FL Studio's tool shortcuts (piano roll › Tools).
+        if (e.altKey && !mod && !e.shiftKey) {
+          const id = ({ KeyE: 'riff', KeyP: 'chords', KeyL: 'articulate', KeyQ: 'quantize', KeyU: 'chop', KeyA: 'arpeggiate', KeyS: 'strum', KeyF: 'flam', KeyW: 'claw', KeyK: 'limit', KeyY: 'flip', KeyR: 'randomize', KeyX: 'scaleLevels', KeyO: 'lfo' } as Record<string, string>)[e.code];
+          if (id) {
+            tool(id);
+            return true;
+          }
+        }
+        if (mod && !e.shiftKey && !e.altKey) {
+          if (e.code === 'KeyQ') {
+            quick('quick quantize', (l, s2) => quickQuantize(l, s2, g, true));
+            return true;
+          }
+          if (e.code === 'KeyU') {
+            quick('quick chop', (l, s2) => quickChop(l, s2, g));
+            return true;
+          }
+          if (e.code === 'KeyG') {
+            quick('glue', glue);
+            return true;
+          }
         }
         // FL Studio tool keys: P draw, B paint, D delete, T mute, C slice, E select.
         if (plain) {
@@ -669,8 +771,8 @@ export function PianoRoll() {
             return true;
           }
         }
-        if (e.code === 'KeyQ' && !mod) {
-          // Q and FL Studio's Alt+Q both quantize.
+        if (e.code === 'KeyQ' && !mod && !e.altKey) {
+          // Q and FL Studio's Shift+Q quantize the start times.
           quantize(pid, ch.id, sel, g);
           return true;
         }
@@ -718,13 +820,17 @@ export function PianoRoll() {
         {toolButton('slice', <IconSlice size={12} />, 'Slice tool (C): click a note to cut it at the snap position')}
         {toolButton('select', <IconSelect size={12} />, 'Select tool: drag a rectangle')}
       </div>
-      <div className="seg" data-hint="Type of new notes: normal, slide (glides the notes of its colour group, plays nothing itself) or portamento (glides from the previous note)">
-        {(['normal', 'slide', 'porta'] as NoteType[]).map((t) => (
-          <button key={t} className={view.noteType === t ? 'active' : ''} onClick={() => setView({ noteType: t })}>
-            {t === 'normal' ? 'Note' : t === 'slide' ? 'Slide' : 'Porta'}
-          </button>
-        ))}
-      </div>
+      <select
+        className={`tb-select note-type ${view.noteType !== 'normal' ? 'active' : ''}`}
+        value={view.noteType}
+        aria-label="Note type"
+        data-hint="Type of new notes: normal, slide (glides the notes of its colour group, plays nothing itself) or portamento (glides from the previous note)"
+        onChange={(e) => setView({ noteType: e.target.value as NoteType })}
+      >
+        <option value="normal">Note</option>
+        <option value="slide">Slide</option>
+        <option value="porta">Porta</option>
+      </select>
       <button
         className="tb-select note-color-pick"
         data-hint="Colour group of new notes (plugins get it as the MIDI channel; slide notes only move notes of their group)"
@@ -760,6 +866,25 @@ export function PianoRoll() {
       </select>
       <button className={`icon-btn ${view.ghostNotes ? 'active' : ''}`} data-hint="Ghost notes of other channels" onClick={() => setView({ ghostNotes: !view.ghostNotes })}>
         <IconGhost size={13} />
+      </button>
+      <button className="icon-btn" aria-label="Tools" data-hint="Tools: quantize, chop, glue, arpeggiate, strum, flam, claw machine, limit, flip, randomize, scale levels, LFO, chord progression, riff machine" onClick={(e) => toolsMenu(e)}>
+        <IconTools size={13} />
+      </button>
+      <button
+        className={`icon-btn ${view.stamp ? 'active' : ''}`}
+        aria-label="Stamp"
+        data-hint={view.stamp ? `Stamp: ${stampLabel(view.stamp)} – the next click places it` : 'Stamp: place a chord or scale with one click'}
+        onClick={(e) => stampMenu(e)}
+      >
+        <IconStamp size={13} />
+      </button>
+      <button
+        className={`icon-btn ${scale ? 'active' : ''}`}
+        aria-label="Scale"
+        data-hint={scale ? `Scale highlighting: ${scaleLabel(scale)}${view.scaleSnap ? ' (snap to scale)' : ''}` : 'Scale highlighting and snap to scale'}
+        onClick={(e) => scaleMenu(e)}
+      >
+        <IconScale size={13} />
       </button>
       <button className="btn" data-hint="Quantize selected notes (or all) to the snap grid (Q)" onClick={() => channel && quantize(patternId, channel.id, selected, grid)}>
         Quantize
