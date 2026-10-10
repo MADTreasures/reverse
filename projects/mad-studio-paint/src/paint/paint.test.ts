@@ -3,7 +3,7 @@ import { floodFillMask } from './fill';
 import { HistoryStack } from './history';
 import { combine, createMask, ellipseMask, expandMask, invertMask, isMaskEmpty, maskBounds, maskOutline, polygonMask, rectMask, translateMask } from './mask';
 import { circleBounds, intersect, union } from './rect';
-import { dabAlpha, ellipsePoints, interpolateDabs, pressureCurve, snapAngle, Stabilizer, stabilizerWindow } from './stroke';
+import { dabAlpha, ellipsePoints, interpolateDabs, polygonPoints, pressureCurve, rectPoints, roundCorners, snapAngle, Stabilizer, stabilizerWindow } from './stroke';
 import { DEFAULT_SUB_TOOLS, mergeSubTools, toolForKey } from './tools';
 
 const count = (m: { data: Uint8Array }) => m.data.reduce((n, v) => n + (v ? 1 : 0), 0);
@@ -229,5 +229,32 @@ describe('tools', () => {
     expect(pen.brush!.antiAlias).toBe(0);
     expect(pen.brush!.hardness).toBe(DEFAULT_SUB_TOOLS.find((s) => s.id === 'pen-g')!.brush!.hardness);
     expect(mergeSubTools('junk')).toHaveLength(DEFAULT_SUB_TOOLS.length);
+  });
+});
+
+describe('figure shapes', () => {
+  it('draws regular polygons in the box, the first corner at the top', () => {
+    const pts = polygonPoints(0, 0, 100, 100, 4);
+    expect(pts).toHaveLength(5);
+    expect(pts[0].x).toBeCloseTo(50);
+    expect(pts[0].y).toBeCloseTo(0);
+    expect(pts[1].x).toBeCloseTo(100);
+    expect(pts[1].y).toBeCloseTo(50);
+    expect(pts[4]).toEqual(pts[0]);
+    expect(polygonPoints(0, 0, 10, 10, 1)).toHaveLength(4);
+  });
+
+  it('rounds corners without moving the edges', () => {
+    const square = rectPoints(0, 0, 100, 100);
+    expect(roundCorners(square, 0)).toBe(square);
+    const round = roundCorners(square, 1);
+    // The corner itself is cut; the middle of each edge stays on the edge.
+    expect(round.some((p) => p.x === 0 && p.y === 0)).toBe(false);
+    expect(round.some((p) => Math.abs(p.x - 50) < 1e-9 && Math.abs(p.y) < 1e-9)).toBe(true);
+    expect(round[round.length - 1]).toEqual(round[0]);
+    for (const p of round) {
+      expect(p.x).toBeGreaterThanOrEqual(0);
+      expect(p.x).toBeLessThanOrEqual(100);
+    }
   });
 });

@@ -17,7 +17,7 @@ import { GradientBar } from '../controls/GradientBar';
 import { tipAlphaUrl } from '../../engine/materials';
 import { openDialog } from '../overlays';
 import { openColorSettings } from '../dialogs/ColorSettingsDialog';
-import { entryForTool, isSpecialCurve, PALETTE_ENTRIES, PALETTE_LAYOUT, subToolsOf, toolInfo, type CorrectSettings, type FillReference, type SubTool, type ToolId } from '../../paint/tools';
+import { entryForTool, isSpecialCurve, PALETTE_ENTRIES, PALETTE_LAYOUT, subToolsOf, toolInfo, type CorrectSettings, type FigureFill, type FillReference, type SubTool, type ToolId } from '../../paint/tools';
 import { Icon } from '../controls/Icons';
 import { PropSlider } from '../controls/PropSlider';
 import { DynamicsPopover, dynamicsOn, type DynamicsKind } from './BrushSettingsPanels';
@@ -334,6 +334,22 @@ export function ToolProperty() {
         </>
       )}
       {sub.tool === 'eraser' && b && <VectorEraserRow sub={sub} update={update} />}
+      {sub.tool === 'figure' && sub.figureShape === 'polygon' && (
+        <PropSlider label="Number of corners" value={sub.figureCorners ?? 5} min={3} max={100} onChange={(v) => update({ figureCorners: v })} />
+      )}
+      {sub.tool === 'figure' && (sub.figureShape === 'rect' || sub.figureShape === 'polygon') && (
+        <PropSlider label="Roundness of corner" value={sub.figureRound ?? 0} min={0} max={100} unit="%" onChange={(v) => update({ figureRound: v })} />
+      )}
+      {sub.tool === 'figure' && (sub.figureShape === 'rect' || sub.figureShape === 'ellipse' || sub.figureShape === 'polygon') && (
+        <div className="prop-row">
+          <span className="prop-label">Line/Fill</span>
+          <select className="prop-select" aria-label="Line/Fill" value={sub.figureFill ?? 'line'} onChange={(e) => update({ figureFill: e.target.value as FigureFill })}>
+            <option value="line">Create line</option>
+            <option value="fill">Create fill</option>
+            <option value="both">Create both line and fill</option>
+          </select>
+        </div>
+      )}
       {sub.tool === 'object' && <ObjectSettings sub={sub} update={update} />}
       {sub.tool === 'lightTable' && <LightTableSettings />}
       {sub.tool === 'text' && <TextSettings />}

@@ -13,7 +13,9 @@ import {
   autoSelectAt,
   BrushSession,
   BrushSizeSession,
+  CurveFigure,
   EyedropperSession,
+  figureCurveSession,
   FigureSession,
   FillSession,
   GradientSession,
@@ -131,7 +133,7 @@ class Controller {
     const sub = currentSubTool();
     if (getState().hint && !CurveInput.active) setState({ hint: '' });
     // A curve being placed ends when another tool is chosen.
-    if (CurveInput.active && getState().tool !== 'ruler') CurveInput.cancel();
+    if (CurveInput.active && getState().tool !== CurveInput.active.tool) CurveInput.cancel();
     const double = this.isDoubleClick(p, tool);
     switch (tool) {
       case 'hand':
@@ -166,6 +168,8 @@ class Controller {
       case 'blend':
         return BrushSession.create(sub, p);
       case 'figure':
+        if (sub.figureShape === 'curve') return CurveFigure.press(sub, p);
+        if (sub.figureShape === 'polyline' || sub.figureShape === 'spline' || sub.figureShape === 'bezier') return figureCurveSession(sub, p);
         return FigureSession.create(sub, p);
       case 'fill':
         if (sub.fill?.mode === 'enclose' || sub.fill?.mode === 'lasso') return LassoFillSession.create(sub, p);
@@ -209,6 +213,7 @@ class Controller {
     if (this.session) this.session.move(p, coalesced);
     else if (PolylineSelect.active) PolylineSelect.active.hover = { x: p.x, y: p.y };
     else if (CurveInput.active) CurveInput.active.hover = { x: p.x, y: p.y };
+    else if (CurveFigure.active) CurveFigure.active.bend = { x: p.x, y: p.y };
     this.changed();
   }
 
@@ -260,6 +265,7 @@ class Controller {
     }
     PolylineSelect.overlay(ctx, this.view);
     CurveInput.overlay(ctx, this.view);
+    CurveFigure.overlay(ctx, this.view);
     if (this.session?.overlay) {
       this.session.overlay(ctx, this.view);
       if (!(this.session instanceof SelectionPenSession)) return;

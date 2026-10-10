@@ -1,12 +1,14 @@
 /**
- * Point-by-point curve input for the curve rulers: each click adds a point, a double-click on the
- * last point (or Enter) finishes, Backspace or Delete removes the last point, Esc cancels. ⌥-click
- * makes a corner (spline, quadratic Bezier); with cubic Bezier curves, dragging from a new anchor
- * pulls out its direction points (without dragging the anchor is a corner).
+ * Point-by-point curve input for the curve rulers and the Figure tool's Polyline, Continuous curve
+ * and Bezier curve: each click adds a point, a double-click on the last point (or Enter) finishes,
+ * Backspace or Delete removes the last point, Esc cancels. ⌥-click makes a corner (spline,
+ * quadratic Bezier); with cubic Bezier curves, dragging from a new anchor pulls out its direction
+ * points (without dragging the anchor is a corner).
  */
 import { sampleCurve, type CurveSpec, type CurveType } from '../paint/curves';
 import type { Pt } from '../paint/rulers';
 import { apply as applyMatrix } from '../paint/viewMath';
+import type { ToolId } from '../paint/tools';
 import { getState, setState } from '../store/store';
 import type { OverlayView, PointerInfo, ToolSession } from './types';
 
@@ -51,6 +53,8 @@ export class CurveInput {
     readonly owner: string,
     readonly type: CurveType,
     private onDone: (spec: CurveSpec) => void,
+    /** The tool the curve belongs to: choosing another one cancels it. */
+    readonly tool: ToolId,
   ) {}
 
   /**
@@ -58,11 +62,11 @@ export class CurveInput {
    * settings; a press with others starts a new curve. Returns a session while a cubic anchor's
    * direction points are dragged out.
    */
-  static press(p: PointerInfo, owner: string, type: CurveType, onDone: (spec: CurveSpec) => void): ToolSession | null {
+  static press(p: PointerInfo, owner: string, type: CurveType, onDone: (spec: CurveSpec) => void, tool: ToolId = 'ruler'): ToolSession | null {
     let c = CurveInput.active;
     if (c && (c.owner !== owner || c.type !== type)) c = null;
     if (!c) {
-      c = CurveInput.active = new CurveInput(owner, type, onDone);
+      c = CurveInput.active = new CurveInput(owner, type, onDone, tool);
       setState({ hint: HINT });
     }
     return c.add(p);
@@ -123,7 +127,7 @@ export class CurveInput {
     const c = CurveInput.active;
     if (!c) return;
     // Another tool was chosen meanwhile.
-    if (getState().tool !== 'ruler') {
+    if (getState().tool !== c.tool) {
       CurveInput.cancel();
       return;
     }

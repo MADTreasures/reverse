@@ -3944,3 +3944,70 @@ test('fill sub tools: drag over several areas, Enclose and fill, Lasso fill, Lef
   expect(await colours(270, 50)).toBe(0);
   expect(errors).toEqual([]);
 });
+
+test('Figure sub tools: curve, polyline, continuous curve, polygon, rounded and filled shapes', async ({ page }) => {
+  const errors = await boot(page);
+  const alpha = (x: number, y: number) => layerAlpha(page, x, y);
+  const use = (id: string, patch: object = {}) =>
+    page.evaluate(
+      ([sub, p]) => {
+        const a = window.__madPaint.actions;
+        a.setTool('figure');
+        a.setSubTool('figure', sub);
+        const s = window.__madPaint.useStore.getState();
+        const t = s.subTools.find((x: any) => x.id === sub);
+        a.updateSubTool(sub, { ...p, brush: { ...t.brush, size: 4 } });
+      },
+      [id, patch] as const,
+    );
+  const click = async (x: number, y: number) => {
+    const p = await docToScreen(page, x, y);
+    await page.mouse.click(p.x, p.y);
+    await page.waitForTimeout(400);
+  };
+  // Curve: drag start → end, then the pointer bends it, a click draws it.
+  await use('fig-curve');
+  await drag(page, [40, 150], [160, 150], 6);
+  const bend = await docToScreen(page, 100, 100);
+  await page.mouse.move(bend.x, bend.y, { steps: 4 });
+  await page.mouse.click(bend.x, bend.y);
+  expect(await alpha(100, 100)).toBeGreaterThan(200);
+  expect(await alpha(100, 150)).toBe(0);
+  await page.keyboard.press('ControlOrMeta+z');
+  expect(await alpha(100, 100)).toBe(0);
+
+  // Polyline: clicks, a double-click finishes.
+  await use('fig-polyline');
+  await click(200, 40);
+  await click(300, 40);
+  const end = await docToScreen(page, 300, 120);
+  await page.mouse.click(end.x, end.y);
+  await page.mouse.dblclick(end.x, end.y);
+  expect(await alpha(250, 40)).toBeGreaterThan(200);
+  expect(await alpha(300, 80)).toBeGreaterThan(200);
+  expect(await alpha(250, 80)).toBe(0);
+  await page.keyboard.press('ControlOrMeta+z');
+
+  // Continuous curve: Enter finishes.
+  await use('fig-spline');
+  await click(40, 250);
+  await click(100, 200);
+  await click(160, 250);
+  await page.keyboard.press('Enter');
+  expect(await alpha(100, 200)).toBeGreaterThan(200);
+  await page.keyboard.press('ControlOrMeta+z');
+
+  // Polygon (a triangle) filled with the drawing colour.
+  await use('fig-polygon', { figureCorners: 3, figureFill: 'fill' });
+  await drag(page, [200, 150], [300, 250], 6);
+  expect(await alpha(250, 220)).toBe(255);
+  expect(await alpha(205, 155)).toBe(0);
+  await page.keyboard.press('ControlOrMeta+z');
+
+  // Rectangle with round corners: the corner stays empty, the edge middle is drawn.
+  await use('fig-rect', { figureRound: 100, figureFill: 'line' });
+  await drag(page, [20, 20], [120, 120], 6);
+  expect(await alpha(70, 20)).toBeGreaterThan(200);
+  expect(await alpha(21, 21)).toBe(0);
+  expect(errors).toEqual([]);
+});

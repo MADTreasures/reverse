@@ -116,6 +116,56 @@ export function ellipsePoints(x0: number, y0: number, x1: number, y1: number): S
   return pts;
 }
 
+/**
+ * Regular polygon with `corners` corners inscribed in the ellipse of the box (the first corner at
+ * the top), closed (the first point repeats at the end).
+ */
+export function polygonPoints(x0: number, y0: number, x1: number, y1: number, corners: number): StrokePoint[] {
+  const n = Math.max(3, Math.min(100, Math.round(corners)));
+  const cx = (x0 + x1) / 2;
+  const cy = (y0 + y1) / 2;
+  const rx = Math.abs(x1 - x0) / 2;
+  const ry = Math.abs(y1 - y0) / 2;
+  const pts: StrokePoint[] = [];
+  for (let i = 0; i < n; i++) {
+    const a = -Math.PI / 2 + (i / n) * Math.PI * 2;
+    pts.push({ x: cx + Math.cos(a) * rx, y: cy + Math.sin(a) * ry, pressure: 1 });
+  }
+  pts.push({ ...pts[0] });
+  return pts;
+}
+
+/**
+ * Rounds the corners of a closed outline (Roundness of corner): each corner is replaced by an arc
+ * that starts `round` (0..1 of the shorter neighbouring half side) away from it.
+ */
+export function roundCorners(pts: StrokePoint[], round: number): StrokePoint[] {
+  const k = Math.max(0, Math.min(1, round));
+  if (k === 0 || pts.length < 4) return pts;
+  // The outline without its closing point.
+  const ring = pts.slice(0, -1);
+  const n = ring.length;
+  const out: StrokePoint[] = [];
+  for (let i = 0; i < n; i++) {
+    const prev = ring[(i + n - 1) % n];
+    const c = ring[i];
+    const next = ring[(i + 1) % n];
+    const lp = Math.hypot(c.x - prev.x, c.y - prev.y);
+    const ln = Math.hypot(next.x - c.x, next.y - c.y);
+    const d = (Math.min(lp, ln) / 2) * k;
+    const a = { x: c.x + ((prev.x - c.x) / (lp || 1)) * d, y: c.y + ((prev.y - c.y) / (lp || 1)) * d };
+    const b = { x: c.x + ((next.x - c.x) / (ln || 1)) * d, y: c.y + ((next.y - c.y) / (ln || 1)) * d };
+    // Quadratic arc a → b with the corner as control point.
+    const steps = 8;
+    for (let t = 0; t <= steps; t++) {
+      const u = t / steps;
+      out.push({ x: (1 - u) * (1 - u) * a.x + 2 * (1 - u) * u * c.x + u * u * b.x, y: (1 - u) * (1 - u) * a.y + 2 * (1 - u) * u * c.y + u * u * b.y, pressure: 1 });
+    }
+  }
+  out.push({ ...out[0] });
+  return out;
+}
+
 export function rectPoints(x0: number, y0: number, x1: number, y1: number): StrokePoint[] {
   return [
     { x: x0, y: y0, pressure: 1 },

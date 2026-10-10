@@ -37,7 +37,10 @@ export type BrushMode = 'paint' | 'erase' | 'blend';
 export type TipFlip = 'off' | 'on' | 'random';
 export type TipTexture = 'none' | 'grain';
 export type SelectShape = 'rect' | 'ellipse' | 'lasso' | 'polyline' | 'pen' | 'erase';
-export type FigureShape = 'line' | 'rect' | 'ellipse';
+export type FigureShape = 'line' | 'curve' | 'polyline' | 'spline' | 'bezier' | 'rect' | 'ellipse' | 'polygon';
+
+/** Figure > Line/Fill: the outline, the inside, or both (outline in the drawing colour, inside in the other one). */
+export type FigureFill = 'line' | 'fill' | 'both';
 export type ControlPointMode = 'move' | 'add' | 'delete' | 'corner' | 'width' | 'opacity' | 'split';
 export type CorrectKind = 'controlPoint' | 'pinch' | 'simplify' | 'connect' | 'width' | 'redraw' | 'redrawWidth';
 export type WidthMode = 'thicken' | 'narrow' | 'scaleUp' | 'scaleDown';
@@ -276,6 +279,12 @@ export interface SubTool {
   brush?: BrushSettings;
   selectShape?: SelectShape;
   figureShape?: FigureShape;
+  /** Polygon: number of corners. */
+  figureCorners?: number;
+  /** Rectangle and polygon: Roundness of corner, 0..100 %. */
+  figureRound?: number;
+  /** Rectangle, ellipse and polygon: Line/Fill. */
+  figureFill?: FigureFill;
   /** Gradient tool: nodes, shape, edge rule, dithering; `layer` makes an editable gradient layer. */
   gradient?: GradientSpec & { layer: boolean };
   /** Eyedropper: read the current layer instead of the displayed colour. */
@@ -713,8 +722,13 @@ export const DEFAULT_SUB_TOOLS: SubTool[] = [
   },
   // Figure
   { id: 'fig-line', tool: 'figure', name: 'Straight line', figureShape: 'line', brush: brush({ size: 3, sizePressure: false, stabilization: 0 }) },
-  { id: 'fig-rect', tool: 'figure', name: 'Rectangle', figureShape: 'rect', brush: brush({ size: 3, sizePressure: false, stabilization: 0 }) },
-  { id: 'fig-ellipse', tool: 'figure', name: 'Ellipse', figureShape: 'ellipse', brush: brush({ size: 3, sizePressure: false, stabilization: 0 }) },
+  { id: 'fig-curve', tool: 'figure', name: 'Curve', figureShape: 'curve', brush: brush({ size: 3, sizePressure: false, stabilization: 0 }) },
+  { id: 'fig-polyline', tool: 'figure', name: 'Polyline', figureShape: 'polyline', brush: brush({ size: 3, sizePressure: false, stabilization: 0 }) },
+  { id: 'fig-spline', tool: 'figure', name: 'Continuous curve', figureShape: 'spline', brush: brush({ size: 3, sizePressure: false, stabilization: 0 }) },
+  { id: 'fig-bezier', tool: 'figure', name: 'Bezier curve', figureShape: 'bezier', brush: brush({ size: 3, sizePressure: false, stabilization: 0 }) },
+  { id: 'fig-rect', tool: 'figure', name: 'Rectangle', figureShape: 'rect', figureRound: 0, figureFill: 'line', brush: brush({ size: 3, sizePressure: false, stabilization: 0 }) },
+  { id: 'fig-ellipse', tool: 'figure', name: 'Ellipse', figureShape: 'ellipse', figureFill: 'line', brush: brush({ size: 3, sizePressure: false, stabilization: 0 }) },
+  { id: 'fig-polygon', tool: 'figure', name: 'Polygon', figureShape: 'polygon', figureCorners: 5, figureRound: 0, figureFill: 'line', brush: brush({ size: 3, sizePressure: false, stabilization: 0 }) },
   // Frame border
   { id: 'frame-rect', tool: 'frame', name: 'Rectangle frame', frameShape: 'rect', frameLine: 5 },
   { id: 'frame-polyline', tool: 'frame', name: 'Polyline frame', frameShape: 'polyline', frameLine: 5 },
@@ -778,6 +792,9 @@ export function mergeSubTools(saved: unknown): SubTool[] {
       ...(def.curveType && CURVE_TYPES.includes(s.curveType as CurveType) ? { curveType: s.curveType } : {}),
       ...(def.rulerFigure && (s.rulerFigure === 'rect' || s.rulerFigure === 'ellipse' || s.rulerFigure === 'polygon') ? { rulerFigure: s.rulerFigure } : {}),
       ...(def.polygonCorners !== undefined && typeof s.polygonCorners === 'number' && Number.isFinite(s.polygonCorners) ? { polygonCorners: Math.max(3, Math.min(32, Math.round(s.polygonCorners))) } : {}),
+      ...(def.figureCorners !== undefined && typeof s.figureCorners === 'number' && Number.isFinite(s.figureCorners) ? { figureCorners: Math.max(3, Math.min(100, Math.round(s.figureCorners))) } : {}),
+      ...(def.figureRound !== undefined && typeof s.figureRound === 'number' && Number.isFinite(s.figureRound) ? { figureRound: Math.max(0, Math.min(100, s.figureRound)) } : {}),
+      ...(def.figureFill !== undefined && (s.figureFill === 'line' || s.figureFill === 'fill' || s.figureFill === 'both') ? { figureFill: s.figureFill } : {}),
       ...(def.tool === 'eraser' && (s.vectorErase === 'touched' || s.vectorErase === 'intersection' || s.vectorErase === 'whole') ? { vectorErase: s.vectorErase } : {}),
       ...(def.tool === 'eraser' && typeof s.vectorReferAll === 'boolean' ? { vectorReferAll: s.vectorReferAll } : {}),
       ...(def.scaleLineWidth !== undefined && typeof s.scaleLineWidth === 'boolean' ? { scaleLineWidth: s.scaleLineWidth } : {}),

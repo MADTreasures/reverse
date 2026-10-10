@@ -9,6 +9,7 @@ import { controller } from '../tools/controller';
 import { PolylineSelect } from '../tools/sessions';
 import { CurveInput } from '../tools/curveInput';
 import { cancelTransform, isTransforming } from '../tools/transform';
+import { CurveFigure } from '../tools/sessions';
 import { commandForShortcut, isEnabled } from './commands';
 import { closeMenu, isModalOpen, useOverlays } from './overlays';
 import { eventToShortcut, keyName } from './shortcuts';
@@ -73,6 +74,13 @@ export function installKeyboard(): void {
         if (e.key === 'Enter') PolylineSelect.finish();
         else if (e.key === 'Escape') PolylineSelect.cancel();
         else PolylineSelect.undoPoint();
+        controller.leave();
+        return;
+      }
+      // Figure > Curve being bent: Esc cancels.
+      if (CurveFigure.active && e.key === 'Escape') {
+        e.preventDefault();
+        CurveFigure.cancel();
         controller.leave();
         return;
       }

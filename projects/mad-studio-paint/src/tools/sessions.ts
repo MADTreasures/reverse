@@ -7,7 +7,7 @@ import { combine, createMask, ellipseMask, isSelected, maskBounds, polygonMask, 
 import { fromPoints, union, type Rect } from '../paint/rect';
 import { distanceToRuler, isSpecial, perspectiveConstraint, rulerConstraint, rulerLine, symmetryTransforms, type Affine, type Constraint, type Pt, type Ruler } from '../paint/rulers';
 import { gridOrigin, nearestLine } from '../paint/grid';
-import { ellipsePoints, rectPoints, snapAngle, type StrokePoint } from '../paint/stroke';
+import { ellipsePoints, polygonPoints, rectPoints, roundCorners, snapAngle, type StrokePoint } from '../paint/stroke';
 import { evalPressureCurve } from '../paint/curve';
 import { DEFAULT_BRUSH, type FillReference, type SubTool } from '../paint/tools';
 import { eraseAt, linesBounds, newStrokeId, splineLine, transformStrokes, type VectorEraseMode, type VectorStroke } from '../paint/vector';
@@ -24,6 +24,8 @@ import { getSurface } from '../engine/surfaces';
 import * as actions from '../store/actions';
 import { drawingColor, getState, setState } from '../store/store';
 import { referencePixels } from './reference';
+import { CurveInput } from './curveInput';
+import { sampleCurve } from '../paint/curves';
 import type { Modifiers, OverlayView, PointerInfo, ToolSession } from './types';
 
 const DRAG_THRESHOLD = 3;
@@ -352,7 +354,10 @@ export class FigureSession implements ToolSession {
       x0 -= dx;
       y0 -= dy;
     }
-    return shape === 'rect' ? rectPoints(x0, y0, x1, y1) : ellipsePoints(x0, y0, x1, y1);
+    const round = (this.sub.figureRound ?? 0) / 100;
+    if (shape === 'rect') return roundCorners(rectPoints(x0, y0, x1, y1), round);
+    if (shape === 'polygon') return roundCorners(polygonPoints(x0, y0, x1, y1, this.sub.figureCorners ?? 5), round);
+    return ellipsePoints(x0, y0, x1, y1);
   }
 
   move(p: PointerInfo): void {
@@ -369,14 +374,175 @@ export class FigureSession implements ToolSession {
       this.stroke.cancel();
       return;
     }
-    this.stroke.path(this.points(p, p));
+    const pts = this.points(p, p);
     const layer = vectorTarget();
-    if (layer) actions.addVectorLines(layer.id, strokeLines(this.sub, this.stroke, getState().colors.transparent), this.sub.name);
-    else actions.commitPixels(this.sub.name, [this.stroke.end()]);
+    const fill = this.sub.figureShape !== 'line' ? (this.sub.figureFill ?? 'line') : 'line';
+    if (layer || fill === 'line') {
+      this.stroke.path(pts);
+      if (layer) actions.addVectorLines(layer.id, strokeLines(this.sub, this.stroke, getState().colors.transparent), this.sub.name);
+      else actions.commitPixels(this.sub.name, [this.stroke.end()]);
+      return;
+    }
+    // Line/Fill: the inside in the drawing colour (Create fill), or the outline in the drawing
+    // colour over the inside in the other one (Create both line and fill) – one undo step.
+    this.stroke.cancel();
+    const s = getState();
+    const inside = fill === 'fill' ? drawingColor(s.colors) : s.colors.active === 'main' ? s.colors.sub : s.colors.main;
+    const patches: (PixelPatch | null)[] = [fillShape(pts, inside)];
+    if (fill === 'both') {
+      const target = strokeTarget();
+      if (target) {
+        const outline = new BrushStroke({ ...this.sub.brush!, stabilization: 0 }, drawingColor(s.colors), s.colors.transparent, target);
+        outline.path(pts);
+        patches.push(outline.end());
+      }
+    }
+    actions.commitPixels(this.sub.name, patches);
   }
 
   cancel(): void {
     this.stroke.cancel();
+  }
+}
+
+/** Fills a closed outline on the editing layer (inside the selection) and returns the change. */
+function fillShape(pts: Pt[], color: string): PixelPatch | null {
+  const target = rasterTarget();
+  if (!target || pts.length < 3) return null;
+  const s = getState();
+  const xs = pts.map((p) => p.x);
+  const ys = pts.map((p) => p.y);
+  const rect = { x: Math.floor(Math.min(...xs)) - 1, y: Math.floor(Math.min(...ys)) - 1, w: Math.ceil(Math.max(...xs) - Math.min(...xs)) + 3, h: Math.ceil(Math.max(...ys) - Math.min(...ys)) + 3 };
+  const sel = engine.selectionCanvas();
+  const shape = createCanvas(s.doc.width, s.doc.height);
+  const c = ctx2d(shape);
+  c.fillStyle = color;
+  c.beginPath();
+  pts.forEach((p, i) => (i ? c.lineTo(p.x, p.y) : c.moveTo(p.x, p.y)));
+  c.closePath();
+  c.fill();
+  if (sel) {
+    c.globalCompositeOperation = 'destination-in';
+    c.drawImage(sel, 0, 0);
+  }
+  const patch = captureLayerChange(target.layerId, target.layer, rect, (ctx) => {
+    ctx.save();
+    ctx.globalCompositeOperation = s.colors.transparent ? 'destination-out' : target.lockAlpha ? 'source-atop' : 'source-over';
+    ctx.drawImage(shape, 0, 0);
+    ctx.restore();
+  });
+  if (patch) engine.invalidate(patch.rect);
+  return patch;
+}
+
+/** Draws a finished figure line (Polyline, Continuous curve, Bezier curve, Curve) with the sub tool's brush. */
+function drawFigureLine(sub: SubTool, pts: Pt[]): void {
+  const target = strokeTarget();
+  if (!target || !sub.brush || pts.length < 2) return;
+  const s = getState();
+  const stroke = new BrushStroke({ ...sub.brush, stabilization: 0 }, drawingColor(s.colors), s.colors.transparent, target);
+  stroke.path(pts.map((p) => ({ x: p.x, y: p.y, pressure: 1 })));
+  const layer = vectorTarget();
+  if (layer) actions.addVectorLines(layer.id, strokeLines(sub, stroke, s.colors.transparent), sub.name);
+  else actions.commitPixels(sub.name, [stroke.end()]);
+}
+
+/**
+ * Figure > Polyline, Continuous curve and Bezier curve: points are clicked one by one (see
+ * CurveInput); the finished line is drawn with the sub tool's brush.
+ */
+export function figureCurveSession(sub: SubTool, p: PointerInfo): ToolSession | null {
+  const type = sub.figureShape === 'polyline' ? 'polyline' : sub.figureShape === 'bezier' ? 'cubic' : 'spline';
+  if (!strokeTarget()) return null;
+  return CurveInput.press(p, sub.id, type, (spec) => drawFigureLine(sub, sampleCurve(spec)), 'figure');
+}
+
+/**
+ * Figure > Curve: drag from the start to the end of the line, then move the pointer to bend it
+ * (it passes through the pointer) and click to draw it.
+ */
+export class CurveFigure {
+  static active: CurveFigure | null = null;
+  bend: Pt | null = null;
+
+  private constructor(
+    readonly sub: SubTool,
+    readonly a: Pt,
+    readonly b: Pt,
+  ) {}
+
+  /** The quadratic curve from a to b passing through the bend point at its middle. */
+  points(): Pt[] {
+    const m = this.bend ?? { x: (this.a.x + this.b.x) / 2, y: (this.a.y + this.b.y) / 2 };
+    const c = { x: 2 * m.x - (this.a.x + this.b.x) / 2, y: 2 * m.y - (this.a.y + this.b.y) / 2 };
+    const n = Math.max(16, Math.ceil(Math.hypot(this.b.x - this.a.x, this.b.y - this.a.y) / 4));
+    return Array.from({ length: n + 1 }, (_, i) => {
+      const t = i / n;
+      return { x: (1 - t) ** 2 * this.a.x + 2 * (1 - t) * t * c.x + t * t * this.b.x, y: (1 - t) ** 2 * this.a.y + 2 * (1 - t) * t * c.y + t * t * this.b.y };
+    });
+  }
+
+  /** A press with the Curve sub tool: starts the line, or (while bending) draws it. */
+  static press(sub: SubTool, p: PointerInfo): ToolSession | null {
+    const cur = CurveFigure.active;
+    if (cur && cur.sub.id === sub.id) {
+      CurveFigure.active = null;
+      setState({ hint: '' });
+      drawFigureLine(sub, cur.points());
+      return null;
+    }
+    if (!strokeTarget()) return null;
+    const start = { x: p.x, y: p.y };
+    let end = start;
+    return {
+      cursor: 'crosshair',
+      move(q: PointerInfo) {
+        end = { x: q.x, y: q.y };
+      },
+      up(q: PointerInfo) {
+        end = { x: q.x, y: q.y };
+        if (Math.hypot(q.sx - p.sx, q.sy - p.sy) < DRAG_THRESHOLD) return;
+        CurveFigure.active = new CurveFigure(sub, start, end);
+        setState({ hint: 'Move the pointer to bend the line · click to draw it · Esc cancels' });
+      },
+      cancel() {},
+      overlay(ctx: CanvasRenderingContext2D, view: OverlayView) {
+        const a = applyMatrix(view.matrix, start.x, start.y);
+        const b = applyMatrix(view.matrix, end.x, end.y);
+        ctx.save();
+        strokeOverlayColor(ctx);
+        ctx.beginPath();
+        ctx.moveTo(a.x, a.y);
+        ctx.lineTo(b.x, b.y);
+        ctx.stroke();
+        ctx.restore();
+      },
+    };
+  }
+
+  static cancel(): void {
+    if (!CurveFigure.active) return;
+    CurveFigure.active = null;
+    setState({ hint: '' });
+  }
+
+  static overlay(ctx: CanvasRenderingContext2D, view: OverlayView): void {
+    const c = CurveFigure.active;
+    if (!c) return;
+    if (getState().tool !== 'figure') {
+      CurveFigure.cancel();
+      return;
+    }
+    ctx.save();
+    strokeOverlayColor(ctx);
+    ctx.beginPath();
+    c.points().forEach((q, i) => {
+      const s = applyMatrix(view.matrix, q.x, q.y);
+      if (i) ctx.lineTo(s.x, s.y);
+      else ctx.moveTo(s.x, s.y);
+    });
+    ctx.stroke();
+    ctx.restore();
   }
 }
 
