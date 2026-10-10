@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { enclosedFillMask, scaleArea } from './fill';
+import { enclosedFillMask, scaleArea, shrinkToDrawing } from './fill';
 import { createMask, polygonMask, rectMask } from './mask';
 
 const W = 40;
@@ -103,5 +103,18 @@ describe('area scaling', () => {
     expect(at(grown, 12, 5)).toBe(255);
     expect(at(grown, 13, 5)).toBe(0);
     expect(at(scaleArea(left, 6, 'round', px), 15, 5)).toBe(255);
+  });
+});
+
+describe('shrink selection', () => {
+  it('shrinks a lasso onto the drawing: lines and enclosed areas stay, empty space around goes', () => {
+    const px = lineArt([[5, 5, 15, 15]]);
+    const lasso = rectMask(W, H, { x: 0, y: 0, w: 25, h: 25 });
+    const m = shrinkToDrawing(px, W, H, lasso, { target: 'transparent', tolerance: 0 });
+    expect(at(m, 5, 5)).toBe(255);
+    expect(at(m, 10, 10)).toBe(255);
+    expect(at(m, 2, 2)).toBe(0);
+    expect(at(m, 30, 2)).toBe(0);
+    expect(count(m)).toBe(11 * 11);
   });
 });

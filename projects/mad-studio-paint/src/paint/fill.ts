@@ -337,3 +337,61 @@ function growToDarkest(mask: Mask, steps: number, pixels: Uint8ClampedArray | Ui
   }
   return out;
 }
+
+/**
+ * Selection > Shrink selection: the lassoed area shrinks onto the drawing inside it – the empty
+ * space (target colour) that connects to the outside of the lasso drops out; the lines and the
+ * closed areas they enclose stay selected.
+ */
+export function shrinkToDrawing(
+  pixels: Uint8ClampedArray | Uint8Array,
+  width: number,
+  height: number,
+  area: Mask,
+  opts: { target: FillTarget; tolerance: number; closeGap?: number },
+): Mask {
+  const n = width * height;
+  const target: FillTarget = opts.target === 'all' ? 'transparent' : opts.target;
+  const fillable = fillableMap(pixels, n, target, opts.tolerance);
+  const gap = Math.max(0, Math.round(opts.closeGap ?? 0));
+  let passable = fillable;
+  let walls: Mask | null = null;
+  if (gap > 0) {
+    walls = createMask(width, height);
+    for (let p = 0; p < n; p++) walls.data[p] = fillable[p] ? 0 : 255;
+    const thick = dilate(walls, gap);
+    passable = new Uint8Array(n);
+    for (let p = 0; p < n; p++) passable[p] = fillable[p] && !thick.data[p] ? 1 : 0;
+  }
+  // The empty space reachable from outside the lasso (or from the canvas edge).
+  let outside = createMask(width, height);
+  const queue = new Int32Array(n);
+  let tail = 0;
+  for (let p = 0; p < n; p++) {
+    const x = p % width;
+    const y = (p / width) | 0;
+    const edge = x === 0 || y === 0 || x === width - 1 || y === height - 1;
+    if (passable[p] && (!area.data[p] || edge)) {
+      outside.data[p] = 255;
+      queue[tail++] = p;
+    }
+  }
+  for (let head = 0; head < tail; head++) {
+    const p = queue[head];
+    const x = p % width;
+    for (const q of [x > 0 ? p - 1 : -1, x < width - 1 ? p + 1 : -1, p - width, p + width]) {
+      if (q < 0 || q >= n || outside.data[q] || !passable[q]) continue;
+      outside.data[q] = 255;
+      queue[tail++] = q;
+    }
+  }
+  if (walls && gap > 0) {
+    // The thickened lines give back their margin to the empty space.
+    const grown = dilate(outside, gap);
+    for (let p = 0; p < n; p++) if (walls.data[p]) grown.data[p] = 0;
+    outside = grown;
+  }
+  const out = createMask(width, height);
+  for (let p = 0; p < n; p++) out.data[p] = area.data[p] && !outside.data[p] ? 255 : 0;
+  return out;
+}

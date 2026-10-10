@@ -2,7 +2,7 @@
 import { hexToRgb } from '../model/color';
 import { findLayer, flatten, isEffectivelyVisible } from '../model/layers';
 import type { GradientLayer, Id, VectorLayer } from '../model/types';
-import { CLOSE_GAP_STEPS, enclosedFillMask, floodFillMask, scaleArea } from '../paint/fill';
+import { CLOSE_GAP_STEPS, enclosedFillMask, floodFillMask, scaleArea, shrinkToDrawing } from '../paint/fill';
 import { combine, createMask, ellipseMask, isSelected, maskBounds, polygonMask, rectMask, translateMask, type Mask, type SelectionOp } from '../paint/mask';
 import { fromPoints, union, type Rect } from '../paint/rect';
 import { distanceToRuler, isSpecial, perspectiveConstraint, rulerConstraint, rulerLine, symmetryTransforms, type Affine, type Constraint, type Pt, type Ruler } from '../paint/rulers';
@@ -1091,6 +1091,8 @@ export class GradientSession implements ToolSession {
 
 export class SelectSession implements ToolSession {
   private points: { x: number; y: number }[] = [];
+  /** Farthest the pointer got from the press (screen pixels). */
+  private travelled = 0;
   private start: PointerInfo;
   private last: PointerInfo;
   private op: SelectionOp;
@@ -1115,7 +1117,8 @@ export class SelectSession implements ToolSession {
 
   move(p: PointerInfo): void {
     this.last = p;
-    if (this.sub.selectShape === 'lasso') this.points.push({ x: p.x, y: p.y });
+    this.travelled = Math.max(this.travelled, Math.hypot(p.sx - this.start.sx, p.sy - this.start.sy));
+    if (this.sub.selectShape === 'lasso' || this.sub.selectShape === 'shrink') this.points.push({ x: p.x, y: p.y });
   }
 
   private box(): Rect {
@@ -1131,19 +1134,31 @@ export class SelectSession implements ToolSession {
   up(p: PointerInfo): void {
     this.move(p);
     const { doc } = getState();
-    const dragged = Math.hypot(p.sx - this.start.sx, p.sy - this.start.sy) >= DRAG_THRESHOLD;
+    // A lasso closed back at its start is still a drag.
+    const dragged = this.travelled >= DRAG_THRESHOLD;
     if (!dragged) {
       // A plain click outside a drag clears the selection.
       if (this.op === 'replace') actions.deselect();
       return;
     }
     const shape = this.sub.selectShape ?? 'rect';
-    const mask =
-      shape === 'lasso'
+    let mask =
+      shape === 'lasso' || shape === 'shrink'
         ? polygonMask(doc.width, doc.height, this.points)
         : shape === 'ellipse'
           ? ellipseMask(doc.width, doc.height, this.box())
           : rectMask(doc.width, doc.height, this.box());
+    if (shape === 'shrink' && this.sub.fill) {
+      // Shrink selection: onto the drawing inside the lasso (as the fill tools see it).
+      const f = this.sub.fill;
+      const pixels = fillReference(this.sub, false);
+      mask = shrinkToDrawing(pixels.data, doc.width, doc.height, mask, {
+        target: f.target ?? 'transparent',
+        tolerance: f.tolerance,
+        closeGap: CLOSE_GAP_STEPS[Math.max(0, Math.min(5, Math.round(f.closeGap ?? 0)))],
+      });
+      if (f.expand) mask = scaleArea(mask, f.expand, f.scaling ?? 'round', pixels.data);
+    }
     actions.applySelection(mask, this.op, `Selection: ${this.sub.name}`);
   }
 
@@ -1154,7 +1169,7 @@ export class SelectSession implements ToolSession {
     ctx.save();
     strokeOverlayColor(ctx);
     ctx.beginPath();
-    if (shape === 'lasso') {
+    if (shape === 'lasso' || shape === 'shrink') {
       this.points.forEach((q, i) => {
         const s = applyMatrix(view.matrix, q.x, q.y);
         if (i === 0) ctx.moveTo(s.x, s.y);

@@ -4011,3 +4011,44 @@ test('Figure sub tools: curve, polyline, continuous curve, polygon, rounded and 
   expect(await alpha(21, 21)).toBe(0);
   expect(errors).toEqual([]);
 });
+
+test('Shrink selection: a lasso round a drawing selects the drawing', async ({ page }) => {
+  const errors = await boot(page);
+  await page.evaluate(() => {
+    const a = window.__madPaint.actions;
+    // A closed square outline 100..200.
+    const outline = (i: number) => {
+      const x = i % 400;
+      const y = Math.floor(i / 400);
+      return x >= 100 && x <= 200 && y >= 100 && y <= 200 && (x < 103 || x > 197 || y < 103 || y > 197);
+    };
+    a.setDrawingColor('#000000');
+    a.setSelection({ width: 400, height: 300, data: new Uint8Array(400 * 300).map((_: number, i: number) => (outline(i) ? 255 : 0)) });
+    a.fillWithColor();
+    a.deselect();
+    a.setTool('select');
+    a.setSubTool('select', 'sel-shrink');
+  });
+  const pts: [number, number][] = [
+    [60, 60],
+    [260, 60],
+    [260, 260],
+    [60, 260],
+    [60, 60],
+  ];
+  const first = await docToScreen(page, ...pts[0]);
+  await page.mouse.move(first.x, first.y);
+  await page.mouse.down();
+  for (const p of pts.slice(1)) {
+    const q = await docToScreen(page, ...p);
+    await page.mouse.move(q.x, q.y, { steps: 6 });
+  }
+  await page.mouse.up();
+  const sel = await page.evaluate(() => {
+    const m = window.__madPaint.useStore.getState().selection;
+    const at = (x: number, y: number) => m.data[y * m.width + x];
+    return { inside: at(150, 150), line: at(101, 150), empty: at(80, 80) };
+  });
+  expect(sel).toEqual({ inside: 255, line: 255, empty: 0 });
+  expect(errors).toEqual([]);
+});

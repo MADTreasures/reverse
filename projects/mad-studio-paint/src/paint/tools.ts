@@ -36,7 +36,7 @@ export type ToolId =
 export type BrushMode = 'paint' | 'erase' | 'blend';
 export type TipFlip = 'off' | 'on' | 'random';
 export type TipTexture = 'none' | 'grain';
-export type SelectShape = 'rect' | 'ellipse' | 'lasso' | 'polyline' | 'pen' | 'erase';
+export type SelectShape = 'rect' | 'ellipse' | 'lasso' | 'polyline' | 'pen' | 'erase' | 'shrink';
 export type FigureShape = 'line' | 'curve' | 'polyline' | 'spline' | 'bezier' | 'rect' | 'ellipse' | 'polygon';
 
 /** Figure > Line/Fill: the outline, the inside, or both (outline in the drawing colour, inside in the other one). */
@@ -685,6 +685,7 @@ export const DEFAULT_SUB_TOOLS: SubTool[] = [
   { id: 'sel-ellipse', tool: 'select', name: 'Ellipse', selectShape: 'ellipse' },
   { id: 'sel-lasso', tool: 'select', name: 'Lasso', selectShape: 'lasso' },
   { id: 'sel-polyline', tool: 'select', name: 'Polyline', selectShape: 'polyline' },
+  { id: 'sel-shrink', tool: 'select', name: 'Shrink selection', selectShape: 'shrink', fill: { ...FILL_OTHERS, mode: 'enclose', target: 'transparent', expand: 0, closeGap: 1 } },
   { id: 'sel-pen', tool: 'select', name: 'Selection pen', selectShape: 'pen', brush: brush({ size: 30, sizePressure: false, hardness: 1, antiAlias: 1, stabilization: 0 }) },
   { id: 'sel-erase', tool: 'select', name: 'Erase selection', selectShape: 'erase', brush: brush({ size: 30, sizePressure: false, hardness: 1, antiAlias: 1, stabilization: 0, mode: 'erase' }) },
   { id: 'auto-layer', tool: 'autoSelect', name: 'Refer to editing layer only', fill: { ...FILL_LAYER, closeGap: 0 } },
