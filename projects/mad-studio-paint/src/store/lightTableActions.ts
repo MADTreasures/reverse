@@ -353,7 +353,7 @@ export function finishCanvasCenter(t: number | null): void {
 }
 
 /** Window > Animation cels. */
-export const showCelsPalette = () => setState((s) => ({ layerDockTab: s.layerDockTab === 'cels' ? 'layer' : 'cels' }));
+export const showCelsPalette = () => setState((s) => (s.layerDockTab === 'animationCels' && !s.hiddenPalettes.includes('animationCels') ? { layerDockTab: 'layer' } : { layerDockTab: 'animationCels', hiddenPalettes: s.hiddenPalettes.filter((x) => x !== 'animationCels') }));
 
 /** Whether the canvas has animation folders (the Animation cels palette needs one). */
 export const hasAnimation = (s: PaintState = getState()) => animationFolders(s.doc.layers).length > 0;

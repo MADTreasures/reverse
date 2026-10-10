@@ -4247,3 +4247,136 @@ test('brush dynamics: Velocity makes fast strokes thinner', async ({ page }) => 
   expect(fast).toBeLessThan(slow * 0.7);
   expect(errors).toEqual([]);
 });
+
+test('palettes: Window menu shows Intermediate Color, Approximate Color, Sub View and Search Layer', async ({ page }) => {
+  const errors = await boot(page);
+  const run = (id: string) => page.evaluate((x) => window.__madPaint.runCommand(x), id);
+  const color = () => page.evaluate(() => window.__madPaint.useStore.getState().colors.main);
+  const setColor = (hex: string) => page.evaluate((c) => window.__madPaint.actions.setDrawingColor(c), hex);
+  const tab = (panel: string, name: string) => page.locator(`[data-testid=${panel}] .palette-tab`, { hasText: name });
+  // Hidden at first, like in the reference; the Window menu shows them in front of their stack.
+  await expect(tab('navigator-panel', 'Sub View')).toHaveCount(0);
+  await run('win-intermediateColor');
+  await expect(tab('colorset-panel', 'Intermediate Color')).toHaveClass(/active/);
+  // Intermediate Color: a corner takes the drawing colour; tiles pick colours between the corners.
+  await setColor('#ff0000');
+  await page.getByRole('button', { name: 'Set the top right colour' }).click();
+  expect((await page.evaluate(() => window.__madPaint.useStore.getState().intermediate.corners))[1]).toBe('#ff0000');
+  const tiles = page.getByTestId('intermediate-tiles');
+  const tb = (await tiles.boundingBox())!;
+  const n = Number(await tiles.getAttribute('data-cols'));
+  expect(n).toBe(20);
+  const tile = (c: number, r: number) => page.mouse.click(tb.x + ((c + 0.5) * tb.width) / n, tb.y + ((r + 0.5) * tb.height) / n);
+  // Along the top: between white and red; down the left side: between white and blue.
+  await tile(9, 0);
+  expect(await color()).toBe('#ff8686');
+  await tile(0, 9);
+  expect(await color()).toBe('#969eff');
+  // Palette menu: 10 × 10 tiles.
+  await page.getByRole('button', { name: 'Intermediate Color palette menu' }).click();
+  await page.getByRole('menuitem', { name: 'Grid divisions into 10 parts' }).click();
+  await expect(tiles).toHaveAttribute('data-cols', '10');
+  // Approximate Color: the middle tile is the drawing colour; to the right it gets brighter.
+  await run('win-approximateColor');
+  await setColor('#3a9a40');
+  const approx = page.getByTestId('approximate-tiles');
+  const ab = (await approx.boundingBox())!;
+  const cols = Number(await approx.getAttribute('data-cols'));
+  const rows = Number(await approx.getAttribute('data-rows'));
+  const tileAt = (c: number, r: number) => page.mouse.click(ab.x + ((c + 0.5) * ab.width) / cols, ab.y + ((r + 0.5) * ab.height) / rows);
+  const mid = { c: Math.floor((cols - 1) / 2), r: Math.floor((rows - 1) / 2) };
+  await tileAt(mid.c, mid.r);
+  expect(await color()).toBe('#3a9a40');
+  await tileAt(cols - 1, mid.r);
+  const bright = await color();
+  expect(parseInt(bright.slice(3, 5), 16)).toBeGreaterThan(0x9a);
+  await page.getByRole('button', { name: 'Horizontal property' }).click();
+  await page.getByRole('menuitem', { name: 'Hue' }).click();
+  await expect(page.getByRole('button', { name: 'Horizontal property' })).toHaveText('H 40 %');
+  // Sub View: import a picture (red left, blue right), pick colours from it.
+  await run('win-subView');
+  await expect(tab('navigator-panel', 'Sub View')).toHaveClass(/active/);
+  const png = await page.evaluate(async () => {
+    const c = new OffscreenCanvas(100, 60);
+    const g = c.getContext('2d')!;
+    g.fillStyle = '#ff0000';
+    g.fillRect(0, 0, 50, 60);
+    g.fillStyle = '#0000ff';
+    g.fillRect(50, 0, 50, 60);
+    const b = new Uint8Array(await (await c.convertToBlob({ type: 'image/png' })).arrayBuffer());
+    return Array.from(b);
+  });
+  const sub = page.getByTestId('subview');
+  const importImage = async (name: string) => {
+    const [chooser] = await Promise.all([page.waitForEvent('filechooser'), sub.getByRole('button', { name: 'Import', exact: true }).click()]);
+    await chooser.setFiles({ name, mimeType: 'image/png', buffer: Buffer.from(png) });
+  };
+  await importImage('ref.png');
+  const view = page.getByTestId('subview-canvas');
+  await expect(view).toHaveAttribute('data-image', 'ref.png');
+  const vb = (await view.boundingBox())!;
+  const left = { x: vb.x + vb.width / 2 - 20, y: vb.y + vb.height / 2 };
+  const right = { x: vb.x + vb.width / 2 + 20, y: vb.y + vb.height / 2 };
+  await page.mouse.click(left.x, left.y);
+  expect(await color()).toBe('#ff0000');
+  await page.mouse.click(right.x, right.y);
+  expect(await color()).toBe('#0000ff');
+  // Flip horizontal: the colours swap sides; rotate right turns 5°.
+  await sub.getByRole('button', { name: 'Flip horizontal' }).click();
+  await page.mouse.click(left.x, left.y);
+  expect(await color()).toBe('#0000ff');
+  await sub.getByRole('button', { name: 'Rotate right' }).click();
+  await expect(view).toHaveAttribute('data-rotation', '5');
+  // Eyedropper off: dragging pans and picks nothing.
+  await sub.getByRole('button', { name: 'Switch to eyedropper automatically' }).click();
+  await setColor('#00ff00');
+  await page.mouse.move(left.x, left.y);
+  await page.mouse.down();
+  await page.mouse.move(left.x + 30, left.y, { steps: 3 });
+  await page.mouse.up();
+  expect(await color()).toBe('#00ff00');
+  // A second image; the list, previous, clear.
+  await importImage('second.png');
+  await expect(page.getByTestId('subview-count')).toHaveText('2 / 2');
+  await sub.getByRole('button', { name: 'To previous image' }).click();
+  await expect(view).toHaveAttribute('data-image', 'ref.png');
+  await sub.getByRole('button', { name: 'Image list' }).click();
+  await expect(page.getByTestId('subview-list').getByRole('option')).toHaveCount(2);
+  await page.getByTestId('subview-list').getByRole('button', { name: 'Remove second.png' }).click();
+  await expect(page.getByTestId('subview-count')).toHaveText('1 / 1');
+  // The images and the palettes shown stay after a restart.
+  await page.waitForTimeout(400);
+  await page.reload();
+  await page.waitForFunction(() => window.__madPaint !== undefined);
+  await expect(page.getByTestId('subview-canvas')).toHaveAttribute('data-image', 'ref.png');
+  // Search Layer: by name, by type, Include/Exclude; delete from there.
+  await page.evaluate(() => {
+    const a = window.__madPaint.actions;
+    a.addVectorLayer();
+    a.renameLayer(window.__madPaint.useStore.getState().activeLayerId, 'Ink lines');
+    a.addRasterLayer();
+    a.renameLayer(window.__madPaint.useStore.getState().activeLayerId, 'Shadows');
+  });
+  await run('win-searchLayer');
+  const rows2 = page.getByTestId('search-layer-row');
+  await expect(rows2).toHaveCount(3);
+  await page.getByRole('searchbox', { name: 'Search keywords' }).fill('ink');
+  await expect(rows2).toHaveText([/Ink lines/]);
+  await page.getByRole('searchbox', { name: 'Search keywords' }).fill('');
+  await page.getByRole('button', { name: 'Layer type' }).click();
+  await page.getByRole('menuitem', { name: 'Raster layer' }).click();
+  await expect(rows2).toHaveCount(2);
+  await page.getByRole('button', { name: 'Exclude' }).click();
+  await page.getByRole('menuitem', { name: 'Visible' }).click();
+  await expect(rows2).toHaveCount(0);
+  await page.getByRole('button', { name: 'Exclude' }).click();
+  await page.getByRole('menuitem', { name: 'Visible' }).click();
+  await rows2.filter({ hasText: 'Shadows' }).click();
+  await page.getByTestId('search-layer').getByRole('button', { name: 'Delete layer' }).click();
+  await expect(rows2).toHaveCount(1);
+  expect(await page.evaluate(() => window.__madPaint.useStore.getState().doc.layers.map((l: any) => l.name))).toEqual(['Ink lines', 'Layer 1']);
+  // Window menu again: hidden.
+  await run('win-subView');
+  await expect(tab('navigator-panel', 'Sub View')).toHaveCount(0);
+  expect(errors).toEqual([]);
+});

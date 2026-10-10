@@ -6,6 +6,8 @@ import * as actions from '../store/actions';
 import { activeFrameFolder } from '../store/frameActions';
 import * as anim from '../store/animationActions';
 import * as labels from '../store/labelActions';
+import { isPaletteShown, togglePalette } from '../store/paletteActions';
+import { PALETTE_NAMES } from '../model/palettes';
 import * as light from '../store/lightTableActions';
 import * as sound from '../store/soundActions';
 import { copy, cut, hasClip, pasteImage } from '../store/clipboard';
@@ -383,7 +385,7 @@ export const COMMANDS: Command[] = [
   { id: 'deregisterAllLight', label: 'Deregister all images from light table', run: () => light.deregisterAll() },
   { id: 'centerCanvas', label: 'Move canvas to center…', run: () => openDialog('centerCanvas'), enabled: () => light.centerPair() !== null },
   { id: 'lockCel', label: 'Lock current animation cel as editing target', run: () => light.toggleCelLock(), checked: () => getState().lockedCel !== null },
-  { id: 'animationCels', label: 'Animation cels', run: () => light.showCelsPalette(), checked: () => getState().layerDockTab === 'cels' },
+  { id: 'animationCels', label: 'Animation cels', run: () => light.showCelsPalette(), checked: () => getState().layerDockTab === 'animationCels' && !getState().hiddenPalettes.includes('animationCels') },
   { id: 'selectPrevCel', label: 'Select previous cel', run: () => anim.selectNeighbourCel(-1), enabled: () => anim.activeTrack() !== null },
   { id: 'selectNextCel', label: 'Select next cel', run: () => anim.selectNeighbourCel(1), enabled: () => anim.activeTrack() !== null },
   { id: 'newTimeline', label: 'New timeline…', run: () => openDialog('newTimeline') },
@@ -425,6 +427,13 @@ export const COMMANDS: Command[] = [
   { id: 'newAudioTrack', label: 'Audio', run: () => void sound.newAudioTrack(), enabled: () => Boolean(getState().doc.timeline) },
   { id: 'deleteAudioTrack', label: 'Delete audio layer', run: () => sound.deleteSoundTrack(), enabled: () => sound.activeSoundTrack() !== null },
   { id: 'toggleTimeline', label: 'Timeline', run: () => anim.toggleTimelinePalette(), checked: () => getState().timelineShown },
+  // Window: palettes shown or hidden (Animation cels has its own command above).
+  ...PALETTE_NAMES.filter(([id]) => id !== 'animationCels').map(([id, name]) => ({
+    id: `win-${id}`,
+    label: name,
+    run: () => togglePalette(id),
+    checked: () => isPaletteShown(id),
+  })),
   // Filter
   ...FILTERS.map((f) => ({
     id: `filter-${f.id}`,

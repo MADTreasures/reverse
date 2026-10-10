@@ -9,6 +9,9 @@ import { OverlayHost } from './ui/OverlayHost';
 import { Palette } from './ui/Palette';
 import { ColorSet } from './ui/palettes/ColorSet';
 import { ColorHistory, ColorSliders, ColorWheelPanel } from './ui/palettes/ColorWheel';
+import { ApproximateColor, approximateMenu, IntermediateColor, intermediateMenu } from './ui/palettes/ColorGrids';
+import { SearchLayer } from './ui/palettes/SearchLayer';
+import { SubView, subViewMenu } from './ui/palettes/SubView';
 import { HistoryPalette } from './ui/palettes/HistoryPalette';
 import { LayerActionBar, LayerFlagBar, LayerList, LayerPropertyBar } from './ui/palettes/LayerPalette';
 import { AdvancedToolSettings } from './ui/palettes/BrushSettingsPanels';
@@ -47,17 +50,21 @@ function DefaultLeftDock() {
         />
         <Palette
           testId="color-panel"
+          stack="color"
           tabs={[
-            { id: 'wheel', label: 'Color Wheel', content: <ColorWheelPanel size={176} /> },
-            { id: 'slider', label: 'Color Slider', content: <ColorSliders /> },
+            { id: 'colorWheel', label: 'Color Wheel', content: <ColorWheelPanel size={176} /> },
+            { id: 'colorSlider', label: 'Color Slider', content: <ColorSliders /> },
           ]}
         />
         <Palette
           className="colorset-palette"
           testId="colorset-panel"
+          stack="colorSet"
           tabs={[
-            { id: 'set', label: 'Color Set', content: <ColorSet /> },
-            { id: 'history', label: 'Color History', content: <ColorHistory /> },
+            { id: 'colorSet', label: 'Color Set', content: <ColorSet /> },
+            { id: 'colorHistory', label: 'Color History', content: <ColorHistory /> },
+            { id: 'intermediateColor', label: 'Intermediate Color', content: <IntermediateColor />, menu: intermediateMenu },
+            { id: 'approximateColor', label: 'Approximate Color', content: <ApproximateColor />, menu: approximateMenu },
           ]}
         />
       </div>
@@ -77,11 +84,14 @@ function ClassicLeftDock() {
         <Palette className="classic-sizes" testId="brushsize-panel" tabs={[{ id: 'size', label: 'Brush Size', content: <BrushSizePalette /> }]} />
         <Palette
           testId="color-panel"
+          stack="classicColor"
           tabs={[
-            { id: 'wheel', label: 'Color Wheel', content: <ColorWheelPanel size={150} /> },
-            { id: 'slider', label: 'Slider', content: <ColorSliders /> },
-            { id: 'set', label: 'Set', content: <ColorSet /> },
-            { id: 'history', label: 'History', content: <ColorHistory /> },
+            { id: 'colorWheel', label: 'Color Wheel', content: <ColorWheelPanel size={150} /> },
+            { id: 'colorSlider', label: 'Slider', content: <ColorSliders /> },
+            { id: 'colorSet', label: 'Set', content: <ColorSet /> },
+            { id: 'colorHistory', label: 'History', content: <ColorHistory /> },
+            { id: 'intermediateColor', label: 'Intermediate', content: <IntermediateColor />, menu: intermediateMenu },
+            { id: 'approximateColor', label: 'Approximate', content: <ApproximateColor />, menu: approximateMenu },
           ]}
         />
       </div>
@@ -94,8 +104,15 @@ function RightDock() {
   return (
     <aside className="dock dock-right">
       <div className="dock-column right-column">
-        <Palette testId="navigator-panel" tabs={[{ id: 'nav', label: 'Navigator', content: <Navigator /> }]} />
-        <Palette testId="layer-property-panel" className="layer-property-palette" tabs={[{ id: 'lprop', label: 'Layer Property', content: <LayerPropertyPalette /> }]} />
+        <Palette
+          testId="navigator-panel"
+          stack="navigator"
+          tabs={[
+            { id: 'navigator', label: 'Navigator', content: <Navigator /> },
+            { id: 'subView', label: 'Sub View', content: <SubView />, menu: subViewMenu },
+          ]}
+        />
+        <Palette testId="layer-property-panel" className="layer-property-palette" tabs={[{ id: 'layerProperty', label: 'Layer Property', content: <LayerPropertyPalette /> }]} />
         <Palette
           grow
           testId="layer-panel"
@@ -103,8 +120,9 @@ function RightDock() {
           onSelect={(id) => setState({ layerDockTab: id as typeof tab })}
           tabs={[
             { id: 'layer', label: 'Layer', content: <LayerPaletteBody /> },
+            { id: 'searchLayer', label: 'Search Layer', content: <SearchLayer /> },
             { id: 'history', label: 'History', content: <HistoryPalette /> },
-            { id: 'cels', label: 'Animation cels', content: <AnimationCelsPalette /> },
+            { id: 'animationCels', label: 'Animation cels', content: <AnimationCelsPalette /> },
           ]}
         />
       </div>
@@ -132,9 +150,10 @@ export function App() {
       if (!e.relatedTarget) setDragOver(false);
     };
     const drop = (e: DragEvent) => {
-      if (!e.dataTransfer?.files.length) return;
-      e.preventDefault();
       setDragOver(false);
+      // The Sub View palette takes dropped images as reference images itself.
+      if (!e.dataTransfer?.files.length || e.defaultPrevented) return;
+      e.preventDefault();
       const onLayers = e.target instanceof Element && e.target.closest('[data-testid=layer-panel]') !== null;
       void handleDroppedFiles([...e.dataTransfer.files], onLayers);
     };

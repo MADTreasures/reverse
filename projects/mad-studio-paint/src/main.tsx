@@ -7,6 +7,9 @@ import { buildDocumentBytes, listenForNativeOpen, openFileBytes, restoreAutosave
 import { native, isElectron, isMac } from './platform/platform';
 import { keyedTrackOf } from './model/animation';
 import { sanitizeOnion } from './paint/animation';
+import { sanitizeApprox, sanitizeCorners, sanitizeTileGrid } from './paint/colorGrids';
+import { isPaletteId } from './model/palettes';
+import { loadSubView } from './store/subView';
 import * as light from './store/lightTableActions';
 import * as actions from './store/actions';
 import * as anim from './store/animationActions';
@@ -58,12 +61,18 @@ function persistPreferences(): void {
       ...(typeof p.showRulerBar === 'boolean' ? { showRulerBar: p.showRulerBar } : {}),
       ...(typeof p.snapGrid === 'boolean' ? { snapGrid: p.snapGrid } : {}),
       ...(p.colorSpace === 'hsv' || p.colorSpace === 'hls' ? { colorSpace: p.colorSpace } : {}),
+      ...(Array.isArray(p.hiddenPalettes) ? { hiddenPalettes: p.hiddenPalettes.filter(isPaletteId) } : {}),
+      ...(p.paletteTabs && typeof p.paletteTabs === 'object' ? { paletteTabs: Object.fromEntries(Object.entries(p.paletteTabs).filter(([, v]) => typeof v === 'string')) as Record<string, string> } : {}),
+      ...(p.intermediate && typeof p.intermediate === 'object'
+        ? { intermediate: { corners: sanitizeCorners((p.intermediate as Record<string, unknown>).corners), grid: sanitizeTileGrid((p.intermediate as Record<string, unknown>).grid) } }
+        : {}),
+      ...(p.approximate ? { approximate: sanitizeApprox(p.approximate) } : {}),
     });
   } catch {
     // Ignore.
   }
   useStore.subscribe((s, prev) => {
-    const keys = ['workspace', 'showSelectionLauncher', 'loop', 'timelineShown', 'timelineHeight', 'onion', 'showGrid', 'showRulerBar', 'snapGrid', 'colorSpace'] as const;
+    const keys = ['workspace', 'showSelectionLauncher', 'loop', 'timelineShown', 'timelineHeight', 'onion', 'showGrid', 'showRulerBar', 'snapGrid', 'colorSpace', 'hiddenPalettes', 'paletteTabs', 'intermediate', 'approximate'] as const;
     if (keys.every((k) => s[k] === prev[k])) return;
     try {
       localStorage.setItem(PREFS_KEY, JSON.stringify(Object.fromEntries(keys.map((k) => [k, s[k]]))));
@@ -119,6 +128,8 @@ async function boot(): Promise<void> {
   if (restored) toast('Restored your last session (not yet saved to a file).');
   else actions.fitToWindow();
   startAutosave();
+  // The Sub View palette's images of the last session.
+  void loadSubView();
   syncTitle();
   // A movie picture decoded later shows as soon as it is there.
   onMovieFrame(() => engine.invalidate());

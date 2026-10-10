@@ -1,5 +1,7 @@
 /** Menu structure shared by the in-window menu bar (browser) and the native menu (Electron). */
+import { PALETTE_NAMES } from '../model/palettes';
 import { FILTER_GROUPS, FILTERS } from '../paint/filters';
+
 export interface MenuSpec {
   label: string;
   /** Command ids, '-' for a separator, or a submenu. */
@@ -172,7 +174,19 @@ export const MENUS: MenuSpec[] = [
     ],
   },
   { label: 'Filter', items: FILTER_GROUPS.map((g) => ({ label: g.label, items: FILTERS.filter((f) => f.group === g.id).map((f) => `filter-${f.id}`) })) },
-  { label: 'Window', items: ['workspaceDefault', 'workspaceClassic', '-', 'toggleTimeline', 'animationCels', '-', 'togglePalettes', 'toggleMenuBar'] },
+  {
+    label: 'Window',
+    items: [
+      'workspaceDefault',
+      'workspaceClassic',
+      '-',
+      ...PALETTE_NAMES.map(([id]) => (id === 'animationCels' ? 'animationCels' : `win-${id}`)),
+      'toggleTimeline',
+      '-',
+      'togglePalettes',
+      'toggleMenuBar',
+    ],
+  },
   { label: 'Help', items: ['shortcuts', 'about'] },
 ];
 

@@ -9,6 +9,8 @@ import type { TextBox } from '../paint/text';
 import { DEFAULT_ONION, type OnionSkin } from '../paint/animation';
 import type { Channel, ChannelGroup, Interp } from '../paint/keyframes';
 import type { LabelRef } from '../paint/labels';
+import { DEFAULT_APPROX, DEFAULT_CORNERS, DEFAULT_TILE_GRID, type ApproxSettings, type Corners, type TileGrid } from '../paint/colorGrids';
+import { DEFAULT_HIDDEN_PALETTES, type LayerDockTab, type PaletteId } from '../model/palettes';
 
 export interface ViewState {
   /** Screen pixels per document pixel. */
@@ -168,7 +170,14 @@ export interface PaintState {
   /** Switch opacity target between All or Individual: on changes all light table layers. */
   lightOpacityAll: boolean;
   /** The tab shown in the dock with the Layer palette. */
-  layerDockTab: 'layer' | 'history' | 'cels';
+  layerDockTab: LayerDockTab;
+  /** Window menu: palettes switched off, and the tab in front of each palette stack. */
+  hiddenPalettes: PaletteId[];
+  paletteTabs: Record<string, string>;
+  /** Intermediate Color palette: the four corner colours and how the tiles show. */
+  intermediate: { corners: Corners; grid: TileGrid };
+  /** Approximate Color palette: its two sliders and how the tiles show. */
+  approximate: ApproxSettings;
 }
 
 /** A keyframe in the Timeline palette: the track (layer) and its frame (on a property row: `group`). */
@@ -274,6 +283,10 @@ function initialState(): PaintState {
     lockedCel: null,
     lightOpacityAll: false,
     layerDockTab: 'layer',
+    hiddenPalettes: [...DEFAULT_HIDDEN_PALETTES],
+    paletteTabs: {},
+    intermediate: { corners: [...DEFAULT_CORNERS], grid: { ...DEFAULT_TILE_GRID } },
+    approximate: structuredClone(DEFAULT_APPROX),
   };
 }
 
