@@ -1,5 +1,6 @@
 import { DELAY_DIVISION_BEATS, effectParam } from '../../model/effects';
 import type { SlotType } from '../../model/types';
+import { workletsReady } from '../worklets';
 
 export interface EffectEnv {
   bpm: number;
@@ -11,6 +12,8 @@ export interface EffectNode {
   readonly input: AudioNode;
   readonly output: AudioNode;
   setParams(params: Record<string, number>, env: EffectEnv): void;
+  /** The track's sidechain bus while a sidechain link feeds it, else null (effects with a sidechain input). */
+  setSidechain?(source: AudioNode | null): void;
   dispose(): void;
 }
 
@@ -19,6 +22,15 @@ const dbToGain = (db: number) => Math.pow(10, db / 20);
 function smooth(param: AudioParam, value: number, ctx: BaseAudioContext): void {
   if (!Number.isFinite(value)) return;
   param.setTargetAtTime(value, ctx.currentTime, 0.015);
+}
+
+/** Removes the connection `from` → `to` if it still exists (disconnect() throws otherwise). */
+function detach(from: AudioNode | null, to: AudioNode): void {
+  try {
+    from?.disconnect(to);
+  } catch {
+    // already disconnected
+  }
 }
 
 /** Dry/wet helper: input feeds both paths, output sums them. */
@@ -127,22 +139,33 @@ class FilterEffect implements EffectNode {
   }
 }
 
+/**
+ * The browser's DynamicsCompressorNode, or, while its Sidechain switch is on and a sidechain link feeds
+ * the track, the same algorithm as an AudioWorklet whose detector listens to the sidechain bus
+ * (worklets/compressor-worklet.js, a port of the native engine's compressor).
+ */
 class CompressorEffect implements EffectNode {
   readonly type = 'compressor' as const;
+  readonly input: GainNode;
   private readonly comp: DynamicsCompressorNode;
   private readonly makeup: GainNode;
+  private keyed: AudioWorkletNode | null = null;
+  private keyedSource: AudioNode | null = null;
+  private source: AudioNode | null = null;
+  private sidechainOn = false;
+  private params: Record<string, number> = {};
   constructor(private readonly ctx: BaseAudioContext) {
+    this.input = ctx.createGain();
     this.comp = ctx.createDynamicsCompressor();
     this.makeup = ctx.createGain();
+    this.input.connect(this.comp);
     this.comp.connect(this.makeup);
-  }
-  get input() {
-    return this.comp;
   }
   get output() {
     return this.makeup;
   }
   setParams(p: Record<string, number>): void {
+    this.params = p;
     const v = (k: string) => effectParam('compressor', p, k);
     smooth(this.comp.threshold, v('threshold'), this.ctx);
     smooth(this.comp.ratio, v('ratio'), this.ctx);
@@ -150,10 +173,63 @@ class CompressorEffect implements EffectNode {
     smooth(this.comp.release, v('release'), this.ctx);
     smooth(this.comp.knee, v('knee'), this.ctx);
     smooth(this.makeup.gain, dbToGain(v('makeup')), this.ctx);
+    this.sidechainOn = v('sidechain') >= 0.5;
+    if (!this.updateMode() && this.keyed) this.applyKeyed(this.keyed, false);
+  }
+  setSidechain(source: AudioNode | null): void {
+    this.source = source;
+    this.updateMode();
+  }
+  private applyKeyed(node: AudioWorkletNode, jump: boolean): void {
+    for (const key of ['threshold', 'ratio', 'attack', 'release', 'knee']) {
+      const param = node.parameters.get(key);
+      const value = effectParam('compressor', this.params, key);
+      if (!param || !Number.isFinite(value)) continue;
+      if (jump) param.value = value;
+      else smooth(param, value, this.ctx);
+    }
+  }
+  /** Switches between the built-in and the keyed compressor; true when it switched. */
+  private updateMode(): boolean {
+    const source = this.sidechainOn && workletsReady(this.ctx) ? this.source : null;
+    if (source === this.keyedSource) return false;
+    this.input.disconnect();
+    if (this.keyed) {
+      detach(this.keyedSource, this.keyed);
+      this.keyed.disconnect();
+      this.keyed.port.postMessage('dispose');
+      this.keyed = null;
+    }
+    this.keyedSource = source;
+    if (source) {
+      const node = new AudioWorkletNode(this.ctx, 'mad-compressor', {
+        numberOfInputs: 2,
+        numberOfOutputs: 1,
+        outputChannelCount: [2],
+        channelCount: 2,
+        channelCountMode: 'explicit',
+        channelInterpretation: 'speakers',
+      });
+      this.applyKeyed(node, true);
+      this.input.connect(node, 0, 0);
+      source.connect(node, 0, 1);
+      node.connect(this.makeup);
+      this.keyed = node;
+    } else {
+      this.input.connect(this.comp);
+    }
+    return true;
   }
   dispose(): void {
+    this.input.disconnect();
     this.comp.disconnect();
     this.makeup.disconnect();
+    if (this.keyed) {
+      detach(this.keyedSource, this.keyed);
+      this.keyed.disconnect();
+      this.keyed.port.postMessage('dispose');
+      this.keyed = null;
+    }
   }
 }
 

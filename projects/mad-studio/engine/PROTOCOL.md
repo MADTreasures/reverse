@@ -227,8 +227,9 @@ whenever the plugin announces a change) delays its own audio, so the engine dela
 path by the difference and everything meets in time.
 
 * Channels are aligned at their mixer track (each waits for the slowest channel of the track),
-  tracks at the master (each waits for the slowest track: aligned input + its inserts). Master
-  inserts add to the total. The output lags the transport by `total` samples; `status.tick`, the
+  every track input waits for the slowest path into it (channels and the sends of other tracks,
+  sidechain links included), and the faster sends are delayed; at the master the same happens for
+  the tracks sending to it (aligned input + their inserts). Master inserts add to the total. The output lags the transport by `total` samples; `status.tick`, the
   metronome, recording (takes move back by it, like the device latencies) and offline renders
   (the file still starts exactly at `startTick`) account for it.
 * Automation is compensated: a lane whose target sits behind latent plugins is read that many
@@ -252,7 +253,9 @@ path by the difference and everything meets in time.
   ```
 
   `tracks[i].latency` – latency the track has detected (aligned input plus its inserts; master:
-  the total); `tracks[i].delay` – compensation delay after the track's fader (master: 0).
+  the total); `tracks[i].delay` – compensation delay of its send to the master (master and tracks
+  that do not send there: 0); `tracks[i].sends` – only for tracks that do not just feed the master:
+  `[{"to":2,"delay":0}, …]`, every send with its compensation delay.
   `plugins` – every loaded instance by key with its reported latency and manual offset (samples).
   `automations` – whether automation is compensated (`pdc` and `pdcAutomation`).
 
@@ -281,16 +284,31 @@ Only these fields matter to the engine (others such as `patterns`, `tracks`, `cl
   "mixer": [   // index 0 = master
     {"id":"mx_0","volume":0.8,"pan":0,"muted":false,"solo":false,"input":null,"armed":false,"latencyOffset":0,
      "effects":[{"id":"fx_1","type":"limiter","enabled":true,"params":{"gain":0,"ceiling":-0.5,"release":0.1}},
-                {"id":"fx_2","type":"plugin","enabled":true,"params":{},"plugin":{…PluginInstanceData…}}]}
+                {"id":"fx_2","type":"plugin","enabled":true,"params":{},"plugin":{…PluginInstanceData…}}]},
+    {"id":"mx_1", …, "routes":[{"to":0,"level":0.8},{"to":4,"level":0,"sidechain":true}]}
   ],
   "samples": {"factory:kick_punch":{"id":"factory:kick_punch","name":"Kick Punch","source":"factory"}}
 }
 ```
 
 `effects[].type` is one of `eq`, `filter`, `compressor`, `distortion`, `chorus`, `delay`, `reverb`,
-`limiter`, `plugin`. Mixer routing: channel → `mixer[channel.mixerTrack]` (clamped) → master (index 0) →
-device output. A track is silent when `muted`, or when any insert track (index > 0) has `solo` and this
-insert does not (master is never soloed out). Only `enabled` effects are in the chain.
+`limiter`, `plugin`. Only `enabled` effects are in the chain.
+
+Mixer routing (FL Studio's route switches and send knobs, `src/model/routing.ts`): channel →
+`mixer[channel.mixerTrack]` (clamped) → the track's `routes` → … → master (index 0) → device output. An
+insert without `routes` sends to the master at unity (`[{"to":0,"level":0.8}]`); `routes: []` sends
+nowhere. Each send takes the track's output after its fader and mute and adds it to the target's
+input at `level` (knob position, gain `(level/0.8)²`). `sidechain: true` marks a sidechain link
+(*Sidechain to this track*, created with level 0): the audio also reaches the target's sidechain bus
+at unity, where a compressor with `"sidechain":1` uses it for its detector (without a sidechain link
+it compresses its own input). Routes to missing tracks, to the track itself, duplicate targets and
+routes that would close a loop are dropped; tracks are checked in index order, so of two routes
+closing a loop the one on the lower track stays (the app sends the same, already validated, routes).
+Tracks are processed senders first, the master last.
+
+A track is silent when `muted`. When any insert (index > 0) has `solo`, only the master, the soloed
+inserts and the tracks their audio passes through on its way to the master are heard (a sidechain
+link with level 0 carries no audio); the master is never soloed out.
 
 Channels may carry `settings` (FL Studio's channel settings › Misc, `src/model/channelSettings.ts`):
 `{"polyphony":0,"mono":false,"porta":false,"glide":0.1,"arp":{…}}`. The engine uses only the voice limit

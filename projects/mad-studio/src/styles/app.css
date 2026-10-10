@@ -2363,3 +2363,52 @@ button.link {
 .channel-tabs {
   margin-left: auto;
 }
+
+/* mixer routing: FL-style send switches relative to the selected track */
+
+.route-switch,
+.route-out {
+  width: 22px;
+  height: 20px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  line-height: 1;
+}
+
+.route-switch {
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  background: #2f383e;
+  color: var(--text-faint);
+}
+
+.route-switch:hover {
+  color: #8fe388;
+  border-color: #5c8a58;
+}
+
+.route-out {
+  color: #6fd36a;
+}
+
+.route-out.placeholder {
+  visibility: hidden;
+}
+
+.route-send {
+  height: 20px;
+  display: flex;
+  align-items: center;
+}
+
+.route-send.sidechain .knob-body {
+  opacity: 0.6;
+}
+
+.strip.routed {
+  border-color: #4f8a4b;
+}

@@ -57,6 +57,8 @@ public:
 
     /** The compensation of the published graph. */
     const LatencyPlan& latencyPlan() const noexcept { return plan; }
+    /** The input the current plan was made from (its sends match plan.routeDelay). */
+    const LatencyInput& latencyPlanInput() const noexcept { return planInput; }
     int totalLatency() const noexcept { return plan.total; }
 
     /** Latency of every plugin in use: what it reports and the manual offset (wrapper

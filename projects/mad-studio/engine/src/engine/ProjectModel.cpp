@@ -154,10 +154,34 @@ bool ProjectModel::trackAudible (size_t index) const
 {
     if (index == 0)
         return true;
-    bool anySolo = false;
+    // routing.ts audibleTracks(): with a solo, the soloed tracks and every track their audio passes
+    // through on its way to the master stay audible.
+    std::vector<bool> audible (mixer.size(), false);
+    std::vector<int> stack;
     for (size_t i = 1; i < mixer.size(); ++i)
-        anySolo = anySolo || mixer[i].solo;
-    return ! anySolo || (index < mixer.size() && mixer[index].solo);
+    {
+        if (mixer[i].solo)
+        {
+            audible[i] = true;
+            stack.push_back ((int) i);
+        }
+    }
+    if (stack.empty())
+        return true;
+    while (! stack.empty())
+    {
+        const int t = stack.back();
+        stack.pop_back();
+        for (const auto& r : mixer[(size_t) t].routes)
+        {
+            const bool carriesAudio = ! r.sidechain || r.level > 0.0f;
+            if (! carriesAudio || r.to < 0 || r.to >= (int) mixer.size() || audible[(size_t) r.to])
+                continue;
+            audible[(size_t) r.to] = true;
+            stack.push_back (r.to);
+        }
+    }
+    return index < mixer.size() && audible[index];
 }
 
 ProjectModel parseProject (const juce::var& json)
@@ -272,33 +296,32 @@ ProjectModel parseProject (const juce::var& json)
         m.mixer.push_back (master);
     }
 
-    // routing.ts sanitizeRoutes(): valid targets only, no self or duplicate sends, no loops.
+    // routing.ts sanitizeRoutes(): valid targets only, no self or duplicate sends, no loops; tracks
+    // are checked in index order against the routes accepted so far.
     const int numTracks = (int) m.mixer.size();
-    m.mixer[0].routes.clear();
-    const auto reaches = [&m] (int from, int target)
+    std::vector<std::vector<RouteModel>> accepted ((size_t) numTracks);
+    const auto reaches = [&accepted, numTracks] (int from, int target)
     {
         std::vector<int> stack { from };
-        std::vector<bool> seen (m.mixer.size(), false);
+        std::vector<bool> seen ((size_t) numTracks, false);
         while (! stack.empty())
         {
             const int t = stack.back();
             stack.pop_back();
             if (t == target)
                 return true;
-            if (t < 0 || t >= (int) m.mixer.size() || seen[(size_t) t])
+            if (t < 0 || t >= numTracks || seen[(size_t) t])
                 continue;
             seen[(size_t) t] = true;
-            for (const auto& r : m.mixer[(size_t) t].routes)
+            for (const auto& r : accepted[(size_t) t])
                 stack.push_back (r.to);
         }
         return false;
     };
     for (int i = 1; i < numTracks; ++i)
     {
-        auto original = std::move (m.mixer[(size_t) i].routes);
-        auto& kept = m.mixer[(size_t) i].routes;
-        kept.clear();
-        for (const auto& r : original)
+        auto& kept = accepted[(size_t) i];
+        for (const auto& r : m.mixer[(size_t) i].routes)
         {
             if (r.to < 0 || r.to >= numTracks || r.to == i)
                 continue;
@@ -309,6 +332,8 @@ ProjectModel parseProject (const juce::var& json)
             kept.push_back (r);
         }
     }
+    for (int i = 0; i < numTracks; ++i)
+        m.mixer[(size_t) i].routes = std::move (accepted[(size_t) i]);
     return m;
 }
 

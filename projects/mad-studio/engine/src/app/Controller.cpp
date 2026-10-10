@@ -790,9 +790,23 @@ void Controller::sendLatencyIfChanged()
         .field ("automations", builder->project().pdc && builder->project().pdcAutomation)
         .field ("total", plan.total)
         .field ("sampleRate", engine.getSampleRate());
+    const auto& input = builder->latencyPlanInput();
     w.key ("tracks").beginArray();
     for (size_t i = 0; i < plan.trackLatency.size(); ++i)
-        w.beginObject().field ("latency", plan.trackLatency[i]).field ("delay", plan.trackDelay[i]).endObject();
+    {
+        w.beginObject().field ("latency", plan.trackLatency[i]).field ("delay", plan.trackDelay[i]);
+        // Every send with its compensation delay, unless the track only feeds the master.
+        const auto sends = i > 0 && i < input.tracks.size() ? input.tracks[i].sends ((int) i) : std::vector<LatencyInput::Route> {};
+        const bool masterOnly = sends.size() == 1 && sends[0].to == 0 && ! sends[0].sidechain;
+        if (i > 0 && i < plan.routeDelay.size() && ! masterOnly)
+        {
+            w.key ("sends").beginArray();
+            for (size_t r = 0; r < sends.size() && r < plan.routeDelay[i].size(); ++r)
+                w.beginObject().field ("to", sends[r].to).field ("delay", plan.routeDelay[i][r]).endObject();
+            w.endArray();
+        }
+        w.endObject();
+    }
     w.endArray();
     w.key ("plugins").beginObject();
     for (const auto& p : builder->pluginLatencies())

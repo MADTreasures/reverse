@@ -7,6 +7,7 @@ import { AutomationRuntime } from './automationRuntime';
 import { ProjectGraph } from './graph';
 import { samplePool, type SamplePool } from './samplePool';
 import { swingOffsetTicks } from './scheduler';
+import { loadWorklets } from './worklets';
 
 export interface RenderOptions {
   mode: 'song' | 'pattern';
@@ -73,6 +74,7 @@ export async function renderProject(project: Project, opts: RenderOptions, pool:
   // Buffers at another rate are resampled on playback, so existing factory sounds are reused.
   if (!pool.hasFactorySamples()) pool.ensureFactorySamples(sampleRate);
   const ctx = new OfflineAudioContext({ numberOfChannels: 2, length, sampleRate });
+  await loadWorklets(ctx);
   const graph = new ProjectGraph(ctx, pool, { meters: false });
   const startOffset = 0.005;
   const at = (tick: number) => startOffset + tempo.seconds(tick) - tempo.seconds(tl.start);

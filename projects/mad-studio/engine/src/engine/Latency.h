@@ -23,7 +23,7 @@ struct LatencyInput
     struct Route
     {
         int to = 0;             // target track
-        bool sidechain = false; // feeds the target's sidechain input (aligned like its mix)
+        bool sidechain = false; // also feeds the target's sidechain input (aligned like its mix)
 
         bool operator== (const Route& o) const { return to == o.to && sidechain == o.sidechain; }
     };

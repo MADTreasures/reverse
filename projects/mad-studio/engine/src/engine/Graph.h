@@ -76,7 +76,7 @@ public:
     std::atomic<bool> monitor { false };
 
     std::vector<float> busL, busR;
-    /** Sidechain input (sends marked "sidechain"); only cleared and used when something feeds it. */
+    /** Sidechain input (sidechain links, at unity); only cleared and used when something feeds it. */
     std::vector<float> sidechainL, sidechainR;
 
     void prepare (double sampleRate, int maxBlock);
@@ -155,7 +155,7 @@ struct GraphSnapshot
         MixerTrackNode* node = nullptr;
         std::vector<Effect*> chain;
         std::vector<RouteEntry> routes; // sends (the master has none)
-        bool sidechainFed = false;      // something sends sidechain audio to this track
+        bool sidechainFed = false;      // a sidechain link feeds this track's sidechain bus
     };
 
     std::vector<ChannelEntry> channels;

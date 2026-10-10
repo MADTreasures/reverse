@@ -1,4 +1,5 @@
 import { pitchCurve } from '../model/notes';
+import { audibleTracks, sidechainSources, trackRoutes } from '../model/routing';
 import type { SequencedEvent } from '../model/timeline';
 import { volumeToGain } from '../model/timing';
 import type { AudioChannel, Channel, EffectSlot, MixerTrack, Project, SlotType } from '../model/types';
@@ -12,6 +13,15 @@ function smooth(param: AudioParam, value: number, ctx: BaseAudioContext): void {
   param.setTargetAtTime(value, ctx.currentTime, 0.01);
 }
 
+/** Removes the connection `from` → `to` if it still exists (disconnect() throws otherwise). */
+function detach(from: AudioNode, to: AudioNode): void {
+  try {
+    from.disconnect(to);
+  } catch {
+    // already gone (for example with a removed track)
+  }
+}
+
 interface ActiveEffect {
   slotId: string;
   type: SlotType;
@@ -23,6 +33,9 @@ interface ActiveEffect {
 export class MixerTrackNode {
   readonly input: GainNode;
   readonly output: GainNode;
+  /** Sidechain bus: sidechain links arrive here, effects with a sidechain input listen to it. */
+  readonly sidechain: GainNode;
+  private sidechainFed = false;
   private readonly panner: StereoPannerNode;
   private readonly fader: GainNode;
   private readonly mute: GainNode;
@@ -36,6 +49,7 @@ export class MixerTrackNode {
 
   constructor(private readonly ctx: BaseAudioContext, meters: boolean) {
     this.input = ctx.createGain();
+    this.sidechain = ctx.createGain();
     this.panner = ctx.createStereoPanner();
     this.fader = ctx.createGain();
     this.mute = ctx.createGain();
@@ -79,6 +93,13 @@ export class MixerTrackNode {
     }
   }
 
+  /** Whether a sidechain link feeds this track (its effects may then listen to the sidechain bus). */
+  setSidechainFed(fed: boolean): void {
+    if (fed === this.sidechainFed) return;
+    this.sidechainFed = fed;
+    for (const fx of this.effects) fx.node.setSidechain?.(fed ? this.sidechain : null);
+  }
+
   private rebuild(slots: EffectSlot[]): void {
     this.input.disconnect();
     for (const fx of this.effects) fx.node.output.disconnect();
@@ -89,6 +110,7 @@ export class MixerTrackNode {
     }
     for (const fx of this.effects) if (!next.includes(fx)) fx.node.dispose();
     this.effects = next;
+    for (const fx of next) fx.node.setSidechain?.(this.sidechainFed ? this.sidechain : null);
     let prev: AudioNode = this.input;
     for (const fx of next) {
       const slot = slots.find((s) => s.id === fx.slotId);
@@ -125,7 +147,7 @@ export class MixerTrackNode {
   dispose(): void {
     for (const fx of this.effects) fx.node.dispose();
     this.effects = [];
-    for (const n of [this.input, this.panner, this.fader, this.mute, this.output]) n.disconnect();
+    for (const n of [this.input, this.sidechain, this.panner, this.fader, this.mute, this.output]) n.disconnect();
     this.splitter?.disconnect();
   }
 }
@@ -248,6 +270,8 @@ export class ProjectGraph {
   readonly activity = new Map<string, number>();
   private readonly strips = new Map<string, ChannelStrip>();
   private readonly chokes = new ChokeManager();
+  /** Mixer sends by "from>to": a gain node into the target's input, plus the sidechain bus for links. */
+  private readonly sends = new Map<string, { from: number; to: number; gain: GainNode; key: GainNode | null }>();
   private project: Project | null = null;
 
   constructor(
@@ -276,15 +300,14 @@ export class ProjectGraph {
       if (this.tracks.length === 0) {
         node.output.connect(this.ctx.destination);
         this.previewBus.connect(node.input);
-      } else {
-        node.output.connect(this.tracks[0].input);
       }
       this.tracks.push(node);
     }
     while (this.tracks.length > project.mixer.length) this.tracks.pop()?.dispose();
 
-    const anySolo = project.mixer.some((t, i) => i > 0 && t.solo);
-    project.mixer.forEach((t, i) => this.tracks[i].update(t, i === 0 || !anySolo || t.solo, env, force));
+    const audible = audibleTracks(project.mixer);
+    project.mixer.forEach((t, i) => this.tracks[i].update(t, audible[i], env, force));
+    this.syncSends(project);
 
     const playable = project.channels.filter(isWebChannel);
     const ids = new Set(playable.map((c) => c.id));
@@ -305,6 +328,50 @@ export class ProjectGraph {
       const track = this.tracks[Math.min(Math.max(0, ch.mixerTrack), this.tracks.length - 1)];
       strip.route(track.input);
     }
+  }
+
+  /** Mixer routing: every insert reaches its targets through a send (post fader), links also the sidechain bus. */
+  private syncSends(project: Project): void {
+    const n = this.tracks.length;
+    const live = new Set<string>();
+    for (let i = 1; i < n; i++) {
+      const from = this.tracks[i];
+      for (const r of trackRoutes(project.mixer, i)) {
+        if (r.to < 0 || r.to >= n || r.to === i) continue;
+        const id = `${i}>${r.to}`;
+        live.add(id);
+        const target = this.tracks[r.to];
+        const level = volumeToGain(r.level);
+        let send = this.sends.get(id);
+        if (!send) {
+          const gain = this.ctx.createGain();
+          gain.gain.value = level;
+          from.output.connect(gain);
+          gain.connect(target.input);
+          send = { from: i, to: r.to, gain, key: null };
+          this.sends.set(id, send);
+        } else {
+          smooth(send.gain.gain, level, this.ctx);
+        }
+        const key = r.sidechain ? target.sidechain : null;
+        if (key !== send.key) {
+          if (send.key) detach(from.output, send.key);
+          if (key) from.output.connect(key);
+          send.key = key;
+        }
+      }
+    }
+    for (const [id, send] of this.sends) {
+      if (live.has(id)) continue;
+      const from = this.tracks[send.from];
+      if (from) {
+        detach(from.output, send.gain);
+        if (send.key) detach(from.output, send.key);
+      }
+      send.gain.disconnect();
+      this.sends.delete(id);
+    }
+    for (let i = 0; i < n; i++) this.tracks[i].setSidechainFed(sidechainSources(project.mixer, i).length > 0);
   }
 
   /** Schedules a sequenced note at audio time `time`; `spt` is seconds per tick. */
@@ -359,6 +426,8 @@ export class ProjectGraph {
   dispose(): void {
     for (const strip of this.strips.values()) strip.dispose();
     this.strips.clear();
+    for (const send of this.sends.values()) send.gain.disconnect();
+    this.sends.clear();
     for (const t of this.tracks) t.dispose();
     this.tracks.length = 0;
     this.previewBus.disconnect();

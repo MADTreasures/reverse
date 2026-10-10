@@ -542,6 +542,93 @@ async function testNoteProps(engine) {
   engine.send({ type: 'project.sync', project: baseProject() });
 }
 
+async function testRouting(engine) {
+  console.log('mixer routing');
+  // A sine on insert 1 and a kick on insert 3, master without effects.
+  const sine = { wave: 'sine', level: 1, coarse: 0, fine: 0, unison: 1, detune: 0, pan: 0 };
+  const base = baseProject();
+  base.mixer[0].effects = [];
+  base.mixer[1].effects = [];
+  base.mixer[2].effects = [];
+  base.channels = [
+    {
+      id: 'ch_rt', kind: 'synth', volume: 0.8, pan: 0, muted: false, mixerTrack: 1,
+      synth: synthParams({
+        osc: [sine, { ...sine, level: 0 }, { ...sine, level: 0 }],
+        filter: { enabled: false, type: 'lowpass', cutoff: 1800, resonance: 1, envAmount: 0, keyTrack: 0 },
+        ampEnv: { attack: 0.005, decay: 0.3, sustain: 1, release: 0.05 },
+        lfo: { target: 'off', rate: 1, depth: 0 },
+        gain: 0.25,
+      }),
+    },
+    { id: 'ch_rk', kind: 'sampler', volume: 0.8, pan: 0, muted: false, mixerTrack: 3, sampler: samplerParams('test:kick', { gain: 1 }) },
+  ];
+  const events = [{ tick: 0, length: 768, channelId: 'ch_rt', key: 69, velocity: 1 }];
+  for (let beat = 0; beat < 8; beat++) events.push({ tick: beat * 96, length: 24, channelId: 'ch_rk', key: 60, velocity: 1 });
+  events.sort((a, b) => a.tick - b.tick);
+  const render = async (name, project) => {
+    engine.send({ type: 'project.sync', project });
+    engine.send({ type: 'timeline.set', mode: 'song', loopStart: 0, loopEnd: 768, events });
+    const path = join(work, name);
+    const d = await engine.request({ type: 'render.start', requestId: name, path, sampleRate: 48000, bitDepth: 32, startTick: 0, endTick: 768, tailSeconds: 0 },
+      (m) => (m.type === 'render.done' && m.requestId === name) || (m.type === 'error' && m.request === 'render.start'), 60000, `render ${name}`);
+    check(d.type === 'render.done', `render ${name}`);
+    return d.type === 'render.done' ? readWav(path) : null;
+  };
+  const synthOnly = (p) => {
+    p.channels[1].muted = true;
+    return p;
+  };
+
+  const direct = await render('route-direct.wav', synthOnly(structuredClone(base)));
+  const viaBus = structuredClone(base);
+  viaBus.mixer[1].routes = [{ to: 2, level: 0.4 }];
+  // A send back from insert 2 to insert 1 would close a loop and is dropped; insert 2 keeps its master send.
+  viaBus.mixer[2].routes = [{ to: 1, level: 0.8 }, { to: 0, level: 0.8 }];
+  const routed = await render('route-bus.wav', synthOnly(viaBus));
+  if (direct && routed) {
+    const a = stats(direct.data, 24000, 168000).rms;
+    const b = stats(routed.data, 24000, 168000).rms;
+    near(b / a, 0.25, 0.002, `insert 1 -> insert 2 at send level 0.4 = gain 0.25 (${(b / a).toFixed(4)})`);
+    check(stats(routed.data).nonFinite === 0, 'routing with a dropped loop renders finite audio');
+  }
+
+  // Sidechain: the kick on insert 3 is linked to insert 1 at level 0 (still heard through its master
+  // send); a compressor with Sidechain on ducks the sine after every kick.
+  const keyed = structuredClone(base);
+  keyed.mixer[3].routes = [{ to: 1, level: 0, sidechain: true }, { to: 0, level: 0.8 }];
+  keyed.mixer[3].muted = false;
+  keyed.mixer[1].effects = [{ id: 'fx_sc', type: 'compressor', enabled: true, params: { threshold: -40, ratio: 20, attack: 0.001, release: 0.08, knee: 0, makeup: 0, sidechain: 1 } }];
+  const keyedOnly = structuredClone(keyed);
+  keyedOnly.mixer[3].routes = [{ to: 1, level: 0, sidechain: true }]; // the kick only keys the compressor
+  const sc = await render('route-sidechain.wav', keyedOnly);
+  const plain = structuredClone(keyedOnly);
+  plain.mixer[1].effects[0].params.sidechain = 0;
+  const unkeyed = await render('route-unkeyed.wav', plain);
+  if (sc && unkeyed) {
+    // 120 BPM: a kick every 0.5 s; measure 10-60 ms after each hit against the end of each beat.
+    let hit = 0;
+    let rest = 0;
+    let rawHit = 0;
+    let rawRest = 0;
+    for (let beat = 1; beat < 7; beat++) {
+      const t = beat * 24000;
+      hit += stats(sc.data, t + 480, t + 2880).rms;
+      rest += stats(sc.data, t + 19200, t + 23520).rms;
+      rawHit += stats(unkeyed.data, t + 480, t + 2880).rms;
+      rawRest += stats(unkeyed.data, t + 19200, t + 23520).rms;
+    }
+    check(hit < rest * 0.5, `sidechain link ducks insert 1 after each kick (${(hit / rest).toFixed(3)})`);
+    near(rawHit / rawRest, 1, 0.02, 'Sidechain off: the kick does not affect insert 1');
+  }
+  const silentKey = structuredClone(keyedOnly);
+  silentKey.channels[0].muted = true;
+  const keyOnly = await render('route-key-only.wav', silentKey);
+  if (keyOnly) near(stats(keyOnly.data).peak, 0, 1e-6, 'a level-0 sidechain link only keys: the kick itself is not heard');
+  engine.send({ type: 'project.sync', project: baseProject() });
+  engine.send(timeline());
+}
+
 async function testPlugins(engine) {
   const gainPath = join(pluginDir, 'MAD Test Gain.vst3');
   const synthPath = join(pluginDir, 'MAD Test Synth.vst3');
@@ -1191,6 +1278,7 @@ async function main() {
     await testRecording(engine, ready);
     await testAutomation(engine);
     await testNoteProps(engine);
+    await testRouting(engine);
     const plugins = await testPlugins(engine);
     await testLatency(engine, plugins);
     await testStress(engine, plugins);

@@ -5,7 +5,7 @@ import { engine } from '../../audio/engine';
 import { noteTweaked, recordAutomationValue } from '../../store/automationActions';
 import { setHint } from '../hint';
 import { controlMenu } from '../menus/controlMenu';
-import { showMenu } from '../overlays';
+import { showMenu, type MenuItem } from '../overlays';
 
 export interface KnobProps {
   value: number;
@@ -25,6 +25,8 @@ export interface KnobProps {
   showLabel?: boolean;
   /** Automation target key (enables "Create automation clip" in the right-click menu). */
   target?: string;
+  /** Entries shown above the standard control menu on right-click. */
+  menuItems?: () => MenuItem[];
 }
 
 export function toNormalized(v: number, min: number, max: number, curve: 'linear' | 'log' = 'linear'): number {
@@ -85,6 +87,7 @@ export function Knob({
   className = '',
   showLabel = false,
   target,
+  menuItems,
 }: KnobProps) {
   const drag = useRef<{ startY: number; startN: number; key: string } | null>(null);
   const automated = useAutomatedValue(target);
@@ -148,7 +151,8 @@ export function Knob({
       onContextMenu={(e) => {
         e.preventDefault();
         e.stopPropagation();
-        showMenu(e, controlMenu({ label: label ?? 'Value', value, min, max, curve, integer, defaultValue, onChange, target, format }));
+        const items = controlMenu({ label: label ?? 'Value', value, min, max, curve, integer, defaultValue, onChange, target, format });
+        showMenu(e, menuItems ? [...menuItems(), { separator: true }, ...items] : items);
       }}
       role="slider"
       aria-label={label}

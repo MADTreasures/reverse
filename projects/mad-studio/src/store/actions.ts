@@ -14,7 +14,7 @@ import { defaultEffectParams } from '../model/effects';
 import { factorySampleInfo } from '../model/factory';
 import { makeId } from '../model/ids';
 import { MAX_POLYPHONY, channelSettings, isDefault as isDefaultSettings } from '../model/channelSettings';
-import { DEFAULT_SEND, trackRoutes, wouldCycle } from '../model/routing';
+import { DEFAULT_SEND, SIDECHAIN_SEND, routedNeighbours, trackRoutes, wouldCycle } from '../model/routing';
 import { clampPluginOffset, clampTrackOffset } from '../model/latency';
 import { findPattern, isStepNote, patternLength, stepIndex, stepKey } from '../model/patterns';
 import { findPreset } from '../model/presets';
@@ -948,6 +948,28 @@ export function routeOnly(from: number, to: number): boolean {
   if (wouldCycle(without, from, to)) return false;
   edit((d) => writeRoutes(d.mixer[from], [{ to, level: DEFAULT_SEND }]), { label: 'mixer route to this track only' });
   return true;
+}
+
+/** FL Studio's "Sidechain to this track": a link whose send level starts at 0 (the master send stays). */
+export function sidechainTo(from: number, to: number): boolean {
+  return setRoute(from, to, true, { sidechain: true, level: SIDECHAIN_SEND });
+}
+
+/** FL Studio's "Reset selected track(s) routing": the track sends only to the master again. */
+export function resetRouting(index: number): void {
+  if (index <= 0 || !useStore.getState().project.mixer[index]?.routes) return;
+  edit((d) => void delete d.mixer[index].routes, { label: 'mixer reset routing' });
+}
+
+/** FL Studio's Alt+click on a mute switch: solo the track together with every track routed to or from it. */
+export function soloWithRouting(index: number): void {
+  const mixer = useStore.getState().project.mixer;
+  if (index <= 0 || index >= mixer.length) return;
+  const on = !mixer[index].solo;
+  const group = [index, ...routedNeighbours(mixer, index)];
+  edit((d) => {
+    for (const i of group) if (i > 0) d.mixer[i].solo = on;
+  }, { label: on ? 'mixer solo with routing' : 'mixer unsolo with routing' });
 }
 
 export function setRouteLevel(from: number, to: number, level: number, opts?: EditOptions): void {

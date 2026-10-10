@@ -209,10 +209,16 @@ function compare(label, web, native) {
   return maxSecond;
 }
 
+// --only demo|notes|routing runs one group of comparisons (default: all).
+const only = option('--only', null);
+const runs = (group) => only === null || only === group;
+
 console.log(`engine: ${enginePath}\nfactory samples at ${factoryRate} Hz, renders at ${sampleRate} Hz`);
+let fullMaxSecond = 0;
+if (runs('demo')) {
 const fullWeb = await browserRender(demo);
 const fullNative = nativeRender(demo, 'demo');
-const fullMaxSecond = compare('full mix', fullWeb, fullNative);
+fullMaxSecond = compare('full mix', fullWeb, fullNative);
 
 // Each insert soloed (isolates instruments and their effects).
 const detail = option('--detail', null); // insert index: print 2 ms RMS around the first sound
@@ -239,8 +245,11 @@ for (let i = 1; i < demo.mixer.length; i++) {
   }
 }
 
+}
+
 // The demo again with note properties on every note: pan, fine pitch, release, Mod X/Y, portamento
 // and slide notes (model/notes.ts; resolved by songTimeline() for both engines).
+if (runs('notes')) {
 const styled = structuredClone(demo);
 let k = 0;
 for (const pattern of styled.patterns) {
@@ -278,6 +287,40 @@ for (let i = 1; i < styled.mixer.length; i++) {
   solo.mixer[i].solo = true;
   compare(`  notes insert ${i}`, await browserRender(solo), nativeRender(solo, `styled${i}`));
 }
+}
+
+// Mixer routing (model/routing.ts): both hats only through a reverb bus, the clap also sends to it,
+// the kick keys the bass compressor through a sidechain link (level 0) and the lead goes through a
+// second bus with a delay that itself feeds the reverb bus.
+if (runs('routing')) {
+const routed = structuredClone(demo);
+const insertOf = (name) => routed.channels.find((c) => c.name === name)?.mixerTrack ?? -1;
+const reverbBus = 12;
+const delayBus = 11;
+routed.mixer[reverbBus].name = 'Reverb bus';
+routed.mixer[reverbBus].effects = [{ id: 'fx_bus_rev', type: 'reverb', enabled: true, params: { decay: 1.6, mix: 0.45 } }];
+routed.mixer[delayBus].name = 'Delay bus';
+routed.mixer[delayBus].effects = [{ id: 'fx_bus_del', type: 'delay', enabled: true, params: { time: 4, feedback: 0.3, mix: 0.4 } }];
+routed.mixer[delayBus].routes = [{ to: 0, level: 0.8 }, { to: reverbBus, level: 0.5 }];
+for (const name of ['Hat Closed', 'Hat Open']) if (insertOf(name) > 0) routed.mixer[insertOf(name)].routes = [{ to: reverbBus, level: 0.7 }];
+if (insertOf('Clap') > 0) routed.mixer[insertOf('Clap')].routes = [{ to: 0, level: 0.8 }, { to: reverbBus, level: 0.45 }];
+if (insertOf('Lead') > 0) routed.mixer[insertOf('Lead')].routes = [{ to: delayBus, level: 0.8 }];
+const kickInsert = insertOf('Kick');
+const bassInsert = insertOf('Bass');
+routed.mixer[kickInsert].routes = [{ to: 0, level: 0.8 }, { to: bassInsert, level: 0, sidechain: true }];
+routed.mixer[bassInsert].effects = [{ id: 'fx_bass_sc', type: 'compressor', enabled: true, params: { threshold: -30, ratio: 8, attack: 0.002, release: 0.12, knee: 3, makeup: 4, sidechain: 1 } }];
+compare('routing', await browserRender(routed), nativeRender(routed, 'routed'));
+const duo = structuredClone(routed);
+duo.mixer[kickInsert].solo = true;
+duo.mixer[bassInsert].solo = true;
+compare('  kick keys the bass', await browserRender(duo), nativeRender(duo, 'routed-duo'));
+for (const bus of [reverbBus, delayBus]) {
+  const solo = structuredClone(routed);
+  solo.mixer[bus].solo = true;
+  for (let i = 1; i < solo.mixer.length; i++) if ((solo.mixer[i].routes ?? []).some((r) => r.to === bus)) solo.mixer[i].solo = true;
+  compare(`  ${solo.mixer[bus].name.toLowerCase()}`, await browserRender(solo), nativeRender(solo, `routed-bus${bus}`));
+}
+}
 
 await browser.close();
 server.close();
@@ -289,7 +332,7 @@ for (const r of rows) {
     r.label.padEnd(22) + `${r.webRms.toFixed(1).padStart(7)}  ${r.nativeRms.toFixed(1).padStart(9)}  ${f(r.dRmsL).padStart(7)}  ${f(r.dRmsR).padStart(7)}  ${f(r.dPeakL).padStart(7)}  ${f(r.dPeakR).padStart(7)}  ${r.maxSecond.toFixed(2).padStart(8)}  (${r.worstAt})`,
   );
 }
-console.log(`\nworst overall RMS difference: ${worst.toFixed(2)} dB (tolerance ${toleranceDb} dB); full mix worst second ${fullMaxSecond.toFixed(2)} dB`);
+console.log(`\nworst overall RMS difference: ${worst.toFixed(2)} dB (tolerance ${toleranceDb} dB)${runs('demo') ? `; full mix worst second ${fullMaxSecond.toFixed(2)} dB` : ''}`);
 if (!keep) rmSync(work, { recursive: true, force: true });
 else console.log(`kept ${work}`);
 process.exit(worst <= toleranceDb ? 0 : 1);

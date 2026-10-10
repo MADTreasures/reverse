@@ -606,9 +606,10 @@ void AudioEngine::processBlock (const float* const* inputs, int numInputs, float
         auto* master = snap->tracks[0].node;
         renderPreviews (ctx, master->busL.data(), master->busR.data());
 
-        // Tracks in routing order (senders before their targets, the master last); every send adds
-        // the track's output to the target's input or sidechain bus, delayed for plugin delay
-        // compensation where the paths into the target differ in latency.
+        // Tracks in routing order (senders before their targets, the master last). Every send adds
+        // the track's output (post fader) to the target's input at the send level; a sidechain link
+        // (FL Studio: a send whose level starts at 0) also feeds the target's sidechain bus at unity.
+        // Sends are delayed for plugin delay compensation where the paths into a target differ.
         for (const int index : snap->order)
         {
             auto& entry = snap->tracks[(size_t) index];
@@ -627,9 +628,17 @@ void AudioEngine::processBlock (const float* const* inputs, int numInputs, float
                     srcL = routeL.data();
                     srcR = routeR.data();
                 }
-                float* destL = route.sidechain ? target->sidechainL.data() : target->busL.data();
-                float* destR = route.sidechain ? target->sidechainR.data() : target->busR.data();
-                route.node->addTo (ctx, srcL, srcR, destL, destR);
+                route.node->addTo (ctx, srcL, srcR, target->busL.data(), target->busR.data());
+                if (route.sidechain)
+                {
+                    float* keyL = target->sidechainL.data();
+                    float* keyR = target->sidechainR.data();
+                    for (int i = 0; i < n; ++i)
+                    {
+                        keyL[i] += srcL[i];
+                        keyR[i] += srcR[i];
+                    }
+                }
             }
         }
 

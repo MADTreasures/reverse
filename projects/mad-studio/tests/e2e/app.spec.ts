@@ -797,3 +797,95 @@ test('about box shows the VST Compatible logo with its trademark notice (Steinbe
   await expect(page.locator('.modal .brand-logo.asio')).toHaveCount(0);
   expect(errors).toEqual([]);
 });
+
+test('mixer routing: route switches, send knobs, route only, sidechain links, loop check; the sidechain compressor ducks', async ({ page }) => {
+  const errors = await boot(page);
+  await page.keyboard.press('F9');
+  const strips = page.locator('.strip');
+  const bus = 12; // an empty insert as the bus
+  const routes = async (i: number) => (await state(page)).project.mixer[i].routes;
+
+  // Select Kick (insert 1); the bus's switch sends it there, the master send stays.
+  await strips.nth(1).locator('.strip-num').click();
+  await strips.nth(bus).locator('.route-switch').click();
+  expect(await routes(1)).toEqual([{ to: 0, level: 0.8 }, { to: bus, level: 0.8 }]);
+  await expect(strips.nth(bus)).toHaveClass(/routed/);
+  const knob = strips.nth(bus).locator('.route-send [role="slider"]');
+  await expect(knob).toBeVisible();
+  // Right-click on the send knob: route to this track only (the master send goes away).
+  await knob.click({ button: 'right' });
+  await page.getByRole('menuitem', { name: 'Route to this track only' }).click();
+  expect(await routes(1)).toEqual([{ to: bus, level: 0.8 }]);
+  await expect(page.locator('.mixer-fx .io-select.output')).toContainText(`Insert ${bus}`);
+
+  // From the bus back to Kick would close a loop: refused with a message.
+  await strips.nth(bus).locator('.strip-num').click();
+  await strips.nth(1).locator('.route-switch').click();
+  await expect(page.locator('.toast')).toContainText('feed the track back into itself');
+  expect(await routes(bus)).toBeUndefined();
+
+  // Hats (insert 3): sidechain link to the bus (level 0, master send kept).
+  await strips.nth(3).locator('.strip-num').click();
+  await strips.nth(bus).locator('.route-switch').click({ button: 'right' });
+  await page.getByRole('menuitem', { name: 'Sidechain to this track' }).click();
+  expect(await routes(3)).toEqual([{ to: 0, level: 0.8 }, { to: bus, level: 0, sidechain: true }]);
+  await strips.nth(bus).locator('.strip-num').click();
+  await expect(page.locator('.mixer-fx .routed-list')).toContainText('Sidechain: Hat');
+
+  // Alt+click on the bus's mute switch solos it with every track routed to or from it.
+  await strips.nth(bus).locator('.mute-led').click({ modifiers: ['Alt'] });
+  const solo = (await state(page)).project.mixer.map((t: any) => t.solo);
+  expect(solo.flatMap((on: boolean, i: number) => (on ? [i] : []))).toEqual([1, 3, bus]);
+  await page.keyboard.press('ControlOrMeta+z');
+  await page.keyboard.press('ControlOrMeta+z');
+  await page.keyboard.press('ControlOrMeta+z');
+  expect(await routes(3)).toBeUndefined();
+
+  // The browser engine: a kick linked to the chords insert keys its compressor (AudioWorklet).
+  const ratio = await page.evaluate(async () => {
+    const m = window.__madStudio;
+    const base = structuredClone(m.useStore.getState().project);
+    const kick = base.channels.find((c: any) => c.name === 'Kick');
+    const chords = base.channels.find((c: any) => c.name === 'Chords');
+    base.channels = [kick, chords];
+    // A steady pad: fast attack, no LFO or filter envelope, so only the compressor changes its level.
+    chords.synth.ampEnv = { attack: 0.005, decay: 0.1, sustain: 1, release: 0.1 };
+    chords.synth.filter.envAmount = 0;
+    chords.synth.lfo = { ...chords.synth.lfo, depth: 0 };
+    const pattern = { ...structuredClone(base.patterns[0]), id: 'pat_sc', notes: {} as Record<string, unknown[]> };
+    pattern.notes[kick.id] = [0, 1, 2, 3].map((b) => ({ id: `k${b}`, key: 60, start: b * 96, length: 24, velocity: 1 }));
+    pattern.notes[chords.id] = [{ id: 'c0', key: 60, start: 0, length: 384, velocity: 1 }];
+    base.patterns = [pattern];
+    base.mixer[kick.mixerTrack].routes = [{ to: chords.mixerTrack, level: 0, sidechain: true }];
+    base.mixer[chords.mixerTrack].effects = [
+      { id: 'fx_sc', type: 'compressor', enabled: true, params: { threshold: -40, ratio: 20, attack: 0.001, release: 0.08, knee: 0, makeup: 0, sidechain: 1 } },
+    ];
+    base.mixer[0].effects = [];
+    const level = async (project: any) => {
+      const buffer = await m.renderProject(project, { mode: 'pattern', patternId: 'pat_sc', sampleRate: 48000, tail: 0 });
+      const [l] = m.bufferChannels(buffer);
+      const rms = (a: number, b: number) => {
+        let s = 0;
+        for (let i = a; i < b; i++) s += l[i] * l[i];
+        return Math.sqrt(s / (b - a));
+      };
+      // A kick on every beat; 10-60 ms after a hit against the end of the beat (render starts at 5 ms).
+      const beatFrames = (60 / project.bpm) * 48000;
+      let hit = 0;
+      let rest = 0;
+      for (let beat = 1; beat < 4; beat++) {
+        const t = Math.round(beat * beatFrames + 240);
+        hit += rms(t + 480, t + 2880);
+        rest += rms(t + Math.round(beatFrames * 0.7), t + Math.round(beatFrames * 0.95));
+      }
+      return hit / rest;
+    };
+    const keyed = await level(base);
+    const off = structuredClone(base);
+    off.mixer[chords.mixerTrack].effects[0].params.sidechain = 0;
+    return { keyed, off: await level(off) };
+  });
+  expect(ratio.keyed).toBeLessThan(0.5);
+  expect(ratio.off).toBeGreaterThan(0.8);
+  expect(errors).toEqual([]);
+});

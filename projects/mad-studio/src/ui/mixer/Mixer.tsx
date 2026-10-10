@@ -2,6 +2,7 @@ import { memo } from 'react';
 import { mixerTarget } from '../../model/automationTargets';
 import { PALETTE, PALETTE_NAMES } from '../../model/colors';
 import { EFFECT_SPECS } from '../../model/effects';
+import { DEFAULT_SEND, sidechainSources, trackRoutes } from '../../model/routing';
 import { formatDb, formatPan, volumeToGain } from '../../model/timing';
 import type { EffectSlot, MixerTrack, TrackInput } from '../../model/types';
 import { inputChannelNames, usePlugins } from '../../plugins/pluginStore';
@@ -11,7 +12,13 @@ import {
   disarmAllTracks,
   moveEffect,
   removeEffect,
+  resetRouting,
+  routeOnly,
   selectMixerTrack,
+  setRoute,
+  setRouteLevel,
+  sidechainTo,
+  soloWithRouting,
   setMixerTrackProps,
   setTrackArmed,
   setTrackInput,
@@ -24,7 +31,7 @@ import { IconMixer, IconPlus } from '../controls/Icons';
 import { Knob } from '../controls/Knob';
 import { Meter } from '../controls/Meter';
 import { effectSlotMenu } from '../menus/pluginMenus';
-import { openDialog, promptDialog, showMenu, type MenuItem } from '../overlays';
+import { openDialog, promptDialog, showMenu, toast, type MenuItem } from '../overlays';
 import { WindowFrame } from '../workspace/WindowFrame';
 import { openEffectEditor } from '../workspace/windows';
 import { LatencyPanel, pdcMenu, trackLatencyMenu } from './Latency';
@@ -96,9 +103,30 @@ function mixerMenu(): MenuItem[] {
   ];
 }
 
+const LOOP_MESSAGE = 'That route would feed the track back into itself.';
+
+/** Turns a send on with FL Studio's feedback check. */
+function tryRoute(ok: boolean): void {
+  if (!ok) toast(LOOP_MESSAGE);
+}
+
+/** Right-click menu of a route switch or send knob: `from` (the selected track) → `to`. */
+function routeMenu(from: number, to: number): MenuItem[] {
+  const mixer = useStore.getState().project.mixer;
+  const linked = trackRoutes(mixer, from).find((r) => r.to === to);
+  return [
+    { label: `${mixer[from]?.name ?? ''} → ${mixer[to]?.name ?? ''}`, header: true },
+    { label: 'Route to this track only', onClick: () => tryRoute(routeOnly(from, to)) },
+    { label: 'Sidechain to this track', checked: !!linked?.sidechain, onClick: () => tryRoute(sidechainTo(from, to)) },
+    ...(linked ? [{ separator: true } as MenuItem, { label: 'Remove send', onClick: () => void setRoute(from, to, false) }] : []),
+  ];
+}
+
 export function Mixer() {
   const tracks = useStore((s) => s.project.mixer);
   const selectedIndex = useStore((s) => s.ui.selectedMixerTrack);
+  const sel = Math.min(selectedIndex, tracks.length - 1);
+  const sends = trackRoutes(tracks, sel);
   const toolbar = (
     <>
       <button className="btn" data-hint="Mixer menu" onClick={(e) => showMenu(e, mixerMenu())}>
@@ -113,9 +141,21 @@ export function Mixer() {
     <WindowFrame id="mixer" title="Mixer" icon={<IconMixer />} toolbar={toolbar}>
       <div className="mixer">
         <div className="mixer-strips">
-          {tracks.map((t, i) => (
-            <Strip key={t.id} track={t} index={i} selected={i === selectedIndex} />
-          ))}
+          {tracks.map((t, i) => {
+            const send = sends.find((r) => r.to === i);
+            return (
+              <Strip
+                key={t.id}
+                track={t}
+                index={i}
+                selected={i === selectedIndex}
+                sel={sel}
+                selName={tracks[sel]?.name ?? ''}
+                sendLevel={send ? send.level : null}
+                sendSidechain={!!send?.sidechain}
+              />
+            );
+          })}
         </div>
         <TrackInspector index={Math.min(selectedIndex, tracks.length - 1)} />
       </div>
@@ -143,19 +183,100 @@ function trackMenu(track: MixerTrack, index: number): MenuItem[] {
         ]
       : []),
     ...(usePlugins.getState().nativeEngine ? [{ label: 'Delay compensation', submenu: trackLatencyMenu(index) }] : []),
+    ...routingMenu(index),
     { separator: true },
     { label: 'Add effect', submenu: effectSlotMenu(index, null) },
   ];
 }
 
-const Strip = memo(function Strip({ track, index, selected }: { track: MixerTrack; index: number; selected: boolean }) {
+/** FL Studio's track menu › routing, for the selected track and the track that was right-clicked. */
+function routingMenu(index: number): MenuItem[] {
+  const s = useStore.getState();
+  const mixer = s.project.mixer;
+  const sel = s.ui.selectedMixerTrack;
+  const items: MenuItem[] = [{ label: 'Routing', header: true }];
+  if (sel > 0 && sel !== index && sel < mixer.length) {
+    const linked = trackRoutes(mixer, sel).find((r) => r.to === index);
+    items.push(
+      { label: 'Route selected to this track', checked: !!linked && !linked.sidechain, onClick: () => tryRoute(setRoute(sel, index, !linked || !!linked.sidechain)) },
+      { label: 'Route selected to this track only', onClick: () => tryRoute(routeOnly(sel, index)) },
+      { label: 'Sidechain selected to this track', checked: !!linked?.sidechain, onClick: () => tryRoute(sidechainTo(sel, index)) },
+    );
+  }
+  if (index > 0 && sel !== index && sel >= 0 && sel < mixer.length) {
+    items.push({ label: 'Route this track to selected only', onClick: () => tryRoute(routeOnly(index, sel)) });
+  }
+  if (index > 0) items.push({ label: 'Reset routing', disabled: !mixer[index]?.routes, onClick: () => resetRouting(index) });
+  return items.length > 1 ? items : [];
+}
+
+/** FL Studio's send switch at the bottom of a track, relative to the selected track. */
+function RouteSwitch({ index, sel, selName, level, sidechain }: { index: number; sel: number; selName: string; level: number | null; sidechain: boolean }) {
+  const stop = (e: { stopPropagation(): void }) => e.stopPropagation();
+  if (index === sel) {
+    return (
+      <span className="route-out" data-hint="Selected track – its sends show on the tracks it feeds">
+        ▼
+      </span>
+    );
+  }
+  if (sel === 0) return <span className="route-out placeholder" />;
+  const menu = (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    showMenu(e, routeMenu(sel, index));
+  };
+  if (level === null) {
+    return (
+      <button
+        className="route-switch"
+        aria-label={`Send ${selName} to this track`}
+        data-hint={`Send ${selName} to this track · right-click: route only / sidechain`}
+        onPointerDown={stop}
+        onClick={() => tryRoute(setRoute(sel, index, true))}
+        onContextMenu={menu}
+      >
+        ▲
+      </button>
+    );
+  }
+  return (
+    <div className={`route-send ${sidechain ? 'sidechain' : ''}`} onPointerDown={stop}>
+      <Knob
+        size={20}
+        label={`Send level from ${selName}`}
+        value={level}
+        min={0}
+        max={1}
+        defaultValue={sidechain ? 0 : DEFAULT_SEND}
+        format={(v) => (sidechain && v === 0 ? 'Sidechain only' : formatDb(volumeToGain(v)))}
+        color={sidechain ? '#8b98a3' : undefined}
+        menuItems={() => routeMenu(sel, index)}
+        onChange={(v, g) => setRouteLevel(sel, index, v, { coalesce: g })}
+      />
+    </div>
+  );
+}
+
+interface StripProps {
+  track: MixerTrack;
+  index: number;
+  selected: boolean;
+  /** The selected track and its send to this strip (FL Studio's route switches follow the selection). */
+  sel: number;
+  selName: string;
+  sendLevel: number | null;
+  sendSidechain: boolean;
+}
+
+const Strip = memo(function Strip({ track, index, selected, sel, selName, sendLevel, sendSidechain }: StripProps) {
   const isMaster = index === 0;
   const native = usePlugins((s) => s.nativeEngine);
   const activeFx = track.effects.filter((e) => e.enabled).length;
   return (
     <div
-      className={`strip ${isMaster ? 'master' : ''} ${selected ? 'selected' : ''} ${track.armed ? 'armed' : ''}`}
-      onPointerDown={() => selectMixerTrack(index)}
+      className={`strip ${isMaster ? 'master' : ''} ${selected ? 'selected' : ''} ${track.armed ? 'armed' : ''} ${sendLevel !== null ? 'routed' : ''}`}
+      onPointerDown={(e) => e.button === 0 && selectMixerTrack(index)}
       onContextMenu={(e) => {
         e.preventDefault();
         showMenu(e, trackMenu(track, index));
@@ -176,10 +297,12 @@ const Strip = memo(function Strip({ track, index, selected }: { track: MixerTrac
       <span className="strip-fx-count">{activeFx ? `FX ${activeFx}` : track.input ? inputLabel(track.input) : ''}</span>
       <button
         className={`mute-led ${track.muted ? '' : 'on'} ${track.solo ? 'solo' : ''}`}
-        data-hint={isMaster ? 'Mute master' : 'Mute (right-click or Ctrl/Cmd+click: solo)'}
-        onClick={(e) =>
-          !isMaster && (e.metaKey || e.ctrlKey) ? setMixerTrackProps(index, { solo: !track.solo }) : setMixerTrackProps(index, { muted: !track.muted })
-        }
+        data-hint={isMaster ? 'Mute master' : 'Mute (right-click or Ctrl/Cmd+click: solo, Alt+click: solo with the tracks routed to and from it)'}
+        onClick={(e) => {
+          if (!isMaster && e.altKey) soloWithRouting(index);
+          else if (!isMaster && (e.metaKey || e.ctrlKey)) setMixerTrackProps(index, { solo: !track.solo });
+          else setMixerTrackProps(index, { muted: !track.muted });
+        }}
         onContextMenu={(e) => {
           // FL Studio: right-clicking a mixer track's mute switch solos the track.
           e.preventDefault();
@@ -223,6 +346,7 @@ const Strip = memo(function Strip({ track, index, selected }: { track: MixerTrac
           }}
         />
       )}
+      <RouteSwitch index={index} sel={sel} selName={selName} level={sendLevel} sidechain={sendSidechain} />
     </div>
   );
 });
@@ -232,13 +356,23 @@ function slotName(slot: EffectSlot): string {
 }
 
 /** FL Studio's track inspector: input, ten effect slots, output. */
+/** "Master, Insert 3 (sidechain)" – where a track sends its audio. */
+function sendSummary(mixer: readonly MixerTrack[], index: number): string {
+  const routes = trackRoutes(mixer, index);
+  if (routes.length === 0) return '(none)';
+  return routes.map((r) => `${mixer[r.to]?.name ?? '?'}${r.sidechain ? ' (sidechain)' : ''}`).join(', ');
+}
+
 function TrackInspector({ index }: { index: number }) {
   const track = useStore((s) => s.project.mixer[index]);
+  const mixer = useStore((s) => s.project.mixer);
   const channels = useStore((s) => s.project.channels);
   const device = usePlugins((s) => s.device);
   const native = usePlugins((s) => s.nativeEngine);
   if (!track) return null;
   const routed = channels.filter((c) => c.kind !== 'automation' && c.mixerTrack === index).map((c) => c.name);
+  const incoming = mixer.flatMap((t, i) => (i > 0 && trackRoutes(mixer, i).some((r) => r.to === index && (!r.sidechain || r.level > 0)) ? [t.name] : []));
+  const keyedBy = sidechainSources(mixer, index).map((i) => mixer[i].name);
   const slots = Array.from({ length: MAX_EFFECT_SLOTS }, (_, i) => track.effects[i] ?? null);
   return (
     <div className="mixer-fx">
@@ -300,13 +434,15 @@ function TrackInspector({ index }: { index: number }) {
           ),
         )}
       </div>
-      <div className="io-select output" data-hint="Output of this track">
+      <div className="io-select output" data-hint="Output of this track (sends: the route switches at the bottom of the other tracks)">
         <span className="io-icon">⇤</span>
-        <span className="io-label">{index === 0 ? (device ? device.outputChannels.slice(0, 2).join(' - ') || 'Out 1 - Out 2' : 'Out 1 - Out 2') : 'Master'}</span>
+        <span className="io-label">{index === 0 ? (device ? device.outputChannels.slice(0, 2).join(' - ') || 'Out 1 - Out 2' : 'Out 1 - Out 2') : sendSummary(mixer, index)}</span>
       </div>
       {native && <LatencyPanel index={index} variant="inspector" />}
       <div className="routed-list">
-        {index === 0 ? 'All insert tracks feed the master.' : routed.length ? `Channels: ${routed.join(', ')}` : 'No channels routed here yet.'}
+        {routed.length ? `Channels: ${routed.join(', ')}` : index === 0 ? '' : 'No channels routed here yet.'}
+        {incoming.length > 0 && <div>From: {incoming.join(', ')}</div>}
+        {keyedBy.length > 0 && <div>Sidechain: {keyedBy.join(', ')}</div>}
       </div>
     </div>
   );

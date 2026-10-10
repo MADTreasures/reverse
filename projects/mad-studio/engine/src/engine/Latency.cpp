@@ -95,7 +95,7 @@ LatencyPlan planCompensation (const LatencyInput& in)
         {
             const int delay = valid (r) ? (int) std::clamp<int64_t> (p.trackInput[(size_t) r.to] - out[(size_t) t], 0, maxCompensation) : 0;
             p.routeDelay[(size_t) t].push_back (delay);
-            if (r.to == 0 && ! r.sidechain)
+            if (r.to == 0)
                 p.trackDelay[(size_t) t] = delay;
         }
     }

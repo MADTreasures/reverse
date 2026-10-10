@@ -1046,6 +1046,166 @@ void testLatencyPlan()
              "a maximal positive offset cancels the maximal latency");
 }
 
+void testRoutedLatencyPlan()
+{
+    auto& s = *suite;
+    // Insert 1 (insert latency 100) sends to the master and sidechains to insert 2; insert 3 (dry)
+    // sends only to insert 2; a dry channel on each insert.
+    LatencyInput in;
+    in.channels = { { 1, 0 }, { 2, 0 }, { 3, 0 } };
+    in.tracks = { { {}, 0, false, {} },
+                  { { 100 }, 0, true, { { 2, true }, { 0, false } } },
+                  { {}, 0, false, {} },
+                  { {}, 0, true, { { 2, false } } } };
+    auto p = planCompensation (in);
+    s.check (p.trackInput == std::vector<int> ({ 100, 0, 100, 0 }), "insert 2 waits for the slower insert sending to it");
+    s.check (p.channelDelay == std::vector<int> ({ 0, 100, 0 }), "the dry channel on insert 2 is delayed to match");
+    s.check (p.routeDelay.size() == 4 && p.routeDelay[1] == std::vector<int> ({ 0, 0 }) && p.routeDelay[3] == std::vector<int> ({ 100 })
+                 && p.routeDelay[2] == std::vector<int> ({ 0 }),
+             "the faster send (insert 3) is delayed, the latent one not");
+    s.check (p.trackDelay == std::vector<int> ({ 0, 0, 0, 0 }) && p.total == 100, "everything meets at the master in time");
+
+    // A track that sends nowhere does not hold up the master.
+    auto silent = in;
+    silent.tracks[3].routes.clear();
+    silent.tracks[1].effects = { 0 };
+    silent.channels.push_back ({ 3, 500 });
+    p = planCompensation (silent);
+    s.check (p.masterInput == 0 && p.total == 0, "unrouted track: no compensation at the master");
+}
+
+void testMixerRouting()
+{
+    auto& s = *suite;
+    SampleStore samples;
+    ChannelIds ids;
+    samples.add (constantSample ("rt_dc", 2, 0.5f, 3.0, 48000.0));
+    samples.add (constantSample ("rt_quiet", 2, 0.05f, 3.0, 48000.0));
+
+    const auto render = [&] (ProjectModel project, std::vector<TimelineEvent> events, std::vector<float>& l, std::vector<float>& r)
+    {
+        auto tl = std::make_shared<Timeline>();
+        tl->songMode = true;
+        tl->loopEnd = 768.0;
+        tl->events = std::move (events);
+        RenderRequest req;
+        req.project = std::move (project);
+        req.timeline = tl;
+        req.sampleRate = 48000.0;
+        req.endTick = 768.0;
+        req.tailSeconds = 0.0;
+        return renderOfflineToBuffers (req, samples, ids, nullptr, l, r);
+    };
+    const auto sampler = [] (const juce::String& id, const juce::String& sample, int track)
+    {
+        ChannelModel ch;
+        ch.id = id;
+        ch.kind = ChannelKind::sampler;
+        ch.mixerTrack = track;
+        for (int i = 0; i < sampler::numParams; ++i)
+            ch.samplerParams[(size_t) i] = sampler::defaultValue (i);
+        ch.samplerParams[sampler::gain] = 1.0f;
+        ch.sampleId = sample;
+        return ch;
+    };
+    const auto note = [&ids] (const juce::String& channel, double start, double length)
+    { return TimelineEvent { start, length, ids.uidFor (channel), 60, 1.0f, 0.0, false, {}, 0, 0 }; };
+
+    // Insert 1 -> insert 2 only, send level 0.4 (gain 0.25); insert 2's fader applies too.
+    {
+        auto p = makeProject (3);
+        p.channels.push_back (sampler ("rt_a", "rt_dc", 1));
+        p.mixer[1].routes = { { 2, 0.4f, false } };
+        std::vector<float> l, r;
+        const auto res = render (p, { note ("rt_a", 0.0, 384.0) }, l, r);
+        s.check (res.ok, "render ok");
+        s.near (rms (l, 9600, 19200), 0.5 * 0.25, 1.0e-4, "send level 0.4 = gain 0.25 into insert 2");
+        p.mixer[2].volume = 0.4f;
+        render (p, { note ("rt_a", 0.0, 384.0) }, l, r);
+        s.near (rms (l, 9600, 19200), 0.5 * 0.25 * 0.25, 1.0e-4, "the target's fader applies to the send");
+        p.mixer[2].muted = true;
+        render (p, { note ("rt_a", 0.0, 384.0) }, l, r);
+        s.near (rms (l, 9600, 19200), 0.0, 1.0e-6, "muting the target silences the send");
+        p.mixer[2].muted = false;
+        p.mixer[1].solo = true;
+        render (p, { note ("rt_a", 0.0, 384.0) }, l, r);
+        s.near (rms (l, 9600, 19200), 0.5 * 0.25 * 0.25, 1.0e-4, "a soloed track is heard through the track it is routed to");
+        p.mixer[1].solo = false;
+        p.mixer[3].solo = true;
+        render (p, { note ("rt_a", 0.0, 384.0) }, l, r);
+        s.near (rms (l, 9600, 19200), 0.0, 1.0e-6, "soloing another track mutes the route");
+    }
+    // Two sends at unity: the track reaches the master twice; no sends at all: silent.
+    {
+        auto p = makeProject (3);
+        p.channels.push_back (sampler ("rt_b", "rt_dc", 1));
+        p.mixer[1].routes = { { 0, 0.8f, false }, { 2, 0.8f, false } };
+        std::vector<float> l, r;
+        render (p, { note ("rt_b", 0.0, 384.0) }, l, r);
+        s.near (rms (l, 9600, 19200), 1.0, 1.0e-4, "direct + via insert 2 = twice the level");
+        p.mixer[1].routes.clear();
+        render (p, { note ("rt_b", 0.0, 384.0) }, l, r);
+        s.near (rms (l, 9600, 19200), 0.0, 1.0e-6, "a track routed nowhere is silent");
+    }
+    // A higher insert sending to a lower one is processed first: no extra block of latency.
+    {
+        auto direct = makeProject (3);
+        direct.channels.push_back (sampler ("rt_c", "rt_dc", 3));
+        auto routed = direct;
+        routed.mixer[3].routes = { { 1, 0.8f, false } };
+        std::vector<float> l1, r1, l2, r2;
+        render (direct, { note ("rt_c", 0.0, 384.0) }, l1, r1);
+        render (routed, { note ("rt_c", 0.0, 384.0) }, l2, r2);
+        const auto onset = [] (const std::vector<float>& v)
+        {
+            for (size_t i = 0; i < v.size(); ++i)
+                if (std::abs (v[i]) > 1.0e-6f)
+                    return (int64_t) i;
+            return (int64_t) -1;
+        };
+        s.check (onset (l1) >= 0 && onset (l1) == onset (l2), str ("insert 3 -> insert 1 -> master in the same block (onset %g vs %g)",
+                                                                   (double) onset (l1), (double) onset (l2)));
+    }
+    // Sidechain: insert 1 (loud, first second only) is linked to insert 2 with level 0; a compressor
+    // with its sidechain on ducks the quiet signal on insert 2 while insert 1 plays. The key is not heard.
+    {
+        auto p = makeProject (3);
+        p.channels.push_back (sampler ("rt_key", "rt_dc", 1));
+        p.channels.back().samplerParams[sampler::oneShot] = 0.0f; // stops with its note
+        p.channels.push_back (sampler ("rt_pad", "rt_quiet", 2));
+        p.mixer[1].routes = { { 2, 0.0f, true } };
+        EffectModel comp;
+        comp.id = "fx_sc";
+        comp.type = "compressor";
+        for (const auto& ps : findEffectSpec ("compressor")->params)
+            comp.params.push_back (ps.def);
+        comp.params[0] = -30.0f; // threshold
+        comp.params[1] = 20.0f;  // ratio
+        comp.params[2] = 0.001f; // attack
+        comp.params[3] = 0.05f;  // release
+        comp.params[6] = 1.0f;   // sidechain on
+        p.mixer[2].effects = { comp };
+        const std::vector<TimelineEvent> events { note ("rt_key", 0.0, 192.0), note ("rt_pad", 0.0, 576.0) };
+        std::vector<float> l, r;
+        render (p, events, l, r);
+        const double ducked = rms (l, 24000, 43200), free = rms (l, 96000, 120000);
+        s.check (free > 1.0e-3 && ducked < free * 0.5, str ("sidechain ducks insert 2 while insert 1 plays (%g vs %g)", ducked, free));
+        s.check (peak (l, 0, l.size()) < 0.5, "the sidechain key itself is not heard (level 0)");
+
+        auto selfKeyed = p;
+        selfKeyed.mixer[2].effects[0].params[6] = 0.0f;
+        render (selfKeyed, events, l, r);
+        const double ownDucked = rms (l, 24000, 43200), ownFree = rms (l, 96000, 120000);
+        s.near (ownDucked, ownFree, ownFree * 0.01, "sidechain off: the compressor only hears insert 2");
+
+        auto audible = p;
+        audible.mixer[1].routes = { { 2, 0.8f, true } };
+        audible.mixer[2].effects.clear();
+        render (audible, events, l, r);
+        s.near (rms (l, 24000, 43200), 0.55, 1.0e-3, "raising a sidechain link's level sends the audio too");
+    }
+}
+
 void testCompensationDelay()
 {
     auto& s = *suite;
@@ -1171,6 +1331,8 @@ bool runSelfTests()
     s.run ("graph levels, chokes, automation, effects", testGraphLevels);
     s.run ("note properties: pan, fine pitch, release, portamento, slides, Mod X/Y", testNoteProperties);
     s.run ("plugin delay compensation plan", testLatencyPlan);
+    s.run ("plugin delay compensation along mixer sends", testRoutedLatencyPlan);
+    s.run ("mixer routing: sends, order, sidechain", testMixerRouting);
     s.run ("compensation delay line", testCompensationDelay);
     s.run ("compensated automation across a loop wrap", testLoopedCompensation);
     collectSampleGarbage();

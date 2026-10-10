@@ -67,7 +67,9 @@ struct InputRoute
 struct RouteModel
 {
     int to = 0;
-    float level = 0.8f; // knob position, gain = volumeToGain(level)
+    float level = 0.8f; // knob position, gain = volumeToGain(level), into the target's input
+    /** Sidechain link (FL Studio: "Sidechain to this track", a send whose level starts at 0): the
+        audio also reaches the target's sidechain bus, at unity, for effects with a sidechain input. */
     bool sidechain = false;
 
     bool operator== (const RouteModel& o) const { return to == o.to && sidechain == o.sidechain && ! differs (level, o.level); }

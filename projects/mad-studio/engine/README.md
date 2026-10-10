@@ -185,11 +185,16 @@ cd projects/mad-studio
 npm ci && npm run build          # web app in dist/ (ELECTRON_SKIP_BINARY_DOWNLOAD=1 is fine)
 PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers \
 node --experimental-transform-types --no-warnings --import ./engine/tests/tools/ts-hooks.mjs \
-     engine/tests/parity/parity.mjs [--engine <path>] [--tolerance-db 2] [--detail <insert>]
+     engine/tests/parity/parity.mjs [--engine <path>] [--tolerance-db 2] [--detail <insert>] \
+     [--only demo|notes|routing]
 ```
 
 Result on Linux (Chromium 141, 48 kHz): full mix RMS +0.00/+0.01 dB (L/R), peak +0.03 dB, worst
-single second 0.28 dB; every soloed insert within 0.18 dB RMS. The only larger per-second figure is
+single second 0.28 dB; every soloed insert within 0.18 dB RMS. The *notes* group (note properties and
+channel settings on every note) stays within 0.18 dB; the *routing* group (hats through a reverb bus,
+a delay bus feeding it, the kick keying the bass compressor through a sidechain link, where the
+browser runs the AudioWorklet port of the native compressor) within 0.35 dB, the sidechain pair
+within 0.01 dB. The only larger per-second figure is
 a window that cuts the bass's first note: Chromium's FIR oversampler in the master limiter adds
 128 frames of latency, JUCE's about 1.4 ms less, so onsets are ~1.3 ms earlier natively.
 

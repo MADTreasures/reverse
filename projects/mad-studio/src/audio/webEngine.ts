@@ -19,6 +19,7 @@ import { samplePool } from './samplePool';
 import { Scheduler } from './scheduler';
 import { Ticker } from './timer';
 import { encodeWav, type WavBitDepth } from './wav';
+import { loadWorklets } from './worklets';
 
 interface HeldNote {
   voice: Voice | null;
@@ -84,6 +85,7 @@ export class WebAudioEngine implements EngineApi {
     const ctx = new AudioContext({ latencyHint: 'interactive' });
     this.ctx = ctx;
     samplePool.ensureFactorySamples(ctx.sampleRate);
+    await loadWorklets(ctx);
     const graph = new ProjectGraph(ctx, samplePool, { meters: true });
     graph.sync(this.automation.apply(useStore.getState().project));
     this.graph = graph;
