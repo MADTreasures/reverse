@@ -25,6 +25,7 @@ import { sanitizeCorrection, type Channel, type Correction, type Levels } from '
 import { celAt } from '../paint/animation';
 import type { TextBox } from '../paint/text';
 import { colorHex, fromPsdEffects, psdColor, toPsdEffects } from './psdStyles';
+import { opacityInExpression } from '../paint/effects';
 import { fromPsdText, textLayerName, toPsdText } from './psdText';
 
 /** Straight RGBA pixels. */
@@ -290,7 +291,7 @@ export interface PsdSource {
 }
 
 /** Effects Photoshop has no layer style for: the layer is written as it looks. */
-const bakes = (l: Layer) => Boolean(l.effects?.tone?.enabled || (l.effects?.border?.enabled && l.effects.border.kind === 'watercolor'));
+const bakes = (l: Layer) => Boolean(l.effects?.tone?.enabled || l.effects?.expression || (l.effects?.border?.enabled && l.effects.border.kind === 'watercolor'));
 
 function common(l: DrawnLayer): PsdLayer {
   const out: PsdLayer = { name: l.name, hidden: !l.visible, opacity: l.opacity, clipping: l.clip, blendMode: toPsdBlend(l.blend) };
@@ -348,7 +349,7 @@ function exportLayer(l: DrawnLayer, src: PsdSource): PsdLayer {
     // Drawn as it looks: effects, mask and (for a screentone that shows the opacity in its dots) opacity.
     const tone = l.effects?.tone;
     const out: PsdLayer = { ...common(l), ...trimmed(src.bakedPixels(l)) };
-    if (tone?.enabled && tone.reflectOpacity) out.opacity = 1;
+    if ((tone?.enabled && tone.reflectOpacity) || opacityInExpression(l.effects)) out.opacity = 1;
     // A folder drawn as one layer was composed on its own.
     if (l.blend === 'pass-through') out.blendMode = 'normal';
     return out;

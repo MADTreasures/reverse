@@ -13,11 +13,11 @@ import { cameraMatrix, invert, isRest, placementAt, placementMatrix, placedCorne
 import type { Affine } from '../paint/rulers';
 import { lightMatrix, type LightLayer } from '../paint/lightTable';
 import { clipGroups, findLayer, flatten, isDrawn } from '../model/layers';
-import type { BlendMode, CorrectionLayer, DrawnLayer, FolderBlendMode, FillLayer, FolderLayer, GradientLayer, Id, Layer, MovieLayer, PaintDocument, RasterLayer, TextLayer, VectorLayer } from '../model/types';
+import type { BlendMode, CorrectionLayer, DrawnLayer, FillLayer, FolderBlendMode, FolderLayer, GradientLayer, Id, Layer, LayerMask, MovieLayer, PaintDocument, RasterLayer, TextLayer, VectorLayer } from '../model/types';
 
 /** Layers with pixels of their own (painted, rendered from content, or a movie's pictures). */
 type PixelLayer = RasterLayer | VectorLayer | TextLayer | GradientLayer | FillLayer | MovieLayer;
-import { anyEffect, applyEdge, applyLayerColor, applyWatercolorEdge, effectReach } from '../paint/effects';
+import { anyEffect, applyEdge, applyExpression, applyLayerColor, applyWatercolorEdge, effectReach, hardenMask, opacityInExpression } from '../paint/effects';
 import { applyDropShadow, applyInnerGlow, applyInnerShadow, applyOuterGlow } from '../paint/styles';
 import { inflate, intersect, union, type Rect } from '../paint/rect';
 import { applyCorrection } from '../paint/tonal';
@@ -25,7 +25,7 @@ import type { FrameBorder, FramePanel } from '../paint/frames';
 import { applyTone } from '../paint/tone';
 import { blendInto } from './blendPixels';
 import { clearRect, createCanvas, ctx2d, type Ctx } from './canvas';
-import { getSurface } from './surfaces';
+import { getSurface, revisionOf } from './surfaces';
 
 export interface ComposeOptions {
   /**
@@ -137,6 +137,8 @@ export class Compositor {
   private moviePictures = new Map<Id, { picture: HTMLCanvasElement; canvas: HTMLCanvasElement }>();
   /** The masks of the composition under way (each placed once). */
   private masksNow = new Map<Id, HTMLCanvasElement | null>();
+  /** Masks without gradients (Mask expression), by mask id. */
+  private hardMasks = new Map<Id, { key: string; canvas: HTMLCanvasElement }>();
 
   constructor(width: number, height: number) {
     this.canvas = createCanvas(width, height);
@@ -237,9 +239,28 @@ export class Compositor {
   private maskOf(layer: Layer): HTMLCanvasElement | null {
     const known = this.masksNow.get(layer.id);
     if (known !== undefined) return known;
-    const out = this.placedMask(layer);
+    let out = this.placedMask(layer);
+    if (out && layer.mask?.gradients === false) out = this.hardMask(layer.mask, out);
     this.masksNow.set(layer.id, out);
     return out;
+  }
+
+  /** Mask expression without gradients: the mask shows fully or not at all (kept while the mask is unchanged). */
+  private hardMask(mask: LayerMask, source: HTMLCanvasElement): HTMLCanvasElement {
+    const own = source === getSurface(mask.id);
+    const key = `${revisionOf(mask.id)}:${mask.threshold ?? 128}:${source.width}x${source.height}`;
+    const known = this.hardMasks.get(mask.id);
+    if (own && known?.key === key) return known.canvas;
+    const canvas = known?.canvas.width === source.width && known.canvas.height === source.height ? known.canvas : createCanvas(source.width, source.height);
+    const ctx = ctx2d(canvas);
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.drawImage(source, 0, 0);
+    const img = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    hardenMask(img.data, mask.threshold ?? 128);
+    ctx.putImageData(img, 0, 0);
+    // A moved mask (keyframes) changes with the frame: it is made again next time.
+    this.hardMasks.set(mask.id, { key: own ? key : '', canvas });
+    return canvas;
   }
 
   private placedMask(layer: Layer): HTMLCanvasElement | null {
@@ -461,6 +482,13 @@ export class Compositor {
     if (layer.kind !== 'folder') {
       const s = this.pixels(layer);
       if (s) ctx.drawImage(s, 0, 0);
+      // Expression color changes the layer's own pixels (before its mask and effects).
+      const expression = layer.effects?.expression;
+      if (s && expression) {
+        const img = ctx.getImageData(rr.x, rr.y, rr.w, rr.h);
+        applyExpression(img.data, expression, layer.opacity);
+        ctx.putImageData(img, rr.x, rr.y);
+      }
     } else {
       if (this.skinned(layer)) this.drawOnionSkins(layer, ctx, rr, opts);
       // The light table lies under the cels of the target cel's animation folder.
@@ -669,7 +697,7 @@ export function strokeFrame(ctx: Ctx, path: Path2D, frame: FrameBorder): void {
 const hasEffects = (layer: Layer) => anyEffect(layer.effects);
 
 /** A screentone that reflects the layer opacity shows it in the dot size, so the dots stay opaque. */
-const opacityOf = (layer: Layer) => (layer.effects?.tone?.enabled && layer.effects.tone.reflectOpacity ? 1 : layer.opacity);
+const opacityOf = (layer: Layer) => ((layer.effects?.tone?.enabled && layer.effects.tone.reflectOpacity) || opacityInExpression(layer.effects) ? 1 : layer.opacity);
 
 /** Keeps only the parts of `ctx` that the mask shows. */
 function applyMask(ctx: Ctx, mask: HTMLCanvasElement): void {

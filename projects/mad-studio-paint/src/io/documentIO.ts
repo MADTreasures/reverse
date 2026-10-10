@@ -15,6 +15,7 @@ import { SEQUENCE_EXT, sequenceNames, type SequenceType } from './sequence';
 import { expressColors, IMAGE_FORMATS, jpegWithDpi, outputSize, type ExpressionColor, type ImageFormat, type OutputSize } from './imageExport';
 import { pngWithDpi } from './png';
 import { maskBounds } from '../paint/mask';
+import { hardenMask } from '../paint/effects';
 import { EXTENSION, IMAGE_EXTENSIONS, isDocumentFileName, isImageFileName, isPsdFileName, mimeForName, packDocument, PSD_EXTENSIONS, unpackDocument } from './format';
 import { idbDelete, idbGet, idbSet } from './idb';
 import { docLightImages } from '../paint/lightTable';
@@ -417,7 +418,12 @@ export async function exportPsd(opts: { skipDraft: boolean; psb?: boolean }): Pr
         // A movie layer: its picture at the current frame.
         layerPixels: (l) => (l.kind === 'movie' ? pixelsOf(engine.compositor.layerImage(doc, { ...l, mask: undefined, effects: undefined }, { frame: getState().frame })) : surface(l.id)),
         bakedPixels: (l) => pixelsOf(engine.compositor.layerImage(doc, l, { skipDraft: opts.skipDraft })),
-        maskPixels: (m) => surface(m.id),
+        // Mask expression without gradients: the mask as it shows.
+        maskPixels: (m) => {
+          const p = surface(m.id);
+          if (p && m.gradients === false) hardenMask(p.data, m.threshold ?? 128);
+          return p;
+        },
         frameShapes,
         textPixels: (_layer, part) => {
           const c = createCanvas(doc.width, doc.height);

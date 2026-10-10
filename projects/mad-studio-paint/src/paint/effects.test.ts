@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { distanceToInside } from './distance';
-import { applyEdge, applyLayerColor, applyWatercolorEdge, DEFAULT_BORDER, effectReach, sanitizeEffects } from './effects';
+import { anyEffect, applyEdge, applyExpression, applyLayerColor, applyWatercolorEdge, DEFAULT_BORDER, DEFAULT_EXPRESSION, effectReach, hardenMask, opacityInExpression, sanitizeEffects } from './effects';
 
 /** RGBA image of w × h with the given pixels opaque black. */
 function image(w: number, h: number, opaque: [number, number][]): Uint8ClampedArray {
@@ -61,5 +61,54 @@ describe('layer effects', () => {
       border: { ...DEFAULT_BORDER, width: 100 },
     });
     expect(sanitizeEffects({ layerColor: { color: '#ABCDEF', sub: null } })?.layerColor).toEqual({ enabled: true, color: '#abcdef', sub: null });
+  });
+});
+
+describe('expression color and mask expression', () => {
+  const px = (...p: number[][]) => new Uint8ClampedArray(p.flat());
+
+  it('shows a layer in grey levels', () => {
+    const d = px([255, 0, 0, 255], [0, 0, 255, 100], [9, 9, 9, 0]);
+    applyExpression(d, DEFAULT_EXPRESSION, 1);
+    expect([...d]).toEqual([76, 76, 76, 255, 29, 29, 29, 100, 9, 9, 9, 0]);
+  });
+
+  it('shows a layer in black and white at the thresholds', () => {
+    const mono = { ...DEFAULT_EXPRESSION, mode: 'mono' as const };
+    const d = px([200, 200, 200, 255], [50, 50, 50, 255], [50, 50, 50, 100], [255, 255, 255, 200]);
+    applyExpression(d, mono, 1);
+    expect([...d]).toEqual([255, 255, 255, 255, 0, 0, 0, 255, 0, 0, 0, 0, 255, 255, 255, 255]);
+    // Reflect layer opacity: at 50 % layer opacity the 200 alpha falls under the threshold.
+    const half = px([255, 255, 255, 200]);
+    applyExpression(half, mono, 0.5);
+    expect([...half]).toEqual([0, 0, 0, 0]);
+    const kept = px([255, 255, 255, 200]);
+    applyExpression(kept, { ...mono, reflectOpacity: false }, 0.5);
+    expect([...kept]).toEqual([255, 255, 255, 255]);
+    // Only black shows.
+    const black = px([255, 255, 255, 255], [0, 0, 0, 255]);
+    applyExpression(black, { ...mono, white: false }, 1);
+    expect([...black]).toEqual([0, 0, 0, 0, 0, 0, 0, 255]);
+    expect(opacityInExpression({ expression: mono })).toBe(true);
+    expect(opacityInExpression({ expression: DEFAULT_EXPRESSION })).toBe(false);
+    expect(anyEffect({ expression: DEFAULT_EXPRESSION })).toBe(true);
+  });
+
+  it('makes a mask show fully or not at all without gradients', () => {
+    const d = px([0, 0, 0, 127], [0, 0, 0, 128], [0, 0, 0, 255]);
+    hardenMask(d, 128);
+    expect([d[3], d[7], d[11]]).toEqual([0, 255, 255]);
+  });
+
+  it('reads expression color settings safely', () => {
+    expect(sanitizeEffects({ expression: { mode: 'mono', colorThreshold: 999, alphaThreshold: -4, black: false } })?.expression).toEqual({
+      mode: 'mono',
+      colorThreshold: 255,
+      alphaThreshold: 1,
+      reflectOpacity: true,
+      black: false,
+      white: true,
+    });
+    expect(sanitizeEffects({ expression: { mode: 'sepia' } })?.expression?.mode).toBe('gray');
   });
 });

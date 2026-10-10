@@ -1,6 +1,7 @@
 /**
- * Layer effects of the Layer Property palette: border effect (edge, watercolor edge) and layer
- * colour. Pure functions on straight RGBA bytes of a region; the compositor applies them.
+ * Layer effects of the Layer Property palette: border effect (edge, watercolor edge), layer colour
+ * and expression colour (grey, monochrome); mask expression without gradients. Pure functions on
+ * straight RGBA bytes of a region; the compositor applies them.
  */
 import { hexToRgb } from '../model/color';
 import { distanceToInside } from './distance';
@@ -27,7 +28,27 @@ export interface LayerColorEffect {
   sub: string | null;
 }
 
+/**
+ * Expression color: the layer shown in grey levels, or in black and white (monochrome: brightness
+ * below the colour threshold is black; opacity below the alpha threshold is transparent; with
+ * Reflect layer opacity the layer opacity counts towards it). Black and white can each be hidden.
+ */
+export interface ExpressionEffect {
+  mode: 'gray' | 'mono';
+  /** 1..255 */
+  colorThreshold: number;
+  /** 1..255 */
+  alphaThreshold: number;
+  reflectOpacity: boolean;
+  black: boolean;
+  white: boolean;
+}
+
+export const DEFAULT_EXPRESSION: ExpressionEffect = { mode: 'gray', colorThreshold: 128, alphaThreshold: 128, reflectOpacity: true, black: true, white: true };
+
 export interface LayerEffects {
+  /** Expression color (absent: Color). */
+  expression?: ExpressionEffect;
   border?: BorderEffect;
   layerColor?: LayerColorEffect;
   /** Screentone: the layer shown as halftone dots. */
@@ -43,7 +64,35 @@ export interface LayerEffects {
 
 /** Whether any effect or style changes how the layer looks. */
 export const anyEffect = (fx: LayerEffects | undefined) =>
-  Boolean(fx && (fx.border?.enabled || fx.layerColor?.enabled || fx.tone?.enabled || fx.dropShadow?.enabled || fx.innerShadow?.enabled || fx.outerGlow?.enabled || fx.innerGlow?.enabled));
+  Boolean(fx && (fx.expression || fx.border?.enabled || fx.layerColor?.enabled || fx.tone?.enabled || fx.dropShadow?.enabled || fx.innerShadow?.enabled || fx.outerGlow?.enabled || fx.innerGlow?.enabled));
+
+/** A monochrome layer that takes its opacity into the black-and-white decision is drawn fully opaque. */
+export const opacityInExpression = (fx: LayerEffects | undefined) => fx?.expression?.mode === 'mono' && fx.expression.reflectOpacity;
+
+/** Expression color, in place: grey levels, or black, white and transparent (`opacity`: the layer's). */
+export function applyExpression(data: Uint8ClampedArray, fx: ExpressionEffect, opacity: number): void {
+  for (let p = 0; p < data.length; p += 4) {
+    if (data[p + 3] === 0) continue;
+    const y = 0.299 * data[p] + 0.587 * data[p + 1] + 0.114 * data[p + 2];
+    if (fx.mode === 'gray') {
+      data[p] = data[p + 1] = data[p + 2] = Math.round(y);
+      continue;
+    }
+    const a = fx.reflectOpacity ? data[p + 3] * opacity : data[p + 3];
+    const white = y >= fx.colorThreshold;
+    if (a < fx.alphaThreshold || (white ? !fx.white : !fx.black)) {
+      data[p] = data[p + 1] = data[p + 2] = data[p + 3] = 0;
+      continue;
+    }
+    data[p] = data[p + 1] = data[p + 2] = white ? 255 : 0;
+    data[p + 3] = 255;
+  }
+}
+
+/** Mask expression without gradients, in place: the mask fully shows (opacity at least `threshold`) or hides. */
+export function hardenMask(data: Uint8ClampedArray, threshold: number): void {
+  for (let p = 3; p < data.length; p += 4) data[p] = data[p] >= threshold ? 255 : 0;
+}
 
 export const DEFAULT_BORDER: BorderEffect = { enabled: true, kind: 'edge', width: 4, color: '#000000', range: 6, opacity: 70, darkness: 40, blur: 2 };
 export const DEFAULT_LAYER_COLOR: LayerColorEffect = { enabled: true, color: '#3a6ff0', sub: null };
@@ -154,5 +203,16 @@ export function sanitizeEffects(raw: unknown): LayerEffects | undefined {
   if (innerGlow) out.innerGlow = innerGlow;
   const kept = sanitizeKeptStyles(r.kept);
   if (kept) out.kept = kept;
+  if (r.expression && typeof r.expression === 'object') {
+    const e = r.expression as Record<string, unknown>;
+    out.expression = {
+      mode: e.mode === 'mono' ? 'mono' : 'gray',
+      colorThreshold: Math.round(num(e.colorThreshold, 128, 1, 255)),
+      alphaThreshold: Math.round(num(e.alphaThreshold, 128, 1, 255)),
+      reflectOpacity: e.reflectOpacity !== false,
+      black: e.black !== false,
+      white: e.white !== false,
+    };
+  }
   return Object.keys(out).length ? out : undefined;
 }

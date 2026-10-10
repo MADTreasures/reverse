@@ -1,7 +1,10 @@
-/** Layer Property palette: effects of the selected layer (border effect, tone, layer colour) and its layer styles. */
+/**
+ * Layer Property palette: effects of the selected layer (border effect, tone, layer colour), its
+ * layer styles and expression color; with its mask selected, the mask expression.
+ */
 import { findLayer } from '../../model/layers';
 import type { Layer } from '../../model/types';
-import { DEFAULT_BORDER, DEFAULT_LAYER_COLOR, type BorderEffect, type LayerColorEffect, type LayerEffects } from '../../paint/effects';
+import { DEFAULT_BORDER, DEFAULT_EXPRESSION, DEFAULT_LAYER_COLOR, type BorderEffect, type ExpressionEffect, type LayerColorEffect, type LayerEffects } from '../../paint/effects';
 import { DEFAULT_GLOW, DEFAULT_SHADOW, type GlowStyle, type ShadowStyle } from '../../paint/styles';
 import { showMenu } from '../overlays';
 import { defaultTone, DOT_SHAPES, type DotShape, type ToneEffect } from '../../paint/tone';
@@ -14,7 +17,9 @@ const supportsEffects = (l: Layer) => l.kind !== 'correction' && l.kind !== 'aud
 
 export function LayerPropertyPalette() {
   const layer = useStore((s) => findLayer(s.doc.layers, s.activeLayerId));
+  const maskSelected = useStore((s) => s.maskEditing);
   if (!layer) return null;
+  if (maskSelected && layer.mask) return <MaskExpression layer={layer} />;
   if (!supportsEffects(layer)) return <p className="palette-note">Correction layers have no effects.</p>;
   const fx: LayerEffects = layer.effects ?? {};
   const set = (next: LayerEffects, label: string) => actions.setLayerEffects(layer.id, next, label);
@@ -132,6 +137,7 @@ export function LayerPropertyPalette() {
         </section>
       )}
       <LayerStyles fx={fx} set={set} />
+      {layer.kind !== 'folder' && <ExpressionColor fx={fx} set={set} />}
       {color?.enabled && (
         <section className="effect-section">
           <h4>Layer color</h4>
@@ -144,6 +150,75 @@ export function LayerPropertyPalette() {
           </label>
         </section>
       )}
+    </div>
+  );
+}
+
+/**
+ * Expression color: Color, Gray or Monochrome (colour and alpha thresholds, Reflect layer opacity,
+ * which of black and white show). It only changes how the layer shows: Color brings the colours back.
+ */
+function ExpressionColor({ fx, set }: { fx: LayerEffects; set: (next: LayerEffects, label: string) => void }) {
+  const e = fx.expression;
+  const up = (patch: Partial<ExpressionEffect>, label = 'Expression color') => set({ ...fx, expression: { ...(e ?? DEFAULT_EXPRESSION), ...patch } }, label);
+  return (
+    <section className="effect-section" data-testid="expression-color">
+      <label className="effect-color">
+        Expression color
+        <select
+          aria-label="Expression color"
+          value={e?.mode ?? 'color'}
+          onChange={(ev) => {
+            const v = ev.target.value;
+            if (v === 'color') {
+              const { expression: _x, ...rest } = fx;
+              set(rest, 'Expression color');
+            } else up({ mode: v as ExpressionEffect['mode'] });
+          }}
+        >
+          <option value="color">Color</option>
+          <option value="gray">Gray</option>
+          <option value="mono">Monochrome</option>
+        </select>
+      </label>
+      {e?.mode === 'mono' && (
+        <>
+          <PropSlider label="Color threshold" value={e.colorThreshold} min={1} max={255} onChange={(v) => up({ colorThreshold: v })} />
+          <PropSlider label="Alpha threshold" value={e.alphaThreshold} min={1} max={255} onChange={(v) => up({ alphaThreshold: v })} />
+          <label className="effect-color">
+            <input type="checkbox" checked={e.reflectOpacity} onChange={(ev) => up({ reflectOpacity: ev.target.checked })} /> Reflect layer opacity
+          </label>
+          <span className="effect-color">
+            <label>
+              <input type="checkbox" checked={e.black} onChange={(ev) => up({ black: ev.target.checked })} /> Black
+            </label>
+            <label>
+              <input type="checkbox" checked={e.white} onChange={(ev) => up({ white: ev.target.checked })} /> White
+            </label>
+          </span>
+        </>
+      )}
+    </section>
+  );
+}
+
+/** With the layer mask selected: Mask expression (Show gradients, Threshold). */
+function MaskExpression({ layer }: { layer: Layer }) {
+  const mask = layer.mask!;
+  const gradients = mask.gradients !== false;
+  return (
+    <div className="layer-property" data-testid="layer-property">
+      <section className="effect-section" data-testid="mask-expression">
+        <h4>Mask expression</h4>
+        <label className="effect-color">
+          Show gradients
+          <select aria-label="Show gradients" value={gradients ? 'yes' : 'no'} onChange={(e) => actions.setMaskExpression(layer.id, { gradients: e.target.value === 'yes' })}>
+            <option value="yes">Yes</option>
+            <option value="no">No</option>
+          </select>
+        </label>
+        {!gradients && <PropSlider label="Threshold" value={mask.threshold ?? 128} min={1} max={255} onChange={(v) => actions.setMaskExpression(layer.id, { threshold: v }, `mask:threshold:${layer.id}`)} />}
+      </section>
     </div>
   );
 }

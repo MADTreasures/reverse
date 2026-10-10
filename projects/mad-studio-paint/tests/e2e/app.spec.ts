@@ -1676,6 +1676,64 @@ test('screentones: the Tone effect turns grey into dots; New tone makes a masked
 /** Displayed RGB at a point. */
 const rgbAt = (page: Page, x: number, y: number) => page.evaluate(([px, py]) => window.__madPaint.engine.sampleDisplayed(px, py, '#ffffff').slice(0, 3), [x, y]);
 
+test('expression color (gray, monochrome) and mask expression (no gradients, threshold)', async ({ page }) => {
+  const errors = await boot(page);
+  // A red layer over the whole canvas.
+  await page.evaluate(() => {
+    const m = window.__madPaint;
+    m.actions.setDrawingColor('#ff0000');
+    m.actions.fillWithColor();
+  });
+  const prop = page.getByTestId('layer-property');
+  expect(await rgbAt(page, 200, 150)).toEqual([255, 0, 0]);
+  // Expression color: Gray, then Monochrome (red is darker than the colour threshold: black).
+  await prop.getByLabel('Expression color').selectOption('gray');
+  expect(await rgbAt(page, 200, 150)).toEqual([76, 76, 76]);
+  await prop.getByLabel('Expression color').selectOption('mono');
+  expect(await rgbAt(page, 200, 150)).toEqual([0, 0, 0]);
+  await prop.getByRole('spinbutton', { name: 'Color threshold' }).fill('50');
+  expect(await rgbAt(page, 200, 150)).toEqual([255, 255, 255]);
+  // Only black shows: the white becomes transparent (with the paper hidden, the backdrop shows).
+  await page.evaluate(() => window.__madPaint.actions.setPaper({ visible: false }));
+  await prop.getByLabel('White', { exact: true }).uncheck();
+  expect(await page.evaluate(() => window.__madPaint.engine.sampleDisplayed(200, 150, '#00ff00'))).toEqual([0, 255, 0, 255]);
+  await page.evaluate(() => window.__madPaint.actions.setPaper({ visible: true }));
+  // Color brings the colours back.
+  await prop.getByLabel('Expression color').selectOption('color');
+  expect(await rgbAt(page, 200, 150)).toEqual([255, 0, 0]);
+
+  // A mask that fades from left (hidden) to right (shown).
+  await page.evaluate(() => {
+    const m = window.__madPaint;
+    m.actions.setSelection({ width: 400, height: 300, data: new Uint8Array(400 * 300).map((_: number, i: number) => Math.round(((i % 400) / 399) * 255)) });
+    m.runCommand('maskOutside');
+  });
+  await page.keyboard.press('ControlOrMeta+d');
+  const faded = await rgbAt(page, 100, 150);
+  expect(faded[0]).toBe(255);
+  expect(faded[1]).toBeGreaterThan(150);
+  expect(faded[1]).toBeLessThan(230);
+  // With the mask selected the palette shows Mask expression: without gradients it shows fully or not at all.
+  await page.getByTestId('mask-thumb').click();
+  await expect(prop.getByTestId('mask-expression')).toBeVisible();
+  await prop.getByLabel('Show gradients').selectOption('no');
+  expect(await rgbAt(page, 100, 150)).toEqual([255, 255, 255]);
+  expect(await rgbAt(page, 300, 150)).toEqual([255, 0, 0]);
+  await prop.getByRole('spinbutton', { name: 'Threshold' }).fill('50');
+  expect(await rgbAt(page, 100, 150)).toEqual([255, 0, 0]);
+  expect(await rgbAt(page, 30, 150)).toEqual([255, 255, 255]);
+  // Saved and opened again.
+  const back = await page.evaluate(async () => {
+    const m = window.__madPaint;
+    await m.openFileBytes({ name: 'mask.madpaint', data: await m.buildDocumentBytes() });
+    const l = m.useStore.getState().doc.layers[0];
+    return { gradients: l.mask.gradients, threshold: l.mask.threshold };
+  });
+  expect(back).toEqual({ gradients: false, threshold: 50 });
+  expect(await rgbAt(page, 100, 150)).toEqual([255, 0, 0]);
+  expect(errors).toEqual([]);
+});
+
 test('fill layers: one colour in the selection; its colour from Color settings, the thumbnail, the Object tool and the colour palettes; saved', async ({ page }) => {
   const errors = await boot(page);
   await page.evaluate(() => delete (window as any).showSaveFilePicker);

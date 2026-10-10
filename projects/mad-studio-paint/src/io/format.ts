@@ -71,7 +71,16 @@ function sanitizeMask(raw: unknown, seen: Set<string>): LayerMask | undefined {
   seen.add(id);
   // Mask keyframes place the mask only (no opacity).
   const keys = sanitizeKeyframes(r.keys).flatMap((k) => removeChannels([k], k.frame, ['opacity', 'volume']));
-  return { id, enabled: bool(r.enabled, true), linked: bool(r.linked, true), ...(r.outside === 'hide' ? { outside: 'hide' as const } : {}), ...(keys.length ? { keys } : {}) };
+  const threshold = typeof r.threshold === 'number' && Number.isFinite(r.threshold) ? Math.round(Math.min(255, Math.max(1, r.threshold))) : undefined;
+  return {
+    id,
+    enabled: bool(r.enabled, true),
+    linked: bool(r.linked, true),
+    ...(r.outside === 'hide' ? { outside: 'hide' as const } : {}),
+    ...(keys.length ? { keys } : {}),
+    ...(r.gradients === false ? { gradients: false as const } : {}),
+    ...(threshold !== undefined ? { threshold } : {}),
+  };
 }
 
 function sanitizeRulers(raw: unknown): LayerRulers | undefined {

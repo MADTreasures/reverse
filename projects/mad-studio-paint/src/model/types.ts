@@ -66,6 +66,10 @@ export interface LayerMask {
    * and centre of rotation over time, within the layer; they apply while the layer's keyframes are on.
    */
   keys?: Keyframe[];
+  /** Mask expression > Show gradients: No (the mask fully shows or hides, at `threshold`). */
+  gradients?: false;
+  /** Mask expression > Threshold (1..255) without gradients. */
+  threshold?: number;
 }
 
 /** Where a layer's rulers apply: on every layer, on layers in the same folder, or only on this layer. */

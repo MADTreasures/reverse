@@ -1299,6 +1299,26 @@ export function setMaskProps(id: Id, patch: Partial<Pick<LayerMask, 'enabled' | 
   });
 }
 
+/**
+ * Layer Property palette > Mask expression: Show gradients (yes: the mask fades; no: it shows fully
+ * where its opacity reaches the threshold) and the threshold. `key` merges slider drags.
+ */
+export function setMaskExpression(id: Id, patch: { gradients?: boolean; threshold?: number }, key?: string): void {
+  if (!findLayer(getState().doc.layers, id)?.mask) return;
+  changeDoc(
+    'Mask expression',
+    (doc) => {
+      const x = findLayer(doc.layers, id);
+      if (!x?.mask) return;
+      const { gradients: _g, threshold: _t, ...rest } = x.mask;
+      const gradients = patch.gradients ?? x.mask.gradients !== false;
+      const threshold = Math.round(Math.min(255, Math.max(1, patch.threshold ?? x.mask.threshold ?? 128)));
+      x.mask = gradients ? rest : { ...rest, gradients: false, threshold };
+    },
+    key ? { key } : {},
+  );
+}
+
 /** Layer > Layer mask > Enable mask. */
 export function toggleMaskEnabled(id: Id = getState().activeLayerId): void {
   const m = findLayer(getState().doc.layers, id)?.mask;

@@ -154,6 +154,16 @@ describe('.madpaint format', () => {
     expect(clash.layers.map((l) => l.mask)).toEqual([{ id: 'm1', enabled: true, linked: false }, undefined, undefined]);
   });
 
+  it('keeps the mask expression (no gradients, threshold)', () => {
+    const doc = createDocument('Mask', 100, 100, 72);
+    doc.layers[0].mask = { ...createLayerMask(), gradients: false, threshold: 200 };
+    const back = unpackDocument(packDocument({ doc, activeLayerId: null, layers: new Map() }));
+    expect(back.doc.layers[0].mask).toMatchObject({ gradients: false, threshold: 200 });
+    const odd = sanitizeDocument({ layers: [{ id: 'a', kind: 'raster', mask: { id: 'm1', gradients: 'no', threshold: 9999 } }] });
+    expect(odd.layers[0].mask).toMatchObject({ threshold: 255 });
+    expect(odd.layers[0].mask?.gradients).toBeUndefined();
+  });
+
   it('keeps the keyframes of layer masks and what a mask is beyond its pixels', () => {
     const doc = createDocument('Mask keys', 200, 100, 72);
     doc.layers[0].mask = { ...createLayerMask(), outside: 'hide', keys: [{ frame: 2, interp: 'smooth', values: { x: 10, y: 0 } }] };
