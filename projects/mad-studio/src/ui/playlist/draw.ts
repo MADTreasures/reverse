@@ -84,6 +84,7 @@ function drawPatternClip(ctx: CanvasRenderingContext2D, v: PlaylistViewport, pro
     for (const [channelId, notes] of Object.entries(pattern.notes)) {
       if (!project.channels.some((c) => c.id === channelId)) continue;
       for (const n of notes) {
+        if (n.muted) continue;
         for (let k = Math.max(0, Math.floor((clip.offset - n.start) / period)); ; k++) {
           const src = n.start + k * period;
           if (src >= clip.offset + clip.length) break;

@@ -28,8 +28,9 @@ public:
         /** Start of chunk `c`; `songTick` >= 0 when the transport plays in song mode (evaluate
             automation there), otherwise -1. Called before the chunk's tempo is read. */
         virtual void chunkStarted (int c, double songTick) = 0;
-        /** A timeline event at absolute sample time `time` (may be after this block: swing). */
-        virtual void noteEvent (const TimelineEvent& ev, double time, double lengthSeconds, double clipOffsetSeconds) = 0;
+        /** A timeline event at absolute sample time `time` (may be after this block: swing).
+            `bends` points at the event's ev.bendCount slide bends (or is null). */
+        virtual void noteEvent (const TimelineEvent& ev, const TimelineBend* bends, double time, double secondsPerTick) = 0;
         virtual void click (double time, bool accent) = 0;
         /** Playback (after a count-in) started at block offset `offset` at `tick`. */
         virtual void playbackStarted (int offset, double tick) = 0;

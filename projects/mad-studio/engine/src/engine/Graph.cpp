@@ -60,6 +60,9 @@ void ChannelNode::process (const BlockContext& ctx, float* busL, float* busR, Co
     const bool delayed = delay != nullptr && delaySamples > 0;
     const bool idle = instrument->isIdle();
     const bool stereo = instrument->render (ctx, bufL.data(), bufR.data());
+    const float* pannedL = nullptr;
+    const float* pannedR = nullptr;
+    const bool panned = instrument->pannedOutput (pannedL, pannedR);
     const float muteTarget = muted.load (std::memory_order_relaxed) ? 0.0f : 1.0f;
     float* stripL = bufL.data();
     float* stripR = bufR.data();
@@ -102,7 +105,7 @@ void ChannelNode::process (const BlockContext& ctx, float* busL, float* busR, Co
     const float* inL = bufL.data();
     const float* inR = bufR.data();
     double lastPan = panValue.current() + 10.0;
-    dsp::PanGains gains;
+    dsp::PanGains gains, pannedGains;
 
     for (int c = 0; c < ctx.numChunks; ++c)
     {
@@ -118,6 +121,7 @@ void ChannelNode::process (const BlockContext& ctx, float* busL, float* busR, Co
             if (dsp::differs (p, lastPan))
             {
                 gains = stereo ? dsp::stereoPanGains (p) : dsp::monoPanGains (p);
+                pannedGains = dsp::stereoPanGains (p);
                 lastPan = p;
             }
             if (stereo)
@@ -132,6 +136,14 @@ void ChannelNode::process (const BlockContext& ctx, float* busL, float* busR, Co
                 const float m = inL[i] * g;
                 stripL[i] = m * gains.left;
                 stripR[i] = m * gains.right;
+            }
+            if (panned)
+            {
+                // Voices with a note pan: always stereo, panned with the stereo law.
+                float l, r;
+                dsp::stereoPan (p, pannedGains, pannedL[i] * g, pannedR[i] * g, l, r);
+                stripL[i] += l;
+                stripR[i] += r;
             }
         }
     }

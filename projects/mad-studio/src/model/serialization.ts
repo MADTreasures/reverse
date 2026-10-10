@@ -14,6 +14,7 @@ import { defaultSynthParams } from './presets';
 import { MAX_BPM, MIN_BPM, ticksPerBar } from './timing';
 import { CURVE_MODES } from './automation';
 import { MAX_PLUGIN_LATENCY_OFFSET, MAX_TRACK_LATENCY_OFFSET_MS } from './latency';
+import { NOTE_COLOR_COUNT, NOTE_PROPS, setNoteValue } from './notes';
 import type {
   AutomationData,
   AutomationPoint,
@@ -241,13 +242,24 @@ function parseNote(v: unknown): Note | null {
   const start = num(v.start, -1);
   const length = num(v.length, 0);
   if (start < 0 || length <= 0) return null;
-  return {
+  const note: Note = {
     id: str(v.id, makeId('n')),
     key: Math.round(num(v.key, 60, 0, 127)),
     start: Math.round(start),
     length: Math.max(1, Math.round(length)),
     velocity: num(v.velocity, 0.78, 0, 1),
   };
+  // Note properties: only values that differ from their default are kept.
+  for (const spec of NOTE_PROPS) {
+    const value = v[spec.key];
+    if (spec.key !== 'velocity' && typeof value === 'number' && Number.isFinite(value)) setNoteValue(note, spec.key, value);
+  }
+  const color = Math.round(num(v.color, 0, 0, NOTE_COLOR_COUNT - 1));
+  if (color > 0) note.color = color;
+  if (v.slide === true) note.slide = true;
+  else if (v.porta === true) note.porta = true;
+  if (v.muted === true) note.muted = true;
+  return note;
 }
 
 function parsePattern(v: unknown, i: number, channelIds: Set<string>, beatsPerBar: number): Pattern | null {

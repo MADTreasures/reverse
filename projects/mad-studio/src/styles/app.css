@@ -618,6 +618,26 @@ body.electron.mac .topbar input {
   font-size: 11px;
 }
 
+.note-color-pick {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 34px;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  background: var(--bg-1);
+  color: var(--text);
+  font-family: var(--mono);
+  cursor: pointer;
+}
+
+.note-color-pick .swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  box-shadow: 0 0 0 1px #0008;
+}
+
 /* -------------------------------------------------------------- controls */
 
 .knob {
@@ -2138,8 +2158,43 @@ button.link {
 
 .note-props-levels {
   display: flex;
+  flex-wrap: wrap;
   gap: 14px;
   padding: 4px 0 6px;
+}
+
+.note-props-kind {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 14px;
+  font-size: 12px;
+}
+
+.note-props-kind label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.note-props-colors {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+}
+
+.note-props-colors button {
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: 1px solid #0009;
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+.note-props-colors button[aria-pressed='true'] {
+  outline: 2px solid var(--text);
+  outline-offset: 1px;
 }
 
 .note-props input[aria-invalid='true'] {

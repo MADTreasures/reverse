@@ -60,6 +60,26 @@ engine never interprets patterns or clips itself.
 * `audioClip: true` → sampler voice is gated by `length` even for one-shot samplers, and playback starts
   `sampleOffset` ticks (converted to seconds at trigger time) into the sample.
 
+**Note properties** (FL Studio's note properties, `src/model/notes.ts`). All fields are optional and only
+sent when they differ from the default; the renderer has already resolved slide and portamento notes
+(slide notes produce no event of their own):
+
+| Field | Range (default) | Built-in synth | Built-in sampler | Plugin instrument |
+| ----- | --------------- | -------------- | ---------------- | ----------------- |
+| `pan` | −1..1 (0) | voice panned (mono law for a mono voice, stereo law for a stereo one) | same | — |
+| `fine` | −1200..1200 cents (0) | oscillator detune | playback detune | — |
+| `release` | 0..1 (0.5) | amp and filter envelope release × `2^((release−0.5)·2)` | amp release × the same | MIDI note-off velocity |
+| `modX` | 0..1 (0.5) | filter cutoff × `2^((modX−0.5)·8)` (±4 octaves) | — | — |
+| `modY` | 0..1 (0.5) | filter resonance × `4^((modY−0.5)·2)`, at most 24 | — | — |
+| `color` | 0..15 (0) | — | — | MIDI channel `color + 1` |
+| `glideFrom`, `glideTime` | semitones, seconds | portamento: the pitch starts `glideFrom` semitones away and moves linearly (in semitones) to the key in `glideTime` | same | — |
+| `bends` | `[{at, length, to}]` (ticks, ticks, semitones) | slide notes: from `at` ticks after the note start the pitch moves from wherever it is to `to` semitones (relative to the key) within `length` ticks, then holds | same | — |
+
+* Ticks in `bends` are converted with the tempo at the note start, like `length`. At most 8 bends per
+  event are used.
+* Voices with a note pan are mixed on a separate, always-stereo path of the channel and panned there with
+  the stereo law, so they never change how the channel pans its other voices (`graph.ts` `ChannelStrip`).
+
 ### `automation.set` (renderer → engine)
 
 Compiled, piecewise-linear automation lanes in **absolute song ticks** and **target units**:

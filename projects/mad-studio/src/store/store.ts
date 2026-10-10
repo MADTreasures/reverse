@@ -1,9 +1,12 @@
 import { create } from 'zustand';
 import { DEFAULT_VELOCITY, createEmptyProject } from '../model/defaults';
+import type { NotePropKey, NoteStyle } from '../model/notes';
 import type { SnapId } from '../model/timing';
 import type { Id, Project } from '../model/types';
 
 export type ToolId = 'draw' | 'paint' | 'delete' | 'mute' | 'slice' | 'select';
+/** Kind of newly drawn notes (FL Studio: slide toggle, portamento notes). */
+export type NoteType = 'normal' | 'slide' | 'porta';
 export type PlayMode = 'pattern' | 'song';
 
 /** Fixed windows plus dynamic ones: `channel:<channelId>` and `effect:<mixerIndex>:<slotId>`. */
@@ -30,6 +33,13 @@ export interface PianoRollView {
   noteLength: number;
   /** Velocity of newly drawn notes; follows the last clicked note. */
   noteVelocity: number;
+  /** Pan, release, fine pitch and Mod X/Y of newly drawn notes; follow the last clicked note. */
+  noteStyle: NoteStyle;
+  /** Colour group of newly drawn notes (FL Studio: the piano roll's colour selector). */
+  noteColor: number;
+  noteType: NoteType;
+  /** Note property shown and edited in the event lane under the notes. */
+  lane: NotePropKey;
   ghostNotes: boolean;
 }
 
@@ -160,6 +170,10 @@ export function initialUi(project: Project): UiState {
       tool: 'draw',
       noteLength: 24,
       noteVelocity: DEFAULT_VELOCITY,
+      noteStyle: {},
+      noteColor: 0,
+      noteType: 'normal',
+      lane: 'velocity',
       ghostNotes: true,
     },
     playlist: { snap: 'main', pxPerTick: 0.18, trackHeight: 44, scrollTick: 0, scrollY: 0, tool: 'draw' },

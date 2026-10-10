@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type WheelEvent as ReactWheelEvent } from 'react';
 import { engine } from '../../audio/engine';
+import { NOTE_COLOR_COUNT, NOTE_PROPS, noteColor, notePropSpec, noteStyleOf, noteValue, setNoteValue, type NotePropKey } from '../../model/notes';
 import { findPattern, patternLength } from '../../model/patterns';
 import { PPQ, SNAP_OPTIONS, formatDuration, formatPosition, gridLineTicks, noteName, snapFloor, snapLabel, snapRound, snapTicks, type SnapId } from '../../model/timing';
 import type { Note } from '../../model/types';
@@ -15,14 +16,14 @@ import {
   sliceNotes,
   updateNotes,
 } from '../../store/actions';
-import { useStore, type ToolId } from '../../store/store';
+import { useStore, type NoteType, type ToolId } from '../../store/store';
 import { prepareCanvas, useElementSize, useFrame } from '../animation';
-import { IconBrush, IconEraser, IconGhost, IconPencil, IconPiano, IconSelect, IconSlice } from '../controls/Icons';
+import { IconBrush, IconEraser, IconGhost, IconMute, IconPencil, IconPiano, IconSelect, IconSlice } from '../controls/Icons';
 import { setHint } from '../hint';
 import { registerWindowKeys } from '../keyboard';
-import { openNoteProperties } from '../overlays';
+import { openNoteProperties, showMenu } from '../overlays';
 import { WindowFrame } from '../workspace/WindowFrame';
-import { KEYS_W, RULER_H, VEL_H, drawRoll, gridBottom, keyAtY, maxScrollY, tickAtX, xOfTick, type RollView } from './draw';
+import { KEYS_W, RULER_H, drawRoll, gridBottom, keyAtY, laneValueAtY, maxScrollY, tickAtX, xOfTick, type RollView } from './draw';
 
 const EMPTY: Note[] = [];
 const RESIZE_ZONE = 6;
@@ -34,7 +35,8 @@ type Drag =
   | { kind: 'rubber'; t0: number; k0: number; t1: number; k1: number; base: Set<string> }
   | { kind: 'paint'; key: string; row: number; last: number }
   | { kind: 'keys'; handle: number; note: number }
-  | { kind: 'velocity'; key: string }
+  | { kind: 'lane'; key: string; reset: boolean }
+  | { kind: 'mute'; key: string; muted: boolean; done: Set<string> }
   | { kind: 'slice'; key: string; tick: number }
   | { kind: 'seek' }
   | { kind: 'pan'; x: number; y: number; scrollTick: number; scrollY: number };
@@ -78,8 +80,8 @@ export function PianoRoll() {
   }, [view.ghostNotes, pattern, channels, channel?.id]);
 
   // Everything the canvas needs, read by the animation loop.
-  const scene = useRef({ rollView, notes, selected, ghosts, color: channel?.color ?? '#888', patLen, beatsPerBar, lineTicks, patternStart, pressed: null as number | null });
-  scene.current = { ...scene.current, rollView, notes, selected, ghosts, color: channel?.color ?? '#888', patLen, beatsPerBar, lineTicks, patternStart };
+  const scene = useRef({ rollView, notes, selected, ghosts, color: channel?.color ?? '#888', patLen, beatsPerBar, lineTicks, patternStart, lane: view.lane, pressed: null as number | null });
+  scene.current = { ...scene.current, rollView, notes, selected, ghosts, color: channel?.color ?? '#888', patLen, beatsPerBar, lineTicks, patternStart, lane: view.lane };
   dirty.current = true;
 
   useEffect(() => setSelected(new Set()), [channelId, patternId]);
@@ -108,6 +110,7 @@ export function PianoRoll() {
       pressedKey: sc.pressed,
       lineTicks: sc.lineTicks,
       patternStart: sc.patternStart,
+      lane: sc.lane,
     });
   });
 
@@ -152,15 +155,42 @@ export function PianoRoll() {
     if (ids.length) sliceNotes(patternId, channel.id, ids, tick, { coalesce: gesture });
   };
 
+  const toggleMute = (id: string, muted: boolean, gesture: string) => {
+    if (!channel) return;
+    updateNotes(
+      patternId,
+      channel.id,
+      (list) => {
+        const n = list.find((x) => x.id === id);
+        if (!n) return;
+        if (muted) n.muted = true;
+        else delete n.muted;
+      },
+      { coalesce: gesture, label: 'piano roll mute note' },
+    );
+  };
+
   const local = (e: { clientX: number; clientY: number }) => {
     const r = canvasRef.current!.getBoundingClientRect();
     return { x: e.clientX - r.left, y: e.clientY - r.top };
   };
 
-  const setVelocityAt = (x: number, y: number, key: string) => {
-    const laneTop = gridBottom(rollView) + 8;
-    const laneH = VEL_H - 14;
-    const vel = Math.min(1, Math.max(0.02, (laneTop + laneH - y) / laneH));
+  /** A new note with the template: last clicked note's style, colour group and note type (FL Studio). */
+  const newNote = (key: number, start: number, length = view.noteLength): Omit<Note, 'id'> => {
+    const n: Omit<Note, 'id'> = { key, start, length, velocity: view.noteVelocity, ...view.noteStyle };
+    if (view.noteColor > 0) n.color = view.noteColor;
+    if (view.noteType === 'slide') n.slide = true;
+    else if (view.noteType === 'porta') n.porta = true;
+    return n;
+  };
+
+  /** Sets (or with `reset` restores) the lane property of the notes starting near `x`. */
+  const setLaneAt = (x: number, y: number, key: string, reset: boolean) => {
+    const lane = view.lane;
+    const spec = notePropSpec(lane);
+    let value = reset ? spec.def : laneValueAtY(rollView, lane, y);
+    if (lane === 'velocity') value = Math.max(0.02, value);
+    else if (lane === 'fine') value = Math.round(value / 5) * 5;
     const tol = Math.max(3 / rollView.pxPerTick, 2);
     const tick = tickAtX(rollView, x);
     if (!channel) return;
@@ -170,12 +200,29 @@ export function PianoRoll() {
       (list) => {
         for (const n of list) {
           if (selected.size > 0 && !selected.has(n.id)) continue;
-          if (Math.abs(n.start - tick) <= tol) n.velocity = vel;
+          if (Math.abs(n.start - tick) <= tol) setNoteValue(n, lane, value);
         }
       },
-      { coalesce: key, label: 'piano roll velocity' },
+      { coalesce: key, label: `piano roll ${spec.label.toLowerCase()}` },
     );
-    setHint(`Velocity: ${Math.round(vel * 127)}`);
+    setHint(`${spec.label}: ${spec.format(value)}`);
+  };
+
+  const laneMenu = (at: { clientX: number; clientY: number }) =>
+    showMenu(at, [
+      { label: 'Event lane', header: true },
+      ...NOTE_PROPS.map((spec) => ({ label: spec.lane, radio: true, checked: view.lane === spec.key, onClick: () => setView({ lane: spec.key }) })),
+    ]);
+
+  /** Hint text for a note: position, length, name and the properties that differ from their default. */
+  const describeNote = (n: Note) => {
+    const parts = [`${formatPosition(n.start, beatsPerBar)} for ${formatDuration(n.length, beatsPerBar)}`, `${noteName(n.key)} / ${n.key}`, `velocity ${Math.round(n.velocity * 127)}`];
+    for (const spec of NOTE_PROPS) if (spec.key !== 'velocity' && n[spec.key] !== undefined) parts.push(`${spec.label.toLowerCase()} ${spec.format(noteValue(n, spec.key))}`);
+    if (n.color) parts.push(`colour ${n.color + 1}`);
+    if (n.slide) parts.push('slide');
+    if (n.porta) parts.push('portamento');
+    if (n.muted) parts.push('muted');
+    return parts.join(' · ');
   };
 
   // ------------------------------------------------------------ pointer input
@@ -199,9 +246,15 @@ export function PianoRoll() {
       return;
     }
     if (y > bottom) {
-      const key = gestureKey('velocity');
-      drag.current = { kind: 'velocity', key };
-      setVelocityAt(x, y, key);
+      if (x < KEYS_W) {
+        laneMenu(e);
+        return;
+      }
+      // Left button draws values, right button resets them to the default.
+      const key = gestureKey('lane');
+      const reset = e.button === 2;
+      drag.current = { kind: 'lane', key, reset };
+      setLaneAt(x, y, key, reset);
       return;
     }
     if (y < RULER_H) {
@@ -241,6 +294,15 @@ export function PianoRoll() {
       if (hit) deleteNotes(patternId, channel.id, [hit.note.id], { coalesce: gk });
       return;
     }
+    if (tool === 'mute') {
+      // FL Studio's mute tool: click (or drag over) notes to mute or unmute them.
+      const gk = gestureKey('mute-notes');
+      const muted = !(hit?.note.muted ?? false);
+      const d: Drag = { kind: 'mute', key: gk, muted, done: new Set(hit ? [hit.note.id] : []) };
+      drag.current = d;
+      if (hit) toggleMute(hit.note.id, muted, gk);
+      return;
+    }
     if ((mod || tool === 'select') && !hit) {
       // Ctrl+drag selects with a rectangle, Ctrl+Shift+drag adds to the selection.
       const base = e.shiftKey ? new Set(selected) : new Set<string>();
@@ -250,7 +312,7 @@ export function PianoRoll() {
     }
     if (hit) {
       // The clicked note becomes the template for new notes (FL Studio).
-      setView({ noteLength: hit.note.length, noteVelocity: hit.note.velocity });
+      setView({ noteLength: hit.note.length, noteVelocity: hit.note.velocity, noteStyle: noteStyleOf(hit.note), noteColor: hit.note.color ?? 0 });
       if (mod && e.shiftKey) {
         const sel = new Set(selected);
         if (sel.has(hit.note.id)) sel.delete(hit.note.id);
@@ -275,7 +337,7 @@ export function PianoRoll() {
     if (tool === 'paint') {
       const gk = gestureKey('paint');
       const start = snapFloor(Math.max(0, tick), g);
-      addNotes(patternId, channel.id, [{ key, start, length: view.noteLength, velocity }], { coalesce: gk });
+      addNotes(patternId, channel.id, [newNote(key, start)], { coalesce: gk });
       startPreview(key, velocity);
       drag.current = { kind: 'paint', key: gk, row: key, last: start };
       return;
@@ -283,7 +345,8 @@ export function PianoRoll() {
     // Draw: create a note and keep dragging it.
     const gk = gestureKey('draw');
     const start = snapFloor(Math.max(0, tick), g);
-    const [id] = addNotes(patternId, channel.id, [{ key, start, length: view.noteLength, velocity }], { coalesce: gk });
+    const template = newNote(key, start);
+    const [id] = addNotes(patternId, channel.id, [template], { coalesce: gk });
     setSelected(new Set());
     startPreview(key, velocity);
     drag.current = {
@@ -292,7 +355,7 @@ export function PianoRoll() {
       anchor: id,
       originTick: tick,
       originKey: key,
-      orig: new Map([[id, { id, key, start, length: view.noteLength, velocity }]]),
+      orig: new Map([[id, { ...template, id }]]),
       lastKey: key,
       clone: false,
     };
@@ -304,11 +367,11 @@ export function PianoRoll() {
     if (!d) {
       if (x > KEYS_W && y > RULER_H && y < gridBottom(rollView)) {
         const hit = noteAt(x, y);
-        e.currentTarget.style.cursor = view.tool === 'slice' ? 'col-resize' : hit?.edge ? 'ew-resize' : hit ? 'move' : view.tool === 'delete' ? 'not-allowed' : 'crosshair';
-        // FL Studio's hint: position and length, note name and number.
+        e.currentTarget.style.cursor =
+          view.tool === 'slice' ? 'col-resize' : view.tool === 'mute' ? 'pointer' : hit?.edge ? 'ew-resize' : hit ? 'move' : view.tool === 'delete' ? 'not-allowed' : 'crosshair';
+        // FL Studio's hint: position and length, note name and number, note properties.
         if (hit) {
-          const n = hit.note;
-          setHint(`${formatPosition(n.start, beatsPerBar)} for ${formatDuration(n.length, beatsPerBar)} · ${noteName(n.key)} / ${n.key} · velocity ${Math.round(n.velocity * 127)}`);
+          setHint(describeNote(hit.note));
         } else {
           const k = keyAtY(rollView, y);
           setHint(`${formatPosition(Math.max(0, tickAtX(rollView, x)), beatsPerBar)} · ${noteName(k)} / ${k}`);
@@ -316,6 +379,9 @@ export function PianoRoll() {
       } else if (y < RULER_H && x > KEYS_W) {
         e.currentTarget.style.cursor = 'text';
         setHint('Click to set the playback position in the pattern');
+      } else if (y > gridBottom(rollView)) {
+        e.currentTarget.style.cursor = x < KEYS_W ? 'pointer' : 'crosshair';
+        setHint(x < KEYS_W ? 'Click to choose the note property of the event lane' : `${notePropSpec(view.lane).lane}: drag to draw values, right-drag to reset them`);
       } else e.currentTarget.style.cursor = 'default';
       return;
     }
@@ -330,9 +396,17 @@ export function PianoRoll() {
       case 'seek':
         seekTo(x, e.altKey);
         break;
-      case 'velocity':
-        setVelocityAt(x, y, d.key);
+      case 'lane':
+        setLaneAt(x, y, d.key, d.reset);
         break;
+      case 'mute': {
+        const hit = noteAt(x, y);
+        if (hit && !d.done.has(hit.note.id)) {
+          d.done.add(hit.note.id);
+          toggleMute(hit.note.id, d.muted, d.key);
+        }
+        break;
+      }
       case 'keys':
         if (key !== d.note && y > RULER_H && y < gridBottom(rollView)) {
           engine.noteOff(d.handle);
@@ -365,7 +439,7 @@ export function PianoRoll() {
         const start = snapFloor(Math.max(0, tick), g);
         if (start !== d.last && !notes.some((n) => n.key === d.row && n.start === start)) {
           d.last = start;
-          addNotes(patternId, channel.id, [{ key: d.row, start, length: view.noteLength, velocity: view.noteVelocity }], { coalesce: d.key });
+          addNotes(patternId, channel.id, [newNote(d.row, start)], { coalesce: d.key });
         }
         break;
       }
@@ -405,7 +479,7 @@ export function PianoRoll() {
           d.lastKey = newKey;
           startPreview(newKey, anchor.velocity);
         }
-        setHint(`${formatPosition(anchor.start + dt, beatsPerBar)} for ${formatDuration(anchor.length, beatsPerBar)} · ${noteName(newKey)} / ${newKey}`);
+        setHint(describeNote({ ...anchor, start: anchor.start + dt, key: newKey }));
         break;
       }
       case 'resize': {
@@ -547,9 +621,9 @@ export function PianoRoll() {
           legatoNotes(pid, ch.id, sel);
           return true;
         }
-        // FL Studio tool keys: P draw, B paint, D delete, C slice, E select.
+        // FL Studio tool keys: P draw, B paint, D delete, T mute, C slice, E select.
         if (plain) {
-          const tool = ({ KeyP: 'draw', KeyB: 'paint', KeyD: 'delete', KeyC: 'slice', KeyE: 'select' } as const)[e.code as 'KeyP'];
+          const tool = ({ KeyP: 'draw', KeyB: 'paint', KeyD: 'delete', KeyT: 'mute', KeyC: 'slice', KeyE: 'select' } as const)[e.code as 'KeyP'];
           if (tool) {
             setUi((d) => void (d.pianoRoll.tool = tool));
             return true;
@@ -640,9 +714,43 @@ export function PianoRoll() {
         {toolButton('draw', <IconPencil size={12} />, 'Draw tool: click to add, drag to move')}
         {toolButton('paint', <IconBrush size={12} />, 'Paint tool: drag to paint notes')}
         {toolButton('delete', <IconEraser size={12} />, 'Delete tool (right mouse button works in every tool)')}
+        {toolButton('mute', <IconMute size={12} />, 'Mute tool (T): click or drag over notes to mute or unmute them')}
         {toolButton('slice', <IconSlice size={12} />, 'Slice tool (C): click a note to cut it at the snap position')}
         {toolButton('select', <IconSelect size={12} />, 'Select tool: drag a rectangle')}
       </div>
+      <div className="seg" data-hint="Type of new notes: normal, slide (glides the notes of its colour group, plays nothing itself) or portamento (glides from the previous note)">
+        {(['normal', 'slide', 'porta'] as NoteType[]).map((t) => (
+          <button key={t} className={view.noteType === t ? 'active' : ''} onClick={() => setView({ noteType: t })}>
+            {t === 'normal' ? 'Note' : t === 'slide' ? 'Slide' : 'Porta'}
+          </button>
+        ))}
+      </div>
+      <button
+        className="tb-select note-color-pick"
+        data-hint="Colour group of new notes (plugins get it as the MIDI channel; slide notes only move notes of their group)"
+        onClick={(e) =>
+          showMenu(e, [
+            { label: 'Colour group of new notes', header: true },
+            ...Array.from({ length: NOTE_COLOR_COUNT }, (_, i) => ({
+              label: i === 0 ? 'Group 1 (channel colour)' : `Group ${i + 1}`,
+              swatch: noteColor(i, channel?.color ?? '#888'),
+              radio: true,
+              checked: view.noteColor === i,
+              onClick: () => setView({ noteColor: i }),
+            })),
+          ])
+        }
+      >
+        <span className="swatch" style={{ background: noteColor(view.noteColor, channel?.color ?? '#888') }} />
+        {view.noteColor + 1}
+      </button>
+      <select className="tb-select" value={view.lane} data-hint="Note property shown in the event lane under the notes" onChange={(e) => setView({ lane: e.target.value as NotePropKey })}>
+        {NOTE_PROPS.map((spec) => (
+          <option key={spec.key} value={spec.key}>
+            {spec.label}
+          </option>
+        ))}
+      </select>
       <select className="tb-select" value={view.snap} data-hint="Snap (Main follows the main snap in the toolbar; Alt while dragging: no snap)" onChange={(e) => setView({ snap: e.target.value as SnapId })}>
         {SNAP_OPTIONS.map((s) => (
           <option key={s} value={s}>

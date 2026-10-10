@@ -196,6 +196,10 @@ export type ChannelKind = Channel['kind'];
 /** Channels that produce sound. */
 export type AudioChannel = SynthChannel | SamplerChannel | PluginChannel;
 
+/**
+ * A note in a pattern. The optional fields are FL Studio's note properties; an absent field has its
+ * default value (see notes.ts), so files and drafts only carry what differs.
+ */
 export interface Note {
   id: Id;
   /** MIDI key 0..127 (60 is shown as C5). */
@@ -206,6 +210,24 @@ export interface Note {
   length: number;
   /** 0..1 */
   velocity: number;
+  /** Release (note-off) velocity 0..1, default 0.5: plugins get it as MIDI note-off velocity, the built-in instruments scale their release time with it. */
+  release?: number;
+  /** -1..1, default 0. */
+  pan?: number;
+  /** Fine pitch in cents, -1200..1200, default 0. */
+  fine?: number;
+  /** Mod X 0..1, default 0.5 (built-in synth: filter cutoff). */
+  modX?: number;
+  /** Mod Y 0..1, default 0.5 (built-in synth: filter resonance). */
+  modY?: number;
+  /** Colour group 0..15 (plugins: MIDI channel 1..16; slide notes only move notes of their group). */
+  color?: number;
+  /** Slide note: plays nothing itself, glides the sounding notes of its colour group to its key over its length. */
+  slide?: boolean;
+  /** Portamento note: glides from the previous note's pitch to its own key (channel glide time). */
+  porta?: boolean;
+  /** Muted notes stay in the piano roll but do not play (FL Studio's mute tool). */
+  muted?: boolean;
 }
 
 export interface Pattern {

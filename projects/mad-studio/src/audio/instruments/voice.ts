@@ -1,3 +1,4 @@
+import type { PitchPoint } from '../../model/notes';
 import { fadeOut } from '../envelope';
 
 /** One sounding (or scheduled) note of an instrument. */
@@ -84,10 +85,42 @@ export interface TriggerOptions {
   sampleOffset?: number;
   /** Force note-length gating even for one-shot samplers. */
   gate?: boolean;
+  /** Note properties (notes.ts); absent values are the defaults. */
+  pan?: number;
+  fine?: number;
+  modX?: number;
+  modY?: number;
+  release?: number;
+  /** Pitch curve (portamento, slide notes) in semitones relative to the key, times relative to the note start. */
+  pitch?: PitchPoint[] | null;
+}
+
+/** Thresholds shared with the native engine (Instruments.cpp). */
+export const NOTE_PAN_EPSILON = 0.001;
+
+/** The always-stereo bus for panned voices. */
+export function createPannedOutput(ctx: BaseAudioContext): GainNode {
+  const g = ctx.createGain();
+  g.channelCount = 2;
+  g.channelCountMode = 'explicit';
+  g.channelInterpretation = 'speakers';
+  return g;
+}
+
+/** Schedules a pitch curve (semitones, relative times) plus a constant offset (cents) on a detune param. */
+export function schedulePitch(param: AudioParam, t: number, cents: number, pitch: readonly PitchPoint[]): void {
+  param.setValueAtTime(cents + pitch[0].v * 100, t);
+  for (let i = 1; i < pitch.length; i++) param.linearRampToValueAtTime(cents + pitch[i].v * 100, t + pitch[i].t);
 }
 
 export interface Instrument {
   readonly output: GainNode;
+  /**
+   * Voices with a note pan. They are stereo, and kept apart from `output` so that they never change
+   * how the channel pans the other voices (a StereoPannerNode treats mono and stereo input differently,
+   * and Web Audio counts a voice's channels from the moment it is scheduled).
+   */
+  readonly pannedOutput: GainNode;
   trigger(key: number, velocity: number, time: number, duration: number | null, opts?: TriggerOptions): Voice | null;
   stopAll(at: number): void;
   dispose(): void;

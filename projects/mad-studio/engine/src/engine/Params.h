@@ -131,6 +131,24 @@ private:
 };
 
 //==============================================================================
+/** Note properties of a sequenced note (model/notes.ts; the defaults have no effect). */
+struct NoteProps
+{
+    float release = 0.5f, pan = 0.0f, fine = 0.0f, modX = 0.5f, modY = 0.5f;
+    int color = 0;            // colour group 0..15 (plugins: MIDI channel color + 1)
+    float glideFrom = 0.0f;   // portamento: semitones away from the key at the start
+    float glideTime = 0.1f;   // seconds (notes.ts DEFAULT_GLIDE_TIME)
+};
+
+/** A slide note's pitch movement, converted to seconds after the note start. */
+struct NoteBend
+{
+    float start = 0.0f, duration = 0.0f;
+    float to = 0.0f; // semitones relative to the key
+};
+
+inline constexpr int maxNoteBends = 8;
+
 /** A note event for one channel inside the current block. */
 struct NoteEvent
 {
@@ -150,6 +168,9 @@ struct NoteEvent
     double clipOffsetSeconds = 0.0;
     bool audioClip = false;
     int32_t handle = 0;      // live notes
+    NoteProps props;
+    int numBends = 0;
+    std::array<NoteBend, maxNoteBends> bends {};
 };
 
 //==============================================================================

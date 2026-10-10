@@ -348,7 +348,7 @@ struct CollectingSink final : Sequencer::Sink
     int startedAt = -1;
     int64_t blockStart = 0;
     void chunkStarted (int, double) override {}
-    void noteEvent (const TimelineEvent& ev, double time, double, double) override { events.emplace_back (ev.tick, time); }
+    void noteEvent (const TimelineEvent& ev, const TimelineBend*, double time, double) override { events.emplace_back (ev.tick, time); }
     void click (double time, bool accent) override { clicks.emplace_back (time, accent); }
     void playbackStarted (int offset, double) override
     {
@@ -369,7 +369,7 @@ void testSequencer()
         tl.loopStart = 0.0;
         tl.loopEnd = reference::schedulerLoopEnd;
         for (const auto t : reference::schedulerEventTicks)
-            tl.events.push_back ({ t, 24.0, 1, 60, 1.0f, 0.0, false });
+            tl.events.push_back ({ t, 24.0, 1, 60, 1.0f, 0.0, false, {}, 0, 0 });
 
         AutoParam bpm ((float) reference::schedulerBpm), swing ((float) reference::schedulerSwing);
         Sequencer seq;
@@ -442,7 +442,7 @@ void testSequencer()
     {
         Timeline tl;
         tl.loopEnd = 3840.0;
-        tl.events.push_back ({ 192.0, 24.0, 1, 60, 1.0f, 0.0, false });
+        tl.events.push_back ({ 192.0, 24.0, 1, 60, 1.0f, 0.0, false, {}, 0, 0 });
         AutoParam bpm (120.0f), swing (0.0f);
         Sequencer seq;
         seq.prepare (48000.0);
@@ -611,7 +611,7 @@ void testGraphLevels()
         auto p = makeProject();
         p.channels.push_back (samplerChannel ("ch_a", "dc_mono", 1));
         std::vector<float> l, r;
-        const auto res = renderWith (p, { { 0.0, 96.0, ids.uidFor ("ch_a"), 60, 1.0f, 0.0, false } }, l, r);
+        const auto res = renderWith (p, { { 0.0, 96.0, ids.uidFor ("ch_a"), 60, 1.0f, 0.0, false, {}, 0, 0 } }, l, r);
         s.check (res.ok, "render ok");
         s.near (rms (l, 4800, 9600), 0.5 * std::cos (3.14159265358979323846 / 4.0), 1.0e-4, "mono sample: -3 dB pan law");
         s.near (rms (r, 4800, 9600), 0.5 * std::cos (3.14159265358979323846 / 4.0), 1.0e-4, "mono sample R");
@@ -621,7 +621,7 @@ void testGraphLevels()
         auto p = makeProject();
         p.channels.push_back (samplerChannel ("ch_b", "dc_stereo", 2));
         std::vector<float> l, r;
-        renderWith (p, { { 0.0, 96.0, ids.uidFor ("ch_b"), 60, 1.0f, 0.0, false } }, l, r);
+        renderWith (p, { { 0.0, 96.0, ids.uidFor ("ch_b"), 60, 1.0f, 0.0, false, {}, 0, 0 } }, l, r);
         s.near (rms (l, 4800, 9600), 0.5, 1.0e-4, "stereo sample: unity at centre");
     }
     // Volume knob 0.4 -> gain 0.25, mixer fader 1.0 -> 1.5625, mute.
@@ -632,16 +632,16 @@ void testGraphLevels()
         p.channels.push_back (ch);
         p.mixer[1].volume = 1.0f;
         std::vector<float> l, r;
-        renderWith (p, { { 0.0, 96.0, ids.uidFor ("ch_c"), 60, 1.0f, 0.0, false } }, l, r);
+        renderWith (p, { { 0.0, 96.0, ids.uidFor ("ch_c"), 60, 1.0f, 0.0, false, {}, 0, 0 } }, l, r);
         s.near (rms (l, 4800, 9600), 0.5 * 0.25 * 1.5625, 1.0e-4, "volumeToGain on channel and fader");
 
         p.mixer[1].muted = true;
-        renderWith (p, { { 0.0, 96.0, ids.uidFor ("ch_c"), 60, 1.0f, 0.0, false } }, l, r);
+        renderWith (p, { { 0.0, 96.0, ids.uidFor ("ch_c"), 60, 1.0f, 0.0, false, {}, 0, 0 } }, l, r);
         s.near (rms (l, 4800, 9600), 0.0, 1.0e-6, "muted insert is silent");
 
         p.mixer[1].muted = false;
         p.mixer[2].solo = true;
-        renderWith (p, { { 0.0, 96.0, ids.uidFor ("ch_c"), 60, 1.0f, 0.0, false } }, l, r);
+        renderWith (p, { { 0.0, 96.0, ids.uidFor ("ch_c"), 60, 1.0f, 0.0, false, {}, 0, 0 } }, l, r);
         s.near (rms (l, 4800, 9600), 0.0, 1.0e-6, "insert soloed out");
     }
     // One-shot plays to the end of the sample regardless of note length; gated stops.
@@ -649,11 +649,11 @@ void testGraphLevels()
         auto p = makeProject();
         p.channels.push_back (samplerChannel ("ch_d", "dc_stereo", 1));
         std::vector<float> l, r;
-        renderWith (p, { { 0.0, 24.0, ids.uidFor ("ch_d"), 60, 1.0f, 0.0, false } }, l, r, nullptr, 768.0);
+        renderWith (p, { { 0.0, 24.0, ids.uidFor ("ch_d"), 60, 1.0f, 0.0, false, {}, 0, 0 } }, l, r, nullptr, 768.0);
         s.near (rms (l, 40000, 44000), 0.5, 1.0e-4, "one-shot ignores the note length");
 
         p.channels[0].samplerParams[sampler::oneShot] = 0.0f;
-        renderWith (p, { { 0.0, 24.0, ids.uidFor ("ch_d"), 60, 1.0f, 0.0, false } }, l, r, nullptr, 768.0);
+        renderWith (p, { { 0.0, 24.0, ids.uidFor ("ch_d"), 60, 1.0f, 0.0, false, {}, 0, 0 } }, l, r, nullptr, 768.0);
         s.near (rms (l, 40000, 44000), 0.0, 1.0e-6, "gated sampler stops after the release");
     }
     // Choke group: the second hat cuts the first within ~18 ms.
@@ -667,8 +667,8 @@ void testGraphLevels()
         p.channels.push_back (a);
         p.channels.push_back (b);
         std::vector<float> l, r;
-        renderWith (p, { { 0.0, 24.0, ids.uidFor ("ch_h1"), 60, 1.0f, 0.0, false },
-                         { 96.0, 24.0, ids.uidFor ("ch_h2"), 60, 1.0f, 0.0, false } }, l, r);
+        renderWith (p, { { 0.0, 24.0, ids.uidFor ("ch_h1"), 60, 1.0f, 0.0, false, {}, 0, 0 },
+                         { 96.0, 24.0, ids.uidFor ("ch_h2"), 60, 1.0f, 0.0, false, {}, 0, 0 } }, l, r);
         s.near (rms (l, 12000, 23000), 0.5, 1.0e-4, "before the choke");
         s.near (rms (l, 26000, 30000), 0.0, 1.0e-5, "choke group kills the earlier voice (18 ms fade)");
     }
@@ -679,7 +679,7 @@ void testGraphLevels()
         auto automation = std::make_shared<AutomationData>();
         automation->lanes.push_back ({ "ch:ch_e:volume", { { 0.0, 0.8 }, { 192.0, 0.8 }, { 193.0, 0.0 } } });
         std::vector<float> l, r;
-        renderWith (p, { { 0.0, 384.0, ids.uidFor ("ch_e"), 60, 1.0f, 0.0, false } }, l, r, automation);
+        renderWith (p, { { 0.0, 384.0, ids.uidFor ("ch_e"), 60, 1.0f, 0.0, false, {}, 0, 0 } }, l, r, automation);
         // 120 BPM: tick 192 = 1 s.
         s.near (rms (l, 12000, 46000), 0.5, 1.0e-3, "automation before the step");
         s.near (rms (l, 52000, 90000), 0.0, 1.0e-4, "automated volume reaches 0");
@@ -701,7 +701,7 @@ void testGraphLevels()
         ch.synthParams[synth::ampSustain] = 1.0f;
         p.channels.push_back (ch);
         std::vector<float> l, r;
-        renderWith (p, { { 0.0, 192.0, ids.uidFor ("ch_s"), 69, 1.0f, 0.0, false } }, l, r);
+        renderWith (p, { { 0.0, 192.0, ids.uidFor ("ch_s"), 69, 1.0f, 0.0, false, {}, 0, 0 } }, l, r);
         s.near (rms (l, 12000, 36000), std::sqrt (0.5) * std::cos (3.14159265358979323846 / 4.0), 2.0e-3,
                 "synth sine voice level with mono pan law");
     }
@@ -728,13 +728,238 @@ void testGraphLevels()
         p.mixer[1].effects = { reverb, delay };
         p.mixer[0].effects = { limiter };
         std::vector<float> l, r;
-        renderWith (p, { { 0.0, 24.0, ids.uidFor ("ch_f"), 60, 1.0f, 0.0, false } }, l, r, nullptr, 768.0);
+        renderWith (p, { { 0.0, 24.0, ids.uidFor ("ch_f"), 60, 1.0f, 0.0, false, {}, 0, 0 } }, l, r, nullptr, 768.0);
         bool finite = true;
         for (size_t i = 0; i < l.size(); ++i)
             finite = finite && std::isfinite (l[i]) && std::isfinite (r[i]);
         s.check (finite, "effects produce finite output");
         s.check (peak (l, 0, l.size()) <= std::pow (10.0, -0.5 / 20.0) + 0.02, str ("limiter ceiling (peak %g)", peak (l, 0, l.size())));
         s.check (rms (l, 72000, 90000) > 1.0e-4, "reverb/delay tail after the sample");
+    }
+}
+
+//==============================================================================
+/** Upward zero crossings per second in [from, to). */
+double frequencyOf (const std::vector<float>& v, size_t from, size_t to, double rate)
+{
+    int crossings = 0;
+    to = std::min (to, v.size());
+    for (size_t i = from + 1; i < to; ++i)
+        crossings += (v[i - 1] < 0.0f && v[i] >= 0.0f) ? 1 : 0;
+    return to > from ? crossings * rate / (double) (to - from) : 0.0;
+}
+
+std::unique_ptr<SampleData> sineSample (const juce::String& id, double hz, double seconds, double rate)
+{
+    auto d = std::make_unique<SampleData>();
+    d->id = id;
+    d->numChannels = 1;
+    d->sampleRate = rate;
+    d->numFrames = (int64_t) (seconds * rate);
+    d->channels[0].resize ((size_t) d->numFrames);
+    for (int64_t i = 0; i < d->numFrames; ++i)
+        d->channels[0][(size_t) i] = (float) (0.5 * std::sin (6.28318530717958647692 * hz * (double) i / rate));
+    return d;
+}
+
+void testNoteProperties()
+{
+    auto& s = *suite;
+    SampleStore samples;
+    ChannelIds ids;
+    samples.add (constantSample ("np_dc_mono", 1, 0.5f, 2.0, 48000.0));
+    samples.add (constantSample ("np_dc_stereo", 2, 0.5f, 2.0, 48000.0));
+    samples.add (sineSample ("np_sine", 1000.0, 2.0, 48000.0));
+    std::vector<TimelineBend> bends;
+
+    const auto renderWith = [&] (ProjectModel project, std::vector<TimelineEvent> events, std::vector<float>& l, std::vector<float>& r)
+    {
+        auto tl = std::make_shared<Timeline>();
+        tl->songMode = true;
+        tl->loopEnd = 768.0;
+        tl->events = std::move (events);
+        tl->bends = bends;
+        RenderRequest req;
+        req.project = std::move (project);
+        req.timeline = tl;
+        req.sampleRate = 48000.0;
+        req.endTick = 768.0;
+        req.tailSeconds = 0.0;
+        return renderOfflineToBuffers (req, samples, ids, nullptr, l, r);
+    };
+    const auto note = [&] (const juce::String& channel, int key, double length, const NoteProps& props = {})
+    {
+        TimelineEvent e;
+        e.tick = 0.0;
+        e.length = length;
+        e.channel = ids.uidFor (channel);
+        e.key = key;
+        e.velocity = 1.0f;
+        e.props = props;
+        return e;
+    };
+    const auto samplerChannel = [] (const juce::String& id, const juce::String& sample)
+    {
+        ChannelModel ch;
+        ch.id = id;
+        ch.kind = ChannelKind::sampler;
+        ch.mixerTrack = 1;
+        for (int i = 0; i < sampler::numParams; ++i)
+            ch.samplerParams[(size_t) i] = sampler::defaultValue (i);
+        ch.samplerParams[sampler::gain] = 1.0f;
+        ch.sampleId = sample;
+        return ch;
+    };
+    const auto sineSynth = [] (const juce::String& id)
+    {
+        ChannelModel ch;
+        ch.id = id;
+        ch.kind = ChannelKind::synth;
+        ch.mixerTrack = 1;
+        for (int i = 0; i < synth::numParams; ++i)
+            ch.synthParams[(size_t) i] = synth::defaultValue (i);
+        ch.synthParams[synth::filterEnabled] = 0.0f;
+        ch.synthParams[synth::gain] = 1.0f;
+        ch.synthParams[(size_t) synth::osc (0, synth::level)] = 1.0f;
+        ch.synthParams[(size_t) synth::osc (1, synth::level)] = 0.0f;
+        ch.synthParams[(size_t) synth::osc (0, synth::wave)] = 0.0f; // sine
+        ch.synthParams[synth::ampSustain] = 1.0f;
+        return ch;
+    };
+    constexpr double quarterPi = 3.14159265358979323846 / 4.0;
+
+    // Note pan (sampler.ts: a StereoPannerNode after the amp; mono input -> mono law). The
+    // instrument output turns stereo, so the centred channel and track pass it at unity.
+    {
+        auto p = makeProject();
+        p.channels.push_back (samplerChannel ("np_a", "np_dc_mono"));
+        NoteProps props;
+        props.pan = -1.0f;
+        std::vector<float> l, r;
+        renderWith (p, { note ("np_a", 60, 96.0, props) }, l, r);
+        s.near (rms (l, 4800, 9600), 0.5, 1.0e-4, "note pan hard left: mono sample at full level on the left");
+        s.near (rms (r, 4800, 9600), 0.0, 1.0e-6, "note pan hard left: right silent");
+
+        props.pan = 0.5f;
+        p.channels[0].sampleId = "np_dc_stereo";
+        renderWith (p, { note ("np_a", 60, 96.0, props) }, l, r);
+        // Stereo law at +0.5: L = inL * cos(pi/4), R = inR + inL * sin(pi/4).
+        s.near (rms (l, 4800, 9600), 0.5 * std::cos (quarterPi), 1.0e-4, "note pan on a stereo sample: stereo law (L)");
+        s.near (rms (r, 4800, 9600), 0.5 + 0.5 * std::sin (quarterPi), 1.0e-4, "note pan on a stereo sample: stereo law (R)");
+    }
+    // Fine pitch on the sampler: +1200 cents plays the 1 kHz sine an octave up.
+    {
+        auto p = makeProject();
+        p.channels.push_back (samplerChannel ("np_f", "np_sine"));
+        std::vector<float> l, r;
+        renderWith (p, { note ("np_f", 60, 96.0) }, l, r);
+        s.near (frequencyOf (l, 2400, 21600, 48000.0), 1000.0, 5.0, "sampler plays the sine at its pitch");
+        NoteProps props;
+        props.fine = 1200.0f;
+        renderWith (p, { note ("np_f", 60, 96.0, props) }, l, r);
+        s.near (frequencyOf (l, 2400, 21600, 48000.0), 2000.0, 5.0, "note fine pitch +1200 cents: an octave up");
+        props.fine = -100.0f;
+        renderWith (p, { note ("np_f", 60, 96.0, props) }, l, r);
+        s.near (frequencyOf (l, 2400, 21600, 48000.0), 1000.0 * std::exp2 (-1.0 / 12.0), 5.0, "note fine pitch -100 cents: a semitone down");
+    }
+    // Release velocity scales the release (gated sampler, release 0.1 s; note ends at 0.125 s).
+    {
+        auto p = makeProject();
+        auto ch = samplerChannel ("np_r", "np_dc_stereo");
+        ch.samplerParams[sampler::oneShot] = 0.0f;
+        ch.samplerParams[sampler::ampRelease] = 0.1f;
+        p.channels.push_back (ch);
+        std::vector<float> l, r;
+        renderWith (p, { note ("np_r", 60, 24.0) }, l, r);
+        const double plain = rms (l, 12240, 15600);
+        NoteProps props;
+        props.release = 1.0f;
+        renderWith (p, { note ("np_r", 60, 24.0, props) }, l, r);
+        const double longer = rms (l, 12240, 15600);
+        s.check (plain < 1.0e-3, str ("default release has ended 0.13 s after the note (rms %g)", plain));
+        s.check (longer > 5.0e-3, str ("release velocity 1.0 doubles the release (rms %g)", longer));
+    }
+    // Portamento: the synth starts an octave below and glides to A4 in 0.5 s.
+    {
+        auto p = makeProject();
+        p.channels.push_back (sineSynth ("np_p"));
+        NoteProps props;
+        props.glideFrom = -12.0f;
+        props.glideTime = 0.5f;
+        std::vector<float> l, r;
+        renderWith (p, { note ("np_p", 69, 384.0, props) }, l, r);
+        const double start = frequencyOf (l, 240, 2640, 48000.0);
+        const double end = frequencyOf (l, 28800, 52800, 48000.0);
+        s.check (start > 200.0 && start < 245.0, str ("portamento starts near 220 Hz (%g Hz)", start));
+        s.near (end, 440.0, 3.0, "portamento ends on the note's key");
+        s.check (rms (r, 28800, 52800) > 0.1 && rms (l, 28800, 52800) > 0.1, "unpanned synth voice on both sides");
+    }
+    // Slide bend: at 0.5 s the note glides an octave up within 1 tick.
+    {
+        auto p = makeProject();
+        p.channels.push_back (sineSynth ("np_s"));
+        bends = { { 96.0, 1.0, 12.0f } };
+        auto e = note ("np_s", 69, 384.0);
+        e.bendFirst = 0;
+        e.bendCount = 1;
+        std::vector<float> l, r;
+        renderWith (p, { e }, l, r);
+        bends.clear();
+        s.near (frequencyOf (l, 2400, 21600, 48000.0), 440.0, 3.0, "before the slide");
+        s.near (frequencyOf (l, 28800, 52800, 48000.0), 880.0, 4.0, "after the slide: an octave up and held");
+    }
+    // Mod X moves the synth's filter cutoff (a 1 kHz saw through a 150 Hz low-pass: 2.4 kHz with Mod X
+    // 1.0 lets the fundamental through, 9 Hz with 0.0 removes almost everything).
+    {
+        auto p = makeProject();
+        auto ch = sineSynth ("np_x");
+        ch.synthParams[synth::filterEnabled] = 1.0f;
+        ch.synthParams[synth::cutoff] = 150.0f;
+        ch.synthParams[synth::keyTrack] = 0.0f;
+        ch.synthParams[synth::envAmount] = 0.0f;
+        ch.synthParams[(size_t) synth::osc (0, synth::wave)] = 2.0f; // sawtooth
+        p.channels.push_back (ch);
+        std::vector<float> l, r;
+        renderWith (p, { note ("np_x", 84, 192.0) }, l, r);
+        const double plain = rms (l, 4800, 40000);
+        NoteProps props;
+        props.modX = 1.0f;
+        renderWith (p, { note ("np_x", 84, 192.0, props) }, l, r);
+        const double open = rms (l, 4800, 40000);
+        props.modX = 0.0f;
+        renderWith (p, { note ("np_x", 84, 192.0, props) }, l, r);
+        const double closed = rms (l, 4800, 40000);
+        s.check (open > plain * 4.0, str ("Mod X 1.0 opens the filter (%g vs %g)", open, plain));
+        s.check (closed < plain * 0.25, str ("Mod X 0.0 closes the filter (%g vs %g)", closed, plain));
+        s.near (notes::resonance (2.0, 1.0f), 8.0, 1.0e-9, "Mod Y 1.0: resonance x4");
+        s.near (notes::resonance (2.0, 0.0f), 0.5, 1.0e-9, "Mod Y 0.0: resonance / 4");
+        s.near (notes::resonance (20.0, 1.0f), notes::maxResonance, 1.0e-9, "Mod Y resonance is capped");
+    }
+    // Synth note pan: a mono voice panned hard right.
+    {
+        auto p = makeProject();
+        p.channels.push_back (sineSynth ("np_q"));
+        NoteProps props;
+        props.pan = 1.0f;
+        std::vector<float> l, r;
+        renderWith (p, { note ("np_q", 69, 192.0, props) }, l, r);
+        s.near (rms (l, 12000, 36000), 0.0, 1.0e-5, "synth note pan hard right: left silent");
+        s.near (rms (r, 12000, 36000), std::sqrt (0.5), 2.0e-3, "synth note pan hard right: full level on the right");
+    }
+    // The pitch curve itself (notes.ts pitchCurve()).
+    {
+        NoteEvent e;
+        e.props.glideFrom = 5.0f;
+        e.props.glideTime = 1.0f;
+        e.numBends = 1;
+        e.bends[0] = { 0.5f, 1.0f, -3.0f };
+        notes::PitchCurve c;
+        c.build (e);
+        s.near (c.at (0.0), 5.0, 1.0e-6, "pitch curve starts at the glide origin");
+        s.near (c.at (0.25), 3.75, 1.0e-6, "glide is linear in semitones");
+        s.near (c.at (1.0), (2.5 - 3.0) / 2.0, 1.0e-6, "a bend takes over mid-glide");
+        s.near (c.at (3.0), -3.0, 1.0e-6, "the last value holds");
+        s.near (c.minimum(), -3.0, 1.0e-6, "lowest pitch of the curve");
     }
 }
 
@@ -877,7 +1102,7 @@ void testLoopedCompensation()
     tl->songMode = true;
     tl->loopStart = 0.0;
     tl->loopEnd = 96.0;
-    tl->events = { { 0.0, 96.0, ids.uidFor ("ch_dc"), 60, 1.0f, 0.0, false } };
+    tl->events = { { 0.0, 96.0, ids.uidFor ("ch_dc"), 60, 1.0f, 0.0, false, {}, 0, 0 } };
     auto automation = std::make_shared<AutomationData>();
     automation->lanes.push_back ({ "mx:0:volume", { { 0.0, 0.8 }, { 48.0, 0.8 }, { 48.0, 0.0 }, { 96.0, 0.0 } } });
 
@@ -928,6 +1153,7 @@ bool runSelfTests()
     s.run ("automation interpolation and override", testAutomation);
     s.run ("WAV writing and reading", testWav);
     s.run ("graph levels, chokes, automation, effects", testGraphLevels);
+    s.run ("note properties: pan, fine pitch, release, portamento, slides, Mod X/Y", testNoteProperties);
     s.run ("plugin delay compensation plan", testLatencyPlan);
     s.run ("compensation delay line", testCompensationDelay);
     s.run ("compensated automation across a loop wrap", testLoopedCompensation);

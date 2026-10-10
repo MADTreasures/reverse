@@ -26,6 +26,18 @@ size_t Timeline::firstAtOrAfter (double t) const noexcept
     return (size_t) std::distance (events.begin(), it);
 }
 
+void parseNoteProps (const juce::var& e, NoteProps& p)
+{
+    p.release = (float) std::clamp (json::number (e, "release", 0.5), 0.0, 1.0);
+    p.pan = (float) std::clamp (json::number (e, "pan", 0.0), -1.0, 1.0);
+    p.fine = (float) std::clamp (json::number (e, "fine", 0.0), -1200.0, 1200.0);
+    p.modX = (float) std::clamp (json::number (e, "modX", 0.5), 0.0, 1.0);
+    p.modY = (float) std::clamp (json::number (e, "modY", 0.5), 0.0, 1.0);
+    p.color = std::clamp (json::integer (e, "color", 0), 0, 15);
+    p.glideFrom = (float) std::clamp (json::number (e, "glideFrom", 0.0), -128.0, 128.0);
+    p.glideTime = (float) std::clamp (json::number (e, "glideTime", 0.0), 0.0, 60.0);
+}
+
 Timeline parseTimeline (const juce::var& v, ChannelIds& ids)
 {
     Timeline tl;
@@ -53,6 +65,20 @@ Timeline parseTimeline (const juce::var& v, ChannelIds& ids)
             ev.velocity = (float) std::clamp (json::number (e, "velocity", 0.8), 0.0, 1.0);
             ev.sampleOffset = std::max (0.0, json::number (e, "sampleOffset", 0.0));
             ev.audioClip = json::boolean (e, "audioClip", false);
+            parseNoteProps (e, ev.props);
+            if (const auto* bends = json::get (e, "bends").getArray())
+            {
+                ev.bendFirst = (uint32_t) tl.bends.size();
+                for (const auto& b : *bends)
+                {
+                    TimelineBend bend;
+                    bend.at = std::max (0.0, json::number (b, "at", 0.0));
+                    bend.length = std::max (0.0, json::number (b, "length", 0.0));
+                    bend.to = (float) std::clamp (json::number (b, "to", 0.0), -128.0, 128.0);
+                    tl.bends.push_back (bend);
+                }
+                ev.bendCount = (uint32_t) tl.bends.size() - ev.bendFirst;
+            }
             tl.events.push_back (ev);
         }
     }

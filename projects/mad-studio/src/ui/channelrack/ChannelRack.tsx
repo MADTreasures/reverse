@@ -530,7 +530,7 @@ function MiniRoll({ channel, notes, stepCount }: { channel: Channel; notes: Note
     ctx.fillStyle = channel.color;
     for (const n of notes) {
       const y = height - 3 - ((n.key - lo + (span - (hi - lo + 1)) / 2) / span) * (height - 6);
-      ctx.globalAlpha = 0.45 + n.velocity * 0.55;
+      ctx.globalAlpha = n.muted ? 0.2 : 0.45 + n.velocity * 0.55;
       ctx.fillRect(n.start * pxPerTick, y - 1.5, Math.max(2, n.length * pxPerTick - 1), 3);
     }
     ctx.globalAlpha = 1;

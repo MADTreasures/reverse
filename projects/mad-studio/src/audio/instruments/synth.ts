@@ -1,7 +1,8 @@
+import { modXFactor, noteResonance, releaseScale } from '../../model/notes';
 import { midiToHz } from '../../model/timing';
 import type { SynthChannel, SynthParams } from '../../model/types';
 import { releaseEnvelope, scheduleEnvelope } from '../envelope';
-import { Voice, enforcePolyphony, type Instrument } from './voice';
+import { NOTE_PAN_EPSILON, Voice, createPannedOutput, enforcePolyphony, schedulePitch, type Instrument, type TriggerOptions } from './voice';
 
 const MAX_VOICES = 24;
 /** LFO depth 1.0 equals ±2 semitones of vibrato. */
@@ -32,10 +33,11 @@ function noiseBuffer(ctx: BaseAudioContext): AudioBuffer {
 /** Three-oscillator subtractive synth built from native Web Audio nodes. */
 export class SynthInstrument implements Instrument {
   readonly output: GainNode;
+  readonly pannedOutput: GainNode;
   private params: SynthParams;
   private readonly voices = new Set<Voice>();
   /** Filters of sounding voices, so cutoff/resonance changes (automation!) reach held notes too. */
-  private readonly voiceFilters = new Map<Voice, { filter: BiquadFilterNode; key: number }>();
+  private readonly voiceFilters = new Map<Voice, { filter: BiquadFilterNode; key: number; modX: number; modY: number | undefined }>();
   private readonly lfo: OscillatorNode;
   private readonly lfoPitch: GainNode;
   private readonly lfoFilter: GainNode;
@@ -44,6 +46,7 @@ export class SynthInstrument implements Instrument {
   constructor(private readonly ctx: BaseAudioContext, channel: SynthChannel) {
     this.params = channel.synth;
     this.output = ctx.createGain();
+    this.pannedOutput = createPannedOutput(ctx);
     this.lfo = ctx.createOscillator();
     this.lfo.type = 'sine';
     this.lfoPitch = ctx.createGain();
@@ -59,23 +62,29 @@ export class SynthInstrument implements Instrument {
     this.params = p;
     const now = this.ctx.currentTime;
     this.output.gain.setTargetAtTime(p.gain, now, 0.01);
+    this.pannedOutput.gain.setTargetAtTime(p.gain, now, 0.01);
     this.lfo.frequency.setTargetAtTime(Math.max(0.01, p.lfo.rate), now, 0.01);
     const d = Math.max(0, Math.min(1, p.lfo.depth));
     this.lfoPitch.gain.setTargetAtTime(p.lfo.target === 'pitch' ? d * LFO_PITCH_CENTS : 0, now, 0.01);
     this.lfoFilter.gain.setTargetAtTime(p.lfo.target === 'filter' ? d * LFO_FILTER_CENTS : 0, now, 0.01);
     this.lfoAmp.gain.setTargetAtTime(p.lfo.target === 'amp' ? d * 0.5 : 0, now, 0.01);
     if (p.filter.enabled) {
-      for (const { filter, key } of this.voiceFilters.values()) {
+      for (const { filter, key, modX, modY } of this.voiceFilters.values()) {
         const keyTrack = Math.pow(2, ((key - 60) / 12) * p.filter.keyTrack);
-        filter.frequency.setTargetAtTime(Math.min(20000, Math.max(20, p.filter.cutoff * keyTrack)), now, 0.01);
-        filter.Q.setTargetAtTime(p.filter.resonance, now, 0.01);
+        filter.frequency.setTargetAtTime(Math.min(20000, Math.max(20, p.filter.cutoff * keyTrack * modX)), now, 0.01);
+        filter.Q.setTargetAtTime(noteResonance(p.filter.resonance, modY), now, 0.01);
       }
     }
   }
 
-  trigger(key: number, velocity: number, t: number, duration: number | null): Voice | null {
+  trigger(key: number, velocity: number, t: number, duration: number | null, opts: TriggerOptions = {}): Voice | null {
     const ctx = this.ctx;
     const p = this.params;
+    const noteFine = opts.fine ?? 0;
+    const modX = modXFactor(opts.modX);
+    const relScale = releaseScale(opts.release);
+    const env = { ...p.ampEnv, release: p.ampEnv.release * relScale };
+    const filterEnv = { ...p.filterEnv, release: p.filterEnv.release * relScale };
     const nodes: AudioNode[] = [];
     const sources: AudioScheduledSourceNode[] = [];
     // LFO connections into this voice; removed when the voice ends so they do not accumulate.
@@ -97,12 +106,12 @@ export class SynthInstrument implements Instrument {
       filter = ctx.createBiquadFilter();
       filter.type = p.filter.type;
       const keyTrack = Math.pow(2, ((key - 60) / 12) * p.filter.keyTrack);
-      filter.frequency.value = Math.min(20000, Math.max(20, p.filter.cutoff * keyTrack));
-      filter.Q.value = p.filter.resonance;
+      filter.frequency.value = Math.min(20000, Math.max(20, p.filter.cutoff * keyTrack * modX));
+      filter.Q.value = noteResonance(p.filter.resonance, opts.modY);
       filter.connect(amp);
       head = filter;
       nodes.push(filter);
-      if (envCents !== 0) scheduleEnvelope(filter.detune, p.filterEnv, t, 0, envCents, duration);
+      if (envCents !== 0) scheduleEnvelope(filter.detune, filterEnv, t, 0, envCents, duration);
       if (p.lfo.target === 'filter') linkLfo(this.lfoFilter, filter.detune);
     }
 
@@ -114,7 +123,23 @@ export class SynthInstrument implements Instrument {
       out = trem;
       nodes.push(trem);
     }
-    out.connect(this.output);
+    const pan = Math.max(-1, Math.min(1, opts.pan ?? 0));
+    if (Math.abs(pan) > NOTE_PAN_EPSILON) {
+      const panner = ctx.createStereoPanner();
+      panner.pan.value = pan;
+      out.connect(panner);
+      panner.connect(this.pannedOutput);
+      nodes.push(panner);
+    } else {
+      out.connect(this.output);
+    }
+
+    // Portamento and slide notes move the pitch of every oscillator through one modulation source.
+    let pitchMod: ConstantSourceNode | null = null;
+    if (opts.pitch) {
+      pitchMod = ctx.createConstantSource();
+      schedulePitch(pitchMod.offset, t, noteFine, opts.pitch);
+    }
 
     for (const osc of p.osc) {
       if (osc.level <= 0.0001) continue;
@@ -135,7 +160,8 @@ export class SynthInstrument implements Instrument {
           const o = ctx.createOscillator();
           o.type = osc.wave;
           o.frequency.value = midiToHz(key + osc.coarse);
-          o.detune.value = osc.fine + spread * osc.detune;
+          o.detune.value = osc.fine + spread * osc.detune + (pitchMod ? 0 : noteFine);
+          if (pitchMod) pitchMod.connect(o.detune);
           if (p.lfo.target === 'pitch') linkLfo(this.lfoPitch, o.detune);
           src = o;
         }
@@ -170,11 +196,16 @@ export class SynthInstrument implements Instrument {
     if (sources.length === 0) {
       unlinkLfo();
       for (const n of nodes) n.disconnect();
+      pitchMod?.disconnect();
       return null;
     }
+    if (pitchMod) {
+      // After the oscillators: the voice cleans up when its first source ends.
+      pitchMod.start(t);
+      sources.push(pitchMod);
+      nodes.push(pitchMod);
+    }
 
-    const env = { ...p.ampEnv };
-    const filterEnv = { ...p.filterEnv };
     const peak = Math.max(0, Math.min(1, velocity));
     const end = scheduleEnvelope(amp.gain, env, t, 0, peak, duration);
     if (Number.isFinite(end)) for (const s of sources) s.stop(end + 0.01);
@@ -184,7 +215,7 @@ export class SynthInstrument implements Instrument {
       return releaseEnvelope(amp.gain, env, t, 0, peak, at);
     });
     this.voices.add(voice);
-    if (filter) this.voiceFilters.set(voice, { filter, key });
+    if (filter) this.voiceFilters.set(voice, { filter, key, modX, modY: opts.modY });
     voice.onEnd(() => {
       this.voices.delete(voice);
       this.voiceFilters.delete(voice);
@@ -203,5 +234,6 @@ export class SynthInstrument implements Instrument {
     this.lfo.stop();
     this.lfo.disconnect();
     this.output.disconnect();
+    this.pannedOutput.disconnect();
   }
 }

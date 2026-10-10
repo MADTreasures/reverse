@@ -370,6 +370,53 @@ test('piano roll: Shift+drag clones, Ctrl+D deselects, double-click opens note p
   expect(t.patternStart).toBe(384);
 });
 
+test('piano roll: note properties – event lane, properties window, colour groups, slide notes, mute tool, note template', async ({ page }) => {
+  await boot(page);
+  const roll = await openLeadInPianoRoll(page);
+  const key = 59;
+  const p = roll.at(192 + 4, key);
+  await page.mouse.click(p.x, p.y);
+  const note = async () => (await roll.notes()).find((n: any) => n.key === key && n.start === 192);
+  expect(await note()).toBeTruthy();
+
+  // Event lane: show Pan, drag at the top of the lane (hard right), right-click resets it.
+  const win = page.locator('[data-window="pianoRoll"]');
+  await win.locator('select[data-hint^="Note property"]').selectOption('pan');
+  expect((await state(page)).ui.pianoRoll.lane).toBe('pan');
+  const laneTop = roll.box.y + roll.box.height - 74 + 9;
+  await page.mouse.click(p.x - 2, laneTop);
+  expect((await note()).pan).toBeGreaterThan(0.9);
+  await page.mouse.click(p.x - 2, laneTop + 20, { button: 'right' });
+  expect((await note()).pan).toBeUndefined();
+
+  // Note properties: slide note in colour group 3.
+  await page.mouse.dblclick(p.x, p.y);
+  const dialog = page.getByRole('dialog', { name: 'Note properties' });
+  await expect(dialog).toBeVisible();
+  await dialog.getByLabel('Slide').check();
+  await dialog.getByRole('button', { name: 'Colour group 3', exact: true }).click();
+  await dialog.getByRole('button', { name: 'Accept' }).click();
+  await expect(dialog).toBeHidden();
+  expect(await note()).toMatchObject({ slide: true, color: 2 });
+
+  // Mute tool (T): click mutes, a second click unmutes.
+  await page.keyboard.press('t');
+  expect((await state(page)).ui.pianoRoll.tool).toBe('mute');
+  await page.mouse.click(p.x, p.y);
+  expect((await note()).muted).toBe(true);
+  await page.mouse.click(p.x, p.y);
+  expect((await note()).muted).toBeUndefined();
+
+  // Back to drawing: the clicked note's colour group becomes the template for new notes.
+  await page.keyboard.press('p');
+  await page.mouse.click(p.x, p.y);
+  const q = roll.at(384 + 4, key);
+  await page.mouse.click(q.x, q.y);
+  const drawn = (await roll.notes()).find((n: any) => n.key === key && n.start === 384);
+  expect(drawn).toMatchObject({ color: 2 });
+  expect(drawn.slide).toBeUndefined();
+});
+
 test('playlist: clip menu and mute tool mute clips, track menu inserts a track, double-click opens the piano roll', async ({ page }) => {
   await boot(page);
   await page.evaluate(() => window.__madStudio.actions.setUi((d: any) => void (d.windows.channelRack.open = false)));

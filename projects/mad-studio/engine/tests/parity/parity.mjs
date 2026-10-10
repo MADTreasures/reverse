@@ -175,7 +175,13 @@ const demo = createDemoProject();
 let worst = 0;
 const rows = [];
 
+const dumpLabel = option('--dump', null); // write both renders of one comparison as raw float32
 function compare(label, web, native) {
+  if (dumpLabel !== null && label.trim() === dumpLabel) {
+    for (const [name, chans] of [['web', web], ['native', native]]) {
+      chans.forEach((c, i) => writeFileSync(join(work, `dump-${name}-${i}.f32`), Buffer.from(c.buffer, c.byteOffset, c.byteLength)));
+    }
+  }
   const len = Math.min(web[0].length, native[0].length);
   const w = web.map((c) => c.slice(0, len));
   const n = native.map((c) => c.slice(0, len));
@@ -231,6 +237,37 @@ for (let i = 1; i < demo.mixer.length; i++) {
       console.log(`  ${(a / sampleRate).toFixed(4)}  ${r(web[0]).padStart(7)} ${r(native[0]).padStart(7)}`);
     }
   }
+}
+
+// The demo again with note properties on every note: pan, fine pitch, release, Mod X/Y, portamento
+// and slide notes (model/notes.ts; resolved by songTimeline() for both engines).
+const styled = structuredClone(demo);
+let k = 0;
+for (const pattern of styled.patterns) {
+  for (const notes of Object.values(pattern.notes)) {
+    const slides = [];
+    for (const n of notes) {
+      k++;
+      n.pan = ((k % 5) - 2) / 2;
+      n.fine = ((k % 7) - 3) * 30;
+      n.release = (k % 3) / 2;
+      n.modX = (k % 4) / 3;
+      n.modY = ((k + 1) % 4) / 3;
+      if (k % 6 === 0) n.porta = true;
+      if (n.length >= 48 && k % 4 === 1) slides.push({ id: `${n.id}-slide`, key: Math.min(127, n.key + 5), start: n.start + n.length / 2, length: n.length / 4, velocity: n.velocity, slide: true });
+    }
+    notes.push(...slides);
+    notes.sort((a, b) => a.start - b.start || a.key - b.key);
+  }
+}
+const styledWeb = await browserRender(styled);
+const styledNative = nativeRender(styled, 'styled');
+compare('note properties', styledWeb, styledNative);
+for (let i = 1; i < styled.mixer.length; i++) {
+  if (!styled.channels.some((c) => c.mixerTrack === i)) continue;
+  const solo = structuredClone(styled);
+  solo.mixer[i].solo = true;
+  compare(`  notes insert ${i}`, await browserRender(solo), nativeRender(solo, `styled${i}`));
 }
 
 await browser.close();

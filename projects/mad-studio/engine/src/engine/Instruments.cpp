@@ -47,8 +47,9 @@ void SynthInstrument::prepare (double rate, int maxBlock)
     // (synth.ts update()); emulating that keeps the LFO phase identical to the browser.
     lfoRate.reset (440.0);
     lfoPhase = 0.0;
-    for (auto* b : { &lfoBuffer, &ampGainBuffer, &outBuffer, &monoBuffer, &stereoL, &stereoR })
+    for (auto* b : { &lfoBuffer, &ampGainBuffer, &outBuffer, &monoBuffer, &stereoL, &stereoR, &pannedL, &pannedR })
         b->assign ((size_t) maxBlock, 0.0f);
+    anyPanned = false;
     noise = &dsp::noiseBuffer (rate);
     for (auto& v : voices)
         v.active = false;
@@ -60,6 +61,13 @@ bool SynthInstrument::isIdle() const noexcept
         if (v.active)
             return false;
     return true;
+}
+
+bool SynthInstrument::pannedOutput (const float*& left, const float*& right) const noexcept
+{
+    left = pannedL.data();
+    right = pannedR.data();
+    return anyPanned;
 }
 
 int SynthInstrument::activeVoiceCount() const noexcept
@@ -153,7 +161,8 @@ void SynthInstrument::startVoice (const NoteEvent& e, const BlockContext& ctx)
     }
 
     v->numSubs = 0;
-    v->stereo = false;
+    v->subStereo = false;
+    const double noteFine = e.props.fine;
     for (int o = 0; o < 3; ++o)
     {
         const double level = P (synth::osc (o, synth::level));
@@ -177,12 +186,12 @@ void SynthInstrument::startVoice (const NoteEvent& e, const BlockContext& ctx)
             s.scale = (float) dsp::chromeWaveScale (wave, sampleRate);
             s.panned = std::abs (pan) > 0.001;
             s.gains = dsp::monoPanGains (pan);
-            v->stereo = v->stereo || s.panned;
+            v->subStereo = v->subStereo || s.panned;
             // Slightly staggered starts decorrelate unison phases (synth.ts: u * 0.7 ms).
             s.startTime = e.time + (double) u * 0.0007 * sampleRate;
             s.started = false;
             s.osc.reset (0.0);
-            s.increment = hz * std::exp2 ((fine + spread * detune) / 1200.0) / sampleRate;
+            s.increment = hz * std::exp2 ((fine + spread * detune + noteFine) / 1200.0) / sampleRate;
             s.noisePos = std::fmod ((double) u * 0.37 + (double) e.key * 0.013, 1.9) * sampleRate;
         }
     }
@@ -200,6 +209,16 @@ void SynthInstrument::startVoice (const NoteEvent& e, const BlockContext& ctx)
     v->tremolo = lfoTarget == 3 && depth > 0.0;
     v->tremBase = (float) (1.0 - std::min (1.0, depth) * 0.5);
 
+    // Note properties.
+    v->pitch.build (e);
+    v->modX = notes::modXFactor (e.props.modX);
+    v->modY = e.props.modY;
+    const double notePan = std::clamp ((double) e.props.pan, -1.0, 1.0);
+    v->notePanned = std::abs (notePan) > notes::panEpsilon;
+    v->notePan = notePan;
+    v->noteGains = v->subStereo ? dsp::stereoPanGains (notePan) : dsp::monoPanGains (notePan);
+    v->stereo = v->subStereo && ! v->notePanned; // panned voices go to the panned output
+
     v->active = true;
     v->killed = false;
     v->serial = nextSerial++;
@@ -209,8 +228,13 @@ void SynthInstrument::startVoice (const NoteEvent& e, const BlockContext& ctx)
 
     const double firstSampleTime = ((double) (ctx.blockStart + e.offset) - e.time) / sampleRate;
     const double peak = std::clamp ((double) e.velocity, 0.0, 1.0);
-    v->amp.start (envelopeFrom (params, synth::ampAttack, ctx, c), 0.0, peak, sampleRate, firstSampleTime);
-    v->filterEnv.start (envelopeFrom (params, synth::filterAttack, ctx, c), 0.0, 1.0, sampleRate, firstSampleTime);
+    const double relScale = notes::releaseScale (e.props.release);
+    auto ampEnv = envelopeFrom (params, synth::ampAttack, ctx, c);
+    auto filterEnvParams = envelopeFrom (params, synth::filterAttack, ctx, c);
+    ampEnv.release *= relScale;
+    filterEnvParams.release *= relScale;
+    v->amp.start (ampEnv, 0.0, peak, sampleRate, firstSampleTime);
+    v->filterEnv.start (filterEnvParams, 0.0, 1.0, sampleRate, firstSampleTime);
 
     if (e.lengthSeconds >= 0.0)
     {
@@ -227,7 +251,8 @@ void SynthInstrument::startVoice (const NoteEvent& e, const BlockContext& ctx)
     enforcePolyphony (e.time);
 }
 
-void SynthInstrument::renderVoice (Voice& v, const BlockContext& ctx, float* mono, float* left, float* right) noexcept
+void SynthInstrument::renderVoice (Voice& v, const BlockContext& ctx, float* mono, float* left, float* right, float* pannedLeft,
+                                   float* pannedRight) noexcept
 {
     const int n = ctx.numSamples;
     const int first = frameIndex (v.startTime, ctx.blockStart);
@@ -243,7 +268,13 @@ void SynthInstrument::renderVoice (Voice& v, const BlockContext& ctx, float* mon
         if (c0 >= c1)
             continue;
 
-        const double pitchMul = v.linkPitch ? std::exp2 ((double) chunkLfoPitch[(size_t) c] / 1200.0) : 1.0;
+        double pitchMul = v.linkPitch ? std::exp2 ((double) chunkLfoPitch[(size_t) c] / 1200.0) : 1.0;
+        if (v.pitch.active())
+        {
+            // Portamento / slide notes (synth.ts: a ConstantSourceNode on every oscillator's detune).
+            const double centreTime = ((double) (ctx.blockStart + (c0 + c1) / 2) - v.startTime) / sr;
+            pitchMul *= std::exp2 (v.pitch.at (centreTime) / 12.0);
+        }
 
         if (v.filterOn)
         {
@@ -252,9 +283,9 @@ void SynthInstrument::renderVoice (Voice& v, const BlockContext& ctx, float* mon
                                     * v.filterEnv.curveValue (centre / sr);
             const double lfoCents = v.linkFilter ? (double) chunkLfoFilter[(size_t) c] : 0.0;
             const double keyTrack = std::exp2 (((double) v.key - 60.0) / 12.0 * (double) params[synth::keyTrack].value (ctx, c));
-            const double f0 = std::clamp ((double) params[synth::cutoff].value (ctx, c) * keyTrack, 20.0, 20000.0);
-            v.coeffs = dsp::makeBiquad (v.filterType, sr, f0, params[synth::resonance].value (ctx, c), 0.0,
-                                        envCents + lfoCents);
+            const double f0 = std::clamp ((double) params[synth::cutoff].value (ctx, c) * keyTrack * v.modX, 20.0, 20000.0);
+            v.coeffs = dsp::makeBiquad (v.filterType, sr, f0, notes::resonance (params[synth::resonance].value (ctx, c), v.modY),
+                                        0.0, envCents + lfoCents);
         }
 
         for (int i = c0; i < c1; ++i)
@@ -304,7 +335,7 @@ void SynthInstrument::renderVoice (Voice& v, const BlockContext& ctx, float* mon
             }
 
             const float env = v.amp.next() * (v.tremolo ? v.tremBase + ampGainBuffer[(size_t) i] : 1.0f);
-            if (v.stereo)
+            if (v.subStereo)
             {
                 l += m; // mono parts are up-mixed without attenuation
                 r += m;
@@ -313,14 +344,33 @@ void SynthInstrument::renderVoice (Voice& v, const BlockContext& ctx, float* mon
                     l = v.filterL.process (v.coeffs, l);
                     r = v.filterR.process (v.coeffs, r);
                 }
-                left[i] += l * env;
-                right[i] += r * env;
+                if (v.notePanned)
+                {
+                    float pl, pr;
+                    dsp::stereoPan (v.notePan, v.noteGains, l * env, r * env, pl, pr);
+                    pannedLeft[i] += pl;
+                    pannedRight[i] += pr;
+                }
+                else
+                {
+                    left[i] += l * env;
+                    right[i] += r * env;
+                }
             }
             else
             {
                 if (v.filterOn)
                     m = v.filterL.process (v.coeffs, m);
-                mono[i] += m * env;
+                if (v.notePanned)
+                {
+                    const float x = m * env;
+                    pannedLeft[i] += x * v.noteGains.left;
+                    pannedRight[i] += x * v.noteGains.right;
+                }
+                else
+                {
+                    mono[i] += m * env;
+                }
             }
         }
     }
@@ -379,28 +429,47 @@ bool SynthInstrument::render (const BlockContext& ctx, float* left, float* right
     }
 
     clear (left, n);
+    anyPanned = false;
     if (idle)
         return false;
 
     float* mono = monoBuffer.data();
     float* sl = stereoL.data();
     float* sr = stereoR.data();
+    float* pl = pannedL.data();
+    float* pr = pannedR.data();
     clear (mono, n);
 
     bool anyStereo = false;
     for (auto& v : voices)
+    {
         anyStereo = anyStereo || (v.active && v.stereo);
+        anyPanned = anyPanned || (v.active && v.notePanned);
+    }
     if (anyStereo)
     {
         clear (sl, n);
         clear (sr, n);
     }
+    if (anyPanned)
+    {
+        clear (pl, n);
+        clear (pr, n);
+    }
 
     for (auto& v : voices)
         if (v.active)
-            renderVoice (v, ctx, mono, sl, sr);
+            renderVoice (v, ctx, mono, sl, sr, pl, pr);
 
     const float* g = outBuffer.data();
+    if (anyPanned)
+    {
+        for (int i = 0; i < n; ++i)
+        {
+            pl[i] *= g[i];
+            pr[i] *= g[i];
+        }
+    }
     if (anyStereo)
     {
         for (int i = 0; i < n; ++i)
@@ -435,7 +504,16 @@ void SamplerInstrument::prepare (double rate, int maxBlock)
 {
     sampleRate = rate;
     outputGain.prepare (rate, 0.01);
-    outBuffer.assign ((size_t) maxBlock, 0.0f);
+    for (auto* b : { &outBuffer, &pannedL, &pannedR })
+        b->assign ((size_t) maxBlock, 0.0f);
+    anyPanned = false;
+}
+
+bool SamplerInstrument::pannedOutput (const float*& left, const float*& right) const noexcept
+{
+    left = pannedL.data();
+    right = pannedR.data();
+    return anyPanned;
 }
 
 bool SamplerInstrument::isIdle() const noexcept
@@ -543,6 +621,12 @@ void SamplerInstrument::handleEvent (const NoteEvent& e, const BlockContext& ctx
     const double offsetSec = startSec + std::max (0.0, e.clipOffsetSeconds);
     if (offsetSec >= duration || ! (rate > 0.0))
         return;
+    // Note fine pitch and the pitch curve detune the playback (sampler.ts: src.detune); the end is
+    // estimated at the lowest pitch reached so a bent note is never cut short.
+    notes::PitchCurve curve;
+    curve.build (e);
+    const double fineRate = rate * std::exp2 ((double) e.props.fine / 1200.0);
+    const double slowest = fineRate * std::exp2 (curve.minimum() / 12.0);
 
     Voice* v = nullptr;
     for (auto& candidate : voices)
@@ -564,9 +648,9 @@ void SamplerInstrument::handleEvent (const NoteEvent& e, const BlockContext& ctx
     const bool gated = P (sampler::oneShot) < 0.5 || loop || e.audioClip;
     const double peak = std::clamp ((double) e.velocity, 0.0, 1.0);
     const dsp::EnvelopeParams env { P (sampler::ampAttack), P (sampler::ampDecay), P (sampler::ampSustain),
-                                    P (sampler::ampRelease) };
+                                    P (sampler::ampRelease) * notes::releaseScale (e.props.release) };
     const double firstSampleTime = ((double) (ctx.blockStart + e.offset) - e.time) / sampleRate;
-    const double naturalRel = loop ? inf : (duration - offsetSec) / rate;
+    const double naturalRel = loop ? inf : (duration - offsetSec) / slowest;
 
     double endRel = naturalRel;
     if (gated)
@@ -594,8 +678,15 @@ void SamplerInstrument::handleEvent (const NoteEvent& e, const BlockContext& ctx
     v->naturalEnd = e.time + naturalRel * sampleRate;
     v->endTime = e.time + endRel * sampleRate;
     v->stopTime = endRel < inf ? v->endTime + 0.01 * sampleRate : inf;
-    v->readPos = offsetSec * sample->sampleRate + firstSampleTime * rate * sample->sampleRate;
-    v->increment = rate * sample->sampleRate / sampleRate;
+    const double startRate = fineRate * std::exp2 (curve.at (0.0) / 12.0);
+    v->readPos = offsetSec * sample->sampleRate + firstSampleTime * startRate * sample->sampleRate;
+    v->baseIncrement = fineRate * sample->sampleRate / sampleRate;
+    v->increment = startRate * sample->sampleRate / sampleRate;
+    v->pitch = curve;
+    const double notePan = std::clamp ((double) e.props.pan, -1.0, 1.0);
+    v->notePanned = std::abs (notePan) > notes::panEpsilon;
+    v->notePan = notePan;
+    v->noteGains = sample->numChannels > 1 ? dsp::stereoPanGains (notePan) : dsp::monoPanGains (notePan);
     v->loopStart = startSec * sample->sampleRate;
     v->loopEnd = (double) sample->numFrames;
     v->chokeGroup = std::max (0, (int) std::lround (P (sampler::chokeGroup)));
@@ -632,10 +723,25 @@ bool SamplerInstrument::render (const BlockContext& ctx, float* left, float* rig
 
     clear (left, n);
     bool stereo = false;
+    anyPanned = false;
     for (const auto& v : voices)
-        stereo = stereo || (v.active && v.sample != nullptr && v.sample->numChannels > 1);
+    {
+        if (! v.active || v.sample == nullptr)
+            continue;
+        if (v.notePanned)
+            anyPanned = true;
+        else
+            stereo = stereo || v.sample->numChannels > 1;
+    }
     if (stereo)
         clear (right, n);
+    float* pl = pannedL.data();
+    float* pr = pannedR.data();
+    if (anyPanned)
+    {
+        clear (pl, n);
+        clear (pr, n);
+    }
 
     for (auto& v : voices)
     {
@@ -652,6 +758,12 @@ bool SamplerInstrument::render (const BlockContext& ctx, float* left, float* rig
 
         for (int i = first; i < last; ++i)
         {
+            if (v.pitch.active() && (i == first || i % chunkSize == 0))
+            {
+                // A k-rate detune (AudioBufferSourceNode): the pitch is updated once per chunk.
+                const double t = ((double) (ctx.blockStart + i) - v.startTime) / sampleRate;
+                v.increment = v.baseIncrement * std::exp2 (v.pitch.at (t) / 12.0);
+            }
             if (v.readPos >= frames)
             {
                 if (! v.loop)
@@ -672,8 +784,24 @@ bool SamplerInstrument::render (const BlockContext& ctx, float* left, float* rig
             if (twoChannels)
             {
                 const float b = (float) (d1[i0] + (d1[i1] - d1[i0]) * frac);
-                left[i] += a * env;
-                right[i] += b * env;
+                if (v.notePanned)
+                {
+                    float a2, b2;
+                    dsp::stereoPan (v.notePan, v.noteGains, a * env, b * env, a2, b2);
+                    pl[i] += a2;
+                    pr[i] += b2;
+                }
+                else
+                {
+                    left[i] += a * env;
+                    right[i] += b * env;
+                }
+            }
+            else if (v.notePanned)
+            {
+                const float x = a * env;
+                pl[i] += x * v.noteGains.left;
+                pr[i] += x * v.noteGains.right;
             }
             else if (stereo)
             {
@@ -702,6 +830,14 @@ bool SamplerInstrument::render (const BlockContext& ctx, float* left, float* rig
     if (stereo)
         for (int i = 0; i < n; ++i)
             right[i] *= g[i];
+    if (anyPanned)
+    {
+        for (int i = 0; i < n; ++i)
+        {
+            pl[i] *= g[i];
+            pr[i] *= g[i];
+        }
+    }
     return stereo;
 }
 
@@ -725,13 +861,18 @@ void PluginInstrument::handleEvent (const NoteEvent& e, const BlockContext& ctx)
     const int offset = std::clamp (e.offset, 0, std::max (0, ctx.numSamples - 1));
     if (e.kind == NoteEvent::Kind::noteOn)
     {
+        // Note colour groups appear to the plugin as MIDI channels (FL Studio); the note release is
+        // the note-off velocity.
         const int key = std::clamp (e.key, 0, 127);
-        midi.addEvent (juce::MidiMessage::noteOn (1, key, juce::jlimit (0.0f, 1.0f, e.velocity)), offset);
-        heldCount[(size_t) key] = (uint8_t) std::min (255, heldCount[(size_t) key] + 1);
+        const int channel = std::clamp (e.props.color, 0, 15) + 1;
+        midi.addEvent (juce::MidiMessage::noteOn (channel, key, juce::jlimit (0.0f, 1.0f, e.velocity)), offset);
+        auto& held = heldCount[(size_t) channel - 1][(size_t) key];
+        held = (uint8_t) std::min (255, held + 1);
         if (e.lengthSeconds >= 0.0)
         {
             if (numPendingOffs < (int) pendingOffs.size())
-                pendingOffs[(size_t) numPendingOffs++] = { e.time + e.lengthSeconds * sampleRate, key };
+                pendingOffs[(size_t) numPendingOffs++] = { e.time + e.lengthSeconds * sampleRate, key, channel,
+                                                           juce::jlimit (0.0f, 1.0f, e.props.release) };
         }
         else if (numLiveNotes < (int) liveNotes.size())
         {
@@ -745,9 +886,9 @@ void PluginInstrument::handleEvent (const NoteEvent& e, const BlockContext& ctx)
         if (liveNotes[(size_t) i].handle != e.handle)
             continue;
         const int key = liveNotes[(size_t) i].key;
-        midi.addEvent (juce::MidiMessage::noteOff (1, key), offset);
-        if (heldCount[(size_t) key] > 0)
-            --heldCount[(size_t) key];
+        midi.addEvent (juce::MidiMessage::noteOff (1, key, 0.5f), offset);
+        if (heldCount[0][(size_t) key] > 0)
+            --heldCount[0][(size_t) key];
         liveNotes[(size_t) i] = liveNotes[(size_t) --numLiveNotes];
         break;
     }
@@ -772,9 +913,10 @@ bool PluginInstrument::render (const BlockContext& ctx, float* left, float* righ
         if (p.time < blockEnd)
         {
             const int offset = std::clamp ((int) std::ceil (p.time - (double) ctx.blockStart), 0, n - 1);
-            midi.addEvent (juce::MidiMessage::noteOff (1, p.key), offset);
-            if (heldCount[(size_t) p.key] > 0)
-                --heldCount[(size_t) p.key];
+            midi.addEvent (juce::MidiMessage::noteOff (p.channel, p.key, p.velocity), offset);
+            auto& held = heldCount[(size_t) p.channel - 1][(size_t) p.key];
+            if (held > 0)
+                --held;
             pendingOffs[(size_t) i] = pendingOffs[(size_t) --numPendingOffs];
         }
         else
@@ -786,10 +928,16 @@ bool PluginInstrument::render (const BlockContext& ctx, float* left, float* righ
     if (sendAllNotesOff)
     {
         const int offset = std::clamp (allNotesOffOffset, 0, n - 1);
-        for (int key = 0; key < 128; ++key)
-            for (; heldCount[(size_t) key] > 0; --heldCount[(size_t) key])
-                midi.addEvent (juce::MidiMessage::noteOff (1, key), offset);
-        midi.addEvent (juce::MidiMessage::allNotesOff (1), offset);
+        for (int channel = 1; channel <= 16; ++channel)
+        {
+            auto& held = heldCount[(size_t) channel - 1];
+            bool any = false;
+            for (int key = 0; key < 128; ++key)
+                for (; held[(size_t) key] > 0; --held[(size_t) key], any = true)
+                    midi.addEvent (juce::MidiMessage::noteOff (channel, key), offset);
+            if (any || channel == 1)
+                midi.addEvent (juce::MidiMessage::allNotesOff (channel), offset);
+        }
         numPendingOffs = 0;
         numLiveNotes = 0;
         sendAllNotesOff = false;

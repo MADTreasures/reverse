@@ -1,5 +1,7 @@
 #pragma once
 
+#include "engine/Params.h"
+
 #include <juce_core/juce_core.h>
 
 #include <cstdint>
@@ -22,6 +24,13 @@ private:
     uint32_t next = 1;
 };
 
+/** A slide note's pitch movement of a sounding note (timeline.ts PitchBend). */
+struct TimelineBend
+{
+    double at = 0.0, length = 0.0; // ticks after the note start, ticks the glide takes
+    float to = 0.0f;               // semitones relative to the note's key
+};
+
 struct TimelineEvent
 {
     double tick = 0.0, length = 0.0;
@@ -30,6 +39,8 @@ struct TimelineEvent
     float velocity = 0.8f;
     double sampleOffset = 0.0; // ticks into the sample (audio clips)
     bool audioClip = false;
+    NoteProps props;
+    uint32_t bendFirst = 0, bendCount = 0; // into Timeline::bends
 };
 
 /** Compiled note events from timeline.set (sorted by tick). */
@@ -38,12 +49,15 @@ struct Timeline
     bool songMode = false;
     double loopStart = 0.0, loopEnd = 384.0;
     std::vector<TimelineEvent> events;
+    std::vector<TimelineBend> bends;
 
     /** Index of the first event with tick >= t. */
     size_t firstAtOrAfter (double t) const noexcept;
 };
 
 Timeline parseTimeline (const juce::var& json, ChannelIds& ids);
+/** The note properties of a timeline event's JSON. */
+void parseNoteProps (const juce::var& event, NoteProps& props);
 
 //==============================================================================
 /** One compiled automation lane: piecewise linear points in absolute song ticks. */

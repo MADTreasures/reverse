@@ -155,7 +155,10 @@ void Sequencer::process (BlockContext& ctx, const Timeline* tl, const AutoParam&
                         continue;
                     const double evTick = ev.tick + swingOffsetTicks (ev.tick, swing);
                     const double at = (double) ctx.blockStart + pos + (evTick - t0) / tps;
-                    sink.noteEvent (ev, at, ev.length * secondsPerTick, ev.sampleOffset * secondsPerTick);
+                    const TimelineBend* bends = ev.bendCount > 0 && ev.bendFirst + ev.bendCount <= tl->bends.size()
+                                                    ? tl->bends.data() + ev.bendFirst
+                                                    : nullptr;
+                    sink.noteEvent (ev, bends, at, secondsPerTick);
                 }
             }
             if (metronome)

@@ -1,3 +1,4 @@
+import { pitchCurve } from '../model/notes';
 import type { SequencedEvent } from '../model/timeline';
 import { volumeToGain } from '../model/timing';
 import type { AudioChannel, Channel, EffectSlot, MixerTrack, Project, SlotType } from '../model/types';
@@ -138,11 +139,17 @@ function isWebChannel(c: Channel): c is WebChannel {
   return c.kind === 'synth' || c.kind === 'sampler';
 }
 
-/** Instrument plus channel volume, pan and mute, routed to a mixer track. */
+/**
+ * Instrument plus channel volume, pan and mute, routed to a mixer track. Voices with a note pan arrive
+ * on the instrument's always-stereo `pannedOutput` and get their own volume and pan stage, so the
+ * channel pans the other voices exactly as before (mono or stereo law by their own channel count).
+ */
 class ChannelStrip {
   private instrument: AnyInstrument;
   private readonly volume: GainNode;
   private readonly panner: StereoPannerNode;
+  private readonly pannedVolume: GainNode;
+  private readonly pannedPanner: StereoPannerNode;
   private readonly mute: GainNode;
   private target: AudioNode | null = null;
   channel: WebChannel;
@@ -156,11 +163,15 @@ class ChannelStrip {
     this.channel = channel;
     this.volume = ctx.createGain();
     this.panner = ctx.createStereoPanner();
+    this.pannedVolume = ctx.createGain();
+    this.pannedPanner = ctx.createStereoPanner();
     this.mute = ctx.createGain();
     this.volume.connect(this.panner);
     this.panner.connect(this.mute);
+    this.pannedVolume.connect(this.pannedPanner);
+    this.pannedPanner.connect(this.mute);
     this.instrument = this.createInstrument(channel);
-    this.instrument.output.connect(this.volume);
+    this.connectInstrument();
     this.applyStrip(channel);
   }
 
@@ -170,9 +181,16 @@ class ChannelStrip {
       : new SamplerInstrument(this.ctx, channel.id, channel, this.pool, this.chokes);
   }
 
+  private connectInstrument(): void {
+    this.instrument.output.connect(this.volume);
+    this.instrument.pannedOutput.connect(this.pannedVolume);
+  }
+
   private applyStrip(channel: WebChannel): void {
     smooth(this.volume.gain, volumeToGain(channel.volume), this.ctx);
     smooth(this.panner.pan, channel.pan, this.ctx);
+    smooth(this.pannedVolume.gain, volumeToGain(channel.volume), this.ctx);
+    smooth(this.pannedPanner.pan, channel.pan, this.ctx);
     smooth(this.mute.gain, channel.muted ? 0 : 1, this.ctx);
   }
 
@@ -183,7 +201,7 @@ class ChannelStrip {
     if (prev.kind !== channel.kind) {
       this.instrument.dispose();
       this.instrument = this.createInstrument(channel);
-      this.instrument.output.connect(this.volume);
+      this.connectInstrument();
     } else if (channel.kind === 'synth' && this.instrument instanceof SynthInstrument) {
       if (prev.kind !== 'synth' || prev.synth !== channel.synth) this.instrument.update(channel);
     } else if (channel.kind === 'sampler' && this.instrument instanceof SamplerInstrument) {
@@ -211,6 +229,8 @@ class ChannelStrip {
     this.instrument.dispose();
     this.volume.disconnect();
     this.panner.disconnect();
+    this.pannedVolume.disconnect();
+    this.pannedPanner.disconnect();
     this.mute.disconnect();
   }
 }
@@ -290,7 +310,13 @@ export class ProjectGraph {
   trigger(ev: SequencedEvent, time: number, spt: number): void {
     const strip = this.strips.get(ev.channelId);
     if (!strip || strip.channel.muted) return;
-    const opts: TriggerOptions | undefined = ev.audioClip ? { gate: true, sampleOffset: (ev.sampleOffset ?? 0) * spt } : undefined;
+    const opts: TriggerOptions = ev.audioClip ? { gate: true, sampleOffset: (ev.sampleOffset ?? 0) * spt } : {};
+    if (ev.pan !== undefined) opts.pan = ev.pan;
+    if (ev.fine !== undefined) opts.fine = ev.fine;
+    if (ev.modX !== undefined) opts.modX = ev.modX;
+    if (ev.modY !== undefined) opts.modY = ev.modY;
+    if (ev.release !== undefined) opts.release = ev.release;
+    opts.pitch = pitchCurve(ev.glideFrom, ev.glideTime, ev.bends, spt);
     strip.trigger(ev.key, ev.velocity, time, ev.length * spt, opts);
     this.activity.set(ev.channelId, time);
   }

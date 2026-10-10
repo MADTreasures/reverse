@@ -497,6 +497,51 @@ async function testAutomation(engine) {
   engine.send({ type: 'project.sync', project: baseProject() });
 }
 
+async function testNoteProps(engine) {
+  console.log('note properties');
+  // A plain sine synth on insert 3 (no effects): note pan, portamento and slide bends via timeline.set.
+  const sine = { wave: 'sine', level: 1, coarse: 0, fine: 0, unison: 1, detune: 0, pan: 0 };
+  const project = baseProject();
+  project.mixer[0].effects = [];
+  project.channels = [{
+    id: 'ch_np', kind: 'synth', volume: 0.8, pan: 0, muted: false, mixerTrack: 3,
+    synth: synthParams({
+      osc: [sine, { ...sine, level: 0 }, { ...sine, level: 0 }],
+      filter: { enabled: false, type: 'lowpass', cutoff: 1800, resonance: 1, envAmount: 0, keyTrack: 0 },
+      ampEnv: { attack: 0.005, decay: 0.3, sustain: 1, release: 0.05 },
+      lfo: { target: 'off', rate: 1, depth: 0 },
+      gain: 1,
+    }),
+  }];
+  engine.send({ type: 'project.sync', project });
+  const render = async (name, events) => {
+    engine.send({ type: 'timeline.set', mode: 'song', loopStart: 0, loopEnd: 384, events });
+    const path = join(work, name);
+    const d = await engine.request({ type: 'render.start', requestId: name, path, sampleRate: 48000, bitDepth: 32, startTick: 0, endTick: 384, tailSeconds: 0 },
+      (m) => (m.type === 'render.done' && m.requestId === name) || (m.type === 'error' && m.request === 'render.start'), 60000, `render ${name}`);
+    check(d.type === 'render.done', `render ${name}`);
+    return d.type === 'render.done' ? readWav(path) : null;
+  };
+  const frequency = (ch, from, to) => {
+    let crossings = 0;
+    for (let i = from + 1; i < to; i++) if (ch[i - 1] < 0 && ch[i] >= 0) crossings++;
+    return (crossings * 48000) / (to - from);
+  };
+  let wav = await render('note-pan.wav', [{ tick: 0, length: 384, channelId: 'ch_np', key: 69, velocity: 1, pan: -1 }]);
+  if (wav) {
+    near(stats([wav.data[1]], 4800, 86400).peak, 0, 1e-4, 'note pan -1 silences the right side');
+    check(stats([wav.data[0]], 4800, 86400).rms > 0.3, 'note pan -1: the left side at full level');
+  }
+  wav = await render('note-glide.wav', [{ tick: 0, length: 384, channelId: 'ch_np', key: 69, velocity: 1, glideFrom: -12, glideTime: 0.25, bends: [{ at: 192, length: 1, to: 7 }] }]);
+  if (wav) {
+    const l = wav.data[0];
+    check(frequency(l, 240, 2640) < 250, `glideFrom -12: starts an octave below (${frequency(l, 240, 2640).toFixed(1)} Hz)`);
+    near(frequency(l, 14400, 43200), 440, 3, 'glideTime 0.25 s: on the key after the glide');
+    near(frequency(l, 52800, 91200), 440 * 2 ** (7 / 12), 4, 'bends: a slide to +7 semitones at tick 192');
+  }
+  engine.send({ type: 'project.sync', project: baseProject() });
+}
+
 async function testPlugins(engine) {
   const gainPath = join(pluginDir, 'MAD Test Gain.vst3');
   const synthPath = join(pluginDir, 'MAD Test Synth.vst3');
@@ -571,6 +616,32 @@ async function testPlugins(engine) {
   await sleep(100);
   wav = await render('plugin-gain-1.wav');
   if (wav) near(stats(wav.data, 4800, 86400).peak, 0.25, 0.003, 'plugin.setParam changes the plugin gain');
+
+  // Note colour groups reach plugins as MIDI channels (the test synth plays channels > 1 on its
+  // last output only) and the note release as note-off velocity (release 5 ms + 95 ms * velocity).
+  engine.send({ type: 'timeline.set', mode: 'song', loopStart: 0, loopEnd: 384, events: [{ tick: 0, length: 384, channelId: 'ch_plug', key: 69, velocity: 1, color: 1 }] });
+  wav = await render('plugin-midi-channel.wav');
+  if (wav) {
+    near(stats([wav.data[0]], 4800, 86400).peak, 0, 0.0005, 'note colour group 1 = MIDI channel 2: nothing on the left');
+    near(stats([wav.data[1]], 4800, 86400).peak, 0.25, 0.003, 'note colour group 1 = MIDI channel 2: the right output');
+  }
+  const releaseTail = async (release) => {
+    const ev = { tick: 0, length: 192, channelId: 'ch_plug', key: 69, velocity: 1 };
+    if (release !== undefined) ev.release = release;
+    engine.send({ type: 'timeline.set', mode: 'song', loopStart: 0, loopEnd: 384, events: [ev] });
+    const w = await render(`plugin-release-${release ?? 'default'}.wav`);
+    // The note ends at 1 s (tick 192 at 120 BPM): measure 20..45 ms and 60..90 ms after it.
+    return w ? [stats(w.data, 48960, 50160).peak, stats(w.data, 50880, 52320).peak] : null;
+  };
+  const fast = await releaseTail(0);
+  const slow = await releaseTail(1);
+  const middle = await releaseTail(undefined);
+  if (fast && slow && middle) {
+    check(fast[0] < 0.001 && fast[1] < 0.001, `release velocity 0: 5 ms release (${fast})`);
+    check(slow[0] > 0.1 && slow[1] > 0.02, `release velocity 1: 100 ms release (${slow})`);
+    check(middle[0] > 0.02 && middle[1] < 0.001, `default release velocity 0.5: 52.5 ms release (${middle})`);
+  }
+  engine.send({ type: 'timeline.set', mode: 'song', loopStart: 0, loopEnd: 384, events: [{ tick: 0, length: 384, channelId: 'ch_plug', key: 69, velocity: 1 }] });
 
   // Plugin parameter automation (normalised 0..1).
   engine.send({ type: 'automation.set', lanes: [{ target: `plug:fx:fx_gain:${gp ? gp.index : 0}`, points: [[0, 0.2], [384, 0.2]] }] });
@@ -1119,6 +1190,7 @@ async function main() {
     await testRender(engine);
     await testRecording(engine, ready);
     await testAutomation(engine);
+    await testNoteProps(engine);
     const plugins = await testPlugins(engine);
     await testLatency(engine, plugins);
     await testStress(engine, plugins);

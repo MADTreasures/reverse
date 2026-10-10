@@ -83,7 +83,7 @@ public:
         }
     }
 
-    void noteEvent (const TimelineEvent& ev, double time, double lengthSeconds, double clipOffsetSeconds) override
+    void noteEvent (const TimelineEvent& ev, const TimelineBend* bends, double time, double secondsPerTick) override
     {
         NoteEvent e;
         e.kind = NoteEvent::Kind::noteOn;
@@ -91,9 +91,14 @@ public:
         e.channel = ev.channel;
         e.key = ev.key;
         e.velocity = ev.velocity;
-        e.lengthSeconds = lengthSeconds;
+        e.lengthSeconds = ev.length * secondsPerTick;
         e.audioClip = ev.audioClip;
-        e.clipOffsetSeconds = ev.audioClip ? clipOffsetSeconds : 0.0;
+        e.clipOffsetSeconds = ev.audioClip ? ev.sampleOffset * secondsPerTick : 0.0;
+        e.props = ev.props;
+        // Slide bends in seconds at the tempo the note starts with (graph.ts trigger(): pitchCurve(…, spt)).
+        e.numBends = bends != nullptr ? (int) std::min<uint32_t> (ev.bendCount, (uint32_t) maxNoteBends) : 0;
+        for (int i = 0; i < e.numBends; ++i)
+            e.bends[(size_t) i] = { (float) (bends[i].at * secondsPerTick), (float) (bends[i].length * secondsPerTick), bends[i].to };
         engine.addEvent (e);
     }
 

@@ -1,3 +1,4 @@
+import { noteColor, notePropSpec, noteValue, type NotePropKey } from '../../model/notes';
 import { TICKS_PER_STEP, isBlackKey, noteName, ticksPerBar, PPQ } from '../../model/timing';
 import type { Note } from '../../model/types';
 
@@ -52,6 +53,21 @@ export interface RollScene {
   lineTicks: number;
   /** Where pattern playback starts (marker in the ruler). */
   patternStart: number;
+  /** Note property shown in the event lane. */
+  lane: NotePropKey;
+}
+
+/** Event lane geometry: values from `laneTop` (max) to `laneTop + laneH` (min). */
+export function laneGeometry(v: RollView): { laneTop: number; laneH: number } {
+  return { laneTop: gridBottom(v) + 8, laneH: VEL_H - 14 };
+}
+
+/** Value of the lane property at height `y`. */
+export function laneValueAtY(v: RollView, key: NotePropKey, y: number): number {
+  const spec = notePropSpec(key);
+  const { laneTop, laneH } = laneGeometry(v);
+  const frac = Math.min(1, Math.max(0, (laneTop + laneH - y) / laneH));
+  return spec.min + frac * (spec.max - spec.min);
 }
 
 function roundRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number): void {
@@ -122,27 +138,57 @@ export function drawRoll(ctx: CanvasRenderingContext2D, v: RollView, s: RollScen
     }
   }
 
-  // --- notes
+  // --- notes (colour group tint; muted notes hollow; slide notes with a ramp, portamento notes with a hook)
   for (const n of s.notes) {
     const x = xOfTick(v, n.start);
     const w = Math.max(3, n.length * pxPerTick - 1);
     const y = yOfKey(v, n.key);
     if (x > width || x + w < KEYS_W || y > bottom || y + rowHeight < RULER_H) continue;
     const selected = s.selected.has(n.id);
+    const fill = selected ? '#ffe2c2' : noteColor(n.color, s.color);
     roundRect(ctx, x + 0.5, y + 0.5, w, rowHeight - 1, 2.5);
-    ctx.globalAlpha = 0.55 + n.velocity * 0.45;
-    ctx.fillStyle = selected ? '#ffe2c2' : s.color;
-    ctx.fill();
-    ctx.globalAlpha = 1;
-    ctx.strokeStyle = selected ? '#ffffff' : '#0b0e10';
-    ctx.lineWidth = selected ? 1.5 : 1;
-    ctx.stroke();
-    ctx.lineWidth = 1;
-    if (w > 26 && rowHeight >= 10) {
-      ctx.fillStyle = '#10151add';
+    if (n.muted) {
+      ctx.globalAlpha = 0.18;
+      ctx.fillStyle = fill;
+      ctx.fill();
+      ctx.globalAlpha = 1;
+      ctx.setLineDash([3, 2]);
+      ctx.strokeStyle = selected ? '#ffffff' : fill;
+      ctx.stroke();
+      ctx.setLineDash([]);
+    } else {
+      ctx.globalAlpha = 0.55 + n.velocity * 0.45;
+      ctx.fillStyle = fill;
+      ctx.fill();
+      ctx.globalAlpha = 1;
+      ctx.strokeStyle = selected ? '#ffffff' : '#0b0e10';
+      ctx.lineWidth = selected ? 1.5 : 1;
+      ctx.stroke();
+      ctx.lineWidth = 1;
+    }
+    let textX = x + 4;
+    if ((n.slide || n.porta) && rowHeight >= 7) {
+      ctx.fillStyle = '#10151acc';
+      ctx.beginPath();
+      if (n.slide) {
+        // A ramp: the glide the slide note causes.
+        ctx.moveTo(x + 2, y + rowHeight - 2);
+        ctx.lineTo(x + Math.min(12, w - 1), y + 2);
+        ctx.lineTo(x + Math.min(12, w - 1), y + rowHeight - 2);
+      } else {
+        ctx.moveTo(x + 2, y + rowHeight / 2 - 3);
+        ctx.lineTo(x + Math.min(8, w - 1), y + rowHeight / 2);
+        ctx.lineTo(x + 2, y + rowHeight / 2 + 3);
+      }
+      ctx.closePath();
+      ctx.fill();
+      textX += 10;
+    }
+    if (w > 26 + textX - x - 4 && rowHeight >= 10) {
+      ctx.fillStyle = n.muted ? '#e6ebeecc' : '#10151add';
       ctx.font = `${Math.min(10, rowHeight - 3)}px -apple-system, sans-serif`;
       ctx.textBaseline = 'middle';
-      ctx.fillText(noteName(n.key), x + 4, y + rowHeight / 2 + 0.5);
+      ctx.fillText(noteName(n.key), textX, y + rowHeight / 2 + 0.5);
     }
   }
 
@@ -224,7 +270,8 @@ export function drawRoll(ctx: CanvasRenderingContext2D, v: RollView, s: RollScen
   ctx.fillStyle = '#3b464d';
   ctx.fillRect(0, 0, KEYS_W, RULER_H);
 
-  // --- velocity lane
+  // --- event lane (FL Studio: the event editor under the notes, with a choice of note property)
+  const spec = notePropSpec(s.lane);
   ctx.fillStyle = '#26323a';
   ctx.fillRect(0, bottom, width, VEL_H);
   ctx.fillStyle = '#1d272d';
@@ -232,25 +279,35 @@ export function drawRoll(ctx: CanvasRenderingContext2D, v: RollView, s: RollScen
   ctx.fillStyle = '#aab6be';
   ctx.font = '9px -apple-system, sans-serif';
   ctx.textBaseline = 'top';
-  ctx.fillText('VELOCITY', 8, bottom + 6);
+  ctx.fillText(spec.label.toUpperCase(), 8, bottom + 6);
+  ctx.fillStyle = '#7d8a93';
+  ctx.fillText('▾ lane', 8, bottom + 18);
   ctx.save();
   ctx.beginPath();
   ctx.rect(KEYS_W, bottom + 1, width - KEYS_W, VEL_H - 1);
   ctx.clip();
-  const laneTop = bottom + 8;
-  const laneH = VEL_H - 14;
+  const { laneTop, laneH } = laneGeometry(v);
+  const yOf = (value: number) => laneTop + laneH - ((value - spec.min) / (spec.max - spec.min)) * laneH;
+  const base = spec.bipolar ? yOf(spec.def) : laneTop + laneH;
+  if (spec.bipolar) {
+    ctx.fillStyle = '#ffffff1a';
+    ctx.fillRect(KEYS_W, Math.round(base), width - KEYS_W, 1);
+  }
   for (const n of s.notes) {
     const x = Math.round(xOfTick(v, n.start)) + 0.5;
     if (x < KEYS_W - 4 || x > width) continue;
-    const h = n.velocity * laneH;
+    const top = yOf(noteValue(n, s.lane));
     const selected = s.selected.has(n.id);
-    ctx.strokeStyle = selected ? '#ffe2c2' : s.color;
+    const color = selected ? '#ffe2c2' : noteColor(n.color, s.color);
+    ctx.globalAlpha = n.muted ? 0.35 : 1;
+    ctx.strokeStyle = color;
     ctx.beginPath();
-    ctx.moveTo(x, laneTop + laneH);
-    ctx.lineTo(x, laneTop + laneH - h);
+    ctx.moveTo(x, base);
+    ctx.lineTo(x, top);
     ctx.stroke();
-    ctx.fillStyle = selected ? '#ffffff' : s.color;
-    ctx.fillRect(x - 2, laneTop + laneH - h - 2, 5, 4);
+    ctx.fillStyle = selected ? '#ffffff' : color;
+    ctx.fillRect(x - 2, top - 2, 5, 4);
+    ctx.globalAlpha = 1;
   }
   ctx.restore();
 

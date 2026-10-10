@@ -1,7 +1,9 @@
 // Minimal plugins with exactly predictable output, used by engine/tests/protocol-test.mjs.
 //   (default)         "MAD Test Gain"  - stereo effect, output = input * gain (parameter 0..1, default 0.5)
 //   MAD_TEST_SYNTH=1: "MAD Test Synth" - sine per MIDI note at the note's frequency,
-//                                        amplitude velocity * 0.25, 5 ms linear attack/release
+//                                        amplitude velocity * 0.25, 5 ms linear attack, linear
+//                                        release of 5 ms + 95 ms * note-off velocity; notes on
+//                                        MIDI channel 1 play on every output, others on the last
 //   MAD_TEST_DELAY=1: "MAD Test Delay" - stereo effect, output = input delayed by `latency` samples
 //                                        (parameter 0..9600, default 1000), reported as its latency
 
@@ -221,8 +223,8 @@ public:
 private:
     struct Voice
     {
-        int note = -1;
-        double phase = 0.0, increment = 0.0, amplitude = 0.0, ramp = 0.0;
+        int note = -1, channel = 1;
+        double phase = 0.0, increment = 0.0, amplitude = 0.0, ramp = 0.0, releaseStep = 0.0;
         bool releasing = false;
     };
 
@@ -240,19 +242,31 @@ private:
             if (slot == nullptr)
                 slot = &voices[0];
             const double hz = 440.0 * std::pow (2.0, (m.getNoteNumber() - 69) / 12.0);
-            *slot = { m.getNoteNumber(), 0.0, hz / rate, m.getFloatVelocity() * 0.25, 0.0, false };
+            *slot = { m.getNoteNumber(), m.getChannel(), 0.0, hz / rate, m.getFloatVelocity() * 0.25, 0.0, rampStep, false };
         }
         else if (m.isNoteOff())
         {
+            // Note-off velocity 0 releases in 5 ms, 1.0 in 100 ms.
+            const double seconds = 0.005 + 0.095 * (double) m.getFloatVelocity();
             for (auto& v : voices)
-                if (v.note == m.getNoteNumber() && ! v.releasing)
+            {
+                if (v.note == m.getNoteNumber() && v.channel == m.getChannel() && ! v.releasing)
+                {
                     v.releasing = true;
+                    v.releaseStep = 1.0 / (seconds * rate);
+                }
+            }
         }
         else if (m.isAllNotesOff() || m.isAllSoundOff())
         {
             for (auto& v : voices)
-                if (v.note >= 0)
+            {
+                if (v.note >= 0 && v.channel == m.getChannel())
+                {
                     v.releasing = true;
+                    v.releaseStep = rampStep;
+                }
+            }
         }
     }
 
@@ -264,7 +278,7 @@ private:
                 continue;
             for (int i = from; i < to; ++i)
             {
-                v.ramp = v.releasing ? v.ramp - rampStep : std::min (1.0, v.ramp + rampStep);
+                v.ramp = v.releasing ? v.ramp - v.releaseStep : std::min (1.0, v.ramp + rampStep);
                 if (v.ramp <= 0.0 && v.releasing)
                 {
                     v.note = -1;
@@ -273,7 +287,8 @@ private:
                 const auto s = (float) (std::sin (2.0 * juce::MathConstants<double>::pi * v.phase) * v.amplitude * v.ramp);
                 v.phase += v.increment;
                 v.phase -= std::floor (v.phase);
-                for (int ch = 0; ch < buffer.getNumChannels(); ++ch)
+                const int channels = buffer.getNumChannels();
+                for (int ch = v.channel == 1 ? 0 : channels - 1; ch < channels; ++ch)
                     buffer.addSample (ch, i, s);
             }
         }
