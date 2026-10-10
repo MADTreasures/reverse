@@ -45,6 +45,8 @@ export interface ComposeOptions {
   camera?: boolean;
   /** Show the light table layers (only the display does). */
   light?: boolean;
+  /** Show selection layers and the Quick Mask (only the display does). */
+  overlays?: boolean;
 }
 
 /** A track placed by its keyframes (or a 2D camera folder seen through its camera). */
@@ -180,7 +182,7 @@ export class Compositor {
     const reach = layers.reduce((n, l) => n + (l.visible ? effectReach(l.effects) : 0), 0);
     if (reach) r = intersect(inflate(r, reach), this.bounds) ?? r;
     if (this.camera && doc.timeline?.enabled && layers.some((l) => l.kind === 'folder' && l.camera)) r = this.bounds;
-    this.compose(doc, this.ctx, r, { paper: doc.paper.visible ? doc.paper.color : null, onion: this.onion, camera: this.camera, light: true });
+    this.compose(doc, this.ctx, r, { paper: doc.paper.visible ? doc.paper.color : null, onion: this.onion, camera: this.camera, light: true, overlays: true });
     return r;
   }
 
@@ -226,6 +228,7 @@ export class Compositor {
   private shown(layer: Layer, opts: ComposeOptions): boolean {
     if (!layer.visible || layer.opacity <= 0) return false;
     if (opts.skipDraft && layer.draft) return false;
+    if (!opts.overlays && layer.kind === 'raster' && (layer.selectionLayer || layer.quickMask)) return false;
     // A track shows only where it has a clip.
     if (this.anim.frame !== null && this.inCel === 0 && !inClips(layer.clips, this.anim.frame)) return false;
     return true;

@@ -275,6 +275,24 @@ export function scaleArea(mask: Mask, px: number, mode: ScalingMode, pixels?: Ui
   return expandRound(mask, r);
 }
 
+/**
+ * Select > Expand / Shrink selected area: by `px` (negative: shrink) with sharp (square) or rounded
+ * corners; when shrinking, the canvas edge counts as outside the selection.
+ */
+export function growSelectionMask(mask: Mask, px: number, corners: 'sharp' | 'rounded'): Mask {
+  const r = Math.round(px);
+  const mode: ScalingMode = corners === 'rounded' ? 'round' : 'rectangle';
+  if (r >= 0) return scaleArea(mask, r, mode);
+  const pad = 1 - r;
+  const { width: w, height: h } = mask;
+  const big = createMask(w + 2 * pad, h + 2 * pad);
+  for (let y = 0; y < h; y++) big.data.set(mask.data.subarray(y * w, (y + 1) * w), (y + pad) * big.width + pad);
+  const shrunk = scaleArea(big, r, mode);
+  const out = createMask(w, h);
+  for (let y = 0; y < h; y++) out.data.set(shrunk.data.subarray((y + pad) * big.width + pad, (y + pad) * big.width + pad + w), y * w);
+  return out;
+}
+
 function expandSquare(mask: Mask, r: number): Mask {
   if (r > 0) return dilate(mask, r);
   const inv = createMask(mask.width, mask.height);

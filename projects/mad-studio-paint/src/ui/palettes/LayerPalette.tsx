@@ -4,6 +4,7 @@ import { countLayers, findLayer, isEffectivelyLocked, layerBelow } from '../../m
 import type { FolderBlendMode, Id, Layer } from '../../model/types';
 import { isMac } from '../../platform/platform';
 import * as actions from '../../store/actions';
+import * as selection from '../../store/selectionActions';
 import { getState, useStore } from '../../store/store';
 import { Icon } from '../controls/Icons';
 import { openTonalDialog, showMenu } from '../overlays';
@@ -119,6 +120,7 @@ function FlagButton({ icon, label, on, onClick, disabled }: { icon: string; labe
 
 export function LayerActionBar() {
   const canMerge = useStore((s) => actions.canMergeDown(s));
+  const hasSelection = useStore((s) => s.selection !== null);
   const count = useStore((s) => countLayers(s.doc.layers));
   const mod = isMac ? '⌘' : 'Ctrl+';
   return (
@@ -141,6 +143,9 @@ export function LayerActionBar() {
       </button>
       <button className="icon-btn" title="Mask outside selection" aria-label="Mask outside selection" onClick={() => actions.maskLayer(true)}>
         <Icon name="mask" />
+      </button>
+      <button className="icon-btn" title="Convert to selection layer" aria-label="Convert to selection layer" disabled={!hasSelection} onClick={() => selection.convertToSelectionLayer()}>
+        <Icon name="select" />
       </button>
       <button className="icon-btn" title="Delete layer" aria-label="Delete layer" disabled={count <= 1} onClick={() => actions.deleteLayer()}>
         <Icon name="trash" />
@@ -220,6 +225,7 @@ function LayerRow({ layer, depth, drag, setDrag, drop, setDrop }: RowsProps & { 
         : []),
       ...(layer.kind === 'raster' || actions.isRenderedLayer(layer) ? [{ label: 'Select layer opacity area', onClick: () => actions.selectLayerOpacity(layer.id) }] : []),
       ...(actions.isRenderedLayer(layer) ? [{ label: 'Rasterize', disabled: layer.locked, onClick: () => actions.rasterizeLayer(layer.id) }] : []),
+      ...(selection.isSelectionLayer(layer) ? [{ label: 'Convert selection layer to selection', onClick: () => selection.selectionLayerToSelection(layer.id) }] : []),
       { separator: true },
       { label: 'Clip to layer below', checked: layer.clip, onClick: () => actions.setLayerProps(layer.id, { clip: !layer.clip }, 'Clip to layer below') },
       { label: 'Set as reference layer', checked: layer.reference, onClick: () => actions.setLayerProps(layer.id, { reference: !layer.reference }, 'Reference layer') },
@@ -419,6 +425,15 @@ function LayerRow({ layer, depth, drag, setDrag, drop, setDrop }: RowsProps & { 
         {layer.kind === 'fill' && (
           <span className="vector-icon" title="Fill layer" data-testid="fill-icon">
             <Icon name="fill" size={16} />
+          </span>
+        )}
+        {layer.kind === 'raster' && (layer.selectionLayer || layer.quickMask) && (
+          <span
+            className="vector-icon"
+            title={layer.quickMask ? 'Quick Mask: paint the selection (Select > Quick Mask again makes it the selection)' : 'Selection layer (Layer > Convert selection layer to selection)'}
+            data-testid={layer.quickMask ? 'quick-mask-icon' : 'selection-layer-icon'}
+          >
+            <Icon name={layer.quickMask ? 'mask' : 'select'} size={16} />
           </span>
         )}
         {layer.kind === 'text' && (

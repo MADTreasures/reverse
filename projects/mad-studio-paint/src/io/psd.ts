@@ -381,10 +381,12 @@ function exportList(layers: Layer[], src: PsdSource, parent?: FolderLayer): PsdL
     return out;
   };
   const out: PsdLayer[] = [];
+  // Selection layers and the Quick Mask stay out of Photoshop documents (like the reference's other formats).
+  const left = (l: DrawnLayer) => (src.skipDraft && l.draft) || (l.kind === 'raster' && (l.selectionLayer || l.quickMask));
   for (const group of clipGroups(layers)) {
-    if (src.skipDraft && group.base.draft) continue;
+    if (left(group.base)) continue;
     out.push(one(group.base, false));
-    for (const l of group.clipped) if (!(src.skipDraft && l.draft)) out.push(one(l));
+    for (const l of group.clipped) if (!left(l)) out.push(one(l));
   }
   return out;
 }

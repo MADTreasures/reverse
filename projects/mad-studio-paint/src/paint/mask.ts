@@ -205,3 +205,55 @@ export function translateMask(m: Mask, dx: number, dy: number): Mask {
   }
   return out;
 }
+
+/**
+ * Select > Blur border: the selection's edge softened over about `radius` pixels on each side
+ * (three box blurs, close to a Gaussian). Inside and outside far from the edge stay as they were.
+ */
+export function blurMask(m: Mask, radius: number): Mask {
+  const k = Math.max(1, Math.round(radius / 3));
+  const { width: w, height: h } = m;
+  let src = Float32Array.from(m.data);
+  let dst = new Float32Array(src.length);
+  // One box blur along a line of `len` values (edges repeat the outermost value).
+  const line = (get: (i: number) => number, set: (i: number, v: number) => void, len: number) => {
+    let sum = 0;
+    for (let i = -k; i <= k; i++) sum += get(Math.min(len - 1, Math.max(0, i)));
+    for (let i = 0; i < len; i++) {
+      set(i, sum / (2 * k + 1));
+      sum += get(Math.min(len - 1, i + k + 1)) - get(Math.max(0, i - k));
+    }
+  };
+  for (let pass = 0; pass < 3; pass++) {
+    for (let y = 0; y < h; y++) {
+      const row = y * w;
+      line((i) => src[row + i], (i, v) => (dst[row + i] = v), w);
+    }
+    [src, dst] = [dst, src];
+    for (let x = 0; x < w; x++) line((i) => src[i * w + x], (i, v) => (dst[i * w + x] = v), h);
+    [src, dst] = [dst, src];
+  }
+  const out = createMask(w, h);
+  for (let i = 0; i < out.data.length; i++) out.data[i] = Math.round(src[i]);
+  return out;
+}
+
+/** A selection from the alpha of RGBA pixels (Quick Mask and selection layers into a selection). */
+export function maskFromAlpha(pixels: Uint8ClampedArray, width: number, height: number): Mask {
+  const m = createMask(width, height);
+  for (let i = 0, p = 3; i < m.data.length; i++, p += 4) m.data[i] = pixels[p];
+  return m;
+}
+
+/** RGBA pixels of one colour with the selection as their alpha (a selection into a Quick Mask or selection layer). */
+export function pixelsFromMask(m: Mask, color: { r: number; g: number; b: number }): Uint8ClampedArray<ArrayBuffer> {
+  const out = new Uint8ClampedArray(m.data.length * 4);
+  for (let i = 0, p = 0; i < m.data.length; i++, p += 4) {
+    if (!m.data[i]) continue;
+    out[p] = color.r;
+    out[p + 1] = color.g;
+    out[p + 2] = color.b;
+    out[p + 3] = m.data[i];
+  }
+  return out;
+}

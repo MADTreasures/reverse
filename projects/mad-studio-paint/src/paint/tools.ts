@@ -144,7 +144,8 @@ export type SpecialRuler = 'parallel' | 'parallelCurve' | 'multiCurve' | 'radial
 export const SPECIAL_RULERS: readonly SpecialRuler[] = ['parallel', 'parallelCurve', 'multiCurve', 'radial', 'radialCurve', 'concentric'];
 /** Special rulers that are made of a curve (placed point by point). */
 export const isSpecialCurve = (s: SpecialRuler | undefined) => s === 'parallelCurve' || s === 'multiCurve' || s === 'radialCurve';
-export type FillReference = 'layer' | 'all' | 'reference';
+/** Refer multiple: the editing layer only, all layers, reference layers, or the layers in the editing layer's folder. */
+export type FillReference = 'layer' | 'all' | 'reference' | 'folder';
 
 export interface FillSettings {
   reference: FillReference;

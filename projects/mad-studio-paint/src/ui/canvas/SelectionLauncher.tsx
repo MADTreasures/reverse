@@ -7,13 +7,7 @@ import { useStore } from '../../store/store';
 import { controller } from '../../tools/controller';
 import { startTransform } from '../../tools/transform';
 import { Icon } from '../controls/Icons';
-import { openDialog, promptDialog } from '../overlays';
-
-async function grow(sign: 1 | -1): Promise<void> {
-  const v = await promptDialog(sign > 0 ? 'Expand selected area by (px)' : 'Shrink selected area by (px)', '4');
-  const n = Math.round(Number(v));
-  if (v !== null && Number.isFinite(n) && n > 0) actions.growSelection(sign * n);
-}
+import { openDialog } from '../overlays';
 
 /** Floating command bar under the current selection. */
 export function SelectionLauncher() {
@@ -40,8 +34,8 @@ export function SelectionLauncher() {
     ['deselect', 'Deselect', () => actions.deselect()],
     ['crop', 'Crop', () => actions.cropCanvas(bounds)],
     ['invertSelection', 'Invert selected area', () => actions.invertSelection()],
-    ['expand', 'Expand selected area', () => void grow(1)],
-    ['shrink', 'Shrink selected area', () => void grow(-1)],
+    ['expand', 'Expand selected area', () => openDialog('expandSelection')],
+    ['shrink', 'Shrink selected area', () => openDialog('shrinkSelection')],
     ['clear', 'Clear', () => actions.clearLayer()],
     ['clearOutside', 'Clear outside selection', () => actions.clearOutsideSelection()],
     ['cutPaste', 'Cut and paste', () => void cutAndPaste()],

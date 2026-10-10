@@ -2015,6 +2015,10 @@ button.rgb-readout {
   margin-top: 18px;
 }
 
+.modal-actions .spacer {
+  flex: 1;
+}
+
 .form-grid {
   display: grid;
   grid-template-columns: 110px 1fr;

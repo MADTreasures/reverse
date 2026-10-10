@@ -6,6 +6,7 @@ import * as actions from '../store/actions';
 import { activeFrameFolder } from '../store/frameActions';
 import * as anim from '../store/animationActions';
 import * as labels from '../store/labelActions';
+import * as selection from '../store/selectionActions';
 import { isPaletteShown, togglePalette } from '../store/paletteActions';
 import { PALETTE_NAMES } from '../model/palettes';
 import * as light from '../store/lightTableActions';
@@ -43,12 +44,6 @@ const notTransforming = () => !isTransforming();
 const canStartTransform = () => isTransforming() || canTransform();
 const hasLayer = () => actions.activeLayer() !== null;
 const hasMask = () => Boolean(actions.activeLayer()?.mask);
-
-async function askGrow(sign: 1 | -1): Promise<void> {
-  const v = await promptDialog(sign > 0 ? 'Expand selected area by (px)' : 'Shrink selected area by (px)', '4');
-  const n = Math.round(Number(v));
-  if (v !== null && Number.isFinite(n) && n > 0) actions.growSelection(sign * n);
-}
 
 async function renameCanvas(): Promise<void> {
   const v = await promptDialog('Canvas name', getState().doc.name);
@@ -301,8 +296,13 @@ export const COMMANDS: Command[] = [
     run: () => actions.selectVectorsInSelection(true),
     enabled: () => hasSelection() && actions.activeLayer()?.kind === 'vector',
   },
-  { id: 'expandSelection', label: 'Expand selected area…', run: () => askGrow(1), enabled: hasSelection },
-  { id: 'shrinkSelection', label: 'Shrink selected area…', run: () => askGrow(-1), enabled: hasSelection },
+  { id: 'expandSelection', label: 'Expand selected area…', run: () => openDialog('expandSelection'), enabled: hasSelection },
+  { id: 'shrinkSelection', label: 'Shrink selected area…', run: () => openDialog('shrinkSelection'), enabled: hasSelection },
+  { id: 'blurBorder', label: 'Blur border…', run: () => openDialog('blurBorder'), enabled: hasSelection },
+  { id: 'colorGamut', label: 'Select color gamut…', run: () => openDialog('colorGamut') },
+  { id: 'quickMask', label: 'Quick Mask', run: () => selection.toggleQuickMask(), checked: () => selection.quickMaskLayer() !== null },
+  { id: 'toSelectionLayer', label: 'Convert to selection layer', run: () => selection.convertToSelectionLayer(), enabled: hasSelection },
+  { id: 'selectionLayerToSelection', label: 'Convert selection layer to selection', run: () => selection.selectionLayerToSelection(), enabled: () => selection.isSelectionLayer(actions.activeLayer()) },
   // View
   { id: 'zoomIn', label: 'Zoom in', keys: ['Mod+=', 'Mod++', 'Mod+Shift+=', 'Mod+;'], run: () => actions.zoomStep(1) },
   { id: 'zoomOut', label: 'Zoom out', keys: ['Mod+-'], run: () => actions.zoomStep(-1) },

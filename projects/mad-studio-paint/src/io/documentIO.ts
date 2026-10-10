@@ -1,5 +1,5 @@
 /** Open, save, import, export and autosave – the browser/Electron side of the document format. */
-import { createRasterLayer, flatten, insertAbove, nextLayerName, pixelIds } from '../model/layers';
+import { createRasterLayer, findLayer, flatten, insertAbove, nextLayerName, pixelIds } from '../model/layers';
 import { createDocument } from '../model/document';
 import type { FolderLayer, Id, Layer, PaintDocument } from '../model/types';
 import { bytesToCanvas, canvasToBytes, createCanvas, ctx2d } from '../engine/canvas';
@@ -106,7 +106,10 @@ function drawExportFrameLines(ctx: CanvasRenderingContext2D, f: OutputFrame): vo
 }
 
 export async function buildDocumentBytes(): Promise<Uint8Array> {
-  const { doc, activeLayerId } = getState();
+  const state = getState();
+  // The Quick Mask is not saved (like the reference: it is a selection being painted).
+  const doc = withoutQuickMask(state.doc);
+  const activeLayerId = findLayer(doc.layers, state.activeLayerId) ? state.activeLayerId : (flatten(doc.layers)[0]?.id ?? state.activeLayerId);
   const layers = new Map<Id, Uint8Array>();
   for (const id of [...pixelIds(doc.layers), ...docLightImages(doc)]) {
     const s = getSurface(id);
@@ -131,6 +134,12 @@ export async function buildDocumentBytes(): Promise<Uint8Array> {
   const previewScale = Math.min(1, 512 / Math.max(doc.width, doc.height));
   const preview = await canvasToBytes(renderMerged({ paper: true, skipDraft: true, scale: previewScale }));
   return packDocument({ doc: { ...doc, sound: files.length ? { files } : undefined, movies: movieFiles.length ? movieFiles : undefined }, activeLayerId, layers, sounds, movies, preview });
+}
+
+/** The document without Quick Mask layers. */
+function withoutQuickMask(doc: PaintDocument): PaintDocument {
+  const strip = (layers: Layer[]): Layer[] => layers.filter((l) => !(l.kind === 'raster' && l.quickMask)).map((l) => (l.kind === 'folder' ? { ...l, children: strip(l.children) } : l));
+  return flatten(doc.layers).some((l) => l.kind === 'raster' && l.quickMask) ? { ...doc, layers: strip(doc.layers) } : doc;
 }
 
 export async function saveDocument(saveAs = false): Promise<boolean> {

@@ -225,6 +225,7 @@ function sanitizeLayer(raw: unknown, seen: Set<string>, depth: number, files: Se
     kind: 'raster',
     blend: isBlendMode(r.blend) ? r.blend : 'normal',
     lockAlpha: bool(r.lockAlpha, false),
+    ...(r.selectionLayer === true ? { selectionLayer: true } : {}),
   };
   return raster;
 }

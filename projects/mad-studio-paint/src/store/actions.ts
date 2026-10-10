@@ -49,7 +49,8 @@ import type { GradientFill } from '../paint/gradient';
 import { defaultGrid, sanitizeGrid, type GridSettings } from '../paint/grid';
 import { sanitizeColorSets, type ColorSets } from '../paint/colorSets';
 import { applyCorrection, correctionLabel, type Correction } from '../paint/tonal';
-import { combine, createMask, expandMask, invertMask, isMaskEmpty, isSelected, maskBounds, rectMask, type Mask, type SelectionOp } from '../paint/mask';
+import { blurMask, combine, createMask, invertMask, isMaskEmpty, isSelected, maskBounds, rectMask, type Mask, type SelectionOp } from '../paint/mask';
+import { growSelectionMask } from '../paint/fill';
 import { mergeSubTools, type SubTool, type ToolId } from '../paint/tools';
 import { normalizeAngle, rotatePan } from '../paint/viewMath';
 import { createCanvas, ctx2d, withClip } from '../engine/canvas';
@@ -98,8 +99,11 @@ export function commit(entry: HistoryEntry): void {
   syncHistoryFlags();
 }
 
-/** Applies a structural change to a copy of the document and records it. */
-export function changeDoc(label: string, fn: (doc: PaintDocument, s: PaintState) => Id | void, opts: { patches?: PixelPatch[]; key?: string } = {}): void {
+/**
+ * Applies a structural change to a copy of the document and records it (with `selection`: the
+ * selection changes in the same undo step).
+ */
+export function changeDoc(label: string, fn: (doc: PaintDocument, s: PaintState) => Id | void, opts: { patches?: PixelPatch[]; key?: string; selection?: Mask | null } = {}): void {
   const s = getState();
   const before = docState(s);
   const doc = cloneDocument(s.doc);
@@ -107,8 +111,10 @@ export function changeDoc(label: string, fn: (doc: PaintDocument, s: PaintState)
   // Cels that left their animation folder leave its track too.
   pruneTracks(doc);
   const activeLayerId = findLayer(doc.layers, active) ? active : flatten(doc.layers)[0]?.id ?? '';
-  setState({ doc, activeLayerId, ...(activeLayerId !== s.activeLayerId ? { maskEditing: false, selectedObjects: [] } : {}) });
-  commit({ label, before, after: { doc, activeLayerId }, patches: opts.patches ?? [], key: opts.key });
+  const selection = opts.selection === undefined ? undefined : opts.selection && !isMaskEmpty(opts.selection) ? opts.selection : null;
+  setState({ doc, activeLayerId, ...(activeLayerId !== s.activeLayerId ? { maskEditing: false, selectedObjects: [] } : {}), ...(selection !== undefined ? { selection } : {}) });
+  if (selection) lastSelection = selection;
+  commit({ label, before, after: { doc, activeLayerId }, patches: opts.patches ?? [], key: opts.key, ...(selection !== undefined ? { selection: { before: s.selection, after: selection } } : {}) });
 }
 
 export function commitPixels(label: string, patches: (PixelPatch | null)[]): void {
@@ -1903,9 +1909,24 @@ export function invertSelection(): void {
   setSelection(invertMask(selection ?? createMask(doc.width, doc.height)), 'Invert selected area');
 }
 
-export function growSelection(px: number): void {
+/** Select > Expand / Shrink selected area by `px` (negative: shrink), with sharp or rounded corners. */
+export function growSelection(px: number, corners: 'sharp' | 'rounded' = 'sharp'): void {
   const { selection } = getState();
-  if (selection && px !== 0) setSelection(expandMask(selection, px), px > 0 ? 'Expand selected area' : 'Shrink selected area');
+  if (selection && px !== 0) setSelection(growSelectionMask(selection, px, corners), px > 0 ? 'Expand selected area' : 'Shrink selected area');
+}
+
+/** Select > Blur border: the selection's edge softened over `px` pixels. */
+export function blurSelection(px: number): void {
+  const { selection } = getState();
+  if (selection && px > 0) setSelection(blurMask(selection, px), 'Blur border');
+}
+
+/** Records the selection's change since `before` (made step by step without history, e.g. by Select color gamut) as one undo step. */
+export function commitSelection(before: Mask | null, label: string): void {
+  const after = getState().selection;
+  if (before === after) return;
+  if (after) lastSelection = after;
+  commit({ label, patches: [], selection: { before, after } });
 }
 
 /** Selects the opaque pixels of a surface (⌘-click on a layer or mask thumbnail). */

@@ -4380,3 +4380,116 @@ test('palettes: Window menu shows Intermediate Color, Approximate Color, Sub Vie
   await expect(tab('navigator-panel', 'Sub View')).toHaveCount(0);
   expect(errors).toEqual([]);
 });
+
+test('selection functions: color gamut, expand/shrink with corner type, blur border, Quick Mask, selection layers', async ({ page }) => {
+  const errors = await boot(page);
+  const run = (id: string) => page.evaluate((x) => window.__madPaint.runCommand(x), id);
+  /** Selected pixels, the bounds and how many are partly selected. */
+  const sel = () =>
+    page.evaluate(() => {
+      const m = window.__madPaint.useStore.getState().selection;
+      if (!m) return null;
+      let n = 0;
+      let soft = 0;
+      let x0 = Infinity;
+      let x1 = -1;
+      for (let i = 0; i < m.data.length; i++) {
+        if (!m.data[i]) continue;
+        n++;
+        if (m.data[i] < 255) soft++;
+        x0 = Math.min(x0, i % m.width);
+        x1 = Math.max(x1, i % m.width);
+      }
+      return { n, soft, x0, x1 };
+    });
+  // Red on the left, blue on the right.
+  await selectTool(page, 'select');
+  await page.evaluate(() => window.__madPaint.actions.setDrawingColor('#ff0000'));
+  await drag(page, [0, 0], [200, 300]);
+  await page.evaluate(() => window.__madPaint.actions.fillWithColor());
+  await page.evaluate(() => window.__madPaint.actions.setDrawingColor('#0000ff'));
+  await drag(page, [200, 0], [400, 300]);
+  await page.evaluate(() => window.__madPaint.actions.fillWithColor());
+  await page.keyboard.press('ControlOrMeta+d');
+  expect(await sel()).toBeNull();
+  // Select color gamut: click red, then add blue; OK is one undo step.
+  await run('colorGamut');
+  const gamut = page.getByRole('dialog', { name: 'Select color gamut' });
+  await expect(gamut).toBeVisible();
+  const at = (x: number, y: number) => docToScreen(page, x, y).then((p) => page.mouse.click(p.x, p.y));
+  await at(100, 150);
+  expect(await sel()).toMatchObject({ n: 200 * 300, x0: 0, x1: 199 });
+  await gamut.getByRole('radio', { name: 'Add to selection' }).click();
+  await at(300, 150);
+  expect((await sel())!.n).toBe(400 * 300);
+  await gamut.getByRole('button', { name: 'OK' }).click();
+  await page.keyboard.press('ControlOrMeta+z');
+  expect(await sel()).toBeNull();
+  await page.keyboard.press('ControlOrMeta+Shift+z');
+  expect((await sel())!.n).toBe(400 * 300);
+  // Cancel puts the selection back.
+  await run('colorGamut');
+  await page.getByRole('dialog', { name: 'Select color gamut' }).getByRole('radio', { name: 'New selection' }).click();
+  await at(300, 150);
+  expect((await sel())!.x0).toBe(200);
+  await page.getByRole('dialog', { name: 'Select color gamut' }).getByRole('button', { name: 'Cancel' }).click();
+  expect((await sel())!.n).toBe(400 * 300);
+  // Expand with sharp corners / shrink with rounded ones.
+  await page.keyboard.press('ControlOrMeta+d');
+  await drag(page, [100, 100], [200, 200]);
+  const base = (await sel())!;
+  await run('expandSelection');
+  const grow = page.getByRole('dialog', { name: 'Expand selected area' });
+  await grow.getByLabel('Expansion width').fill('10');
+  await grow.getByRole('button', { name: 'OK' }).click();
+  const grown = (await sel())!;
+  expect([grown.x0, grown.x1]).toEqual([base.x0 - 10, base.x1 + 10]);
+  await run('shrinkSelection');
+  const shrink = page.getByRole('dialog', { name: 'Shrink selected area' });
+  await shrink.getByLabel('Shrinking width').fill('10');
+  await shrink.getByRole('radio', { name: 'Rounded corners' }).click();
+  await shrink.getByRole('button', { name: 'OK' }).click();
+  expect((await sel())!.n).toBe(base.n);
+  // Blur border: a soft edge.
+  await run('blurBorder');
+  await page.getByRole('dialog', { name: 'Blur border' }).getByLabel('Blur range').fill('9');
+  await page.getByRole('dialog', { name: 'Blur border' }).getByRole('button', { name: 'OK' }).click();
+  expect((await sel())!.soft).toBeGreaterThan(300);
+  // Quick Mask: the selection becomes a red layer to paint on, and back.
+  await page.keyboard.press('ControlOrMeta+d');
+  await run('quickMask');
+  await expect(page.getByTestId('quick-mask-icon')).toHaveCount(1);
+  expect(await sel()).toBeNull();
+  await thinPen(page);
+  await drag(page, [50, 250], [350, 250]);
+  // The Quick Mask shows red (half transparent) over the blue picture.
+  const shown = await page.evaluate(() => window.__madPaint.engine.sampleDisplayed(300, 250, '#ffffff'));
+  expect(shown[0]).toBeGreaterThan(100);
+  expect(shown[2]).toBeLessThan(170);
+  await run('quickMask');
+  await expect(page.getByTestId('quick-mask-icon')).toHaveCount(0);
+  const painted = (await sel())!;
+  expect(painted.n).toBeGreaterThan(300);
+  expect(painted.x0).toBeLessThan(60);
+  expect(painted.x1).toBeGreaterThan(340);
+  expect(await page.evaluate(() => window.__madPaint.useStore.getState().activeLayerId)).toBe(await page.evaluate(() => window.__madPaint.useStore.getState().doc.layers[0].id));
+  // Selection layer: kept as a green layer, not exported, back to a selection, saved.
+  await run('toSelectionLayer');
+  await expect(page.getByTestId('selection-layer-icon')).toHaveCount(1);
+  expect(await sel()).toBeNull();
+  expect(await page.evaluate(() => window.__madPaint.useStore.getState().doc.layers[0].name)).toBe('Selection 1');
+  await run('selectionLayerToSelection');
+  expect((await sel())!.n).toBe(painted.n);
+  // A Quick Mask is not saved; the selection layer is.
+  await run('quickMask');
+  const back = await page.evaluate(async () => {
+    const m = window.__madPaint;
+    await m.openFileBytes({ name: 'sel.madpaint', data: await m.buildDocumentBytes() });
+    return m.useStore.getState().doc.layers.map((l: any) => [l.name, Boolean(l.selectionLayer), Boolean(l.quickMask)]);
+  });
+  expect(back).toEqual([
+    ['Selection 1', true, false],
+    ['Layer 1', false, false],
+  ]);
+  expect(errors).toEqual([]);
+});

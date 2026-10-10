@@ -119,6 +119,10 @@ export interface RasterLayer extends LayerBase {
   blend: BlendMode;
   /** Lock transparent pixels: painting only changes existing pixels. */
   lockAlpha: boolean;
+  /** A selection layer (Select > Convert to selection layer): its opacity is a stored selection; shown in its layer colour, never exported. */
+  selectionLayer?: boolean;
+  /** Select > Quick Mask: the selection being painted (red); not saved, it turns back into the selection. */
+  quickMask?: boolean;
 }
 
 export interface FolderLayer extends LayerBase {

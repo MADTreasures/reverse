@@ -198,6 +198,7 @@ const REFERENCE_LABELS: Record<FillReference, string> = {
   layer: 'Editing layer only',
   all: 'All layers',
   reference: 'Reference layers',
+  folder: 'Layer in folder',
 };
 
 const AA_LEVELS = ['None', 'Weak', 'Medium', 'Strong'];

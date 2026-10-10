@@ -43,6 +43,7 @@ import { balloonSession, textSession } from './textTool';
 import { frameSession } from './frameTool';
 import { confirmTransform, drawTransformOverlay, hitHandle, isTransforming, transformCursor, TransformSession } from './transform';
 import { drawFilterCenter, filterCenter, FilterCenterSession } from './filterCenter';
+import { canvasPick, CanvasPickSession } from './canvasPick';
 import type { Modifiers, OverlayView, PointerInfo, ToolSession } from './types';
 
 const DOUBLE_CLICK_MS = 350;
@@ -64,6 +65,7 @@ class Controller {
   constructor() {
     // The filter dialogs' centre mark lives on the canvas.
     filterCenter.onChange(() => this.changed());
+    canvasPick.onChange(() => this.changed());
   }
 
   private changed(): void {
@@ -80,7 +82,7 @@ class Controller {
 
   cursor(): string {
     if (this.session?.cursor) return this.session.cursor;
-    if (filterCenter.active && !this.mods.space) return 'crosshair';
+    if ((filterCenter.active || canvasPick.active) && !this.mods.space) return 'crosshair';
     if (isTransforming() && !this.mods.space && this.hover) return transformCursor(hitHandle(this.hover, this.view));
     const t = this.current();
     const keyed = t === 'object' ? keyframeTarget() : null;
@@ -119,6 +121,11 @@ class Controller {
     if (filterCenter.active) {
       if (p.space || p.button === 1) return new HandSession(p);
       return p.button === 0 ? new FilterCenterSession(p) : null;
+    }
+    // A dialog picks colours from the canvas (Select color gamut).
+    if (canvasPick.active) {
+      if (p.space || p.button === 1) return new HandSession(p);
+      return p.button === 0 ? new CanvasPickSession(p) : null;
     }
     if (isTransforming() && !p.space && p.button === 0) {
       const handle = hitHandle(p, this.view);

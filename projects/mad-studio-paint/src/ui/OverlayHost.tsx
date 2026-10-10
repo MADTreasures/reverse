@@ -15,6 +15,7 @@ import { ColorSettingsDialog } from './dialogs/ColorSettingsDialog';
 import { AnimationCelsExportDialog, AnimationExportDialog, AssignMultipleDialog, AudioExportDialog, CameraFolderDialog, CenterCanvasDialog, FrameRateDialog, ManageTimelinesDialog, MovieExportDialog, NewTimelineDialog, OnionSkinDialog, TimelineSettingsDialog } from './dialogs/AnimationDialogs';
 import { AboutDialog, ShortcutsDialog } from './dialogs/InfoDialogs';
 import { FrameEditDialog, GoToFrameDialog, GoToLabelDialog, TimelineLabelDialog, TrackLabelDialog } from './dialogs/LabelDialogs';
+import { BlurBorderDialog, ColorGamutDialog, GrowSelectionDialog } from './dialogs/SelectionDialogs';
 import { NewCanvasDialog } from './dialogs/NewCanvasDialog';
 import { closeDialog, closeMenu, useOverlays, type MenuItem } from './overlays';
 
@@ -76,6 +77,10 @@ export function OverlayHost() {
           {dialog.kind === 'custom' && dialog.id === 'goToLabel' && <GoToLabelDialog />}
           {dialog.kind === 'custom' && dialog.id === 'insertFrame' && <FrameEditDialog mode="insert" />}
           {dialog.kind === 'custom' && dialog.id === 'deleteFrame' && <FrameEditDialog mode="delete" />}
+          {dialog.kind === 'custom' && dialog.id === 'expandSelection' && <GrowSelectionDialog mode="expand" />}
+          {dialog.kind === 'custom' && dialog.id === 'shrinkSelection' && <GrowSelectionDialog mode="shrink" />}
+          {dialog.kind === 'custom' && dialog.id === 'blurBorder' && <BlurBorderDialog />}
+          {dialog.kind === 'custom' && dialog.id === 'colorGamut' && <ColorGamutDialog />}
           {dialog.kind === 'custom' && dialog.id === 'exportGif' && <AnimationExportDialog format="gif" />}
           {dialog.kind === 'custom' && dialog.id === 'exportApng' && <AnimationExportDialog format="apng" />}
           {dialog.kind === 'custom' && dialog.id === 'exportWebp' && <AnimationExportDialog format="webp" />}
@@ -115,6 +120,8 @@ export function OverlayHost() {
 function backdropClass(dialog: NonNullable<ReturnType<typeof useOverlays.getState>['dialog']>): string {
   if (dialog.kind === 'filter') return filterSpec(dialog.filter).center ? 'clear top pass' : 'clear top';
   if (dialog.kind === 'tonal' || (dialog.kind === 'custom' && dialog.id === 'centerCanvas')) return 'clear';
+  // Select color gamut: clicks on the canvas pick colours while it is open.
+  if (dialog.kind === 'custom' && dialog.id === 'colorGamut') return 'clear top pass';
   return '';
 }
 
