@@ -3143,3 +3143,98 @@
   color: var(--text-faint);
   font-size: 11px;
 }
+
+/* Filter dialogs: open near the top so the preview on the canvas stays visible; values as a
+   number with a bar under it, OK / Cancel / Preview on the right (like the reference). */
+.modal-backdrop.top {
+  align-items: flex-start;
+  padding-top: 64px;
+}
+
+/* Filters with a centre: the canvas takes presses (to move the ×), the rest of the window waits. */
+.modal-backdrop.pass {
+  pointer-events: none;
+}
+
+.modal-backdrop.pass > .modal {
+  pointer-events: auto;
+}
+
+body.canvas-only * {
+  pointer-events: none;
+}
+
+body.canvas-only .paint-canvas,
+body.canvas-only .modal,
+body.canvas-only .modal * {
+  pointer-events: auto;
+}
+
+.modal.filter-dialog {
+  min-width: 460px;
+}
+
+.filter-body {
+  display: flex;
+  gap: 16px;
+}
+
+.filter-params {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 300px;
+}
+
+.filter-row {
+  display: grid;
+  grid-template-columns: 1fr minmax(120px, auto);
+  gap: 4px 10px;
+  align-items: center;
+}
+
+.filter-row > label:not(.check) {
+  color: var(--text-dim);
+}
+
+.filter-row.number .filter-value {
+  width: 90px;
+  justify-self: end;
+  text-align: right;
+}
+
+.filter-row.number .filter-bar {
+  grid-column: 1 / -1;
+  width: 100%;
+  margin: 0;
+}
+
+.filter-row > .check,
+.filter-row > .btn {
+  grid-column: 1 / -1;
+  justify-self: start;
+}
+
+.filter-side {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 96px;
+}
+
+.filter-busy {
+  color: var(--text-dim);
+  font-size: 11px;
+  visibility: hidden;
+}
+
+.filter-busy.on {
+  visibility: visible;
+}
+
+.filter-hint {
+  color: var(--text-dim);
+  margin: 4px 0 0;
+  font-size: 11px;
+}

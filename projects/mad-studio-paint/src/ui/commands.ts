@@ -11,7 +11,9 @@ import { copy, cut, hasClip, pasteImage } from '../store/clipboard';
 import { drawingColor, getState, setState } from '../store/store';
 import { cancelTransform, confirmTransform, isTransforming, startTransform } from '../tools/transform';
 import { CORRECTIONS, correctionLabel, defaultCorrection, type CorrectionType } from '../paint/tonal';
-import { openDialog, openTonalDialog, promptDialog } from './overlays';
+import { FILTERS } from '../paint/filters';
+import { applyFilterNow } from '../store/filterActions';
+import { openDialog, openFilterDialog, openTonalDialog, promptDialog } from './overlays';
 import { openAssignMenu } from './palettes/TimelinePalette';
 import { openImageExport, openPsdDuplicate } from './dialogs/ExportDialog';
 import { openColorSettings } from './dialogs/ColorSettingsDialog';
@@ -398,7 +400,12 @@ export const COMMANDS: Command[] = [
   { id: 'deleteAudioTrack', label: 'Delete audio layer', run: () => sound.deleteSoundTrack(), enabled: () => sound.activeSoundTrack() !== null },
   { id: 'toggleTimeline', label: 'Timeline', run: () => anim.toggleTimelinePalette(), checked: () => getState().timelineShown },
   // Filter
-  { id: 'gaussianBlur', label: 'Blur: Gaussian blur…', run: () => openDialog('gaussianBlur'), enabled: canEdit },
+  ...FILTERS.map((f) => ({
+    id: `filter-${f.id}`,
+    label: f.params.length ? `${f.label}…` : f.label,
+    run: () => (f.params.length ? openFilterDialog(f.id) : applyFilterNow(f.id)),
+    enabled: canEdit,
+  })),
   // Help
   { id: 'shortcuts', label: 'Keyboard shortcuts', keys: ['F1'], run: () => openDialog('shortcuts') },
   { id: 'about', label: 'About MAD Studio Paint', run: () => openDialog('about') },

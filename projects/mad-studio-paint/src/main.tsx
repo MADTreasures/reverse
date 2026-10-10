@@ -12,6 +12,7 @@ import * as actions from './store/actions';
 import * as anim from './store/animationActions';
 import { getState, useStore } from './store/store';
 import { controller } from './tools/controller';
+import { filterCenter } from './tools/filterCenter';
 import { runCommand } from './ui/commands';
 import { installKeyboard } from './ui/keyboard';
 import { nativeMenuTemplate } from './ui/nativeMenu';
@@ -126,7 +127,7 @@ async function boot(): Promise<void> {
 
   // Automation hooks for tests and power users.
   Object.assign(window, {
-    __madPaint: { useStore, actions, anim, light, engine, controller, runCommand, buildDocumentBytes, openFileBytes },
+    __madPaint: { useStore, actions, anim, light, engine, controller, filterCenter, runCommand, buildDocumentBytes, openFileBytes },
   });
   native?.ready();
 }

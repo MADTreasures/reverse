@@ -3602,3 +3602,88 @@ test('frame templates: a page layout makes its frames; frames on the canvas beco
   await expect(dlg.getByRole('option', { name: 'Meine Seite' })).toHaveCount(0);
   expect(errors).toEqual([]);
 });
+
+test('Filter menu: previewed filters, filters without settings, the centre × on the canvas; one undo step each', async ({ page }) => {
+  const errors = await boot(page);
+  // A black block on the left half (rows 50..249) of a transparent layer.
+  await page.evaluate(() => {
+    const a = window.__madPaint.actions;
+    a.setDrawingColor('#000000');
+    a.setSelection({ width: 400, height: 300, data: new Uint8Array(400 * 300).map((_: number, i: number) => (i % 400 < 200 && i >= 50 * 400 && i < 250 * 400 ? 255 : 0)) });
+    a.fillWithColor();
+    a.deselect();
+  });
+  const alpha = (x: number, y: number) => layerAlpha(page, x, y);
+  expect(await alpha(203, 150)).toBe(0);
+  // The menu has the reference's groups.
+  await page.getByRole('navigation', { name: 'Main menu' }).getByRole('button', { name: 'Filter', exact: true }).dispatchEvent('pointerdown');
+  for (const g of ['Blur', 'Sharpen', 'Effect', 'Distort', 'Render', 'Correction']) await expect(page.locator('.menu-sub', { hasText: g }).first()).toBeVisible();
+  await page.keyboard.press('Escape');
+
+  // Gaussian blur: the preview shows on the canvas while the dialog is open; Preview off hides it.
+  await openMenu(page, 'Filter', 'Blur', 'filter-gaussianBlur');
+  const gauss = page.getByRole('dialog', { name: 'Gaussian blur' });
+  await gauss.getByRole('spinbutton', { name: 'Strength' }).fill('10');
+  await expect.poll(() => alpha(203, 150)).toBeGreaterThan(0);
+  // The preview is computed off the main thread.
+  expect(page.workers().length).toBeGreaterThan(0);
+  await gauss.getByRole('checkbox', { name: 'Preview' }).uncheck();
+  await expect.poll(() => alpha(203, 150)).toBe(0);
+  await gauss.getByRole('checkbox', { name: 'Preview' }).check();
+  await gauss.getByRole('button', { name: 'OK' }).click();
+  await expect(gauss).toBeHidden();
+  expect(await alpha(203, 150)).toBeGreaterThan(0);
+  await page.keyboard.press('ControlOrMeta+z');
+  expect(await alpha(203, 150)).toBe(0);
+  // It reopens with the last strength.
+  await openMenu(page, 'Filter', 'Blur', 'filter-gaussianBlur');
+  await expect(gauss.getByRole('spinbutton', { name: 'Strength' })).toHaveValue('10');
+  await gauss.getByRole('button', { name: 'Cancel' }).click();
+  expect(await alpha(203, 150)).toBe(0);
+
+  // Blur has no settings: it runs at once.
+  await openMenu(page, 'Filter', 'Blur', 'filter-blur');
+  expect(await alpha(200, 150)).toBeGreaterThan(0);
+  expect(await alpha(199, 150)).toBeLessThan(255);
+  await page.keyboard.press('ControlOrMeta+z');
+  expect(await alpha(200, 150)).toBe(0);
+
+  // Mosaic: 30 px tiles from the canvas origin; the tile 180..209 is half covered.
+  await openMenu(page, 'Filter', 'Effect', 'filter-mosaic');
+  const mosaic = page.getByRole('dialog', { name: 'Mosaic' });
+  await mosaic.getByRole('spinbutton', { name: 'Tile size' }).fill('30');
+  await expect.poll(() => alpha(205, 100)).toBeGreaterThan(100);
+  await mosaic.getByRole('button', { name: 'OK' }).click();
+  await expect(mosaic).toBeHidden();
+  expect(await alpha(181, 100)).toBe(await alpha(209, 119));
+  expect(await alpha(181, 100)).toBeLessThan(255);
+  await page.keyboard.press('ControlOrMeta+z');
+
+  // Twirl: the red × starts in the middle; pressing the canvas moves it, and the preview follows.
+  await openMenu(page, 'Filter', 'Distort', 'filter-twirl');
+  const twirl = page.getByRole('dialog', { name: 'Twirl' });
+  await expect.poll(() => page.evaluate(() => window.__madPaint.filterCenter.point)).toEqual({ x: 200, y: 150 });
+  // Black from the left is twisted into the right half above the centre.
+  await expect.poll(() => alpha(210, 120)).toBeGreaterThan(0);
+  const at = await docToScreen(page, 300, 60);
+  await page.mouse.click(at.x, at.y);
+  await expect.poll(() => page.evaluate(() => window.__madPaint.filterCenter.point)).toEqual({ x: 300, y: 60 });
+  // Twisting around the new centre leaves the far left untouched.
+  await expect.poll(() => alpha(20, 280)).toBe(0);
+  // Cancel restores the layer and removes the ×.
+  await twirl.getByRole('button', { name: 'Cancel' }).click();
+  await expect(twirl).toBeHidden();
+  expect(await page.evaluate(() => window.__madPaint.filterCenter.point)).toBeNull();
+  expect(await alpha(210, 120)).toBe(0);
+  expect(await alpha(100, 150)).toBe(255);
+
+  // Inside a selection only the selected pixels change.
+  await page.evaluate(() => window.__madPaint.actions.setSelection({ width: 400, height: 300, data: new Uint8Array(400 * 300).map((_: number, i: number) => (i < 150 * 400 ? 255 : 0)) }));
+  await openMenu(page, 'Filter', 'Render', 'filter-perlinNoise');
+  const perlin = page.getByRole('dialog', { name: 'Perlin noise' });
+  await perlin.getByRole('button', { name: 'OK' }).click();
+  await expect(perlin).toBeHidden();
+  expect(await alpha(300, 20)).toBe(255);
+  expect(await alpha(300, 280)).toBe(0);
+  expect(errors).toEqual([]);
+});

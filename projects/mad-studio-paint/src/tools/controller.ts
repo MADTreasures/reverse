@@ -37,6 +37,7 @@ import { isCameraFolder, tracksOf } from '../model/animation';
 import { balloonSession, textSession } from './textTool';
 import { frameSession } from './frameTool';
 import { confirmTransform, drawTransformOverlay, hitHandle, isTransforming, transformCursor, TransformSession } from './transform';
+import { drawFilterCenter, filterCenter, FilterCenterSession } from './filterCenter';
 import type { Modifiers, OverlayView, PointerInfo, ToolSession } from './types';
 
 const DOUBLE_CLICK_MS = 350;
@@ -55,6 +56,11 @@ class Controller {
     return () => this.listeners.delete(fn);
   }
 
+  constructor() {
+    // The filter dialogs' centre mark lives on the canvas.
+    filterCenter.onChange(() => this.changed());
+  }
+
   private changed(): void {
     for (const l of this.listeners) l();
   }
@@ -69,6 +75,7 @@ class Controller {
 
   cursor(): string {
     if (this.session?.cursor) return this.session.cursor;
+    if (filterCenter.active && !this.mods.space) return 'crosshair';
     if (isTransforming() && !this.mods.space && this.hover) return transformCursor(hitHandle(this.hover, this.view));
     const t = this.current();
     const keyed = t === 'object' ? keyframeTarget() : null;
@@ -103,6 +110,11 @@ class Controller {
   }
 
   private start(p: PointerInfo): ToolSession | null {
+    // A filter dialog with a centre is open: the canvas places the centre (Space still pans).
+    if (filterCenter.active) {
+      if (p.space || p.button === 1) return new HandSession(p);
+      return p.button === 0 ? new FilterCenterSession(p) : null;
+    }
     if (isTransforming() && !p.space && p.button === 0) {
       const handle = hitHandle(p, this.view);
       // Double-click inside the box confirms the transform.
@@ -237,6 +249,10 @@ class Controller {
     if (!this.session && (this.current() === 'object' || this.current() === 'gradient')) drawGradientHandles(ctx, this.view);
     if (!this.session && this.current() === 'lightTable') drawLightBox(ctx, this.view);
     drawTransformOverlay(ctx, this.view);
+    if (filterCenter.active) {
+      drawFilterCenter(ctx, this.view);
+      return;
+    }
     PolylineSelect.overlay(ctx, this.view);
     CurveInput.overlay(ctx, this.view);
     if (this.session?.overlay) {

@@ -1,5 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { CanvasSizeDialog, GaussianBlurDialog } from './dialogs/AdjustDialogs';
+import { CanvasSizeDialog } from './dialogs/AdjustDialogs';
+import { FilterDialog } from './dialogs/FilterDialog';
+import { filterSpec } from '../paint/filters';
 import { PressureDialog } from './dialogs/PressureDialog';
 import { DivideFrameDialog, DrawAlongRulerDialog, FrameTemplateDialog, NewFrameFolderDialog } from './dialogs/FrameDialogs';
 import { NewToneDialog } from './dialogs/ToneDialog';
@@ -35,8 +37,8 @@ export function OverlayHost() {
     <>
       {menu && <ContextMenu x={menu.x} y={menu.y} items={menu.items} />}
       {dialog && (
-        // Dialogs that preview on the canvas leave it undimmed.
-        <div className={`modal-backdrop ${dialog.kind === 'tonal' || (dialog.kind === 'custom' && (dialog.id === 'centerCanvas' || dialog.id === 'gaussianBlur')) ? 'clear' : ''}`} onPointerDown={(e) => e.target === e.currentTarget && closeDialog()}>
+        // Dialogs that preview on the canvas leave it undimmed; filters with a centre let the canvas take presses.
+        <div className={`modal-backdrop ${backdropClass(dialog)}`} onPointerDown={(e) => e.target === e.currentTarget && closeDialog()}>
           {dialog.kind === 'prompt' && <PromptDialog title={dialog.title} value={dialog.value} onDone={dialog.resolve} />}
           {dialog.kind === 'confirm' && (
             <div className="modal small" role="dialog" aria-label={dialog.title}>
@@ -76,7 +78,7 @@ export function OverlayHost() {
           {dialog.kind === 'custom' && dialog.id === 'shortcuts' && <ShortcutsDialog />}
           {dialog.kind === 'tonal' && <TonalDialog target={dialog.target} />}
           {dialog.kind === 'custom' && dialog.id === 'pressure' && <PressureDialog />}
-          {dialog.kind === 'custom' && dialog.id === 'gaussianBlur' && <GaussianBlurDialog />}
+          {dialog.kind === 'filter' && <FilterDialog key={dialog.filter} id={dialog.filter} />}
           {dialog.kind === 'custom' && dialog.id === 'preferences' && <PreferencesDialog />}
           {dialog.kind === 'custom' && dialog.id === 'canvasSize' && <CanvasSizeDialog mode="canvas" />}
           {dialog.kind === 'custom' && dialog.id === 'imageResolution' && <CanvasSizeDialog mode="resolution" />}
@@ -97,6 +99,12 @@ export function OverlayHost() {
       </div>
     </>
   );
+}
+
+function backdropClass(dialog: NonNullable<ReturnType<typeof useOverlays.getState>['dialog']>): string {
+  if (dialog.kind === 'filter') return filterSpec(dialog.filter).center ? 'clear top pass' : 'clear top';
+  if (dialog.kind === 'tonal' || (dialog.kind === 'custom' && dialog.id === 'centerCanvas')) return 'clear';
+  return '';
 }
 
 function PromptDialog({ title, value, onDone }: { title: string; value: string; onDone: (v: string | null) => void }) {

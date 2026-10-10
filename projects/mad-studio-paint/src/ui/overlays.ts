@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import type { Id } from '../model/types';
 import type { CorrectionType } from '../paint/tonal';
+import type { FilterId } from '../paint/filters';
 
 export interface MenuItem {
   label?: string;
@@ -12,7 +13,7 @@ export interface MenuItem {
   submenu?: MenuItem[];
 }
 
-export type CustomDialogId = 'newCanvas' | 'colorSettings' | 'export' | 'exportPreview' | 'exportPsd' | 'frameTemplates' | 'timelineSettings' | 'newTimeline' | 'frameRate' | 'manageTimelines' | 'cameraFolder' | 'assignMultiple' | 'centerCanvas' | 'onionSkin' | 'exportGif' | 'exportApng' | 'exportWebp' | 'exportSequence' | 'exportCels' | 'exportAudio' | 'exportMovie' | 'canvasSize' | 'imageResolution' | 'gaussianBlur' | 'preferences' | 'about' | 'shortcuts' | 'pressure' | 'newFrameFolder' | 'divideFrame' | 'drawAlongRuler' | 'newTone' | 'gradient';
+export type CustomDialogId = 'newCanvas' | 'colorSettings' | 'export' | 'exportPreview' | 'exportPsd' | 'frameTemplates' | 'timelineSettings' | 'newTimeline' | 'frameRate' | 'manageTimelines' | 'cameraFolder' | 'assignMultiple' | 'centerCanvas' | 'onionSkin' | 'exportGif' | 'exportApng' | 'exportWebp' | 'exportSequence' | 'exportCels' | 'exportAudio' | 'exportMovie' | 'canvasSize' | 'imageResolution' | 'preferences' | 'about' | 'shortcuts' | 'pressure' | 'newFrameFolder' | 'divideFrame' | 'drawAlongRuler' | 'newTone' | 'gradient';
 
 /** What a tonal correction dialog changes. */
 export type TonalTarget =
@@ -27,7 +28,8 @@ type DialogSpec =
   | { kind: 'prompt'; title: string; value: string; resolve: (v: string | null) => void }
   | { kind: 'confirm'; title: string; message: string; okLabel: string; danger: boolean; resolve: (v: boolean) => void }
   | { kind: 'custom'; id: CustomDialogId }
-  | { kind: 'tonal'; target: TonalTarget };
+  | { kind: 'tonal'; target: TonalTarget }
+  | { kind: 'filter'; filter: FilterId };
 
 interface Toast {
   id: number;
@@ -91,6 +93,10 @@ export function openDialog(id: CustomDialogId): void {
 
 export function openTonalDialog(target: TonalTarget): void {
   useOverlays.setState({ dialog: { kind: 'tonal', target }, menu: null });
+}
+
+export function openFilterDialog(filter: FilterId): void {
+  useOverlays.setState({ dialog: { kind: 'filter', filter }, menu: null });
 }
 
 export function closeDialog(): void {

@@ -1364,15 +1364,6 @@ export class FilterPreview {
     return this.edit !== null;
   }
 
-  /** Renders the layer with a CSS filter applied (inside the selection only, if there is one). */
-  apply(filter: string): void {
-    this.render((ctx, lifted) => {
-      ctx.filter = filter || 'none';
-      ctx.drawImage(lifted, 0, 0);
-      ctx.filter = 'none';
-    });
-  }
-
   /** Renders the layer with a tonal correction applied (exact pixel maths, see paint/tonal.ts). */
   applyCorrection(c: Correction | null): void {
     this.render((ctx, lifted) => {
@@ -1386,6 +1377,22 @@ export class FilterPreview {
       const tmp = createCanvas(lifted.width, lifted.height);
       ctx2d(tmp).putImageData(img, 0, 0);
       ctx.drawImage(tmp, 0, 0);
+    });
+  }
+
+  /**
+   * Shows filter output: `img` replaces the pixels of `rect` (layer coordinates), the rest of the
+   * layer stays as it was; null shows the layer unchanged.
+   */
+  applyPixels(img: { data: Uint8ClampedArray; width: number; height: number } | null, rect: Rect | null): void {
+    this.render((ctx, lifted) => {
+      ctx.drawImage(lifted, 0, 0);
+      if (!img || !rect || rect.w <= 0 || rect.h <= 0) return;
+      const tmp = createCanvas(rect.w, rect.h);
+      ctx2d(tmp).putImageData(new ImageData(new Uint8ClampedArray(img.data), rect.w, rect.h), 0, 0);
+      ctx.clearRect(rect.x, rect.y, rect.w, rect.h);
+      ctx.globalCompositeOperation = 'source-over';
+      ctx.drawImage(tmp, rect.x, rect.y);
     });
   }
 
