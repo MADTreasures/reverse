@@ -145,7 +145,7 @@ type Drag =
   | { kind: 'cels'; x0: number; delta: number; copy: boolean }
   | { kind: 'labels'; x0: number; delta: number; copy: boolean };
 
-const ICONS: Record<Layer['kind'], string> = { raster: 'layer', vector: 'vector', text: 'text', gradient: 'gradient', fill: 'fill', lines: 'focusLines', correction: 'correction', folder: 'folder', audio: 'audio', movie: 'movie' };
+const ICONS: Record<Layer['kind'], string> = { raster: 'layer', vector: 'vector', text: 'text', gradient: 'gradient', fill: 'fill', lines: 'focusLines', image: 'imageLayer', correction: 'correction', folder: 'folder', audio: 'audio', movie: 'movie' };
 const trackIcon = (l: Layer) =>
   isAnimationFolder(l) ? 'animFolder' : l.kind === 'folder' && l.camera ? 'camera' : l.kind === 'folder' && l.frame ? 'frame' : l.kind === 'lines' && l.items[0]?.kind === 'speed' ? 'speedLines' : ICONS[l.kind];
 const INTERP_LABELS: Record<Interp, string> = { hold: 'Hold', linear: 'Linear', smooth: 'Smooth' };

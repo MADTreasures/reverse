@@ -12,6 +12,7 @@ import type { Correction } from '../paint/tonal';
 import type { FrameBorder } from '../paint/frames';
 import type { GradientFill } from '../paint/gradient';
 import type { EffectLines } from '../paint/effectLines';
+import type { ImagePlacement } from '../paint/imageMaterial';
 import type { GridSettings } from '../paint/grid';
 import type { Balloon, TextBox } from '../paint/text';
 import type { VectorStroke } from '../paint/vector';
@@ -208,6 +209,19 @@ export interface LinesLayer extends LayerBase {
 }
 
 /**
+ * Image material layer (Material palette, Edit > Register material): an image placed on the canvas
+ * whose position, scale and turn stay editable with the Object tool, optionally tiled; rendered by
+ * the engine from the image, which is kept with the document.
+ */
+export interface ImageLayer extends LayerBase {
+  kind: 'image';
+  blend: BlendMode;
+  placement: ImagePlacement;
+  /** Changes with every edit (never reused), so rendered pixels can be cached. */
+  rev: number;
+}
+
+/**
  * Audio layer (Animation > New animation layer > Audio, File > Import > Audio): a track of the
  * timeline whose clips play sound files; hidden, it is muted. It has no pixels.
  */
@@ -249,7 +263,7 @@ export interface MovieFile {
   height: number;
 }
 
-export type Layer = RasterLayer | FolderLayer | CorrectionLayer | VectorLayer | TextLayer | GradientLayer | FillLayer | LinesLayer | AudioLayer | MovieLayer;
+export type Layer = RasterLayer | FolderLayer | CorrectionLayer | VectorLayer | TextLayer | GradientLayer | FillLayer | LinesLayer | ImageLayer | AudioLayer | MovieLayer;
 
 /** Layers that take part in the picture (all but audio layers). */
 export type DrawnLayer = Exclude<Layer, AudioLayer>;

@@ -6,7 +6,9 @@ import * as anim from '../../store/animationActions';
 import * as sound from '../../store/soundActions';
 import * as light from '../../store/lightTableActions';
 import { isCameraFolder, maskTrackId } from '../../model/animation';
-import type { Layer } from '../../model/types';
+import type { ImageLayer, Layer } from '../../model/types';
+import { EMPTY_CONTENT } from '../../paint/objects';
+import { TILING_DIRECTIONS, TILING_MODES, type ImagePlacement, type TilingDirection, type TilingMode } from '../../paint/imageMaterial';
 import type { Interp, Placement, PlacementChannel } from '../../paint/keyframes';
 import { currentSubTool, drawingColor, getState, setState, useStore } from '../../store/store';
 import { pxToPt, setTextStyle, setTextWrap, textToolStyle } from '../../store/textActions';
@@ -558,8 +560,13 @@ function ObjectSettings({ sub, update, more }: { sub: SubTool; update: (patch: P
     const l = actions.activeLayer(s);
     return l?.kind === 'lines' && !s.maskEditing ? l : null;
   });
+  const image = useStore((s) => {
+    const l = actions.activeLayer(s);
+    return l?.kind === 'image' && !s.maskEditing ? l : null;
+  });
   if (audio) return <AudioTrackSettings />;
   if (lines && !keyed) return <LinesObjectSettings layer={lines} more={more} />;
+  if (image && !keyed) return <ImageObjectSettings layer={image} />;
   if (fill && !keyed)
     return (
       <>
@@ -577,6 +584,89 @@ function ObjectSettings({ sub, update, more }: { sub: SubTool; update: (patch: P
       </>
     );
   return keyed ? <KeyframeSettings track={keyed} /> : <ObjectLineSettings sub={sub} update={update} />;
+}
+
+/** Object tool on an image material layer: Image material (scale ratio, rotation, interpolation, flips) and Tiling. */
+function ImageObjectSettings({ layer }: { layer: ImageLayer }) {
+  const p = layer.placement;
+  const change = (patch: Partial<ImagePlacement>, label: string, key?: string) =>
+    actions.setLayerContent(layer.id, { ...EMPTY_CONTENT, image: { ...p, ...patch } }, label, key ? `image:${layer.id}:${key}` : undefined);
+  const scale = Math.round(Math.abs(p.sx) * 1000) / 10;
+  return (
+    <>
+      <div className="prop-section">Image material</div>
+      <PropSlider
+        testId="prop-image-scale"
+        label="Scale ratio"
+        value={scale}
+        min={1}
+        max={1000}
+        log
+        step={0.1}
+        decimals={1}
+        unit="%"
+        onChange={(v) => {
+          const k = v / 100 / Math.max(1e-6, Math.abs(p.sx));
+          change({ sx: p.sx * k, sy: p.sy * k }, 'Scale ratio', 'scale');
+        }}
+      />
+      <PropSlider
+        testId="prop-image-rotation"
+        label="Rotation angle"
+        value={Math.round(((((p.rotation * 180) / Math.PI + 540) % 360) - 180) * 10) / 10}
+        min={-180}
+        max={180}
+        step={0.5}
+        decimals={1}
+        unit="°"
+        onChange={(v) => change({ rotation: (v * Math.PI) / 180 }, 'Rotation angle', 'rotation')}
+      />
+      <div className="prop-row">
+        <span className="prop-label">Interpolation method</span>
+        <select className="prop-select" aria-label="Interpolation method" value={p.hardEdges ? 'hard' : 'smooth'} onChange={(e) => change({ hardEdges: e.target.value === 'hard' }, 'Interpolation method')}>
+          <option value="smooth">Smooth edges (bilinear)</option>
+          <option value="hard">Hard edges (nearest neighbor)</option>
+        </select>
+      </div>
+      <div className="prop-row">
+        <button className="btn small" onClick={() => change({ sx: -p.sx }, 'Flip horizontal')}>
+          Flip horizontal
+        </button>
+        <button className="btn small" onClick={() => change({ sy: -p.sy }, 'Flip vertical')}>
+          Flip vertical
+        </button>
+      </div>
+      <div className="prop-section">Tiling</div>
+      <label className="check prop-check">
+        <input type="checkbox" checked={p.tiling !== null} onChange={(e) => change({ tiling: e.target.checked ? 'repeat' : null }, 'Tiling')} />
+        Tiling
+      </label>
+      {p.tiling && (
+        <>
+          <div className="prop-row">
+            <span className="prop-label">Repetition</span>
+            <select className="prop-select" aria-label="Repetition" value={p.tiling} onChange={(e) => change({ tiling: e.target.value as TilingMode }, 'Tiling')}>
+              {TILING_MODES.map(([v, l]) => (
+                <option key={v} value={v}>
+                  {l}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="prop-row">
+            <span className="prop-label">Tiling direction</span>
+            <select className="prop-select" aria-label="Tiling direction" value={p.tilingDirection} onChange={(e) => change({ tilingDirection: e.target.value as TilingDirection }, 'Tiling direction')}>
+              {TILING_DIRECTIONS.map(([v, l]) => (
+                <option key={v} value={v}>
+                  {l}
+                </option>
+              ))}
+            </select>
+          </div>
+        </>
+      )}
+    </>
+  );
 }
 
 /** Object tool on an audio track: its volume at the current frame (with volume keyframes: a keyframe there). */

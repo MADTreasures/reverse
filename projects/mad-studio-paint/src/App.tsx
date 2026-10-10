@@ -1,3 +1,7 @@
+import { MaterialStrip } from './ui/palettes/MaterialPalette';
+import { applyMaterial, MATERIAL_MIME, useMaterials } from './store/materialActions';
+import { apply as applyMatrix, invert } from './paint/viewMath';
+import { controller } from './tools/controller';
 import { useEffect, useState } from 'react';
 import { handleDroppedFiles } from './io/documentIO';
 import { isElectron } from './platform/platform';
@@ -130,6 +134,14 @@ function RightDock() {
   );
 }
 
+/** A point of the window (client px) on the document. */
+function clientToDoc(x: number, y: number): { x: number; y: number } | undefined {
+  const canvas = document.querySelector('[data-testid=paint-canvas]');
+  if (!canvas) return undefined;
+  const r = canvas.getBoundingClientRect();
+  return applyMatrix(invert(controller.view.matrix), x - r.left, y - r.top);
+}
+
 export function App() {
   const hidden = useStore((s) => s.palettesHidden);
   const menuHidden = useStore((s) => s.menuHidden);
@@ -137,6 +149,7 @@ export function App() {
   const name = useStore((s) => s.doc.name);
   const dirty = useStore((s) => s.dirty);
   const timelineShown = useStore((s) => s.timelineShown);
+  const stripShown = useMaterials((s) => s.stripShown);
   const [dragOver, setDragOver] = useState(false);
 
   useEffect(() => {
@@ -144,6 +157,10 @@ export function App() {
       if (e.dataTransfer?.types.includes('Files')) {
         e.preventDefault();
         setDragOver(true);
+      } else if (e.dataTransfer?.types.includes(MATERIAL_MIME) && e.target instanceof Element && e.target.closest('.canvas-window, [data-testid=layer-panel]')) {
+        // Materials can be dropped on the canvas or the Layer palette.
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'copy';
       }
     };
     const leave = (e: DragEvent) => {
@@ -151,6 +168,13 @@ export function App() {
     };
     const drop = (e: DragEvent) => {
       setDragOver(false);
+      const material = e.dataTransfer?.getData(MATERIAL_MIME);
+      if (material) {
+        e.preventDefault();
+        const onCanvas = e.target instanceof Element && e.target.closest('.canvas-window') !== null;
+        applyMaterial(material, onCanvas ? clientToDoc(e.clientX, e.clientY) : undefined);
+        return;
+      }
       // The Sub View palette takes dropped images as reference images itself.
       if (!e.dataTransfer?.files.length || e.defaultPrevented) return;
       e.preventDefault();
@@ -185,6 +209,7 @@ export function App() {
           <StatusBar />
         </main>
         {!hidden && <RightDock />}
+        {!hidden && stripShown && <MaterialStrip />}
       </div>
       {dragOver && <div className="drop-hint">Drop on the canvas to open · drop images on the Layer palette to add them as layers</div>}
       <AdvancedToolSettings />

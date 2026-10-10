@@ -13,9 +13,10 @@ import { strFromU8, strToU8, unzipSync, zipSync } from 'fflate';
 import { isBlendMode } from '../model/blend';
 import { clampCanvasSide } from '../model/document';
 import { createAudioLayer, createRasterLayer, flatten, nextRev } from '../model/layers';
-import type { AudioLayer, CorrectionLayer, FillLayer, FolderLayer, GradientLayer, Id, Layer, LayerMask, LayerRulers, LinesLayer, MovieFile, MovieLayer, PaintDocument, RasterLayer, TextLayer, VectorLayer } from '../model/types';
+import type { AudioLayer, CorrectionLayer, FillLayer, FolderLayer, GradientLayer, Id, ImageLayer, Layer, LayerMask, LayerRulers, LinesLayer, MovieFile, MovieLayer, PaintDocument, RasterLayer, TextLayer, VectorLayer } from '../model/types';
 import { sanitizeGradientFill } from '../paint/gradient';
 import { sanitizeEffectLines, type EffectLines } from '../paint/effectLines';
+import { sanitizePlacement } from '../paint/imageMaterial';
 import { sanitizeEffects } from '../paint/effects';
 import { sanitizeRuler, type Ruler } from '../paint/rulers';
 import { sanitizeCorrection } from '../paint/tonal';
@@ -215,6 +216,13 @@ function sanitizeLayer(raw: unknown, seen: Set<string>, depth: number, files: Se
       return layer;
     }
   }
+  if (r.kind === 'image') {
+    const placement = sanitizePlacement(r.placement);
+    if (placement) {
+      const layer: ImageLayer = { ...common, kind: 'image', blend: isBlendMode(r.blend) ? r.blend : 'normal', placement, rev: nextRev() };
+      return layer;
+    }
+  }
   if (r.kind === 'lines') {
     const items = Array.isArray(r.items) ? r.items.slice(0, 1000).map((x) => sanitizeEffectLines(x)).filter((x): x is EffectLines => x !== null) : [];
     const layer: LinesLayer = { ...common, kind: 'lines', blend: isBlendMode(r.blend) ? r.blend : 'normal', items, rev: nextRev() };
@@ -322,13 +330,13 @@ function documentJson(doc: PaintDocument): unknown {
   const pack = (layers: Layer[]): unknown[] =>
     layers.map((l) => {
       if (l.kind === 'vector') return packVectorLayer(l);
-      if (l.kind === 'text' || l.kind === 'gradient' || l.kind === 'fill' || l.kind === 'lines') {
+      if (l.kind === 'text' || l.kind === 'gradient' || l.kind === 'fill' || l.kind === 'lines' || l.kind === 'image') {
         const { rev: _rev, ...rest } = l;
         return rest;
       }
       return l.kind === 'folder' ? { ...l, children: pack(l.children) } : l;
     });
-  return flatten(doc.layers).some((l) => l.kind === 'vector' || l.kind === 'text' || l.kind === 'gradient' || l.kind === 'fill' || l.kind === 'lines') ? { ...doc, layers: pack(doc.layers) } : doc;
+  return flatten(doc.layers).some((l) => l.kind === 'vector' || l.kind === 'text' || l.kind === 'gradient' || l.kind === 'fill' || l.kind === 'lines' || l.kind === 'image') ? { ...doc, layers: pack(doc.layers) } : doc;
 }
 
 export function packDocument(file: DocumentFile): Uint8Array {

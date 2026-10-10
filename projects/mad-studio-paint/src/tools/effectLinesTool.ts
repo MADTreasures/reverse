@@ -26,7 +26,7 @@ const MIN_DRAG_PX = 4;
 /** Toning: the lines are grey, so the tone shows them as dots. */
 const TONING_GREY = '#808080';
 
-type Placement = Pick<EffectLines, 'cx' | 'cy' | 'rx' | 'ry' | 'rotation'> & Partial<Pick<EffectLines, 'fx' | 'fy' | 'angle'>>;
+export type Placement = Pick<EffectLines, 'cx' | 'cy' | 'rx' | 'ry' | 'rotation'> & Partial<Pick<EffectLines, 'fx' | 'fy' | 'angle'>>;
 
 /** A special ruler that applies now (with special snapping on): radial ones give a centre, parallel ones an angle. */
 function specialRuler(): { center?: Pt; angle?: number } {
@@ -45,7 +45,7 @@ const colorOf = (c: LinesColor, user: string): string => {
 };
 
 /** The new lines of a sub tool at a place (on a lines layer: with the settings of the lines already there). */
-function newLines(o: EffectLinesSettings, at: Placement, like: EffectLines | null): EffectLines {
+export function newLines(o: EffectLinesSettings, at: Placement, like: EffectLines | null): EffectLines {
   const base: EffectLines = like
     ? like
     : {

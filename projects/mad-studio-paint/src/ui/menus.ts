@@ -53,6 +53,8 @@ export const MENUS: MenuSpec[] = [
       '-',
       'imageResolution',
       'canvasSize',
+      '-',
+      { label: 'Register material', items: ['registerMaterial'] },
     ],
   },
   {
@@ -199,6 +201,7 @@ export const MENUS: MenuSpec[] = [
       '-',
       ...PALETTE_NAMES.map(([id]) => (id === 'animationCels' ? 'animationCels' : `win-${id}`)),
       'toggleTimeline',
+      'win-material',
       '-',
       'togglePalettes',
       'toggleMenuBar',

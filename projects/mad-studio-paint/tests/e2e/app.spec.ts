@@ -1526,10 +1526,10 @@ test('balloons: drawn over text, with a tail; the Object tool moves balloon and 
   let l = (await state(page)).layers[0];
   expect(l.balloons).toHaveLength(1);
   await expect(page.getByTestId('balloon-icon')).toHaveCount(1);
-  // The text is centred in the balloon.
+  // The text is centred in the balloon (dragged with the mouse: to a pixel at any zoom).
   const t = l.texts[0];
-  expect(t.x + t.w / 2).toBeCloseTo(180, 0);
-  expect(t.y + t.h / 2).toBeCloseTo(130, 0);
+  expect(Math.abs(t.x + t.w / 2 - 180)).toBeLessThanOrEqual(1);
+  expect(Math.abs(t.y + t.h / 2 - 130)).toBeLessThanOrEqual(1);
   await useSubTool(page, 'balloon', 'balloon-tail');
   await drag(page, [180, 160], [120, 260], 8);
   l = (await state(page)).layers[0];
@@ -4402,14 +4402,23 @@ test('selection functions: color gamut, expand/shrink with corner type, blur bor
       }
       return { n, soft, x0, x1 };
     });
-  // Red on the left, blue on the right.
+  // Red on the left, blue on the right (exact halves, whatever the zoom).
   await selectTool(page, 'select');
-  await page.evaluate(() => window.__madPaint.actions.setDrawingColor('#ff0000'));
-  await drag(page, [0, 0], [200, 300]);
-  await page.evaluate(() => window.__madPaint.actions.fillWithColor());
-  await page.evaluate(() => window.__madPaint.actions.setDrawingColor('#0000ff'));
-  await drag(page, [200, 0], [400, 300]);
-  await page.evaluate(() => window.__madPaint.actions.fillWithColor());
+  const fillColumns = (x0: number, x1: number, color: string) =>
+    page.evaluate(
+      ([a, b, c]) => {
+        const m = window.__madPaint;
+        const { width, height } = m.useStore.getState().doc;
+        const data = new Uint8Array(width * height);
+        for (let y = 0; y < height; y++) for (let x = a; x < b; x++) data[y * width + x] = 255;
+        m.actions.setSelection({ width, height, data }, 'Select');
+        m.actions.setDrawingColor(c);
+        m.actions.fillWithColor();
+      },
+      [x0, x1, color] as const,
+    );
+  await fillColumns(0, 200, '#ff0000');
+  await fillColumns(200, 400, '#0000ff');
   await page.keyboard.press('ControlOrMeta+d');
   expect(await sel()).toBeNull();
   // Select color gamut: click red, then add blue; OK is one undo step.
@@ -4716,5 +4725,97 @@ test('Comic tool: focus lines, flash and speed lines layers, edited with the Obj
     ['lines', 'focus', true],
     ['raster', null, null],
   ]);
+  expect(errors).toEqual([]);
+});
+
+test('Material palette: patterns become image material layers (Object tool, tiling), tones, lines, registered materials, favourites', async ({ page }) => {
+  const errors = await boot(page);
+  const layers = () => page.evaluate(() => window.__madPaint.useStore.getState().doc.layers.map((l: any) => ({ kind: l.kind, name: l.name, tiling: l.placement?.tiling ?? null, tone: Boolean(l.effects?.tone) })));
+  const alphaOf = (id: string, x: number, y: number) => page.evaluate(([i, px, py]) => window.__madPaint.engine.sampleLayer(i, px, py)?.[3] ?? -1, [id, x, y] as const);
+  // The strip at the right edge opens the palette at a folder.
+  await page.getByRole('button', { name: 'Material [Color pattern]' }).click();
+  const palette = page.getByTestId('material-palette');
+  await expect(palette).toBeVisible();
+  // Color pattern > Pattern (the first of the two Pattern folders).
+  await palette.getByRole('button', { name: 'Pattern', exact: true }).first().click();
+  await expect(palette.getByRole('option', { name: 'Polka dots' })).toBeVisible();
+  await palette.getByLabel('Search materials').fill('polka');
+  await expect(palette.getByRole('option')).toHaveCount(1);
+  // Dragged onto the canvas: a tiled image material layer covering the canvas.
+  await palette.getByRole('option', { name: 'Polka dots' }).dragTo(page.getByTestId('paint-canvas'), { targetPosition: { x: 200, y: 150 } });
+  expect((await layers())[0]).toEqual({ kind: 'image', name: 'Polka dots', tiling: 'repeat', tone: false });
+  const pattern = await page.evaluate(() => window.__madPaint.useStore.getState().doc.layers[0].id);
+  expect(await alphaOf(pattern, 2, 2)).toBe(255);
+  expect(await alphaOf(pattern, 397, 297)).toBe(255);
+  // The Object tool selects it; without tiling only one copy shows, at its place.
+  await page.keyboard.press('Escape');
+  await selectTool(page, 'object');
+  const at = await docToScreen(page, 200, 150);
+  await page.mouse.click(at.x, at.y);
+  expect(await page.evaluate(() => window.__madPaint.useStore.getState().selectedObjects)).toEqual(['image']);
+  await page.getByRole('button', { name: 'Tool Settings', exact: true }).click();
+  await page.getByTestId('tool-property').getByLabel('Tiling', { exact: true }).uncheck();
+  expect((await layers())[0].tiling).toBeNull();
+  expect(await alphaOf(pattern, 2, 2)).toBe(0);
+  await page.keyboard.press('ControlOrMeta+z');
+  expect((await layers())[0].tiling).toBe('repeat');
+  // A tone material makes a tone layer, an effect lines material a lines layer.
+  await page.getByRole('button', { name: 'Material [Monochromatic pattern]' }).click();
+  await palette.getByLabel('Search materials').fill('');
+  await palette.getByRole('option', { name: 'Dot 30%' }).click();
+  await palette.getByRole('button', { name: 'Paste material to canvas' }).click();
+  expect((await layers())[0]).toMatchObject({ kind: 'fill', tone: true });
+  await page.getByRole('button', { name: 'Material [Manga material]' }).click();
+  await palette.getByRole('option', { name: 'Burst' }).dblclick();
+  expect((await layers())[0]).toMatchObject({ kind: 'lines', name: 'Burst' });
+  // Favourites.
+  await palette.getByRole('option', { name: 'Burst' }).click();
+  await palette.getByRole('button', { name: 'Add to favorites' }).click();
+  await page.getByRole('button', { name: 'Material [Favorites]' }).click();
+  await expect(palette.getByRole('option')).toHaveText(['Burst']);
+  await page.keyboard.press('Escape');
+  await expect(palette).toHaveCount(0);
+  // Edit > Register material > Image: the drawing on Layer 1 becomes a material.
+  await page.evaluate(() => {
+    const m = window.__madPaint;
+    const s = m.useStore.getState();
+    m.actions.selectLayer(s.doc.layers.find((l: any) => l.kind === 'raster').id);
+  });
+  await selectTool(page, 'select');
+  await drag(page, [40, 40], [100, 80]);
+  await page.evaluate(() => {
+    const a = window.__madPaint.actions;
+    a.setDrawingColor('#ff0000');
+    a.fillWithColor();
+  });
+  await openMenu(page, 'Edit', 'Register material', 'registerMaterial');
+  const dlg = page.getByRole('dialog', { name: 'Material property' });
+  await dlg.getByLabel('Material name').fill('Red box');
+  await dlg.getByLabel('Search tags').fill('Box, Red');
+  await dlg.getByRole('button', { name: 'OK' }).click();
+  await expect(palette.getByRole('option', { name: 'Red box' })).toBeVisible();
+  await page.keyboard.press('ControlOrMeta+d');
+  await palette.getByRole('option', { name: 'Red box' }).dblclick();
+  // New layers go above the selected one (Layer 1).
+  expect(await layers()).toContainEqual({ kind: 'image', name: 'Red box', tiling: null, tone: false });
+  // Image material layers come back from the file with their image.
+  const reopened = await page.evaluate(async () => {
+    const m = window.__madPaint;
+    const bytes = await m.buildDocumentBytes();
+    m.actions.newDocument('Other', 100, 100, 72, '#ffffff');
+    await m.openFileBytes({ name: 'materials.madpaint', data: bytes });
+    const s = m.useStore.getState();
+    const images = s.doc.layers.filter((l: any) => l.kind === 'image');
+    return images.map((l: any) => [l.name, m.engine.sampleLayer(l.id, Math.round(l.placement.cx), Math.round(l.placement.cy))?.[3] ?? -1]);
+  });
+  expect(reopened).toEqual([
+    ['Polka dots', expect.any(Number)],
+    ['Red box', 255],
+  ]);
+  // Registered materials stay after a restart.
+  await page.reload();
+  await page.waitForFunction(() => window.__madPaint !== undefined);
+  await page.getByRole('button', { name: 'Material [Image material]' }).click();
+  await expect(page.getByTestId('material-palette').getByRole('option', { name: 'Red box' })).toBeVisible();
   expect(errors).toEqual([]);
 });

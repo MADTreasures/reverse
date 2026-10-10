@@ -3,7 +3,8 @@
  * The document structure (layer tree, flags) lives in the store; this module owns the pixels.
  */
 import { flatten, maskIds, pixelIds, renderedIds } from '../model/layers';
-import type { GradientLayer, Id, LinesLayer, PaintDocument, TextLayer, VectorLayer } from '../model/types';
+import type { GradientLayer, Id, ImageLayer, LinesLayer, PaintDocument, TextLayer, VectorLayer } from '../model/types';
+import { keptImages, placementMatrix, tileBlock, type ImagePlacement } from '../paint/imageMaterial';
 import { renderGradient, type GradientFill } from '../paint/gradient';
 import { drawEffectLines, type EffectLines } from '../paint/effectLines';
 import { HistoryStack } from '../paint/history';
@@ -16,7 +17,7 @@ import { renderTextLayer } from './textRender';
 import { createCanvas, ctx2d, maskToCanvas } from './canvas';
 import type { OnionSkin } from '../paint/animation';
 import type { Placement } from '../paint/keyframes';
-import { docLightImages, type LightLayer } from '../paint/lightTable';
+import type { LightLayer } from '../paint/lightTable';
 import { Compositor } from './compositor';
 import { patchBytes, type PixelPatch } from './edit';
 import { deleteSurface, ensureSurface, getSurface, resizeSurfaces, setSurface, surfaceIds, touch } from './surfaces';
@@ -45,6 +46,44 @@ const maskBytes = (m: Mask | null | undefined) => (m ? m.data.byteLength : 0);
 const lineIds = (strokes: VectorStroke[]) => strokes.map((s) => s.id).join(',');
 
 /** A gradient layer's pixels (its colours are stored resolved). */
+/** An image material layer's pixels: its image where it is placed, tiled when it is. */
+function drawImageLayer(ctx: CanvasRenderingContext2D, p: ImagePlacement): void {
+  const img = getSurface(p.image);
+  if (!img) return;
+  const m = placementMatrix(p);
+  ctx.save();
+  ctx.imageSmoothingEnabled = !p.hardEdges;
+  ctx.imageSmoothingQuality = 'high';
+  if (!p.tiling) {
+    ctx.setTransform(m[0], m[1], m[2], m[3], m[4], m[5]);
+    ctx.drawImage(img, 0, 0);
+  } else {
+    // A block of copies (mirrored or turned for Flip and Reverse) repeats as a pattern.
+    const block = tileBlock(p.tiling, p.tilingDirection);
+    let tile: HTMLCanvasElement = img;
+    if (block.cols > 1 || block.rows > 1) {
+      tile = createCanvas(p.w * block.cols, p.h * block.rows);
+      const t = ctx2d(tile);
+      for (let r = 0; r < block.rows; r++)
+        for (let c = 0; c < block.cols; c++) {
+          const [fx, fy] = block.flip(c, r);
+          t.save();
+          t.translate(c * p.w + (fx ? p.w : 0), r * p.h + (fy ? p.h : 0));
+          t.scale(fx ? -1 : 1, fy ? -1 : 1);
+          t.drawImage(img, 0, 0);
+          t.restore();
+        }
+    }
+    const pattern = ctx.createPattern(tile, p.tilingDirection === 'both' ? 'repeat' : p.tilingDirection === 'horizontal' ? 'repeat-x' : 'repeat-y');
+    if (pattern) {
+      pattern.setTransform(new DOMMatrix([m[0], m[1], m[2], m[3], m[4], m[5]]));
+      ctx.fillStyle = pattern;
+      ctx.fillRect(0, 0, ctx.canvas.width, ctx.canvas.height);
+    }
+  }
+  ctx.restore();
+}
+
 function drawGradientFill(ctx: CanvasRenderingContext2D, fill: GradientFill): void {
   const { width, height } = ctx.canvas;
   const img = ctx.createImageData(width, height);
@@ -124,7 +163,7 @@ class PaintEngine {
   /** Renders vector and text layers whose content changed (new lines, erasing, typing, undo …). */
   private syncVectors(doc: PaintDocument): void {
     for (const l of flatten(doc.layers)) {
-      if (l.kind !== 'vector' && l.kind !== 'text' && l.kind !== 'gradient' && l.kind !== 'fill' && l.kind !== 'lines') continue;
+      if (l.kind !== 'vector' && l.kind !== 'text' && l.kind !== 'gradient' && l.kind !== 'fill' && l.kind !== 'lines' && l.kind !== 'image') continue;
       const known = getSurface(l.id);
       const sized = known && known.width === doc.width && known.height === doc.height;
       if (sized && this.vectorRevs.get(l.id) === l.rev) continue;
@@ -144,7 +183,8 @@ class PaintEngine {
         ctx.fillRect(0, 0, surface.width, surface.height);
       } else if (l.kind === 'lines') {
         for (const item of l.items) drawEffectLines(ctx, item, { x: 0, y: 0, w: surface.width, h: surface.height });
-      } else drawGradientFill(ctx, l.gradient);
+      } else if (l.kind === 'image') drawImageLayer(ctx, l.placement);
+      else drawGradientFill(ctx, l.gradient);
       this.vectorRevs.set(l.id, l.rev);
       touch(l.id);
       this.compositor?.invalidate();
@@ -199,6 +239,18 @@ class PaintEngine {
     const ctx = ctx2d(surface);
     ctx.clearRect(0, 0, surface.width, surface.height);
     for (const item of items) drawEffectLines(ctx, item, { x: 0, y: 0, w: surface.width, h: surface.height });
+    this.vectorRevs.delete(layer.id);
+    touch(layer.id);
+    this.invalidate();
+  }
+
+  /** Shows an image material layer placed elsewhere while a tool changes it. */
+  previewImage(layer: ImageLayer, placement: ImagePlacement): void {
+    const surface = getSurface(layer.id);
+    if (!surface) return;
+    const ctx = ctx2d(surface);
+    ctx.clearRect(0, 0, surface.width, surface.height);
+    drawImageLayer(ctx, placement);
     this.vectorRevs.delete(layer.id);
     touch(layer.id);
     this.invalidate();
@@ -365,8 +417,8 @@ class PaintEngine {
 
   /** Resizes all surfaces (canvas size changes). Pixels are anchored at the offset. */
   resizeCanvas(width: number, height: number, offsetX = 0, offsetY = 0): void {
-    // Light table images keep their size.
-    resizeSurfaces(width, height, offsetX, offsetY, new Set(this.currentDoc ? docLightImages(this.currentDoc) : []));
+    // Light table and material images keep their size.
+    resizeSurfaces(width, height, offsetX, offsetY, new Set(this.currentDoc ? keptImages(this.currentDoc) : []));
     this.compositor.resize(width, height);
   }
 
@@ -374,7 +426,7 @@ class PaintEngine {
   gc(): void {
     const keep = new Set<Id>();
     const add = (doc: PaintDocument | undefined) => {
-      if (doc) for (const id of [...pixelIds(doc.layers), ...renderedIds(doc.layers), ...docLightImages(doc)]) keep.add(id);
+      if (doc) for (const id of [...pixelIds(doc.layers), ...renderedIds(doc.layers), ...keptImages(doc)]) keep.add(id);
     };
     add(this.currentDoc ?? undefined);
     for (const e of this.history.entries()) {

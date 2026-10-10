@@ -1,8 +1,9 @@
 import { uid } from './ids';
 import type { Correction } from '../paint/tonal';
-import type { AudioLayer, CorrectionLayer, DrawnLayer, FillLayer, FolderLayer, GradientLayer, Id, Layer, LayerMask, LinesLayer, MovieLayer, PaintDocument, RasterLayer, TextLayer, VectorLayer } from './types';
+import type { AudioLayer, CorrectionLayer, DrawnLayer, FillLayer, FolderLayer, GradientLayer, Id, ImageLayer, Layer, LayerMask, LinesLayer, MovieLayer, PaintDocument, RasterLayer, TextLayer, VectorLayer } from './types';
 import type { GradientFill } from '../paint/gradient';
 import type { EffectLines } from '../paint/effectLines';
+import type { ImagePlacement } from '../paint/imageMaterial';
 import { remapTrack } from '../paint/animation';
 import { newLightId } from '../paint/lightTable';
 
@@ -113,6 +114,25 @@ export function createGradientLayer(name: string, gradient: GradientFill, patch:
     reference: false,
     draft: false,
     gradient,
+    rev: nextRev(),
+    ...patch,
+  };
+}
+
+/** An image material layer. */
+export function createImageLayer(name: string, placement: ImagePlacement, patch: Partial<ImageLayer> = {}): ImageLayer {
+  return {
+    id: uid('i'),
+    kind: 'image',
+    name,
+    visible: true,
+    opacity: 1,
+    blend: 'normal',
+    clip: false,
+    locked: false,
+    reference: false,
+    draft: false,
+    placement,
     rev: nextRev(),
     ...patch,
   };
@@ -260,9 +280,9 @@ export function pixelIds(layers: Layer[]): Id[] {
   return ids;
 }
 
-/** Ids of vector, text, gradient, fill and lines layers (their pixels are rendered from their content). */
+/** Ids of vector, text, gradient, fill, lines and image material layers (their pixels are rendered from their content). */
 export const renderedIds = (layers: Layer[]): Id[] =>
-  flatten(layers).flatMap((l) => (l.kind === 'vector' || l.kind === 'text' || l.kind === 'gradient' || l.kind === 'fill' || l.kind === 'lines' ? [l.id] : []));
+  flatten(layers).flatMap((l) => (l.kind === 'vector' || l.kind === 'text' || l.kind === 'gradient' || l.kind === 'fill' || l.kind === 'lines' || l.kind === 'image' ? [l.id] : []));
 
 /** Ids of all layer masks. */
 export const maskIds = (layers: Layer[]): Id[] => flatten(layers).flatMap((l) => (l.mask ? [l.mask.id] : []));
@@ -392,7 +412,7 @@ export function cloneLayer(layer: Layer, idMap: Map<Id, Id> = new Map()): { copy
   const copyOne = (l0: Layer): Layer => {
     // Light table layers of a copied cel are its own.
     const l: Layer = l0.lightTable ? { ...l0, lightTable: l0.lightTable.map((e) => ({ ...e, id: newLightId() })) } : l0;
-    const id = uid(l.kind === 'folder' ? 'f' : l.kind === 'correction' ? 'c' : l.kind === 'vector' ? 'v' : l.kind === 'text' ? 't' : l.kind === 'gradient' ? 'g' : l.kind === 'fill' ? 'p' : l.kind === 'lines' ? 'e' : 'l');
+    const id = uid(l.kind === 'folder' ? 'f' : l.kind === 'correction' ? 'c' : l.kind === 'vector' ? 'v' : l.kind === 'text' ? 't' : l.kind === 'gradient' ? 'g' : l.kind === 'fill' ? 'p' : l.kind === 'lines' ? 'e' : l.kind === 'image' ? 'i' : 'l');
     idMap.set(l.id, id);
     const mask = copyMask(l.mask);
     if (l.kind === 'folder') {
@@ -405,6 +425,8 @@ export function cloneLayer(layer: Layer, idMap: Map<Id, Id> = new Map()): { copy
     if (l.kind === 'text') return { ...l, id, mask, texts: [...l.texts], balloons: [...l.balloons], rev: nextRev() };
     if (l.kind === 'gradient' || l.kind === 'fill') return { ...l, id, mask, rev: nextRev() };
     if (l.kind === 'lines') return { ...l, id, mask, items: [...l.items], rev: nextRev() };
+    // The image never changes, so the copy shows the same one.
+    if (l.kind === 'image') return { ...l, id, mask, rev: nextRev() };
     return { ...l, id, mask };
   };
   return { copy: copyOne(layer), idMap };

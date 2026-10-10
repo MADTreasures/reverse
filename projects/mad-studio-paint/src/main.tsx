@@ -10,6 +10,7 @@ import { sanitizeOnion } from './paint/animation';
 import { sanitizeApprox, sanitizeCorners, sanitizeTileGrid } from './paint/colorGrids';
 import { isPaletteId } from './model/palettes';
 import { loadSubView } from './store/subView';
+import { loadMaterials } from './store/materialActions';
 import * as light from './store/lightTableActions';
 import * as actions from './store/actions';
 import * as anim from './store/animationActions';
@@ -130,6 +131,7 @@ async function boot(): Promise<void> {
   startAutosave();
   // The Sub View palette's images of the last session.
   void loadSubView();
+  void loadMaterials();
   syncTitle();
   // A movie picture decoded later shows as soon as it is there.
   onMovieFrame(() => engine.invalidate());

@@ -16,6 +16,7 @@ export type LayerType =
   | 'tone'
   | 'focusLines'
   | 'speedLines'
+  | 'image'
   | 'correction'
   | 'folder'
   | 'frame'
@@ -36,6 +37,7 @@ export const LAYER_TYPES: [LayerType, string][] = [
   ['tone', 'Tone layer'],
   ['focusLines', 'Focus lines layer'],
   ['speedLines', 'Speed lines layer'],
+  ['image', 'Image material layer'],
   ['correction', 'Correction layer'],
   ['folder', 'Layer folder'],
   ['frame', 'Frame border folder'],

@@ -24,6 +24,7 @@ import { openImageExport, openPsdDuplicate } from './dialogs/ExportDialog';
 import { openColorSettings } from './dialogs/ColorSettingsDialog';
 import { IMAGE_FORMAT_ORDER, IMAGE_FORMATS } from '../io/imageExport';
 import { formatShortcut, normalizeShortcut } from './shortcuts';
+import { toggleMaterialStrip, useMaterials } from '../store/materialActions';
 
 export interface Command {
   id: string;
@@ -427,6 +428,8 @@ export const COMMANDS: Command[] = [
   { id: 'newAudioTrack', label: 'Audio', run: () => void sound.newAudioTrack(), enabled: () => Boolean(getState().doc.timeline) },
   { id: 'deleteAudioTrack', label: 'Delete audio layer', run: () => sound.deleteSoundTrack(), enabled: () => sound.activeSoundTrack() !== null },
   { id: 'toggleTimeline', label: 'Timeline', run: () => anim.toggleTimelinePalette(), checked: () => getState().timelineShown },
+  { id: 'win-material', label: 'Material', run: () => toggleMaterialStrip(), checked: () => useMaterials.getState().stripShown },
+  { id: 'registerMaterial', label: 'Image…', run: () => openDialog('registerMaterial'), enabled: () => actions.editTarget() !== null },
   // Window: palettes shown or hidden (Animation cels has its own command above).
   ...PALETTE_NAMES.filter(([id]) => id !== 'animationCels').map(([id, name]) => ({
     id: `win-${id}`,

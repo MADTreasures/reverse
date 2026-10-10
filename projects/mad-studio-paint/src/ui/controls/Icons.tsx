@@ -360,6 +360,61 @@ const paths: Record<string, ReactNode> = {
     </>
   ),
   speedLines: <path d="M3 5h14M6 8h11M3 11h14M8 14h9M4.5 17h10" />,
+  imageLayer: (
+    <>
+      <rect x="3" y="4" width="14" height="12" rx="1" />
+      <circle cx="7.5" cy="8" r="1.4" />
+      <path d="M3.5 15l4.5-4.5 3 3 2-2 3.5 3.5" />
+    </>
+  ),
+  material: (
+    <>
+      <rect x="3" y="3" width="6" height="6" rx="0.8" />
+      <rect x="11" y="3" width="6" height="6" rx="0.8" />
+      <rect x="3" y="11" width="6" height="6" rx="0.8" />
+      <rect x="11" y="11" width="6" height="6" rx="0.8" />
+    </>
+  ),
+  colorPattern: (
+    <>
+      <path d="M10 3.5 16.5 10 10 16.5 3.5 10z" />
+      <path d="M10 3.5v13M3.5 10h13" />
+    </>
+  ),
+  monoPattern: (
+    <>
+      <path d="M10 3.5 16.5 10 10 16.5 3.5 10z" />
+      <circle cx="10" cy="7" r="0.9" />
+      <circle cx="7" cy="10" r="0.9" />
+      <circle cx="13" cy="10" r="0.9" />
+      <circle cx="10" cy="13" r="0.9" />
+    </>
+  ),
+  mangaMaterial: (
+    <>
+      <rect x="3" y="3" width="14" height="14" rx="0.8" />
+      <path d="M3 9.5h8M11 3v14M11 12h6" />
+    </>
+  ),
+  rename: <path d="M4 15.5 4.6 12l8.2-8.2 2.9 2.9-8.2 8.2zM11.4 5.2l2.9 2.9M3.5 17.5h13" />,
+  listView: <path d="M3 5h2M3 10h2M3 15h2M7.5 5H17M7.5 10H17M7.5 15H17" />,
+  largeThumbs: (
+    <>
+      <rect x="3" y="3" width="6" height="6" />
+      <rect x="11" y="3" width="6" height="6" />
+      <rect x="3" y="11" width="6" height="6" />
+      <rect x="11" y="11" width="6" height="6" />
+    </>
+  ),
+  smallThumbs: <path d="M3 3h3v3H3zM8.5 3h3v3h-3zM14 3h3v3h-3zM3 8.5h3v3H3zM8.5 8.5h3v3h-3zM14 8.5h3v3h-3zM3 14h3v3H3zM8.5 14h3v3h-3zM14 14h3v3h-3z" />,
+  heart: <path d="M10 16.5s-6.5-4-6.5-8.3A3.3 3.3 0 0 1 10 6.6a3.3 3.3 0 0 1 6.5 1.6c0 4.3-6.5 8.3-6.5 8.3z" />,
+  pasteMaterial: (
+    <>
+      <rect x="4" y="4" width="9" height="12" rx="1" />
+      <path d="M8 3h5l3 3v7" />
+      <path d="M8.5 10h5M11 7.5 13.5 10 11 12.5" />
+    </>
+  ),
   link: <path d="M8.5 11.5a3 3 0 0 0 4.2 0l2.6-2.6a3 3 0 0 0-4.2-4.2l-.8.8M11.5 8.5a3 3 0 0 0-4.2 0l-2.6 2.6a3 3 0 0 0 4.2 4.2l.8-.8" />,
   trash: (
     <>

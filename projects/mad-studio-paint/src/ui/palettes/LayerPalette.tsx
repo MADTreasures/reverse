@@ -427,6 +427,11 @@ function LayerRow({ layer, depth, drag, setDrag, drop, setDrop }: RowsProps & { 
             <Icon name="fill" size={16} />
           </span>
         )}
+        {layer.kind === 'image' && (
+          <span className="vector-icon" title={`Image material layer${layer.placement.tiling ? ' (tiled)' : ''}`} data-testid="image-icon">
+            <Icon name="imageLayer" size={16} />
+          </span>
+        )}
         {layer.kind === 'lines' && (
           <span className="vector-icon" title={layer.items[0]?.kind === 'speed' ? 'Speed lines layer' : 'Focus lines layer'} data-testid="lines-icon">
             <Icon name={layer.items[0]?.kind === 'speed' ? 'speedLines' : 'focusLines'} size={16} />

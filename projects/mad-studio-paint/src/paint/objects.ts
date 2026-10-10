@@ -6,6 +6,7 @@
 import { distanceToEdge, polygonBounds, transformPanel, type FramePanel } from './frames';
 import type { GradientFill } from './gradient';
 import { hitEffectLines, referenceBounds, transformEffectLines, type EffectLines } from './effectLines';
+import { hitPlacement, placementBounds, transformPlacement, type ImagePlacement } from './imageMaterial';
 import type { Affine, Pt } from './rulers';
 import {
   balloonBody,
@@ -34,23 +35,42 @@ export interface Content {
   gradient?: GradientFill;
   /** The focus / speed lines of a lines layer. */
   lines?: EffectLines[];
+  /** The image of an image material layer (object id IMAGE_ID). */
+  image?: ImagePlacement;
 }
+
+/** Object id of an image material layer's image. */
+export const IMAGE_ID = 'image';
 
 /** Object id of a gradient layer's gradient. */
 export const GRADIENT_ID = 'gradient';
 
 export const EMPTY_CONTENT: Content = { strokes: [], texts: [], balloons: [], panels: [] };
 
-export const contentOf = (l: { kind: string; strokes?: VectorStroke[]; texts?: TextBox[]; balloons?: Balloon[]; frame?: { panels: FramePanel[] }; gradient?: GradientFill; items?: EffectLines[] }): Content => ({
+export const contentOf = (l: {
+  kind: string;
+  strokes?: VectorStroke[];
+  texts?: TextBox[];
+  balloons?: Balloon[];
+  frame?: { panels: FramePanel[] };
+  gradient?: GradientFill;
+  items?: EffectLines[];
+  placement?: ImagePlacement;
+}): Content => ({
   strokes: l.strokes ?? [],
   texts: l.texts ?? [],
   balloons: l.balloons ?? [],
   panels: l.frame?.panels ?? [],
   ...(l.gradient ? { gradient: l.gradient } : {}),
   ...(l.items ? { lines: l.items } : {}),
+  ...(l.placement ? { image: l.placement } : {}),
 });
 
-export const objectIds = (c: Content): string[] => [...[...c.strokes, ...c.balloons, ...c.texts, ...c.panels, ...(c.lines ?? [])].map((o) => o.id), ...(c.gradient ? [GRADIENT_ID] : [])];
+export const objectIds = (c: Content): string[] => [
+  ...[...c.strokes, ...c.balloons, ...c.texts, ...c.panels, ...(c.lines ?? [])].map((o) => o.id),
+  ...(c.gradient ? [GRADIENT_ID] : []),
+  ...(c.image ? [IMAGE_ID] : []),
+];
 
 const applyTo = (m: Affine, p: Pt): Pt => ({ x: m[0] * p.x + m[2] * p.y + m[4], y: m[1] * p.x + m[3] * p.y + m[5] });
 
@@ -91,6 +111,7 @@ export function transformContent(c: Content, which: Set<string> | null, m: Affin
     panels: c.panels.map((p) => (picked(p.id) ? transformPanel(p, m) : p)),
     ...(c.gradient ? { gradient: picked(GRADIENT_ID) ? { ...c.gradient, a: applyTo(m, c.gradient.a), b: applyTo(m, c.gradient.b) } : c.gradient } : {}),
     ...(c.lines ? { lines: c.lines.map((e) => (picked(e.id) ? transformEffectLines(e, m) : e)) } : {}),
+    ...(c.image ? { image: picked(IMAGE_ID) ? transformPlacement(c.image, m) : c.image } : {}),
   };
 }
 
@@ -128,6 +149,7 @@ export function warpContent(c: Content, which: Set<string> | null, map: (p: Pt) 
     panels: c.panels.map((p) => (picked(p.id) ? { ...p, points: p.points.map(map) } : p)),
     ...(c.gradient ? { gradient: picked(GRADIENT_ID) ? { ...c.gradient, a: map(c.gradient.a), b: map(c.gradient.b) } : c.gradient } : {}),
     ...(c.lines ? { lines: c.lines.map((e) => (picked(e.id) ? transformEffectLines(e, localAffine(map, { x: e.cx, y: e.cy })) : e)) } : {}),
+    ...(c.image ? { image: picked(IMAGE_ID) ? transformPlacement(c.image, localAffine(map, { x: c.image.cx, y: c.image.cy })) : c.image } : {}),
   };
 }
 
@@ -141,6 +163,7 @@ export function contentBounds(c: Content, which: Set<string> | null = null): Box
     ...c.panels.filter((p) => picked(p.id)).map((p) => polygonBounds(p.points)),
     ...(c.gradient && picked(GRADIENT_ID) ? [boundsOf([c.gradient.a, c.gradient.b], 4)] : []),
     ...(c.lines ?? []).filter((e) => picked(e.id)).map(referenceBounds),
+    ...(c.image && picked(IMAGE_ID) ? [placementBounds(c.image)] : []),
   ].filter((b): b is Box => b !== null);
   return boundsOf(boxes.flatMap((b) => [
     { x: b.x, y: b.y },
@@ -159,6 +182,7 @@ export function pickObject(c: Content, p: Pt, tolerance: number, frameLine = 0, 
   for (const panel of c.panels) if (distanceToEdge(panel.points, p) <= tolerance + frameLine / 2) return panel.id;
   // A gradient is picked on the line between its start and end.
   if (c.gradient && distanceToEdge([c.gradient.a, c.gradient.b], p) <= tolerance * 2) return GRADIENT_ID;
+  if (c.image && hitPlacement(c.image, p, tolerance)) return IMAGE_ID;
   return null;
 }
 
@@ -181,6 +205,7 @@ export function idsTouching(c: Content, inside: (p: Pt) => boolean): Set<string>
   }
   if (c.gradient && (inside(c.gradient.a) || inside(c.gradient.b))) ids.add(GRADIENT_ID);
   for (const e of c.lines ?? []) if (inside({ x: e.cx, y: e.cy })) ids.add(e.id);
+  if (c.image && inside({ x: c.image.cx, y: c.image.cy })) ids.add(IMAGE_ID);
   return ids;
 }
 

@@ -18,7 +18,7 @@ import { maskBounds } from '../paint/mask';
 import { hardenMask } from '../paint/effects';
 import { EXTENSION, IMAGE_EXTENSIONS, isDocumentFileName, isImageFileName, isPsdFileName, mimeForName, packDocument, PSD_EXTENSIONS, unpackDocument } from './format';
 import { idbDelete, idbGet, idbSet } from './idb';
-import { docLightImages } from '../paint/lightTable';
+import { keptImages } from '../paint/imageMaterial';
 import { clearSounds, mixSound, setSoundBytes, soundBytes } from '../engine/sounds';
 import { animationFolders, hasSound, soundMix, type AnimationFolder } from '../model/animation';
 import { celFileName, exposureSheetCsv, uniqueNames, type CelNameFormat } from './animationCels';
@@ -111,7 +111,7 @@ export async function buildDocumentBytes(): Promise<Uint8Array> {
   const doc = withoutQuickMask(state.doc);
   const activeLayerId = findLayer(doc.layers, state.activeLayerId) ? state.activeLayerId : (flatten(doc.layers)[0]?.id ?? state.activeLayerId);
   const layers = new Map<Id, Uint8Array>();
-  for (const id of [...pixelIds(doc.layers), ...docLightImages(doc)]) {
+  for (const id of [...pixelIds(doc.layers), ...keptImages(doc)]) {
     const s = getSurface(id);
     if (s) layers.set(id, await canvasToBytes(s));
   }

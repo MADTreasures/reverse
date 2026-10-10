@@ -13,10 +13,10 @@ import { cameraMatrix, invert, isRest, placementAt, placementMatrix, placedCorne
 import type { Affine } from '../paint/rulers';
 import { lightMatrix, type LightLayer } from '../paint/lightTable';
 import { clipGroups, findLayer, flatten, isDrawn } from '../model/layers';
-import type { BlendMode, CorrectionLayer, DrawnLayer, FillLayer, FolderBlendMode, FolderLayer, GradientLayer, Id, Layer, LayerMask, LinesLayer, MovieLayer, PaintDocument, RasterLayer, TextLayer, VectorLayer } from '../model/types';
+import type { BlendMode, CorrectionLayer, DrawnLayer, FillLayer, FolderBlendMode, FolderLayer, GradientLayer, Id, ImageLayer, Layer, LayerMask, LinesLayer, MovieLayer, PaintDocument, RasterLayer, TextLayer, VectorLayer } from '../model/types';
 
 /** Layers with pixels of their own (painted, rendered from content, or a movie's pictures). */
-type PixelLayer = RasterLayer | VectorLayer | TextLayer | GradientLayer | FillLayer | LinesLayer | MovieLayer;
+type PixelLayer = RasterLayer | VectorLayer | TextLayer | GradientLayer | FillLayer | LinesLayer | ImageLayer | MovieLayer;
 import { anyEffect, applyEdge, applyExpression, applyLayerColor, applyWatercolorEdge, effectReach, hardenMask, opacityInExpression } from '../paint/effects';
 import { applyDropShadow, applyInnerGlow, applyInnerShadow, applyOuterGlow } from '../paint/styles';
 import { inflate, intersect, union, type Rect } from '../paint/rect';
@@ -440,7 +440,7 @@ export class Compositor {
       this.pool.release(c);
       return;
     }
-    if (layer.kind === 'raster' || layer.kind === 'vector' || layer.kind === 'text' || layer.kind === 'gradient' || layer.kind === 'fill' || layer.kind === 'lines' || layer.kind === 'movie') {
+    if (layer.kind === 'raster' || layer.kind === 'vector' || layer.kind === 'text' || layer.kind === 'gradient' || layer.kind === 'fill' || layer.kind === 'lines' || layer.kind === 'image' || layer.kind === 'movie') {
       const s = this.pixels(layer);
       if (!s) return;
       if (!this.maskOf(layer) && !hasEffects(layer)) {

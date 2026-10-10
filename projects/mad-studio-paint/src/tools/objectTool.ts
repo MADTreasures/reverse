@@ -6,7 +6,8 @@
  * Settings changes colour, width, font and so on.
  */
 import { flatten, isEffectivelyVisible } from '../model/layers';
-import { contentBounds, contentOf, EMPTY_CONTENT, pickObject, transformContent, type Content } from '../paint/objects';
+import { contentBounds, contentOf, EMPTY_CONTENT, IMAGE_ID, pickObject, transformContent, type Content } from '../paint/objects';
+import { placementCorners } from '../paint/imageMaterial';
 import type { GradientFill } from '../paint/gradient';
 import type { GradientLayer, LinesLayer } from '../model/types';
 import { effectLinesGeometry, type EffectLines } from '../paint/effectLines';
@@ -364,6 +365,8 @@ function drawOutlines(ctx: CanvasRenderingContext2D, view: OverlayView, c: Conte
     }
     ctx.restore();
   }
+  // An image material: its (first) copy.
+  if (c.image && ids.has(IMAGE_ID)) poly(placementCorners(c.image), true);
   ctx.setLineDash([3, 3]);
   for (const t of c.texts) if (ids.has(t.id)) poly(frameCorners(t), true);
   ctx.restore();

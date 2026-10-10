@@ -1,3 +1,4 @@
+import { RegisterMaterialDialog } from './dialogs/MaterialDialogs';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { CanvasSizeDialog } from './dialogs/AdjustDialogs';
 import { FilterDialog } from './dialogs/FilterDialog';
@@ -104,6 +105,7 @@ export function OverlayHost() {
           {dialog.kind === 'custom' && dialog.id === 'drawAlongRuler' && <DrawAlongRulerDialog />}
           {dialog.kind === 'custom' && dialog.id === 'newTone' && <NewToneDialog />}
           {dialog.kind === 'custom' && dialog.id === 'gradient' && <GradientDialog />}
+          {dialog.kind === 'custom' && dialog.id === 'registerMaterial' && <RegisterMaterialDialog />}
         </div>
       )}
       <div className="toasts" aria-live="polite">
