@@ -3,6 +3,7 @@
  * corners), Blur border (range) and Select color gamut (stays open while colours are picked on the
  * canvas: error margin, new / add / delete, Refer multiple, Reset).
  */
+import { recordOp } from '../../store/autoActionStore';
 import { useEffect, useRef, useState } from 'react';
 import type { FillReference } from '../../paint/tools';
 import * as actions from '../../store/actions';
@@ -47,6 +48,7 @@ export function GrowSelectionDialog({ mode }: { mode: 'expand' | 'shrink' }) {
         last.grow = width;
         last.corners = corners;
         actions.growSelection(mode === 'expand' ? width : -width, corners);
+        recordOp(mode === 'expand' ? 'Expand selected area' : 'Shrink selected area', { kind: 'grow', px: mode === 'expand' ? width : -width, rounded: corners === 'rounded' });
         closeDialog();
       }}
     >

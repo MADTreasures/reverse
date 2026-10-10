@@ -1,3 +1,4 @@
+import { QUICK_ITEM_MIME } from '../quickItems';
 import { useState } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import { BRUSH_SIZE_PRESETS } from '../../store/actions';
@@ -70,6 +71,9 @@ export function ToolPalette() {
                 aria-label={e.label}
                 aria-pressed={active}
                 data-tool={e.tools[0]}
+                draggable
+                // Tools can be dropped on the Quick Access palette.
+                onDragStart={(ev) => ev.dataTransfer.setData(QUICK_ITEM_MIME, JSON.stringify({ kind: 'tool', tool: lastTool.get(e.id) ?? e.tools[0] }))}
                 onClick={() => !active && actions.setTool(lastTool.get(e.id) ?? e.tools[0])}
               >
                 <Icon name={e.icon} size={20} />
@@ -122,7 +126,14 @@ export function SubToolPalette() {
       </div>
       <div className="subtool-list">
         {shown.map((s) => (
-          <button key={s.id} className={`subtool ${s.id === active.id ? 'active' : ''} ${s.brush || s.effectLines ? 'with-stroke' : ''}`} data-subtool={s.id} onClick={() => actions.setSubTool(tool, s.id)}>
+          <button
+            key={s.id}
+            className={`subtool ${s.id === active.id ? 'active' : ''} ${s.brush || s.effectLines ? 'with-stroke' : ''}`}
+            data-subtool={s.id}
+            draggable
+            onDragStart={(e) => e.dataTransfer.setData(QUICK_ITEM_MIME, JSON.stringify({ kind: 'tool', tool, sub: s.id }))}
+            onClick={() => actions.setSubTool(tool, s.id)}
+          >
             {s.brush && <StrokePreview sub={s} />}
             {s.effectLines && <EffectLinesPreview style={s.effectLines.style} />}
             <span className="subtool-name">{s.name}</span>

@@ -61,7 +61,9 @@ describe('palettes', () => {
     }
     expect(stackOf('intermediateColor', 'default')).toBe('colorSet');
     expect(stackOf('colorWheel', 'classic')).toBe(stackOf('approximateColor', 'classic'));
-    expect(DEFAULT_HIDDEN_PALETTES).toEqual(['subView', 'intermediateColor', 'approximateColor', 'searchLayer']);
+    expect(DEFAULT_HIDDEN_PALETTES).toEqual(['subView', 'intermediateColor', 'approximateColor', 'searchLayer', 'quickAccess', 'autoAction']);
+    expect(stackOf('quickAccess', 'default')).toBe('colorSet');
+    expect(stackOf('autoAction', 'default')).toBe('layerProperty');
   });
 });
 

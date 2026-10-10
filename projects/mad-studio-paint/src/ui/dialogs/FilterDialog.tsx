@@ -4,6 +4,7 @@
  * computed in the background and shown on the canvas; filters with a centre show a red × there
  * that follows presses and drags on the canvas.
  */
+import { recordOp, setFilterPreset } from '../../store/autoActionStore';
 import { useEffect, useRef, useState } from 'react';
 import { FilterRunner } from '../../engine/filterRunner';
 import { defaultValues, filterSpec, type FilterId, type FilterParam, type FilterValues } from '../../paint/filters';
@@ -13,6 +14,10 @@ import { closeDialog } from '../overlays';
 
 /** Last settings of each filter in this session: a filter reopens with them, like the reference. */
 const lastValues = new Map<FilterId, FilterValues>();
+
+/** Settings the next dialog of a filter opens with (auto actions with Change settings on). */
+export const presetFilterValues = (id: FilterId, values: FilterValues) => lastValues.set(id, values);
+setFilterPreset(presetFilterValues);
 
 const keyOf = (v: FilterValues) => JSON.stringify(v);
 
@@ -94,6 +99,7 @@ export function FilterDialog({ id }: { id: FilterId }) {
       cur.s.preview.applyPixels(img, rect);
     }
     cur.s.preview.commit(spec.label);
+    recordOp(spec.label, { kind: 'filter', filter: id, values: { ...values } });
     closeDialog();
   };
 

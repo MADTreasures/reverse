@@ -1,4 +1,5 @@
 import { RegisterMaterialDialog } from './dialogs/MaterialDialogs';
+import { QuickAccessSettingsDialog } from './dialogs/QuickAccessSettingsDialog';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { CanvasSizeDialog } from './dialogs/AdjustDialogs';
 import { FilterDialog } from './dialogs/FilterDialog';
@@ -106,6 +107,7 @@ export function OverlayHost() {
           {dialog.kind === 'custom' && dialog.id === 'newTone' && <NewToneDialog />}
           {dialog.kind === 'custom' && dialog.id === 'gradient' && <GradientDialog />}
           {dialog.kind === 'custom' && dialog.id === 'registerMaterial' && <RegisterMaterialDialog />}
+          {dialog.kind === 'custom' && dialog.id === 'quickAccessSettings' && <QuickAccessSettingsDialog />}
         </div>
       )}
       <div className="toasts" aria-live="polite">
@@ -124,6 +126,8 @@ function backdropClass(dialog: NonNullable<ReturnType<typeof useOverlays.getStat
   if (dialog.kind === 'tonal' || (dialog.kind === 'custom' && dialog.id === 'centerCanvas')) return 'clear';
   // Select color gamut: clicks on the canvas pick colours while it is open.
   if (dialog.kind === 'custom' && dialog.id === 'colorGamut') return 'clear top pass';
+  // Quick Access Settings: the palette (and the rest of the window) stays usable.
+  if (dialog.kind === 'custom' && dialog.id === 'quickAccessSettings') return 'clear pass';
   return '';
 }
 
@@ -155,10 +159,12 @@ function PromptDialog({ title, value, onDone }: { title: string; value: string; 
 
 function ContextMenu({ x, y, items }: { x: number; y: number; items: MenuItem[] }) {
   const ref = useRef<HTMLDivElement>(null);
-  const [pos, setPos] = useState({ x, y });
+  const [pos, setPos] = useState({ x, y, flip: false });
   useLayoutEffect(() => {
     const r = ref.current!.getBoundingClientRect();
-    setPos({ x: Math.min(x, window.innerWidth - r.width - 4), y: Math.min(y, window.innerHeight - r.height - 4) });
+    const left = Math.min(x, window.innerWidth - r.width - 4);
+    // Submenus open to the left when there is no room on the right.
+    setPos({ x: left, y: Math.min(y, window.innerHeight - r.height - 4), flip: left + r.width * 2 > window.innerWidth });
   }, [x, y]);
   useEffect(() => {
     const close = (e: PointerEvent) => {
@@ -168,10 +174,21 @@ function ContextMenu({ x, y, items }: { x: number; y: number; items: MenuItem[] 
     return () => window.removeEventListener('pointerdown', close, true);
   }, []);
   return (
-    <div className="context-menu" ref={ref} style={{ left: pos.x, top: pos.y }} role="menu">
+    <div className={`context-menu ${pos.flip ? 'flip' : ''}`} ref={ref} style={{ left: pos.x, top: pos.y }} role="menu">
+      <ContextItems items={items} />
+    </div>
+  );
+}
+
+/** The items of a context menu; a submenu opens to the side while its item is hovered (or clicked). */
+function ContextItems({ items }: { items: MenuItem[] }) {
+  return (
+    <>
       {items.map((it, i) =>
         it.separator ? (
           <div key={i} className="menu-sep" />
+        ) : it.submenu ? (
+          <SubMenu key={i} item={it} />
         ) : (
           <button
             key={i}
@@ -188,6 +205,35 @@ function ContextMenu({ x, y, items }: { x: number; y: number; items: MenuItem[] 
             <span className="menu-shortcut">{it.shortcut ?? ''}</span>
           </button>
         ),
+      )}
+    </>
+  );
+}
+
+/** A submenu: kept inside the window (moved up when it would reach past the bottom). */
+function SubMenu({ item }: { item: MenuItem }) {
+  const [open, setOpen] = useState(false);
+  const [lift, setLift] = useState(0);
+  const ref = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    if (!open || !ref.current) return;
+    const r = ref.current.getBoundingClientRect();
+    // Where it would be without the lift.
+    const top = r.top + lift;
+    const over = r.bottom + lift - (window.innerHeight - 4);
+    setLift(over > 0 ? Math.max(0, Math.min(over, top - 4)) : 0);
+  }, [open]);
+  return (
+    <div className={`menu-sub ${open ? 'open' : ''} ${item.disabled ? 'disabled' : ''}`} onPointerEnter={() => !item.disabled && setOpen(true)} onPointerLeave={() => setOpen(false)}>
+      <button role="menuitem" className="menu-item" aria-haspopup="menu" aria-expanded={open} disabled={item.disabled} onClick={() => setOpen((o) => !o)}>
+        <span className="menu-check" />
+        <span className="menu-label">{item.label}</span>
+        <span className="menu-shortcut">▸</span>
+      </button>
+      {open && !item.disabled && (
+        <div ref={ref} className="menu-dropdown sub" style={{ display: 'flex', top: -4 - lift }} role="menu" aria-label={item.label}>
+          <ContextItems items={item.submenu!} />
+        </div>
       )}
     </div>
   );

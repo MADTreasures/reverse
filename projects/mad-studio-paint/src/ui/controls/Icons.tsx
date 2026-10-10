@@ -634,6 +634,12 @@ const paths: Record<string, ReactNode> = {
     </>
   ),
   removeCel: <path d="M5.5 2.5h6l3 3v12h-9zM7.8 9.3l4.4 4.4M12.2 9.3l-4.4 4.4" />,
+  autoAction: (
+    <>
+      <path d="M3 5h10M3 9h10M3 13h6" />
+      <path d="M12.5 11.5l5 3-5 3z" />
+    </>
+  ),
 };
 
 export function Icon({ name, size = 18 }: { name: string; size?: number }) {

@@ -18,7 +18,9 @@ export type PaletteId =
   | 'layer'
   | 'searchLayer'
   | 'history'
-  | 'animationCels';
+  | 'animationCels'
+  | 'quickAccess'
+  | 'autoAction';
 
 /** The names in the Window menu, in its order. */
 export const PALETTE_NAMES: [PaletteId, string][] = [
@@ -35,9 +37,11 @@ export const PALETTE_NAMES: [PaletteId, string][] = [
   ['navigator', 'Navigator'],
   ['subView', 'Sub View'],
   ['history', 'History'],
+  ['quickAccess', 'Quick Access'],
+  ['autoAction', 'Auto Action'],
 ];
 
-export const DEFAULT_HIDDEN_PALETTES: PaletteId[] = ['subView', 'intermediateColor', 'approximateColor', 'searchLayer'];
+export const DEFAULT_HIDDEN_PALETTES: PaletteId[] = ['subView', 'intermediateColor', 'approximateColor', 'searchLayer', 'quickAccess', 'autoAction'];
 
 /** The palette stack a palette is a tab of, in a workspace. */
 export function stackOf(id: PaletteId, workspace: WorkspaceId): string {
@@ -46,6 +50,7 @@ export function stackOf(id: PaletteId, workspace: WorkspaceId): string {
     case 'subView':
       return 'navigator';
     case 'layerProperty':
+    case 'autoAction':
       return 'layerProperty';
     case 'layer':
     case 'searchLayer':

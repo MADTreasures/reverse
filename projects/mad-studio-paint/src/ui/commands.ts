@@ -18,13 +18,15 @@ import { CORRECTIONS, correctionLabel, defaultCorrection, type CorrectionType } 
 import { FILTERS } from '../paint/filters';
 import { INBETWEEN_FILLED, INBETWEEN_OPEN } from '../paint/labels';
 import { applyFilterNow } from '../store/filterActions';
-import { openDialog, openFilterDialog, openTonalDialog, promptDialog } from './overlays';
+import { openDialog, openFilterDialog, openTonalDialog, promptDialog, useOverlays } from './overlays';
 import { openAssignMenu } from './palettes/TimelinePalette';
 import { openImageExport, openPsdDuplicate } from './dialogs/ExportDialog';
 import { openColorSettings } from './dialogs/ColorSettingsDialog';
 import { IMAGE_FORMAT_ORDER, IMAGE_FORMATS } from '../io/imageExport';
 import { formatShortcut, normalizeShortcut } from './shortcuts';
 import { toggleMaterialStrip, useMaterials } from '../store/materialActions';
+import { noteCommand, setCommandRunner } from '../store/autoActionStore';
+import { openQuickAccessSettings } from './palettes/QuickAccessPalette';
 
 export interface Command {
   id: string;
@@ -430,6 +432,7 @@ export const COMMANDS: Command[] = [
   { id: 'toggleTimeline', label: 'Timeline', run: () => anim.toggleTimelinePalette(), checked: () => getState().timelineShown },
   { id: 'win-material', label: 'Material', run: () => toggleMaterialStrip(), checked: () => useMaterials.getState().stripShown },
   { id: 'registerMaterial', label: 'Image…', run: () => openDialog('registerMaterial'), enabled: () => actions.editTarget() !== null },
+  { id: 'quickAccessSettings', label: 'Quick Access Settings…', run: () => openQuickAccessSettings() },
   // Window: palettes shown or hidden (Animation cels has its own command above).
   ...PALETTE_NAMES.filter(([id]) => id !== 'animationCels').map(([id, name]) => ({
     id: `win-${id}`,
@@ -472,5 +475,10 @@ export async function runCommand(id: string): Promise<void> {
   }
   const c = byId.get(id);
   if (!c || !isEnabled(c)) return;
+  const dialog = useOverlays.getState().dialog;
   await c.run();
+  // An auto action being recorded takes it in.
+  noteCommand(id, c.label, dialog);
 }
+
+setCommandRunner(runCommand);

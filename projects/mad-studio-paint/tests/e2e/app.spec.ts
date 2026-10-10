@@ -4819,3 +4819,269 @@ test('Material palette: patterns become image material layers (Object tool, tili
   await expect(page.getByTestId('material-palette').getByRole('option', { name: 'Red box' })).toBeVisible();
   expect(errors).toEqual([]);
 });
+
+test('Auto Action palette: records commands and filter settings, plays them (run / change settings switches, from a command), sets', async ({ page }) => {
+  const errors = await boot(page);
+  const run = (id: string) => page.evaluate((x) => window.__madPaint.runCommand(x), id);
+  const layerCount = () => page.evaluate(() => window.__madPaint.useStore.getState().doc.layers.length);
+  const applied = () =>
+    page.evaluate(() => {
+      const h = window.__madPaint.engine.history;
+      return h.entries().slice(0, h.undoCount).map((e: any) => e.label);
+    });
+  const alpha = (x: number, y: number) => layerAlpha(page, x, y);
+  // A black block on the left half of Layer 1.
+  await page.evaluate(() => {
+    const a = window.__madPaint.actions;
+    a.setDrawingColor('#000000');
+    a.setSelection({ width: 400, height: 300, data: new Uint8Array(400 * 300).map((_: number, i: number) => (i % 400 < 200 && i >= 50 * 400 && i < 250 * 400 ? 255 : 0)) });
+    a.fillWithColor();
+    a.deselect();
+  });
+  const start = await applied();
+  // Hidden at first, like in the reference; Window > Auto Action shows it in front of the Layer Property palette.
+  const tab = page.locator('[data-testid=layer-property-panel] .palette-tab', { hasText: 'Auto Action' });
+  await expect(tab).toHaveCount(0);
+  await run('win-autoAction');
+  await expect(tab).toHaveClass(/active/);
+  const palette = page.getByTestId('auto-action-palette');
+  const tree = palette.getByRole('tree', { name: 'Auto actions' });
+  await expect(tree.getByRole('treeitem', { name: 'New clipped raster layer' })).toBeVisible();
+
+  // Add auto action (named in a dialog), then record: Duplicate layer, Gaussian blur (its settings are kept), New raster layer.
+  await palette.getByRole('button', { name: 'Add auto action' }).click();
+  const named = page.getByRole('dialog', { name: 'Add auto action' });
+  await named.getByRole('textbox').fill('Blurred copy');
+  await named.getByRole('textbox').press('Enter');
+  const action = tree.getByRole('treeitem', { name: 'Blurred copy' });
+  await expect(action).toHaveAttribute('aria-selected', 'true');
+  await palette.getByRole('button', { name: 'Start recording auto action' }).click();
+  await expect(action).toHaveClass(/recording/);
+  await run('duplicateLayer');
+  await openMenu(page, 'Filter', 'Blur', 'filter-gaussianBlur');
+  const gauss = page.getByRole('dialog', { name: 'Gaussian blur' });
+  await gauss.getByRole('spinbutton', { name: 'Strength' }).fill('12');
+  await gauss.getByRole('button', { name: 'OK' }).click();
+  await expect(gauss).toBeHidden();
+  await run('newRasterLayer');
+  // Undo is not recorded; shortcuts are.
+  await run('undo');
+  await page.keyboard.press('ControlOrMeta+Shift+n');
+  await palette.getByRole('button', { name: 'Stop recording auto action' }).click();
+  await expect(action).not.toHaveClass(/recording/);
+  // The recorded commands, the filter's settings under it.
+  const steps = ['Duplicate layer', 'Gaussian blur', 'New raster layer', 'New raster layer'];
+  for (const s of new Set(steps)) await expect(tree.getByRole('treeitem', { name: s }).first()).toBeVisible();
+  await expect(tree.getByRole('treeitem', { name: 'New raster layer' })).toHaveCount(2);
+  await expect(palette.getByText('Strength : 12')).toBeVisible();
+  // The duplicate step is deleted (after OK).
+  await tree.getByRole('treeitem', { name: 'New raster layer' }).last().click();
+  await palette.getByRole('button', { name: 'Delete auto action' }).click();
+  await page.getByRole('dialog', { name: 'Delete auto action' }).getByRole('button', { name: 'OK' }).click();
+  await expect(tree.getByRole('treeitem', { name: 'New raster layer' })).toHaveCount(1);
+  expect((await applied()).slice(start.length)).toEqual(['Duplicate layer', 'Gaussian blur', 'New raster layer']);
+
+  // Back to the start, then Play: the same three steps, the copy blurred with the recorded strength.
+  const back = async () => {
+    while ((await applied()).length > start.length) await run('undo');
+  };
+  await back();
+  const layers0 = await layerCount();
+  await action.click();
+  await palette.getByRole('button', { name: 'Play auto action' }).click();
+  await expect.poll(applied).toEqual([...start, 'Duplicate layer', 'Gaussian blur', 'New raster layer']);
+  expect(await layerCount()).toBe(layers0 + 2);
+  await run('selectLayerBelow');
+  expect(await alpha(203, 150)).toBeGreaterThan(0);
+
+  // Run switch off: Gaussian blur is skipped.
+  await back();
+  await tree.getByRole('checkbox', { name: 'Run Gaussian blur' }).uncheck();
+  await expect(tree.getByRole('checkbox', { name: 'Run Blurred copy' })).not.toBeChecked();
+  await action.dblclick();
+  await expect.poll(applied).toEqual([...start, 'Duplicate layer', 'New raster layer']);
+  await tree.getByRole('checkbox', { name: 'Run Gaussian blur' }).check();
+
+  // Change settings switch on: the filter dialog opens with the recorded strength; the playback goes on after OK.
+  await back();
+  await tree.getByRole('checkbox', { name: 'Change settings of Gaussian blur' }).check();
+  await action.click();
+  await palette.getByRole('button', { name: 'Play auto action' }).click();
+  await expect(gauss).toBeVisible();
+  await expect(gauss.getByRole('spinbutton', { name: 'Strength' })).toHaveValue('12');
+  expect((await applied()).slice(start.length)).toEqual(['Duplicate layer']);
+  await gauss.getByRole('spinbutton', { name: 'Strength' }).fill('4');
+  await gauss.getByRole('button', { name: 'OK' }).click();
+  await expect.poll(applied).toEqual([...start, 'Duplicate layer', 'Gaussian blur', 'New raster layer']);
+  await tree.getByRole('checkbox', { name: 'Change settings of Gaussian blur' }).uncheck();
+
+  // Played from a selected command: the commands before it are left out.
+  await back();
+  await run('duplicateLayer');
+  await tree.getByRole('treeitem', { name: 'Gaussian blur' }).click();
+  await palette.getByRole('button', { name: 'Play auto action' }).click();
+  await expect.poll(applied).toEqual([...start, 'Duplicate layer', 'Gaussian blur', 'New raster layer']);
+
+  // The default set: a double click plays "New clipped raster layer".
+  const before = await layerCount();
+  await tree.getByRole('treeitem', { name: 'New clipped raster layer' }).dblclick();
+  await expect.poll(layerCount).toBe(before + 1);
+  expect(await page.evaluate(() => window.__madPaint.useStore.getState().doc.layers[0].clip)).toBe(true);
+
+  // Sets: a new set starts with one auto action; Copy auto action to different set puts a copy there.
+  await page.getByRole('button', { name: 'Auto Action palette menu' }).click();
+  await page.getByRole('menuitem', { name: 'Create new set…' }).click();
+  await page.getByRole('dialog', { name: 'Create new set' }).getByRole('textbox').fill('Comics');
+  await page.getByRole('dialog', { name: 'Create new set' }).getByRole('button', { name: 'OK' }).click();
+  const setSelect = palette.getByRole('combobox', { name: 'Auto action set' });
+  await expect(setSelect.locator('option:checked')).toHaveText('Comics');
+  await expect(tree.getByRole('treeitem')).toHaveCount(1);
+  await setSelect.selectOption({ label: 'Default' });
+  await action.click();
+  await page.getByRole('button', { name: 'Auto Action palette menu' }).click();
+  await page.getByRole('menuitem', { name: 'Copy auto action to different set' }).hover();
+  await page.getByRole('menu', { name: 'Copy auto action to different set' }).getByRole('menuitem', { name: 'Comics' }).click();
+  await setSelect.selectOption({ label: 'Comics' });
+  await expect(tree.getByRole('treeitem', { name: 'Blurred copy' })).toBeVisible();
+  // Button mode: the auto actions as buttons that play them.
+  await page.getByRole('button', { name: 'Auto Action palette menu' }).click();
+  await page.getByRole('menuitem', { name: 'Button mode' }).click();
+  const n = await layerCount();
+  await palette.getByRole('toolbar', { name: 'Auto action buttons' }).getByRole('button', { name: 'Blurred copy' }).click();
+  await expect.poll(layerCount).toBe(n + 2);
+  // Kept in the browser's storage.
+  const kept = await page.evaluate(() => JSON.parse(localStorage.getItem('mad-paint:auto-actions')!));
+  expect(kept.sets.map((s: any) => s.name)).toEqual(['Default', 'Comics']);
+  expect(kept.buttonMode).toBe(true);
+  expect(kept.sets[0].actions.find((a: any) => a.name === 'Blurred copy').steps.map((s: any) => s.op.kind)).toEqual(['command', 'filter', 'command']);
+  expect(errors).toEqual([]);
+});
+
+test('Quick Access palette: buttons run tools, colours, commands and auto actions; search; Quick Access Settings; sets and views', async ({ page }) => {
+  const errors = await boot(page);
+  const run = (id: string) => page.evaluate((x) => window.__madPaint.runCommand(x), id);
+  const layerCount = () => page.evaluate(() => window.__madPaint.useStore.getState().doc.layers.length);
+  const tab = page.locator('[data-testid=colorset-panel] .palette-tab', { hasText: 'Quick Access' });
+  await expect(tab).toHaveCount(0);
+  await run('win-quickAccess');
+  await expect(tab).toHaveClass(/active/);
+  const palette = page.getByTestId('quick-access-palette');
+  const buttons = palette.getByRole('toolbar', { name: 'Quick Access buttons' });
+  const labels = () => buttons.locator('.qa-btn, .qa-sep').evaluateAll((els) => els.map((e) => e.getAttribute('aria-label')));
+
+  // Set 2: sub tools, drawing colours and commands.
+  await palette.getByRole('tab', { name: 'Set 2' }).click();
+  await buttons.getByRole('button', { name: 'Pencil' }).click();
+  const s = await state(page);
+  expect(s.tool).toBe('pencil');
+  expect(s.activeSub.pencil).toBe('pencil');
+  await expect(buttons.getByRole('button', { name: 'Pencil' })).toHaveAttribute('aria-pressed', 'true');
+  await buttons.getByRole('button', { name: 'R:255 G:255 B:255' }).click();
+  expect((await state(page)).colors.main).toBe('#ffffff');
+  const n = await layerCount();
+  await buttons.getByRole('button', { name: 'New raster layer' }).click();
+  expect(await layerCount()).toBe(n + 1);
+  // Set 1: Undo.
+  await palette.getByRole('tab', { name: 'Set 1' }).click();
+  await buttons.getByRole('button', { name: 'Undo' }).click();
+  expect(await layerCount()).toBe(n);
+
+  // Search: results show where they are; faded ones cannot be run; the search is kept in the history.
+  const search = palette.getByRole('textbox', { name: 'Search functions' });
+  await search.fill('gaussian');
+  const results = palette.getByRole('listbox', { name: 'Search results' });
+  await expect(results.getByRole('option', { name: 'Gaussian blur' })).toContainText('(Menu commands > Filter > Blur)');
+  await results.getByRole('option', { name: 'Gaussian blur' }).click();
+  await expect(page.getByRole('dialog', { name: 'Gaussian blur' })).toBeVisible();
+  await page.getByRole('dialog', { name: 'Gaussian blur' }).getByRole('button', { name: 'Cancel' }).click();
+  await search.fill('blur border');
+  await expect(results.getByRole('option', { name: 'Blur border' })).toHaveAttribute('aria-disabled', 'true');
+  // Right click > Add to Quick Access > Set 1.
+  await search.fill('gaussian');
+  await results.getByRole('option', { name: 'Gaussian blur' }).click({ button: 'right' });
+  await page.getByRole('menuitem', { name: 'Add to Quick Access' }).hover();
+  await page.getByRole('menu', { name: 'Add to Quick Access' }).getByRole('menuitem', { name: 'Set 1' }).click();
+  await expect(buttons.getByRole('button', { name: 'Gaussian blur' })).toBeVisible();
+  await palette.getByRole('button', { name: 'Hide search results' }).click();
+  await expect(results).toHaveCount(0);
+  await palette.getByRole('button', { name: 'Search history' }).click();
+  await expect(page.getByRole('menuitem', { name: 'gaussian' })).toBeVisible();
+  await page.keyboard.press('Escape');
+  await page.mouse.click(700, 500);
+
+  // Quick Access Settings: a click on the palette selects a button; Add puts functions under it.
+  await page.getByRole('button', { name: 'Quick Access palette menu' }).click();
+  await page.getByRole('menuitem', { name: 'Quick Access Settings…' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Quick Access Settings' });
+  await expect(dialog).toBeVisible();
+  const layersBefore = await layerCount();
+  await buttons.getByRole('button', { name: 'Redo' }).click();
+  await expect(buttons.getByRole('button', { name: 'Redo' })).toHaveClass(/sel/);
+  expect(await layerCount()).toBe(layersBefore);
+  await dialog.getByRole('combobox', { name: 'Category' }).selectOption({ label: 'Tool' });
+  const funcs = dialog.getByRole('tree', { name: 'Functions' });
+  await funcs.getByRole('treeitem', { name: 'Pen', exact: true }).click();
+  await funcs.getByRole('treeitem', { name: 'Real G-pen – Pen' }).click();
+  await dialog.getByRole('button', { name: 'Add', exact: true }).click();
+  await dialog.getByRole('button', { name: 'Add separator' }).click();
+  await dialog.getByRole('combobox', { name: 'Category' }).selectOption({ label: 'Auto Action' });
+  await funcs.getByRole('treeitem', { name: 'Default' }).click();
+  await funcs.getByRole('treeitem', { name: 'New draft layer' }).click();
+  await dialog.getByRole('button', { name: 'Add', exact: true }).click();
+  await dialog.getByRole('combobox', { name: 'Category' }).selectOption({ label: 'Drawing color' });
+  await dialog.getByLabel('Drawing color to add').fill('#ff0000');
+  await dialog.getByRole('button', { name: 'Add', exact: true }).click();
+  let order = await labels();
+  const at = order.indexOf('Redo');
+  expect(order.slice(at, at + 5)).toEqual(['Redo', 'Real G-pen', 'Separator', 'New draft layer', 'R:255 G:0 B:0']);
+  // Settings names the selected button; Delete removes it.
+  await dialog.getByRole('button', { name: 'Settings…' }).click();
+  await dialog.getByRole('textbox', { name: 'Name' }).fill('Red');
+  await dialog.getByRole('button', { name: 'OK' }).click();
+  await expect(buttons.getByRole('button', { name: 'Red', exact: true })).toBeVisible();
+  await buttons.getByRole('button', { name: 'Cut' }).click();
+  await dialog.getByRole('button', { name: 'Delete' }).click();
+  await expect(buttons.getByRole('button', { name: 'Cut' })).toHaveCount(0);
+  // Dragged while the dialog is open: a button moves before the one it is dropped on.
+  await buttons.getByRole('button', { name: 'Red', exact: true }).dragTo(buttons.getByRole('button', { name: 'Undo' }), { targetPosition: { x: 4, y: 10 } });
+  order = await labels();
+  expect(order[0]).toBe('Red');
+  await dialog.getByRole('button', { name: 'Close' }).click();
+  await expect(dialog).toBeHidden();
+  // Closed: buttons run again (the auto action and the colour).
+  const m = await layerCount();
+  await buttons.getByRole('button', { name: 'New draft layer' }).click();
+  await expect.poll(layerCount).toBe(m + 1);
+  expect(await page.evaluate(() => window.__madPaint.useStore.getState().doc.layers[0].draft)).toBe(true);
+  await buttons.getByRole('button', { name: 'Red', exact: true }).click();
+  expect((await state(page)).colors.main).toBe('#ff0000');
+
+  // A sub tool dragged from the Sub Tool palette onto the buttons is added there.
+  await page.evaluate(() => window.__madPaint.actions.setTool('pen'));
+  await page.locator('[data-subtool=pen-g]').dragTo(buttons, { targetPosition: { x: 10, y: 5 } });
+  await expect(buttons.getByRole('button', { name: 'G-pen', exact: true })).toBeVisible();
+
+  // Palette menu: list view, sets as a pop-up, a new set.
+  await page.getByRole('button', { name: 'Quick Access palette menu' }).click();
+  await page.getByRole('menuitem', { name: 'View' }).hover();
+  await page.getByRole('menu', { name: 'View' }).getByRole('menuitem', { name: 'List (1 column)' }).click();
+  await expect(buttons).toHaveClass(/list/);
+  await page.getByRole('button', { name: 'Quick Access palette menu' }).click();
+  await page.getByRole('menuitem', { name: 'Create set…' }).click();
+  await page.getByRole('dialog', { name: 'Create set' }).getByRole('textbox').fill('Mine');
+  await page.getByRole('dialog', { name: 'Create set' }).getByRole('button', { name: 'OK' }).click();
+  await expect(palette.getByRole('tab', { name: 'Mine' })).toHaveAttribute('aria-selected', 'true');
+  await expect(buttons.locator('.qa-btn')).toHaveCount(0);
+  await page.getByRole('button', { name: 'Quick Access palette menu' }).click();
+  await page.getByRole('menuitem', { name: 'How to display set lists' }).hover();
+  await page.getByRole('menu', { name: 'How to display set lists' }).getByRole('menuitem', { name: 'Pop-up' }).click();
+  await palette.getByRole('combobox', { name: 'Quick Access set' }).selectOption({ label: 'Set 1' });
+  await expect(buttons.getByRole('button', { name: 'Red', exact: true })).toBeVisible();
+  // Kept in the browser's storage.
+  const kept = await page.evaluate(() => JSON.parse(localStorage.getItem('mad-paint:quick-access')!));
+  expect(kept.sets.map((x: any) => x.name)).toEqual(['Set 1', 'Set 2', 'Mine']);
+  expect(kept.view).toBe('list-1');
+  expect(kept.setList).toBe('popup');
+  expect(kept.history).toContain('gaussian');
+  expect(errors).toEqual([]);
+});

@@ -118,6 +118,22 @@
   color: #fff;
 }
 
+.menu-sub.open > .menu-item {
+  background: var(--select-row);
+  color: #fff;
+}
+
+.menu-sub.disabled:hover > .menu-item {
+  background: none;
+  color: inherit;
+}
+
+/* context menus near the right edge open their submenus to the left */
+.context-menu.flip .menu-dropdown.sub {
+  left: auto;
+  right: 100%;
+}
+
 .command-bar {
   display: flex;
   align-items: center;
@@ -4115,4 +4131,478 @@ body.canvas-only .modal * {
 
 .material-command-bar .spacer {
   flex: 1;
+}
+
+/* ------------------------------------------------------------------ auto action palette */
+
+.auto-action-palette {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.action-set-row {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  padding: 4px;
+  border-bottom: 1px solid var(--line);
+}
+
+.action-set-row .prop-select {
+  flex: 1;
+  min-width: 0;
+}
+
+.action-list {
+  flex: 1;
+  min-height: 90px;
+  overflow: auto;
+  padding: 2px 0;
+  background: var(--well);
+}
+
+.action-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 22px;
+  padding: 0 4px;
+  font-size: 11px;
+  cursor: default;
+  user-select: none;
+}
+
+.action-row:hover {
+  background: var(--bg-2);
+}
+
+.action-row.on {
+  background: var(--select-row);
+  color: #fff;
+}
+
+.action-row.step {
+  padding-left: 20px;
+}
+
+.action-row input[type='checkbox'] {
+  margin: 0;
+}
+
+.action-row.recording .action-name {
+  color: #ff8a80;
+}
+
+.action-row.drop-before {
+  box-shadow: inset 0 2px 0 var(--accent);
+}
+
+.action-row.drop-after {
+  box-shadow: inset 0 -2px 0 var(--accent);
+}
+
+/* the change settings switch of an auto action: on when one of its commands opens its dialog */
+.dialog-switch {
+  flex: none;
+  width: 11px;
+  height: 11px;
+  border: 1px solid var(--line-soft);
+  border-radius: 2px;
+}
+
+.dialog-switch.on {
+  background: var(--text-dim);
+}
+
+.folder-twist {
+  flex: none;
+  width: 14px;
+  color: var(--text-dim);
+  font-size: 10px;
+}
+
+.action-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.action-detail {
+  padding-left: 58px;
+  font-size: 10px;
+  line-height: 15px;
+  color: var(--text-faint);
+}
+
+.rec-dot {
+  display: inline-block;
+  flex: none;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #e04848;
+}
+
+.stop-square {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 1px;
+  background: var(--text);
+}
+
+.action-bar {
+  display: flex;
+  justify-content: flex-end;
+  gap: 2px;
+  padding: 3px 4px;
+  border-top: 1px solid var(--line);
+}
+
+.action-buttons {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 4px;
+  overflow: auto;
+}
+
+.action-button {
+  text-align: left;
+  padding: 4px 8px;
+}
+
+/* ------------------------------------------------------------------ quick access palette */
+
+.quick-access-palette {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 4px;
+}
+
+.qa-search {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.qa-search-row {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 0 2px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--well);
+}
+
+.qa-search-row .icon-btn {
+  min-width: 20px;
+  height: 20px;
+}
+
+.qa-search-input {
+  flex: 1;
+  min-width: 0;
+  height: 20px;
+  border: none;
+  background: none;
+  color: var(--text);
+  font-size: 11px;
+  outline: none;
+}
+
+.qa-results {
+  max-height: 160px;
+  overflow: auto;
+  border: 1px solid var(--line);
+  background: var(--bg-1);
+  box-shadow: 0 4px 12px #0006;
+}
+
+.qa-result {
+  display: flex;
+  gap: 4px;
+  padding: 3px 6px;
+  font-size: 11px;
+  white-space: nowrap;
+  cursor: default;
+}
+
+.qa-result:not(.faded):not(.none):hover {
+  background: var(--select-row);
+  color: #fff;
+}
+
+.qa-result.faded {
+  opacity: 0.45;
+}
+
+.qa-result.none {
+  color: var(--text-faint);
+}
+
+.qa-result-where {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--text-faint);
+}
+
+.qa-result:not(.faded):hover .qa-result-where {
+  color: #ffffffbb;
+}
+
+.qa-set-row .prop-select {
+  width: 100%;
+}
+
+.qa-set-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  min-height: 20px;
+}
+
+.qa-set-tab {
+  padding: 1px 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  color: var(--text-dim);
+  font-size: 11px;
+}
+
+.qa-set-tab.active {
+  background: var(--active-tab);
+  color: #fff;
+}
+
+.qa-buttons {
+  display: grid;
+  gap: 3px;
+  align-content: start;
+  min-height: 30px;
+}
+
+.qa-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  min-width: 0;
+  padding: 4px 2px;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  color: var(--text);
+  font-size: 10px;
+}
+
+.qa-buttons.tiles.no-names .qa-btn {
+  aspect-ratio: 1;
+  padding: 2px;
+}
+
+.qa-buttons.list .qa-btn {
+  flex-direction: row;
+  justify-content: flex-start;
+  gap: 6px;
+  padding: 0 6px;
+  font-size: 11px;
+}
+
+.qa-btn:hover {
+  background: var(--bg-3);
+}
+
+.qa-btn.on {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.qa-btn.off {
+  opacity: 0.4;
+}
+
+.qa-btn.missing .qa-name {
+  text-decoration: line-through;
+}
+
+.qa-btn.sel,
+.qa-sep.sel {
+  outline: 2px solid var(--accent-strong);
+  outline-offset: -1px;
+}
+
+.quick-access-palette.editing .qa-btn {
+  cursor: grab;
+}
+
+.qa-btn.drop-before {
+  box-shadow: -3px 0 0 var(--accent-strong);
+}
+
+.qa-btn.drop-after {
+  box-shadow: 3px 0 0 var(--accent-strong);
+}
+
+.qa-buttons.list .qa-btn.drop-before {
+  box-shadow: 0 -2px 0 var(--accent-strong);
+}
+
+.qa-buttons.list .qa-btn.drop-after {
+  box-shadow: 0 2px 0 var(--accent-strong);
+}
+
+.qa-icon {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  min-height: 18px;
+}
+
+.qa-name {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.qa-buttons.tiles .qa-name {
+  font-size: 9.5px;
+  line-height: 1.15;
+}
+
+.qa-initials {
+  min-width: 18px;
+  padding: 0 2px;
+  border: 1px solid currentColor;
+  border-radius: 3px;
+  font-size: 9.5px;
+  font-weight: 600;
+  line-height: 15px;
+  text-align: center;
+}
+
+.qa-swatch {
+  display: inline-block;
+  width: 16px;
+  height: 16px;
+  border: 1px solid var(--line-soft);
+  border-radius: 3px;
+}
+
+.qa-swatch.big {
+  width: 28px;
+  height: 28px;
+}
+
+.qa-swatch.on {
+  outline: 2px solid var(--accent-strong);
+}
+
+/* a separator: the buttons after it start a new row */
+.qa-sep {
+  grid-column: 1 / -1;
+  height: 1px;
+  margin: 2px 0;
+  background: var(--line-soft);
+}
+
+.qa-sep.drop-before {
+  box-shadow: 0 -2px 0 var(--accent-strong);
+}
+
+/* Quick Access Settings */
+.modal.qa-settings {
+  width: 580px;
+}
+
+.qa-settings-body {
+  display: flex;
+  gap: 12px;
+}
+
+.qa-settings-left {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.qa-func-list {
+  height: 300px;
+  overflow: auto;
+  border: 1px solid var(--line);
+  background: var(--well);
+}
+
+.qa-func {
+  padding: 3px 6px;
+  font-size: 12px;
+  white-space: nowrap;
+  cursor: default;
+  user-select: none;
+}
+
+.qa-func:hover {
+  background: var(--bg-3);
+}
+
+.qa-func.on {
+  background: var(--select-row);
+  color: #fff;
+}
+
+.qa-func.group {
+  color: var(--text-dim);
+  font-weight: 600;
+}
+
+.qa-func.added::after {
+  content: ' ✓';
+  color: var(--text-faint);
+}
+
+.qa-func .twist {
+  display: inline-block;
+  width: 12px;
+}
+
+.qa-settings-buttons {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 170px;
+}
+
+.qa-naming {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.qa-naming input {
+  flex: 1;
+}
+
+.qa-color-pick {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  height: 300px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  box-sizing: border-box;
+}
+
+.qa-color-swatches {
+  display: flex;
+  gap: 8px;
 }

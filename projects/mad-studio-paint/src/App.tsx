@@ -26,6 +26,8 @@ import { BrushSizePalette, SubToolPalette, ToolPalette, ToolProperty } from './u
 import { StatusBar } from './ui/StatusBar';
 import { TimelinePalette } from './ui/palettes/TimelinePalette';
 import { AnimationCelsPalette } from './ui/palettes/AnimationCelsPalette';
+import { QuickAccessPalette, quickAccessMenu } from './ui/palettes/QuickAccessPalette';
+import { AutoActionPalette, autoActionMenu } from './ui/palettes/AutoActionPalette';
 
 function LayerPaletteBody() {
   return (
@@ -69,6 +71,7 @@ function DefaultLeftDock() {
             { id: 'colorHistory', label: 'Color History', content: <ColorHistory /> },
             { id: 'intermediateColor', label: 'Intermediate Color', content: <IntermediateColor />, menu: intermediateMenu },
             { id: 'approximateColor', label: 'Approximate Color', content: <ApproximateColor />, menu: approximateMenu },
+            { id: 'quickAccess', label: 'Quick Access', content: <QuickAccessPalette />, menu: quickAccessMenu },
           ]}
         />
       </div>
@@ -96,6 +99,7 @@ function ClassicLeftDock() {
             { id: 'colorHistory', label: 'History', content: <ColorHistory /> },
             { id: 'intermediateColor', label: 'Intermediate', content: <IntermediateColor />, menu: intermediateMenu },
             { id: 'approximateColor', label: 'Approximate', content: <ApproximateColor />, menu: approximateMenu },
+            { id: 'quickAccess', label: 'Quick Access', content: <QuickAccessPalette />, menu: quickAccessMenu },
           ]}
         />
       </div>
@@ -116,7 +120,15 @@ function RightDock() {
             { id: 'subView', label: 'Sub View', content: <SubView />, menu: subViewMenu },
           ]}
         />
-        <Palette testId="layer-property-panel" className="layer-property-palette" tabs={[{ id: 'layerProperty', label: 'Layer Property', content: <LayerPropertyPalette /> }]} />
+        <Palette
+          testId="layer-property-panel"
+          className="layer-property-palette"
+          stack="layerProperty"
+          tabs={[
+            { id: 'layerProperty', label: 'Layer Property', content: <LayerPropertyPalette /> },
+            { id: 'autoAction', label: 'Auto Action', content: <AutoActionPalette />, menu: autoActionMenu },
+          ]}
+        />
         <Palette
           grow
           testId="layer-panel"

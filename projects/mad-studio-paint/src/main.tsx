@@ -8,7 +8,7 @@ import { native, isElectron, isMac } from './platform/platform';
 import { keyedTrackOf } from './model/animation';
 import { sanitizeOnion } from './paint/animation';
 import { sanitizeApprox, sanitizeCorners, sanitizeTileGrid } from './paint/colorGrids';
-import { isPaletteId } from './model/palettes';
+import { DEFAULT_HIDDEN_PALETTES, isPaletteId, PALETTE_NAMES, type PaletteId } from './model/palettes';
 import { loadSubView } from './store/subView';
 import { loadMaterials } from './store/materialActions';
 import * as light from './store/lightTableActions';
@@ -62,7 +62,7 @@ function persistPreferences(): void {
       ...(typeof p.showRulerBar === 'boolean' ? { showRulerBar: p.showRulerBar } : {}),
       ...(typeof p.snapGrid === 'boolean' ? { snapGrid: p.snapGrid } : {}),
       ...(p.colorSpace === 'hsv' || p.colorSpace === 'hls' ? { colorSpace: p.colorSpace } : {}),
-      ...(Array.isArray(p.hiddenPalettes) ? { hiddenPalettes: p.hiddenPalettes.filter(isPaletteId) } : {}),
+      ...(Array.isArray(p.hiddenPalettes) ? { hiddenPalettes: hiddenWithNewPalettes(p.hiddenPalettes.filter(isPaletteId), p.palettesKnown) } : {}),
       ...(p.paletteTabs && typeof p.paletteTabs === 'object' ? { paletteTabs: Object.fromEntries(Object.entries(p.paletteTabs).filter(([, v]) => typeof v === 'string')) as Record<string, string> } : {}),
       ...(p.intermediate && typeof p.intermediate === 'object'
         ? { intermediate: { corners: sanitizeCorners((p.intermediate as Record<string, unknown>).corners), grid: sanitizeTileGrid((p.intermediate as Record<string, unknown>).grid) } }
@@ -76,11 +76,17 @@ function persistPreferences(): void {
     const keys = ['workspace', 'showSelectionLauncher', 'loop', 'timelineShown', 'timelineHeight', 'onion', 'showGrid', 'showRulerBar', 'snapGrid', 'colorSpace', 'hiddenPalettes', 'paletteTabs', 'intermediate', 'approximate'] as const;
     if (keys.every((k) => s[k] === prev[k])) return;
     try {
-      localStorage.setItem(PREFS_KEY, JSON.stringify(Object.fromEntries(keys.map((k) => [k, s[k]]))));
+      localStorage.setItem(PREFS_KEY, JSON.stringify({ ...Object.fromEntries(keys.map((k) => [k, s[k]])), palettesKnown: PALETTE_NAMES.map(([id]) => id) }));
     } catch {
       // Ignore.
     }
   });
+}
+
+/** Saved hidden palettes, with palettes newer than the saved settings hidden as they are by default. */
+function hiddenWithNewPalettes(hidden: PaletteId[], known: unknown): PaletteId[] {
+  const seen = new Set(Array.isArray(known) ? known : ['navigator', 'subView', 'colorWheel', 'colorSlider', 'colorSet', 'intermediateColor', 'approximateColor', 'colorHistory', 'layerProperty', 'layer', 'searchLayer', 'history', 'animationCels']);
+  return [...new Set([...hidden, ...DEFAULT_HIDDEN_PALETTES.filter((id) => !seen.has(id))])];
 }
 
 /** Keeps the pixel engine in step with the document structure and selection in the store. */

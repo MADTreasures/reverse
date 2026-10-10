@@ -10,7 +10,8 @@ import { PolylineSelect } from '../tools/sessions';
 import { CurveInput } from '../tools/curveInput';
 import { cancelTransform, isTransforming } from '../tools/transform';
 import { CurveFigure } from '../tools/sessions';
-import { commandForShortcut, isEnabled } from './commands';
+import { commandForShortcut, isEnabled, runCommand } from './commands';
+import { noteCommand } from '../store/autoActionStore';
 import { closeMenu, isModalOpen, useOverlays } from './overlays';
 import { eventToShortcut, keyName } from './shortcuts';
 
@@ -97,7 +98,8 @@ export function installKeyboard(): void {
       if (cmd) {
         e.preventDefault();
         if (!e.repeat || ['undo', 'redo', 'brushSmaller', 'brushBigger', 'zoomIn', 'zoomOut', 'rotateLeft', 'rotateRight'].includes(cmd.id)) {
-          if (isEnabled(cmd)) void cmd.run();
+          // Through runCommand: an auto action being recorded takes it in.
+          if (isEnabled(cmd)) void runCommand(cmd.id);
         }
         return;
       }
@@ -139,13 +141,18 @@ export function installKeyboard(): void {
     held = null;
   });
 
+  // ⌘C / ⌘X / ⌘V come as clipboard events; an auto action being recorded takes them in too.
   document.addEventListener('copy', (e) => {
     if (isTextTarget(e.target) || isModalOpen()) return;
-    if (copy()) e.preventDefault();
+    if (!copy()) return;
+    e.preventDefault();
+    noteCommand('copy', 'Copy');
   });
   document.addEventListener('cut', (e) => {
     if (isTextTarget(e.target) || isModalOpen()) return;
-    if (cut()) e.preventDefault();
+    if (!cut()) return;
+    e.preventDefault();
+    noteCommand('cut', 'Cut');
   });
   document.addEventListener('paste', (e) => {
     if (isTextTarget(e.target) || isModalOpen()) return;
@@ -156,6 +163,6 @@ export function installKeyboard(): void {
         pasteImage(bmp);
         bmp.close();
       });
-    } else pasteImage();
+    } else if (pasteImage()) noteCommand('paste', 'Paste');
   });
 }

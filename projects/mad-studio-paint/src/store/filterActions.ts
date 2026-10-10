@@ -44,6 +44,19 @@ export function startFilter(): FilterSession | null {
 /** The rectangle filter `id` changes, or null when there is nothing for it to do. */
 export const filterRect = (session: FilterSession, id: FilterId, values: FilterValues): Rect | null => filterRegion(id, values, session.source, session.area, session.content);
 
+/** A filter with the given settings, without a dialog (auto actions). */
+export function applyFilterValues(id: FilterId, values: FilterValues): void {
+  const session = startFilter();
+  if (!session) return;
+  const rect = filterRect(session, id, values);
+  if (!rect) {
+    session.preview.cancel();
+    return;
+  }
+  session.preview.applyPixels(runFilter(id, session.source, values, rect, session.ctx), rect);
+  session.preview.commit(filterSpec(id).label);
+}
+
 /** Filters without settings (Blur, Sharpen, Smoothing …) run straight from the menu. */
 export function applyFilterNow(id: FilterId): void {
   const session = startFilter();
