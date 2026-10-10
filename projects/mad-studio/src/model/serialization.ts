@@ -14,7 +14,9 @@ import { defaultSynthParams } from './presets';
 import { MAX_BPM, MIN_BPM, ticksPerBar } from './timing';
 import { CURVE_MODES } from './automation';
 import { MAX_PLUGIN_LATENCY_OFFSET, MAX_TRACK_LATENCY_OFFSET_MS } from './latency';
+import { parseChannelSettings } from './channelSettings';
 import { NOTE_COLOR_COUNT, NOTE_PROPS, setNoteValue } from './notes';
+import { DEFAULT_SEND, sanitizeRoutes } from './routing';
 import { SCALES, type ScaleSpec, type ScaleType } from './scales';
 import type {
   AutomationData,
@@ -224,6 +226,8 @@ function parseChannel(v: unknown, i: number, mixerCount: number, samples: Record
     muted: bool(v.muted, false),
     mixerTrack: Math.round(num(v.mixerTrack, 0, 0, mixerCount - 1)),
   };
+  const settings = v.kind !== 'automation' ? parseChannelSettings(v.settings) : null;
+  if (settings) Object.assign(base, { settings });
   if (v.kind === 'synth') return { ...base, kind: 'synth', synth: parseSynth(v.synth) };
   if (v.kind === 'sampler') {
     const ch: Channel = { ...base, kind: 'sampler', sampler: parseSampler(v.sampler, samples) };
@@ -312,6 +316,15 @@ function parseMixerTrack(v: unknown, i: number): MixerTrack {
     input: parseTrackInput(v.input),
     armed: i > 0 && bool(v.armed, false),
     latencyOffset: num(v.latencyOffset, 0, -MAX_TRACK_LATENCY_OFFSET_MS, MAX_TRACK_LATENCY_OFFSET_MS),
+    ...(Array.isArray(v.routes) && i > 0
+      ? {
+          routes: v.routes.filter(isObj).map((r) => ({
+            to: Math.round(num(r.to, -1)),
+            level: num(r.level, DEFAULT_SEND, 0, 1),
+            ...(r.sidechain === true ? { sidechain: true } : {}),
+          })),
+        }
+      : {}),
   };
 }
 
@@ -348,6 +361,7 @@ export function parseProject(raw: unknown): Project {
 
   const mixerRaw = arr(raw.mixer).slice(0, 65);
   const mixer = (mixerRaw.length ? mixerRaw : [null]).map((m, i) => parseMixerTrack(m, i));
+  sanitizeRoutes(mixer);
 
   const channels = arr(raw.channels)
     .map((c, i) => parseChannel(c, i, mixer.length, samples))

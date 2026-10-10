@@ -122,11 +122,13 @@ void SynthInstrument::killAll (const BlockContext& ctx, int offset)
 void SynthInstrument::enforcePolyphony (double atTime) noexcept
 {
     // voice.ts enforcePolyphony(): alive = not ended and endTime > at; kill the oldest.
+    const int limit = voiceLimit.load (std::memory_order_relaxed);
+    const int most = limit > 0 ? std::min (limit, maxVoices) : maxVoices;
     int alive = 0;
     for (const auto& v : voices)
         alive += (v.active && v.endTime > atTime) ? 1 : 0;
 
-    while (alive > maxVoices)
+    while (alive > most)
     {
         Voice* oldest = nullptr;
         for (auto& v : voices)
@@ -692,11 +694,13 @@ void SamplerInstrument::handleEvent (const NoteEvent& e, const BlockContext& ctx
     v->chokeGroup = std::max (0, (int) std::lround (P (sampler::chokeGroup)));
     v->cutSelf = P (sampler::cutSelf) >= 0.5;
 
-    // voice.ts enforcePolyphony(voices, 32, t).
+    // voice.ts enforcePolyphony(voices, 32 or the channel's limit, t).
+    const int limit = voiceLimit.load (std::memory_order_relaxed);
+    const int most = limit > 0 ? std::min (limit, maxVoices) : maxVoices;
     int alive = 0;
     for (const auto& x : voices)
         alive += (x.active && x.endTime > e.time) ? 1 : 0;
-    while (alive > maxVoices)
+    while (alive > most)
     {
         Voice* oldest = nullptr;
         for (auto& x : voices)

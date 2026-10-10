@@ -85,6 +85,36 @@ export interface SamplerParams {
   gain: number;
 }
 
+export type ArpDirection = 'off' | 'up' | 'down' | 'upDown' | 'downUp' | 'random';
+
+/** FL Studio's channel arpeggiator (channel settings › Misc › Arpeggiator). */
+export interface ArpSettings {
+  direction: ArpDirection;
+  /** Octaves, 1..4. */
+  range: number;
+  /** Step length in ticks. */
+  time: number;
+  /** Note length as a share of the step, 0.05..1. */
+  gate: number;
+  /** How often each arpeggio note repeats, 1..8. */
+  repeat: number;
+  /** Chord a single held note is expanded to before it is arpeggiated (`none` or a chord id of scales.ts). */
+  chord: string;
+}
+
+/** Channel settings › Misc (FL Studio): polyphony, portamento and the arpeggiator. */
+export interface ChannelSettings {
+  /** Most voices sounding at once, 0 = the instrument's default (Polyphony › Max). */
+  polyphony: number;
+  /** One note at a time: a new note ends the previous one (Polyphony › Mono). */
+  mono: boolean;
+  /** Every note glides from the previous one (Polyphony › Porta). */
+  porta: boolean;
+  /** Glide time of portamento in seconds (Polyphony › Slide). */
+  glide: number;
+  arp: ArpSettings;
+}
+
 interface ChannelBase {
   id: Id;
   name: string;
@@ -96,6 +126,8 @@ interface ChannelBase {
   muted: boolean;
   /** Index into Project.mixer, 0 = master. */
   mixerTrack: number;
+  /** Absent = the defaults (channelSettings.ts). */
+  settings?: ChannelSettings;
 }
 
 export interface SynthChannel extends ChannelBase {
@@ -308,6 +340,16 @@ export type SlotType = EffectSlot['type'];
  */
 export type TrackInput = `stereo:${number}` | `mono:${number}`;
 
+/** A mixer send (FL Studio: route switch and send knob under a track). */
+export interface MixerRoute {
+  /** Target mixer track index (0 = master). */
+  to: number;
+  /** Send level knob 0..1 (see volumeToGain, 0.8 = unity). */
+  level: number;
+  /** Sidechain: the audio feeds the target's sidechain input (e.g. a ducking compressor) instead of its mix. */
+  sidechain?: boolean;
+}
+
 export interface MixerTrack {
   id: Id;
   name: string;
@@ -328,6 +370,8 @@ export interface MixerTrack {
    * all the others.
    */
   latencyOffset: number;
+  /** Where the track sends its audio; absent = to the master at unity (routing.ts). The master has none. */
+  routes?: MixerRoute[];
 }
 
 export interface SampleInfo {

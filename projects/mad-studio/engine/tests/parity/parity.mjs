@@ -260,6 +260,15 @@ for (const pattern of styled.patterns) {
     notes.sort((a, b) => a.start - b.start || a.key - b.key);
   }
 }
+// Channel settings: the chords arpeggiated over two octaves, the bass mono with portamento, the lead
+// limited to two voices (the voice limit is applied by each engine itself).
+const settingsFor = (name, patch) => {
+  const ch = styled.channels.find((c) => c.name === name);
+  if (ch) ch.settings = { polyphony: 0, mono: false, porta: false, glide: 0.08, arp: { direction: 'off', range: 1, time: 24, gate: 0.9, repeat: 1, chord: 'none' }, ...patch };
+};
+settingsFor('Chords', { arp: { direction: 'upDown', range: 2, time: 24, gate: 0.7, repeat: 1, chord: 'none' } });
+settingsFor('Bass', { mono: true, porta: true });
+settingsFor('Lead', { polyphony: 2 });
 const styledWeb = await browserRender(styled);
 const styledNative = nativeRender(styled, 'styled');
 compare('note properties', styledWeb, styledNative);

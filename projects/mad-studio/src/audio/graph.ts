@@ -204,8 +204,9 @@ class ChannelStrip {
       this.connectInstrument();
     } else if (channel.kind === 'synth' && this.instrument instanceof SynthInstrument) {
       if (prev.kind !== 'synth' || prev.synth !== channel.synth) this.instrument.update(channel);
+      else if (prev.settings !== channel.settings) this.instrument.setVoiceLimit(channel);
     } else if (channel.kind === 'sampler' && this.instrument instanceof SamplerInstrument) {
-      if (prev.kind !== 'sampler' || prev.sampler !== channel.sampler) this.instrument.update(channel);
+      if (prev.kind !== 'sampler' || prev.sampler !== channel.sampler || prev.settings !== channel.settings) this.instrument.update(channel);
     }
     this.applyStrip(channel);
   }
@@ -322,11 +323,12 @@ export class ProjectGraph {
   }
 
   /** Starts a held note (keyboard, piano roll preview); release it with voice.release(). */
-  noteOn(channelId: string, key: number, velocity: number, time = this.ctx.currentTime): Voice | null {
+  noteOn(channelId: string, key: number, velocity: number, time = this.ctx.currentTime, opts: { glideFrom?: number; glideTime?: number } = {}): Voice | null {
     const strip = this.strips.get(channelId);
     if (!strip) return null;
     this.activity.set(channelId, time);
-    return strip.trigger(key, velocity, time, null);
+    const pitch = pitchCurve(opts.glideFrom, opts.glideTime, undefined, 0);
+    return strip.trigger(key, velocity, time, null, pitch ? { pitch } : undefined);
   }
 
   stopAll(at = this.ctx.currentTime): void {

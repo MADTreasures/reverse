@@ -20,10 +20,28 @@ struct LatencyInput
         int track = 0;   // mixer track the channel feeds (0 = master)
         int latency = 0; // latency of its instrument (plugin report + manual offset)
     };
+    struct Route
+    {
+        int to = 0;             // target track
+        bool sidechain = false; // feeds the target's sidechain input (aligned like its mix)
+
+        bool operator== (const Route& o) const { return to == o.to && sidechain == o.sidechain; }
+    };
     struct Track
     {
         std::vector<int> effects; // latency of each enabled insert, in chain order
         int offset = 0;           // manual offset: > 0 delays this track, < 0 delays all others
+        /** False: the default send to the master; true: exactly `routes`. */
+        bool routed = false;
+        std::vector<Route> routes;
+
+        /** The sends of track `index` (the master sends nowhere). */
+        std::vector<Route> sends (int index) const
+        {
+            if (index <= 0)
+                return {};
+            return routed ? routes : std::vector<Route> { Route {} };
+        }
     };
 
     bool automatic = true; // false: only the manual offsets apply
@@ -38,7 +56,8 @@ struct LatencyInput
             if (channels[i].track != o.channels[i].track || channels[i].latency != o.channels[i].latency)
                 return false;
         for (size_t i = 0; i < tracks.size(); ++i)
-            if (tracks[i].effects != o.tracks[i].effects || tracks[i].offset != o.tracks[i].offset)
+            if (tracks[i].effects != o.tracks[i].effects || tracks[i].offset != o.tracks[i].offset
+                || tracks[i].sends ((int) i) != o.tracks[i].sends ((int) i))
                 return false;
         return true;
     }
@@ -48,7 +67,8 @@ struct LatencyInput
 struct LatencyPlan
 {
     std::vector<int> channelDelay; // delay of each channel before its track bus
-    std::vector<int> trackDelay;   // delay of each track before the master bus (master: 0)
+    std::vector<int> trackDelay;   // delay of each track's send to the master (master and unrouted: 0)
+    std::vector<std::vector<int>> routeDelay; // delay of each send of each track (Track::sends order)
     std::vector<int> trackInput;   // latency of the aligned signal entering each track
     std::vector<int> trackLatency; // latency each track has detected (inputs + inserts)
     int masterInput = 0;           // latency of the aligned signal entering the master
@@ -60,13 +80,15 @@ struct LatencyPlan
 
     bool operator== (const LatencyPlan& o) const
     {
-        return channelDelay == o.channelDelay && trackDelay == o.trackDelay && trackInput == o.trackInput
+        return channelDelay == o.channelDelay && trackDelay == o.trackDelay && routeDelay == o.routeDelay && trackInput == o.trackInput
                && trackLatency == o.trackLatency && masterInput == o.masterInput && total == o.total;
     }
     bool operator!= (const LatencyPlan& o) const { return ! (*this == o); }
 };
 
-/** Computes the compensation delays. Pure function (unit-tested in the self-test). */
+/** Computes the compensation delays along the mixer routing: every track input waits for its
+    slowest channel or send, the sends of faster tracks are delayed. Pure function (unit-tested in
+    the self-test). */
 LatencyPlan planCompensation (const LatencyInput& in);
 
 //==============================================================================

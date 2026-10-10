@@ -1,3 +1,4 @@
+import { channelSettings } from '../../model/channelSettings';
 import { minPitch, releaseScale } from '../../model/notes';
 import type { SamplerChannel, SamplerParams } from '../../model/types';
 import { releaseEnvelope, scheduleEnvelope } from '../envelope';
@@ -11,6 +12,8 @@ export class SamplerInstrument implements Instrument {
   readonly output: GainNode;
   readonly pannedOutput: GainNode;
   private params: SamplerParams;
+  /** Voice limit (channel settings: polyphony, Mono = 1). */
+  private maxVoices = MAX_VOICES;
   private readonly voices = new Set<Voice>();
 
   constructor(
@@ -28,6 +31,8 @@ export class SamplerInstrument implements Instrument {
 
   update(channel: SamplerChannel): void {
     this.params = channel.sampler;
+    const st = channelSettings(channel);
+    this.maxVoices = st.mono ? 1 : st.polyphony > 0 ? Math.min(MAX_VOICES, st.polyphony) : MAX_VOICES;
     this.output.gain.setTargetAtTime(this.params.gain, this.ctx.currentTime, 0.01);
     this.pannedOutput.gain.setTargetAtTime(this.params.gain, this.ctx.currentTime, 0.01);
   }
@@ -98,7 +103,7 @@ export class SamplerInstrument implements Instrument {
     if (p.cutSelf) this.chokes.add(`self:${this.channelId}`, voice);
     this.voices.add(voice);
     voice.onEnd(() => this.voices.delete(voice));
-    enforcePolyphony(this.voices, MAX_VOICES, t);
+    enforcePolyphony(this.voices, this.maxVoices, t);
     return voice;
   }
 

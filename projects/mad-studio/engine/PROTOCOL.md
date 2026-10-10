@@ -143,7 +143,7 @@ recognised and ignored. A `transport.play` refused during a render is acknowledg
 
 | Command | Fields |
 | ------- | ------ |
-| `live.noteOn` | `handle` (int), `channelId`, `key`, `velocity` (0..1) |
+| `live.noteOn` | `handle` (int), `channelId`, `key`, `velocity` (0..1); optional `glideFrom` (semitones), `glideTime` (s): portamento of the channel settings, computed by the renderer |
 | `live.noteOff` | `handle` |
 | `live.allNotesOff` | – (panic) |
 | `preview.sample` | `id` – plays the sample once (max 6 s) through the master at gain 0.8 |
@@ -291,6 +291,12 @@ Only these fields matter to the engine (others such as `patterns`, `tracks`, `cl
 `limiter`, `plugin`. Mixer routing: channel → `mixer[channel.mixerTrack]` (clamped) → master (index 0) →
 device output. A track is silent when `muted`, or when any insert track (index > 0) has `solo` and this
 insert does not (master is never soloed out). Only `enabled` effects are in the chain.
+
+Channels may carry `settings` (FL Studio's channel settings › Misc, `src/model/channelSettings.ts`):
+`{"polyphony":0,"mono":false,"porta":false,"glide":0.1,"arp":{…}}`. The engine uses only the voice limit
+(`mono` = 1 voice, else `polyphony`, 0 = the instrument's default of 24 synth / 32 sampler voices; the
+oldest voice fades out, like `voice.ts` `enforcePolyphony`). Arpeggiator, Mono note cutting and
+portamento are resolved by the renderer into the `timeline.set` events and the live note messages.
 
 ---
 

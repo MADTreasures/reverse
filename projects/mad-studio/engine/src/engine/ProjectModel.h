@@ -43,6 +43,8 @@ struct ChannelModel
     std::array<float, sampler::numParams> samplerParams {};
     juce::String sampleId;
     PluginRef plugin;
+    /** Voice limit from the channel settings (polyphony, Mono = 1); 0 = the instrument's default. */
+    int maxVoices = 0;
 };
 
 struct EffectModel
@@ -61,6 +63,16 @@ struct InputRoute
     bool operator== (const InputRoute& o) const { return channels == o.channels && first == o.first; }
 };
 
+/** A mixer send (routing.ts MixerRoute). */
+struct RouteModel
+{
+    int to = 0;
+    float level = 0.8f; // knob position, gain = volumeToGain(level)
+    bool sidechain = false;
+
+    bool operator== (const RouteModel& o) const { return to == o.to && sidechain == o.sidechain && ! differs (level, o.level); }
+};
+
 struct MixerTrackModel
 {
     juce::String id, name;
@@ -69,7 +81,14 @@ struct MixerTrackModel
     InputRoute input;
     std::vector<EffectModel> effects;
     float latencyOffsetMs = 0.0f; // manual PDC offset: > 0 delays this track, < 0 all others
+    /** Sends (validated: valid targets, no loops); by default to the master at unity. The
+        master's own sends are ignored. */
+    std::vector<RouteModel> routes { RouteModel {} };
 };
+
+/** Track indices in processing order (routing.ts processingOrder): senders before their
+    targets, the master last. */
+std::vector<int> processingOrder (const std::vector<MixerTrackModel>& mixer);
 
 struct ProjectModel
 {

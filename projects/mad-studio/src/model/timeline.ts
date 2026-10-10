@@ -1,7 +1,10 @@
-import { DEFAULT_GLIDE_TIME, MAX_NOTE_BENDS, type PitchBend } from './notes';
+import { channelSettings } from './channelSettings';
+import { arpSequence, random } from './noteTools';
+import { MAX_NOTE_BENDS, type PitchBend } from './notes';
+import { CHORDS } from './scales';
 import { findPattern, patternLength, songLength } from './patterns';
 import { ticksPerBar } from './timing';
-import type { Id, Note, Project } from './types';
+import type { ArpSettings, Id, Note, Project } from './types';
 
 /**
  * A note (or audio clip trigger) placed on the absolute timeline. Both engines play these: the web
@@ -66,35 +69,113 @@ function noteEvent(n: Note, channelId: Id, tick: number, length: number): RawEve
   return ev;
 }
 
+/** Arpeggiates a channel's notes on a grid that starts with each phrase (FL Studio: channel arpeggiator). */
+function arpeggiateEvents(notes: RawEvent[], arp: ArpSettings): RawEvent[] {
+  const sorted = [...notes].sort((a, b) => a.tick - b.tick || a.key - b.key);
+  if (sorted.length === 0) return [];
+  const step = Math.max(1, arp.time);
+  const end = Math.max(...sorted.map((n) => n.tick + n.length));
+  const out: RawEvent[] = [];
+  let t = sorted[0].tick;
+  let heldKey = '';
+  let seq: { key: number; source: RawEvent }[] = [];
+  let idx = 0;
+  for (let guard = 0; t < end && guard < 100000; guard++) {
+    const held = sorted.filter((n) => n.tick <= t && t < n.tick + n.length);
+    if (held.length === 0) {
+      // Silence: the next phrase starts its grid with its first note.
+      const next = sorted.find((n) => n.tick > t);
+      if (!next) break;
+      t = next.tick;
+      heldKey = '';
+      continue;
+    }
+    const key = held.map((n) => n.key).join(',');
+    if (key !== heldKey) {
+      heldKey = key;
+      idx = 0;
+      const chord = arp.chord !== 'none' && held.length === 1 ? CHORDS.find((c) => c.id === arp.chord) : undefined;
+      const keys = chord ? chord.intervals.map((i) => held[0].key + i).filter((k) => k <= 127) : held.map((n) => n.key);
+      const byClass = (k: number) => held.find((n) => n.key % 12 === k % 12) ?? held[0];
+      seq = arpSequence(keys, arp.direction === 'random' ? 'up' : arp.direction, arp.range).map((k) => ({ key: k, source: byClass(k) }));
+    }
+    const position = Math.floor(idx / Math.max(1, arp.repeat));
+    const pick = arp.direction === 'random' ? seq[Math.floor(random(t + 1)() * seq.length)] : seq[position % seq.length];
+    if (pick) {
+      const { slide: _slide, porta: _porta, ...source } = pick.source;
+      out.push({ ...source, tick: t, length: Math.max(1, Math.round(step * arp.gate)), key: pick.key, bends: undefined });
+    }
+    idx++;
+    t += step;
+  }
+  return out.map((e) => {
+    const { bends: _b, ...rest } = e;
+    return rest;
+  });
+}
+
+/** One note at a time: each note ends where the next begins, of a chord only the highest note plays (Mono). */
+function monophonic(notes: RawEvent[]): RawEvent[] {
+  const sorted = [...notes].sort((a, b) => a.tick - b.tick || b.key - a.key);
+  const out: RawEvent[] = [];
+  for (const n of sorted) {
+    const prev = out[out.length - 1];
+    if (prev && prev.tick === n.tick) continue;
+    if (prev && prev.tick + prev.length > n.tick) prev.length = n.tick - prev.tick;
+    out.push({ ...n });
+  }
+  return out;
+}
+
 /**
- * Resolves slide and portamento notes per channel (FL Studio): a slide note plays nothing itself; the
- * notes of its colour group sounding when it starts glide over its length so that the highest of them
- * lands on the slide note's key (a chord keeps its shape). A portamento note starts at the pitch of the
- * previous note on its channel and glides to its own key.
+ * Applies the channel settings and resolves slide and portamento notes per channel (FL Studio):
+ * - the arpeggiator replaces held notes by arpeggios, Mono keeps one note at a time;
+ * - a slide note plays nothing itself; the notes of its colour group sounding when it starts glide over
+ *   its length so that the highest of them lands on the slide note's key (a chord keeps its shape);
+ * - a portamento note (or every note with the channel's Porta switch) starts at the pitch of the previous
+ *   note on its channel and glides to its own key in the channel's slide time.
  */
-function resolveNoteFx(events: RawEvent[], glideTime: (channelId: Id) => number): SequencedEvent[] {
-  if (!events.some((e) => e.slide || e.porta)) return events;
+function resolveNotes(events: RawEvent[], project: Project): SequencedEvent[] {
+  const settings = new Map(project.channels.map((c) => [c.id, channelSettings(c)]));
+  const special = (id: Id) => {
+    const st = settings.get(id);
+    return !!st && (st.mono || st.porta || st.arp.direction !== 'off');
+  };
+  const strip = ({ slide: _slide, porta: _porta, ...e }: RawEvent): SequencedEvent => e;
+  if (!events.some((e) => e.slide || e.porta || special(e.channelId))) return events.map(strip);
+
   const byChannel = new Map<Id, RawEvent[]>();
+  const out: RawEvent[] = [];
   for (const e of events) {
-    if (e.audioClip) continue;
+    if (e.audioClip) {
+      out.push(e);
+      continue;
+    }
     let list = byChannel.get(e.channelId);
     if (!list) byChannel.set(e.channelId, (list = []));
     list.push(e);
   }
   const lastBend = (e: SequencedEvent) => (e.bends && e.bends.length ? e.bends[e.bends.length - 1].to : 0);
-  for (const list of byChannel.values()) {
-    if (!list.some((e) => e.slide || e.porta)) continue;
-    const notes = list.filter((e) => !e.slide);
-    for (const s of list) {
-      if (!s.slide) continue;
-      const group = s.color ?? 0;
-      const hit = notes.filter((n) => (n.color ?? 0) === group && n.tick <= s.tick && s.tick < n.tick + n.length);
+  for (const [channelId, list] of byChannel) {
+    const st = settings.get(channelId) ?? channelSettings(undefined);
+    if (!list.some((e) => e.slide || e.porta) && !special(channelId)) {
+      out.push(...list);
+      continue;
+    }
+    let notes = list.filter((e) => !e.slide);
+    if (st.arp.direction !== 'off') notes = arpeggiateEvents(notes, st.arp);
+    if (st.mono) notes = monophonic(notes);
+    notes.sort((a, b) => a.tick - b.tick || a.key - b.key);
+    for (const sl of list) {
+      if (!sl.slide) continue;
+      const group = sl.color ?? 0;
+      const hit = notes.filter((n) => (n.color ?? 0) === group && n.tick <= sl.tick && sl.tick < n.tick + n.length);
       if (hit.length === 0) continue;
       const highest = Math.max(...hit.map((n) => n.key + lastBend(n)));
-      const interval = s.key - highest;
+      const interval = sl.key - highest;
       for (const n of hit) {
         const bends = (n.bends ??= []);
-        if (bends.length < MAX_NOTE_BENDS) bends.push({ at: s.tick - n.tick, length: s.length, to: lastBend(n) + interval });
+        if (bends.length < MAX_NOTE_BENDS) bends.push({ at: sl.tick - n.tick, length: sl.length, to: lastBend(n) + interval });
       }
     }
     let prev: RawEvent | null = null;
@@ -105,21 +186,20 @@ function resolveNoteFx(events: RawEvent[], glideTime: (channelId: Id) => number)
       while (j < notes.length && notes[j].tick === notes[i].tick) j++;
       for (let k = i; k < j; k++) {
         const n = notes[k];
-        if (!n.porta || !prev) continue;
+        if (!(n.porta || st.porta) || !prev) continue;
         const from = prev.key + lastBend(prev) - n.key;
         if (from !== 0) {
           n.glideFrom = from;
-          n.glideTime = glideTime(n.channelId);
+          n.glideTime = st.glide;
         }
       }
       prev = notes[j - 1];
       i = j;
     }
+    out.push(...notes);
   }
-  return events.filter((e) => !e.slide).map(({ slide: _slide, porta: _porta, ...e }) => e);
+  return sortEvents(out).map(strip);
 }
-
-const channelGlideTime = (_channelId: Id) => DEFAULT_GLIDE_TIME;
 
 /** Events of a single pattern, looping over its length. */
 export function patternTimeline(project: Project, patternId: Id | null): Timeline {
@@ -134,7 +214,7 @@ export function patternTimeline(project: Project, patternId: Id | null): Timelin
       if (ev) events.push(ev);
     }
   }
-  return { events: resolveNoteFx(sortEvents(events), channelGlideTime), start: 0, end: patternLength(pattern, project.beatsPerBar) };
+  return { events: resolveNotes(sortEvents(events), project), start: 0, end: patternLength(pattern, project.beatsPerBar) };
 }
 
 /** Events of the whole arrangement. Pattern clips loop their pattern across the clip length. */
@@ -184,7 +264,7 @@ export function songTimeline(project: Project): Timeline {
       }
     }
   }
-  return { events: resolveNoteFx(sortEvents(events), channelGlideTime), start: 0, end: songLength(project) };
+  return { events: resolveNotes(sortEvents(events), project), start: 0, end: songLength(project) };
 }
 
 /** Index of the first event at or after the given tick (binary search). */

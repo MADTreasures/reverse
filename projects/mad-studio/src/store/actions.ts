@@ -13,16 +13,20 @@ import {
 import { defaultEffectParams } from '../model/effects';
 import { factorySampleInfo } from '../model/factory';
 import { makeId } from '../model/ids';
+import { MAX_POLYPHONY, channelSettings, isDefault as isDefaultSettings } from '../model/channelSettings';
+import { DEFAULT_SEND, trackRoutes, wouldCycle } from '../model/routing';
 import { clampPluginOffset, clampTrackOffset } from '../model/latency';
-import { findPattern, patternLength, stepKey } from '../model/patterns';
+import { findPattern, isStepNote, patternLength, stepIndex, stepKey } from '../model/patterns';
 import { findPreset } from '../model/presets';
 import type { ScaleSpec } from '../model/scales';
 import { MAX_BPM, MIN_BPM, TICKS_PER_STEP, ticksPerBar } from '../model/timing';
 import type {
   Channel,
+  ChannelSettings,
   Clip,
   EffectType,
   Id,
+  MixerRoute,
   MixerTrack,
   Note,
   Pattern,
@@ -406,6 +410,9 @@ export function setChannelSample(id: Id, info: SampleInfo, rootKey?: number): vo
 // ---------------------------------------------------------------------------
 // Steps and notes
 
+/** Notes in a step cell (any pitch and delay inside the step, at most a step long). */
+const inStep = (n: Note, step: number) => isStepNote(n) && stepIndex(n) === step;
+
 export function setStep(patternId: Id, channelId: Id, step: number, on: boolean, opts?: EditOptions): void {
   const project = useStore.getState().project;
   const channel = project.channels.find((c) => c.id === channelId);
@@ -413,14 +420,15 @@ export function setStep(patternId: Id, channelId: Id, step: number, on: boolean,
   const key = stepKey(channel);
   const start = step * TICKS_PER_STEP;
   edit((d) => {
+    const p = patternOf(d, patternId);
     const notes = notesOf(d, patternId, channelId);
-    if (!notes) return;
-    const existing = notes.findIndex((n) => n.start === start && n.key === key);
-    if (on && existing < 0) {
+    if (!p || !notes) return;
+    const existing = notes.some((n) => inStep(n, step));
+    if (on && !existing) {
       notes.push({ id: makeId('n'), key, start, length: TICKS_PER_STEP, velocity: DEFAULT_VELOCITY });
       notes.sort((a, b) => a.start - b.start || a.key - b.key);
-    } else if (!on && existing >= 0) {
-      notes.splice(existing, 1);
+    } else if (!on && existing) {
+      p.notes[channelId] = notes.filter((n) => !inStep(n, step));
     }
   }, { label: 'channel rack step', ...opts });
 }
@@ -429,8 +437,7 @@ export function isStepOn(project: Project, patternId: Id, channelId: Id, step: n
   const channel = project.channels.find((c) => c.id === channelId);
   const pattern = findPattern(project, patternId);
   if (!channel || !pattern) return false;
-  const key = stepKey(channel);
-  return (pattern.notes[channelId] ?? []).some((n) => n.start === step * TICKS_PER_STEP && n.key === key);
+  return (pattern.notes[channelId] ?? []).some((n) => inStep(n, step));
 }
 
 export function toggleStep(patternId: Id, channelId: Id, step: number): void {
@@ -447,7 +454,7 @@ export function fillSteps(patternId: Id, channelId: Id, every: number, stepCount
   edit((d) => {
     const notes = notesOf(d, patternId, channelId);
     if (!notes) return;
-    const kept = notes.filter((n) => !(n.key === key && n.start % TICKS_PER_STEP === 0 && n.length <= TICKS_PER_STEP));
+    const kept = notes.filter((n) => !isStepNote(n));
     for (let i = 0; i < stepCount; i += every) {
       kept.push({ id: makeId('n'), key, start: i * TICKS_PER_STEP, length: TICKS_PER_STEP, velocity: DEFAULT_VELOCITY });
     }
@@ -906,6 +913,68 @@ export function setMixerTrackProps(index: number, patch: MixerPatch, opts?: Edit
     if (patch.solo !== undefined && index > 0) t.solo = patch.solo;
     if (patch.latencyOffset !== undefined) t.latencyOffset = clampTrackOffset(patch.latencyOffset);
   }, { label: 'mixer track settings', ...opts });
+}
+
+// ---------------------------------------------------------------------------
+// Mixer routing (FL Studio: route switches, send knobs, sidechain)
+
+function writeRoutes(t: Draft<MixerTrack>, routes: MixerRoute[]): void {
+  if (routes.length === 1 && routes[0].to === 0 && routes[0].level === DEFAULT_SEND && !routes[0].sidechain) delete t.routes;
+  else t.routes = routes.map((r) => ({ ...r }));
+}
+
+/**
+ * Turns the send `from` → `to` on or off (FL Studio: the route switch of `to` while `from` is selected).
+ * Returns false when the send would create a feedback loop.
+ */
+export function setRoute(from: number, to: number, on: boolean, opts: { sidechain?: boolean; level?: number } = {}): boolean {
+  const mixer = useStore.getState().project.mixer;
+  if (from <= 0 || from >= mixer.length || to < 0 || to >= mixer.length || from === to) return false;
+  if (on && !trackRoutes(mixer, from).some((r) => r.to === to) && wouldCycle(mixer, from, to)) return false;
+  edit((d) => {
+    const t = d.mixer[from];
+    const routes = trackRoutes(d.mixer, from).filter((r) => r.to !== to);
+    if (on) routes.push({ to, level: opts.level ?? DEFAULT_SEND, ...(opts.sidechain ? { sidechain: true } : {}) });
+    writeRoutes(t, routes);
+  }, { label: on ? (opts.sidechain ? 'mixer sidechain to track' : 'mixer route to track') : 'mixer remove route' });
+  return true;
+}
+
+/** FL Studio's "Route to this track only": `from` sends only to `to`. */
+export function routeOnly(from: number, to: number): boolean {
+  const mixer = useStore.getState().project.mixer;
+  if (from <= 0 || from >= mixer.length || to < 0 || to >= mixer.length || from === to) return false;
+  const without = mixer.map((t, i) => (i === from ? { ...t, routes: [] } : t));
+  if (wouldCycle(without, from, to)) return false;
+  edit((d) => writeRoutes(d.mixer[from], [{ to, level: DEFAULT_SEND }]), { label: 'mixer route to this track only' });
+  return true;
+}
+
+export function setRouteLevel(from: number, to: number, level: number, opts?: EditOptions): void {
+  edit((d) => {
+    const routes = trackRoutes(d.mixer, from).map((r) => (r.to === to ? { ...r, level: Math.min(1, Math.max(0, level)) } : r));
+    writeRoutes(d.mixer[from], routes);
+  }, { label: 'mixer send level', ...opts });
+}
+
+// ---------------------------------------------------------------------------
+// Channel settings (FL Studio: channel settings › Misc)
+
+/** Changes a channel's polyphony, portamento or arpeggiator settings; defaults are not stored. */
+export function updateChannelSettings(id: Id, recipe: (s: ChannelSettings) => void, opts?: EditOptions): void {
+  edit((d) => {
+    const ch = channelOf(d, id);
+    if (!ch || ch.kind === 'automation') return;
+    const next = structuredClone(channelSettings(ch as Channel));
+    recipe(next);
+    next.polyphony = Math.round(Math.min(MAX_POLYPHONY, Math.max(0, next.polyphony)));
+    next.glide = Math.min(5, Math.max(0, next.glide));
+    next.arp.range = Math.round(Math.min(4, Math.max(1, next.arp.range)));
+    next.arp.gate = Math.min(1, Math.max(0.05, next.arp.gate));
+    next.arp.repeat = Math.round(Math.min(8, Math.max(1, next.arp.repeat)));
+    if (isDefaultSettings(next)) delete ch.settings;
+    else ch.settings = next;
+  }, { label: 'channel settings', ...opts });
 }
 
 // ---------------------------------------------------------------------------

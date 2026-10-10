@@ -8,6 +8,8 @@ import type { Id, Project } from '../model/types';
 export type ToolId = 'draw' | 'paint' | 'delete' | 'mute' | 'slice' | 'select';
 /** Kind of newly drawn notes (FL Studio: slide toggle, portamento notes). */
 export type NoteType = 'normal' | 'slide' | 'porta';
+/** Graph editor lanes (FL Studio: Note pitch, Velocity, Release, Fine pitch, Panning, Mod X, Mod Y, Shift). */
+export type GraphLane = 'pitch' | NotePropKey | 'shift';
 export type PlayMode = 'pattern' | 'song';
 
 /** Fixed windows plus dynamic ones: `channel:<channelId>` and `effect:<mixerIndex>:<slotId>`. */
@@ -98,6 +100,9 @@ export interface UiState {
   pickerShow: { pattern: boolean; audio: boolean; automation: boolean };
   /** Last automatable control the user moved (FL: Tools › Last tweaked). */
   lastTweaked: string | null;
+  /** Graph editor under the channel rack for the selected channel (FL Studio: channel menu › Graph editor). */
+  graphEditor: boolean;
+  graphLane: GraphLane;
 }
 
 export interface TransportState {
@@ -192,6 +197,8 @@ export function initialUi(project: Project): UiState {
     playlistPick: null,
     pickerShow: { pattern: true, audio: true, automation: true },
     lastTweaked: null,
+    graphEditor: false,
+    graphLane: 'velocity',
   };
 }
 

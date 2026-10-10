@@ -26,7 +26,8 @@ export interface EngineApi {
   playheadTick(): number | null;
   /** Position inside the selected pattern (recording, step highlight). */
   patternTick(): number | null;
-  noteOn(channelId: Id, key: number, velocity?: number): number;
+  /** Starts a live note; `opts` carries the portamento of the channel settings and whether it is recorded. */
+  noteOn(channelId: Id, key: number, velocity?: number, opts?: LiveNoteOptions): number;
   noteOff(handle: number): void;
   previewSample(sampleId: string): void;
   previewPreset(presetId: string): void;
@@ -46,4 +47,15 @@ export interface EngineApi {
   setAudioDevice(opts: { type?: string; output?: string; input?: string; sampleRate?: number; bufferSize?: number }): void;
   /** Opens the audio driver's own settings panel (ASIO). */
   showAudioControlPanel(): void;
+}
+
+/** Live note details computed by the live input (channel settings: Mono, Porta, arpeggiator). */
+export interface LiveNoteOptions {
+  /** Portamento: the note starts this many semitones away and glides to its key in `glideTime` seconds. */
+  glideFrom?: number;
+  glideTime?: number;
+  /** Notes the arpeggiator plays are heard but not recorded (the held keys are recorded instead). */
+  record?: boolean;
+  /** Recorded but not played (a held key on an arpeggiated channel). */
+  silent?: boolean;
 }

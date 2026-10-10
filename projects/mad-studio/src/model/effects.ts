@@ -89,6 +89,7 @@ export const EFFECT_SPECS: Record<EffectType, EffectSpec> = {
       { key: 'release', label: 'Release', min: 0.02, max: 1.5, default: 0.2, curve: 'log', unit: 's' },
       { key: 'knee', label: 'Knee', min: 0, max: 30, default: 6, unit: 'dB' },
       { key: 'makeup', label: 'Makeup', min: 0, max: 24, default: 0, unit: 'dB' },
+      { key: 'sidechain', label: 'Sidechain', min: 0, max: 1, default: 0, options: ['Off', 'On'] },
     ],
   },
   distortion: {

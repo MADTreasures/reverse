@@ -163,6 +163,8 @@ void AudioEngine::prepare (double rate, int blockSize)
     previewL.assign ((size_t) maxBlock, 0.0f);
     previewR.assign ((size_t) maxBlock, 0.0f);
     clickBuffer.assign ((size_t) maxBlock, 0.0f);
+    routeL.assign ((size_t) maxBlock, 0.0f);
+    routeR.assign ((size_t) maxBlock, 0.0f);
     for (auto& c : clicks)
         c.active = false;
 }
@@ -277,6 +279,8 @@ void AudioEngine::handleCommands (GraphSnapshot* snap, const BlockContext& ctx) 
                 e.velocity = cmd.velocity;
                 e.lengthSeconds = -1.0;
                 e.handle = cmd.handle;
+                e.props.glideFrom = cmd.glideFrom;
+                e.props.glideTime = cmd.glideTime;
                 for (auto& h : liveHandles)
                 {
                     if (h.handle == 0)
@@ -584,7 +588,7 @@ void AudioEngine::processBlock (const float* const* inputs, int numInputs, float
     else
     {
         for (const auto& t : snap->tracks)
-            t.node->clearBus (n);
+            t.node->clearBus (n, t.sidechainFed);
 
         for (const auto& t : snap->tracks)
             if (t.node->monitor.load (std::memory_order_relaxed))
@@ -602,24 +606,32 @@ void AudioEngine::processBlock (const float* const* inputs, int numInputs, float
         auto* master = snap->tracks[0].node;
         renderPreviews (ctx, master->busL.data(), master->busR.data());
 
-        for (size_t t = 1; t < snap->tracks.size(); ++t)
+        // Tracks in routing order (senders before their targets, the master last); every send adds
+        // the track's output to the target's input or sidechain bus, delayed for plugin delay
+        // compensation where the paths into the target differ in latency.
+        for (const int index : snap->order)
         {
-            auto& entry = snap->tracks[t];
-            entry.node->process (ctx, entry.chain);
-            if (entry.delay != nullptr && entry.delaySamples > 0)
+            auto& entry = snap->tracks[(size_t) index];
+            entry.node->process (ctx, entry.chain, entry.sidechainFed);
+            for (const auto& route : entry.routes)
             {
-                float* bus[] = { entry.node->busL.data(), entry.node->busR.data() };
-                entry.delay->process (bus, n, entry.delaySamples);
-            }
-            const float* l = entry.node->busL.data();
-            const float* r = entry.node->busR.data();
-            for (int i = 0; i < n; ++i)
-            {
-                master->busL[(size_t) i] += l[i];
-                master->busR[(size_t) i] += r[i];
+                auto* target = snap->tracks[(size_t) route.to].node;
+                const float* srcL = entry.node->busL.data();
+                const float* srcR = entry.node->busR.data();
+                if (route.delay != nullptr && route.delaySamples > 0)
+                {
+                    std::copy (srcL, srcL + n, routeL.begin());
+                    std::copy (srcR, srcR + n, routeR.begin());
+                    float* bus[] = { routeL.data(), routeR.data() };
+                    route.delay->process (bus, n, route.delaySamples);
+                    srcL = routeL.data();
+                    srcR = routeR.data();
+                }
+                float* destL = route.sidechain ? target->sidechainL.data() : target->busL.data();
+                float* destR = route.sidechain ? target->sidechainR.data() : target->busR.data();
+                route.node->addTo (ctx, srcL, srcR, destL, destR);
             }
         }
-        master->process (ctx, snap->tracks[0].chain);
 
         renderClicks (ctx, clickBuffer.data());
         if (snap->clickDelay != nullptr && snap->latency > 0)

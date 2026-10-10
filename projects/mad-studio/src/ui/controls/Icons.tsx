@@ -235,3 +235,9 @@ export const IconScale = (p: IconProps) => (
     <circle cx="11" cy="13" r="1.3" fill="currentColor" stroke="none" />
   </Svg>
 );
+/** Graph editor: bars of step values. */
+export const IconGraph = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M3 13V8M6.5 13V4M10 13V9.5M13.5 13V6" strokeWidth={2} />
+  </Svg>
+);

@@ -31,6 +31,10 @@ public:
     /** Parameters in EffectSpec order (empty for plugin effects). */
     std::vector<AutoParam> params;
 
+    /** Audio thread: the track's sidechain input for this block (null when nothing is sent to it). */
+    const float* sidechainLeft = nullptr;
+    const float* sidechainRight = nullptr;
+
     /** Message/render thread, before the effect is published. `offline` renders must be
         deterministic (no background rebuilds). */
     virtual void prepare (double sampleRate, int maxBlock, bool offline) = 0;

@@ -6,7 +6,7 @@
 import { native } from '../platform/platform';
 import type { PlayMode } from '../store/store';
 import { toast } from '../ui/overlays';
-import type { EngineApi } from './engineApi';
+import type { EngineApi, LiveNoteOptions } from './engineApi';
 import { NativeEngine } from './nativeEngine';
 import type { RenderOptions } from './render';
 import type { WavBitDepth } from './wav';
@@ -67,8 +67,8 @@ class EngineFacade implements EngineApi {
   patternTick() {
     return this.impl.patternTick();
   }
-  noteOn(channelId: string, key: number, velocity?: number) {
-    return this.impl.noteOn(channelId, key, velocity);
+  noteOn(channelId: string, key: number, velocity?: number, opts?: LiveNoteOptions) {
+    return this.impl.noteOn(channelId, key, velocity, opts);
   }
   noteOff(handle: number) {
     this.impl.noteOff(handle);

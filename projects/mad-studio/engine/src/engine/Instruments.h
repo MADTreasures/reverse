@@ -82,6 +82,8 @@ public:
     SynthInstrument();
 
     std::array<AutoParam, synth::numParams> params;
+    /** Channel settings: most voices at once (0 = 24, synth.ts MAX_VOICES). */
+    std::atomic<int> voiceLimit { 0 };
 
     void prepare (double sampleRate, int maxBlock) override;
     void handleEvent (const NoteEvent& e, const BlockContext& ctx) override;
@@ -165,6 +167,8 @@ public:
     explicit SamplerInstrument (uint32_t channelUid);
 
     std::array<AutoParam, sampler::numParams> params;
+    /** Channel settings: most voices at once (0 = 32, sampler.ts MAX_VOICES). */
+    std::atomic<int> voiceLimit { 0 };
 
     /** Set by the graph builder; the published snapshot keeps the samples alive. */
     std::atomic<const SampleData*> forward { nullptr }, reversed { nullptr };

@@ -6,6 +6,7 @@ import { SYNTH_PRESETS } from '../../model/presets';
 import type { Channel, Note } from '../../model/types';
 import { addSamplerChannelFor, assignSampleToChannel, importSamplesDialog } from '../../project/projectIO';
 import {
+  setUi,
   addChannel,
   addFactoryChannel,
   addSynthChannel,
@@ -118,6 +119,15 @@ export function channelContextMenu(channel: Channel): MenuItem[] {
     { label: channel.name, header: true },
     { label: channel.kind === 'plugin' ? 'Plugin settings…' : 'Edit instrument…', onClick: () => openChannelEditor(channel.id) },
     { label: 'Piano roll', shortcut: 'F7', onClick: () => openPianoRoll(channel.id) },
+    {
+      label: 'Graph editor',
+      checked: useStore.getState().ui.graphEditor,
+      onClick: () =>
+        setUi((u) => {
+          u.graphEditor = !u.graphEditor;
+          u.selectedChannelId = channel.id;
+        }),
+    },
     { separator: true },
     {
       label: 'Rename…',

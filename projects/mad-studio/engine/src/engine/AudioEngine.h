@@ -42,6 +42,7 @@ struct EngineCommand
     int numKeys = 0;
     double duration = 0.6;
     uint32_t seq = 0; // play/stop/seek: the client's transport sequence number (0: none)
+    float glideFrom = 0.0f, glideTime = 0.1f; // noteOn: portamento of live notes
 };
 
 /** Audio thread -> message thread notification. */
@@ -183,6 +184,8 @@ private:
     };
     std::array<SamplePreview, 4> samplePreviews {};
     std::vector<float> previewL, previewR;
+    /** Scratch for a delayed mixer send. */
+    std::vector<float> routeL, routeR;
 
     // Metronome.
     struct Click

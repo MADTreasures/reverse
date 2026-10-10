@@ -9,7 +9,7 @@ import { toast } from '../ui/overlays';
 import { pianoRollSnap, patternStartTick } from '../store/snap';
 import { useStore, type AppState, type PlayMode } from '../store/store';
 import { AutomationRuntime } from './automationRuntime';
-import type { EngineApi } from './engineApi';
+import type { EngineApi, LiveNoteOptions } from './engineApi';
 import { WebRecorder, armedTargets, deliverTakes, monitoredTargets, type RecordedTake } from './recorder';
 import { ProjectGraph } from './graph';
 import { SynthInstrument } from './instruments/synth';
@@ -261,13 +261,13 @@ export class WebAudioEngine implements EngineApi {
     return (pos - clip.start + clip.offset) % len;
   }
 
-  noteOn(channelId: Id, key: number, velocity = DEFAULT_VELOCITY): number {
+  noteOn(channelId: Id, key: number, velocity = DEFAULT_VELOCITY, opts: LiveNoteOptions = {}): number {
     void this.resume();
     const handle = this.nextHandle++;
-    const voice = this.graph?.noteOn(channelId, key, velocity) ?? null;
+    const voice = opts.silent ? null : (this.graph?.noteOn(channelId, key, velocity, undefined, opts) ?? null);
     const s = useStore.getState();
     let recordStart: number | null = null;
-    if (s.transport.recording && s.transport.recordFilter.notes && this.scheduler.playing) {
+    if (opts.record !== false && s.transport.recording && s.transport.recordFilter.notes && this.scheduler.playing) {
       const tick = this.patternTick();
       if (tick !== null) recordStart = tick;
     }

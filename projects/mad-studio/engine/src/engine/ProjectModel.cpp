@@ -2,6 +2,8 @@
 
 #include "core/Json.h"
 
+#include <algorithm>
+
 namespace mad
 {
 namespace
@@ -189,6 +191,8 @@ ProjectModel parseProject (const juce::var& json)
             ch.pan = num (c, "pan", 0.0f);
             ch.muted = json::boolean (c, "muted", false);
             ch.mixerTrack = json::integer (c, "mixerTrack", 0);
+            const auto settings = json::get (c, "settings");
+            ch.maxVoices = json::boolean (settings, "mono", false) ? 1 : std::clamp (json::integer (settings, "polyphony", 0), 0, 64);
             switch (ch.kind)
             {
                 case ChannelKind::synth:   ch.synthParams = parseSynthParams (json::get (c, "synth")); break;
@@ -241,6 +245,19 @@ ProjectModel parseProject (const juce::var& json)
                     tr.effects.push_back (std::move (fx));
                 }
             }
+            // Sends: absent = to the master at unity (validated below, once every track is known).
+            if (const auto* routes = json::get (t, "routes").getArray())
+            {
+                tr.routes.clear();
+                for (const auto& r : *routes)
+                {
+                    RouteModel route;
+                    route.to = json::integer (r, "to", -1);
+                    route.level = (float) std::clamp (json::number (r, "level", 0.8), 0.0, 1.0);
+                    route.sidechain = json::boolean (r, "sidechain", false);
+                    tr.routes.push_back (route);
+                }
+            }
             m.mixer.push_back (std::move (tr));
             if ((int) m.mixer.size() >= maxMixerTracks)
                 break;
@@ -254,7 +271,76 @@ ProjectModel parseProject (const juce::var& json)
         master.name = "Master";
         m.mixer.push_back (master);
     }
+
+    // routing.ts sanitizeRoutes(): valid targets only, no self or duplicate sends, no loops.
+    const int numTracks = (int) m.mixer.size();
+    m.mixer[0].routes.clear();
+    const auto reaches = [&m] (int from, int target)
+    {
+        std::vector<int> stack { from };
+        std::vector<bool> seen (m.mixer.size(), false);
+        while (! stack.empty())
+        {
+            const int t = stack.back();
+            stack.pop_back();
+            if (t == target)
+                return true;
+            if (t < 0 || t >= (int) m.mixer.size() || seen[(size_t) t])
+                continue;
+            seen[(size_t) t] = true;
+            for (const auto& r : m.mixer[(size_t) t].routes)
+                stack.push_back (r.to);
+        }
+        return false;
+    };
+    for (int i = 1; i < numTracks; ++i)
+    {
+        auto original = std::move (m.mixer[(size_t) i].routes);
+        auto& kept = m.mixer[(size_t) i].routes;
+        kept.clear();
+        for (const auto& r : original)
+        {
+            if (r.to < 0 || r.to >= numTracks || r.to == i)
+                continue;
+            if (std::any_of (kept.begin(), kept.end(), [&r] (const RouteModel& k) { return k.to == r.to; }))
+                continue;
+            if (reaches (r.to, i))
+                continue;
+            kept.push_back (r);
+        }
+    }
     return m;
+}
+
+std::vector<int> processingOrder (const std::vector<MixerTrackModel>& mixer)
+{
+    const int n = (int) mixer.size();
+    std::vector<int> incoming ((size_t) n, 0), order;
+    std::vector<bool> done ((size_t) n, false);
+    for (int i = 1; i < n; ++i)
+        for (const auto& r : mixer[(size_t) i].routes)
+            if (r.to >= 0 && r.to < n)
+                ++incoming[(size_t) r.to];
+    for (int k = 0; k < n; ++k)
+    {
+        int next = -1;
+        for (int i = 1; i < n && next < 0; ++i)
+            if (! done[(size_t) i] && incoming[(size_t) i] == 0)
+                next = i;
+        if (next < 0)
+            break;
+        done[(size_t) next] = true;
+        order.push_back (next);
+        for (const auto& r : mixer[(size_t) next].routes)
+            if (r.to >= 0 && r.to < n)
+                --incoming[(size_t) r.to];
+    }
+    for (int i = 1; i < n; ++i)
+        if (! done[(size_t) i])
+            order.push_back (i);
+    if (n > 0)
+        order.push_back (0);
+    return order;
 }
 
 } // namespace mad

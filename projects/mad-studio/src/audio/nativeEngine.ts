@@ -18,7 +18,7 @@ import { pianoRollSnap, patternStartTick } from '../store/snap';
 import { useStore, type AppState, type PlayMode } from '../store/store';
 import { toast } from '../ui/overlays';
 import { AutomationRuntime } from './automationRuntime';
-import type { EngineApi } from './engineApi';
+import type { EngineApi, LiveNoteOptions } from './engineApi';
 import { deliverTakes, type RecordedTake } from './recorder';
 import type { RenderOptions } from './render';
 import { decodeAudioFile, samplePool } from './samplePool';
@@ -29,6 +29,8 @@ interface HeldNote {
   key: number;
   velocity: number;
   recordStart: number | null;
+  /** False for silent notes (recorded only), which the engine never heard of. */
+  sent: boolean;
 }
 
 interface Status {
@@ -442,13 +444,16 @@ export class NativeEngine implements EngineApi {
 
   // ------------------------------------------------------------------ live notes
 
-  noteOn(channelId: Id, key: number, velocity = DEFAULT_VELOCITY): number {
+  noteOn(channelId: Id, key: number, velocity = DEFAULT_VELOCITY, opts: LiveNoteOptions = {}): number {
     const handle = this.nextHandle++;
-    this.send({ type: 'live.noteOn', handle, channelId, key, velocity });
+    if (!opts.silent) {
+      const glide = opts.glideFrom ? { glideFrom: opts.glideFrom, glideTime: opts.glideTime ?? 0.1 } : {};
+      this.send({ type: 'live.noteOn', handle, channelId, key, velocity, ...glide });
+    }
     const s = useStore.getState();
     let recordStart: number | null = null;
-    if (s.transport.recording && s.transport.recordFilter.notes && this.playing) recordStart = this.patternTick();
-    this.held.set(handle, { channelId, key, velocity, recordStart });
+    if (opts.record !== false && s.transport.recording && s.transport.recordFilter.notes && this.playing) recordStart = this.patternTick();
+    this.held.set(handle, { channelId, key, velocity, recordStart, sent: !opts.silent });
     return handle;
   }
 
@@ -456,7 +461,7 @@ export class NativeEngine implements EngineApi {
     const note = this.held.get(handle);
     if (!note) return;
     this.held.delete(handle);
-    this.send({ type: 'live.noteOff', handle });
+    if (note.sent) this.send({ type: 'live.noteOff', handle });
     if (note.recordStart === null) return;
     const s = useStore.getState();
     const pattern = findPattern(s.project, s.ui.selectedPatternId);

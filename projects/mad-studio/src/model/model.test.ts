@@ -64,7 +64,10 @@ describe('patterns', () => {
     expect(steps.steps[4]).toBeGreaterThan(0);
     expect(steps.steps[1]).toBe(0);
     expect(stepView([note(0, 48)], ch, 16).representable).toBe(false);
-    expect(stepView([note(0, 24, 64)], ch, 16).representable).toBe(false);
+    // Like FL Studio's steps, a step may have its own pitch and a delay inside the step (graph editor).
+    expect(stepView([note(0, 24, 64)], ch, 16).representable).toBe(true);
+    expect(stepView([note(30, 12)], ch, 16).steps[1]).toBeGreaterThan(0);
+    expect(stepView([note(0), note(6, 12)], ch, 16).representable).toBe(false);
   });
 });
 

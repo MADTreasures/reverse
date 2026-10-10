@@ -24,6 +24,7 @@ LatencyPlan planCompensation (const LatencyInput& in)
     const int numTracks = (int) in.tracks.size();
     p.channelDelay.assign (in.channels.size(), 0);
     p.trackDelay.assign ((size_t) numTracks, 0);
+    p.routeDelay.assign ((size_t) numTracks, {});
     p.trackInput.assign ((size_t) numTracks, 0);
     p.trackLatency.assign ((size_t) numTracks, 0);
     if (numTracks == 0)
@@ -31,29 +32,57 @@ LatencyPlan planCompensation (const LatencyInput& in)
 
     const auto trackOf = [numTracks] (const LatencyInput::Channel& c) { return std::clamp (c.track, 0, numTracks - 1); };
     const auto latencyOf = [&in] (int v) { return in.automatic ? clampLatency (v) : 0; };
+    const auto valid = [numTracks] (const LatencyInput::Route& r) { return r.to >= 0 && r.to < numTracks; };
 
-    // Every track input is aligned to its slowest channel.
+    // Processing order (routing.ts processingOrder): senders before their targets, the master last.
+    std::vector<int> incoming ((size_t) numTracks, 0), order;
+    std::vector<bool> done ((size_t) numTracks, false);
+    for (int t = 1; t < numTracks; ++t)
+        for (const auto& r : in.tracks[(size_t) t].sends (t))
+            if (valid (r))
+                ++incoming[(size_t) r.to];
+    for (int k = 0; k < numTracks; ++k)
+    {
+        int next = -1;
+        for (int t = 1; t < numTracks && next < 0; ++t)
+            if (! done[(size_t) t] && incoming[(size_t) t] == 0)
+                next = t;
+        if (next < 0)
+            break;
+        done[(size_t) next] = true;
+        order.push_back (next);
+        for (const auto& r : in.tracks[(size_t) next].sends (next))
+            if (valid (r))
+                --incoming[(size_t) r.to];
+    }
+    for (int t = 1; t < numTracks; ++t)
+        if (! done[(size_t) t])
+            order.push_back (t);
+
+    // Every track input is aligned to its slowest channel ...
+    std::vector<int64_t> input ((size_t) numTracks, 0);
     for (const auto& c : in.channels)
     {
-        auto& input = p.trackInput[(size_t) trackOf (c)];
-        input = std::max (input, latencyOf (c.latency));
+        auto& v = input[(size_t) trackOf (c)];
+        v = std::max<int64_t> (v, latencyOf (c.latency));
     }
-
-    // The tracks meet at the master input (channels routed to the master meet them there too);
-    // a manual offset shifts a track against the others.
-    int64_t master = p.trackInput[0];
-    std::vector<int64_t> align ((size_t) numTracks, 0);
-    for (int t = 1; t < numTracks; ++t)
+    // ... and to its slowest send. A manual offset shifts a track against the others (> 0: its sends
+    // are delayed more, < 0: the other inputs of its targets wait for it).
+    std::vector<int64_t> out ((size_t) numTracks, 0);
+    for (const int t : order)
     {
         const auto& track = in.tracks[(size_t) t];
+        input[(size_t) t] = std::clamp<int64_t> (input[(size_t) t], 0, maxCompensation);
         const int effects = in.automatic ? sumOf (track.effects) : 0;
-        p.trackLatency[(size_t) t] = std::min (maxCompensation, p.trackInput[(size_t) t] + effects);
-        align[(size_t) t] = (int64_t) p.trackLatency[(size_t) t] - std::clamp (track.offset, -maxCompensation, maxCompensation);
-        master = std::max (master, align[(size_t) t]);
+        p.trackLatency[(size_t) t] = (int) std::min<int64_t> (maxCompensation, input[(size_t) t] + effects);
+        out[(size_t) t] = (int64_t) p.trackLatency[(size_t) t] - std::clamp (track.offset, -maxCompensation, maxCompensation);
+        for (const auto& r : track.sends (t))
+            if (valid (r))
+                input[(size_t) r.to] = std::max (input[(size_t) r.to], out[(size_t) t]);
     }
-    master = std::clamp<int64_t> (master, 0, maxCompensation);
-    p.masterInput = (int) master;
-    p.trackInput[0] = p.masterInput;
+    for (int t = 0; t < numTracks; ++t)
+        p.trackInput[(size_t) t] = (int) std::clamp<int64_t> (input[(size_t) t], 0, maxCompensation);
+    p.masterInput = p.trackInput[0];
 
     for (size_t i = 0; i < in.channels.size(); ++i)
     {
@@ -61,7 +90,15 @@ LatencyPlan planCompensation (const LatencyInput& in)
         p.channelDelay[i] = std::clamp (p.trackInput[(size_t) trackOf (c)] - latencyOf (c.latency), 0, maxCompensation);
     }
     for (int t = 1; t < numTracks; ++t)
-        p.trackDelay[(size_t) t] = (int) std::clamp<int64_t> (master - align[(size_t) t], 0, maxCompensation);
+    {
+        for (const auto& r : in.tracks[(size_t) t].sends (t))
+        {
+            const int delay = valid (r) ? (int) std::clamp<int64_t> (p.trackInput[(size_t) r.to] - out[(size_t) t], 0, maxCompensation) : 0;
+            p.routeDelay[(size_t) t].push_back (delay);
+            if (r.to == 0 && ! r.sidechain)
+                p.trackDelay[(size_t) t] = delay;
+        }
+    }
 
     const int masterEffects = in.automatic ? sumOf (in.tracks[0].effects) : 0;
     p.trackLatency[0] = std::min (maxCompensation, p.masterInput + masterEffects);

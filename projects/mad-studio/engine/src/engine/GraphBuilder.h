@@ -113,6 +113,8 @@ private:
     std::map<juce::String, ChannelEntry> channels;
     std::vector<std::shared_ptr<MixerTrackNode>> tracks;
     std::map<juce::String, EffectEntry> effects;
+    /** Mixer sends by "from>to" (their level smoothing survives graph rebuilds). */
+    std::map<juce::String, std::shared_ptr<RouteNode>> routes;
     std::shared_ptr<const Timeline> currentTimeline;
     std::shared_ptr<const AutomationData> currentAutomation;
     juce::String structure;
@@ -123,7 +125,7 @@ private:
     LatencyInput planInput;
     LatencyPlan plan;
     std::map<const ChannelNode*, std::shared_ptr<CompensationDelay>> channelDelays;
-    std::map<const MixerTrackNode*, std::shared_ptr<CompensationDelay>> trackDelays;
+    std::map<const RouteNode*, std::shared_ptr<CompensationDelay>> routeDelays;
     std::shared_ptr<CompensationDelay> clickDelay;
 };
 

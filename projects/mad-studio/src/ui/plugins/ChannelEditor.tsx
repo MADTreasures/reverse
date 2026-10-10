@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { channelTarget } from '../../model/automationTargets';
 import { stepKey } from '../../model/patterns';
 import { formatPan } from '../../model/timing';
@@ -11,6 +12,7 @@ import { Knob } from '../controls/Knob';
 import { WindowFrame } from '../workspace/WindowFrame';
 import { openPianoRoll } from '../workspace/windows';
 import { AutomationEditor } from './AutomationEditor';
+import { ChannelSettingsPanel } from './ChannelSettingsPanel';
 import { PreviewButton } from './common';
 import { PluginWrapper } from './PluginWrapper';
 import { SamplerEditor } from './SamplerEditor';
@@ -46,8 +48,11 @@ function kindIcon(channel: Channel) {
 export function ChannelEditor({ channelId }: { channelId: string }) {
   const channel = useStore((s) => s.project.channels.find((c) => c.id === channelId));
   const mixer = useStore((s) => s.project.mixer);
+  const [tab, setTab] = useState<'instrument' | 'misc'>('instrument');
   if (!channel) return null;
   const isAutomation = channel.kind === 'automation';
+  const hasSettings = channel.kind === 'synth' || channel.kind === 'plugin' || (channel.kind === 'sampler' && !channel.audioClip);
+  const showMisc = hasSettings && tab === 'misc';
 
   return (
     <WindowFrame id={`channel:${channelId}`} title={`${channel.name} – ${kindLabel(channel)}`} icon={kindIcon(channel)} accent={channel.color}>
@@ -111,10 +116,21 @@ export function ChannelEditor({ channelId }: { channelId: string }) {
               </button>
             </>
           )}
+          {hasSettings && (
+            <div className="seg channel-tabs" role="tablist" aria-label="Channel settings page">
+              <button role="tab" aria-selected={tab === 'instrument'} className={tab === 'instrument' ? 'active' : ''} onClick={() => setTab('instrument')}>
+                {channel.kind === 'plugin' ? 'Plugin' : 'Instrument'}
+              </button>
+              <button role="tab" aria-selected={tab === 'misc'} className={tab === 'misc' ? 'active' : ''} data-hint="Polyphony, portamento and arpeggiator (FL Studio: channel settings › Misc)" onClick={() => setTab('misc')}>
+                Misc
+              </button>
+            </div>
+          )}
         </div>
-        {channel.kind === 'synth' && <SynthEditor channel={channel} />}
-        {channel.kind === 'sampler' && <SamplerEditor channel={channel} />}
-        {channel.kind === 'plugin' && <PluginWrapper instanceKey={instanceKeyForChannel(channel.id)} plugin={channel.plugin} title={`${channel.name} – ${channel.plugin.name}`} />}
+        {showMisc && (channel.kind === 'synth' || channel.kind === 'plugin' || channel.kind === 'sampler') && <ChannelSettingsPanel channel={channel} />}
+        {!showMisc && channel.kind === 'synth' && <SynthEditor channel={channel} />}
+        {!showMisc && channel.kind === 'sampler' && <SamplerEditor channel={channel} />}
+        {!showMisc && channel.kind === 'plugin' && <PluginWrapper instanceKey={instanceKeyForChannel(channel.id)} plugin={channel.plugin} title={`${channel.name} – ${channel.plugin.name}`} />}
         {channel.kind === 'automation' && <AutomationEditor channel={channel} />}
       </div>
     </WindowFrame>

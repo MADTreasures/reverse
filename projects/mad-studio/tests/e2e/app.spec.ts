@@ -489,6 +489,81 @@ test('piano roll tools: glue and quick chop, arpeggiate with live preview, stamp
   expect(generated.every((n: any) => [0, 2, 4, 5, 7, 9, 11].includes(n.key % 12))).toBe(true);
 });
 
+test('graph editor edits step properties; channel settings drive the arpeggiator', async ({ page }) => {
+  await boot(page);
+  const info = await page.evaluate(() => {
+    const m = window.__madStudio;
+    const s = m.useStore.getState();
+    const hat = s.project.channels.find((c: any) => c.name === 'Hat Closed');
+    const pat = s.project.patterns.find((p: any) => p.name === 'Hats');
+    m.actions.selectPattern(pat.id);
+    m.actions.selectChannel(hat.id);
+    return { channelId: hat.id, patternId: pat.id };
+  });
+  const notes = () =>
+    page.evaluate(({ channelId, patternId }) => window.__madStudio.useStore.getState().project.patterns.find((p: any) => p.id === patternId).notes[channelId], info);
+  const rack = page.locator('[data-window="channelRack"]');
+  await rack.getByRole('button', { name: 'Graph editor' }).click();
+  const graph = rack.locator('.graph-canvas');
+  await expect(graph).toBeVisible();
+  await graph.scrollIntoViewIfNeeded();
+
+  // Velocity lane: drag along the bottom of the first step lowers its velocity; right-drag resets.
+  const box = (await graph.boundingBox())!;
+  const first = (await notes()).find((n: any) => n.start === 0);
+  await page.mouse.move(box.x + 8, box.y + box.height - 10);
+  await page.mouse.down();
+  await page.mouse.up();
+  const lowered = (await notes()).find((n: any) => n.start === 0);
+  expect(lowered.velocity).toBeLessThan(first.velocity);
+
+  // Note pitch lane: the top of the lane is two octaves above the step key; a step keeps showing as a step.
+  await rack.getByRole('tab', { name: 'Note pitch' }).click();
+  await page.mouse.click(box.x + 8, box.y + 6);
+  expect((await notes()).find((n: any) => n.start === 0).key).toBeGreaterThan(80);
+  await expect(rack.locator('.rack-row.selected .step.on').first()).toBeVisible();
+  await page.mouse.click(box.x + 8, box.y + 40, { button: 'right' });
+  expect((await notes()).find((n: any) => n.start === 0).key).toBe(60);
+
+  // Shift lane: a step delayed inside its cell is still step 1.
+  await rack.getByRole('tab', { name: 'Shift' }).click();
+  await page.mouse.click(box.x + 8, box.y + box.height / 2);
+  const shifted = (await notes()).find((n: any) => n.start > 0 && n.start < 24);
+  expect(shifted).toBeTruthy();
+
+  // Channel settings: the arpeggiator turns the lead's chords into arpeggios in the timeline.
+  const timeline = await page.evaluate(() => {
+    const m = window.__madStudio;
+    const s = m.useStore.getState();
+    const chords = s.project.channels.find((c: any) => c.name === 'Chords');
+    m.actions.updateChannelSettings(chords.id, (st: any) => {
+      st.arp.direction = 'up';
+      st.arp.time = 24;
+    });
+    m.actions.updateChannelSettings(chords.id, (st: any) => void (st.mono = true));
+    const project = m.useStore.getState().project;
+    const pat = project.patterns.find((p: any) => p.name === 'Chords');
+    return { settings: project.channels.find((c: any) => c.id === chords.id).settings, notes: pat.notes[chords.id].length };
+  });
+  expect(timeline.settings).toMatchObject({ mono: true, arp: { direction: 'up', time: 24 } });
+  // The channel window shows the settings.
+  await page.evaluate(() => {
+    const m = window.__madStudio;
+    const chords = m.useStore.getState().project.channels.find((c: any) => c.name === 'Chords');
+    m.runCommand && m.actions.selectChannel(chords.id);
+  });
+  await rack.locator('.rack-row', { hasText: 'Chords' }).locator('.channel-name').click();
+  const win = page.locator('[data-window^="channel:"]').last();
+  await win.getByRole('tab', { name: 'Misc' }).click();
+  await expect(win.getByLabel('Arpeggiator direction')).toHaveValue('up');
+  await win.getByLabel('Arpeggiator direction').selectOption('off');
+  const after = await page.evaluate(() => {
+    const s = window.__madStudio.useStore.getState();
+    return s.project.channels.find((c: any) => c.name === 'Chords').settings;
+  });
+  expect(after).toMatchObject({ mono: true, arp: { direction: 'off' } });
+});
+
 test('playlist: clip menu and mute tool mute clips, track menu inserts a track, double-click opens the piano roll', async ({ page }) => {
   await boot(page);
   await page.evaluate(() => window.__madStudio.actions.setUi((d: any) => void (d.windows.channelRack.open = false)));

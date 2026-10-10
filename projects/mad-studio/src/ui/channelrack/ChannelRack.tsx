@@ -1,6 +1,6 @@
 import { memo, useEffect, useMemo, useRef, type DragEvent, type PointerEvent as ReactPointerEvent, type WheelEvent as ReactWheelEvent } from 'react';
 import { engine } from '../../audio/engine';
-import { findPattern, patternLength, patternSteps, stepKey, stepView } from '../../model/patterns';
+import { findPattern, isStepNote, patternLength, patternSteps, stepIndex, stepView } from '../../model/patterns';
 import { evaluateAutomation } from '../../model/automation';
 import { channelTarget } from '../../model/automationTargets';
 import { TICKS_PER_STEP, formatPan, formatPosition } from '../../model/timing';
@@ -29,7 +29,8 @@ import {
 import { useStore, type RackFilter } from '../../store/store';
 import { prepareCanvas, useFrame } from '../animation';
 import { DragNumber } from '../controls/DragNumber';
-import { IconCurve, IconPlug, IconPlus, IconRack } from '../controls/Icons';
+import { IconCurve, IconGraph, IconPlug, IconPlus, IconRack } from '../controls/Icons';
+import { GraphEditor } from './GraphEditor';
 import { Knob } from '../controls/Knob';
 import { audioFilesFromDrop, getDragItem, hasDragItem, hasFiles, sampleInfoFor } from '../dnd';
 import { setHint } from '../hint';
@@ -86,6 +87,10 @@ export function ChannelRack() {
   const bars = pattern ? patternLength(pattern, beatsPerBar) / (beatsPerBar * 96) : 1;
   const markerRef = useRef<HTMLDivElement>(null);
   const ledRowRef = useRef<HTMLDivElement>(null);
+  const graphOpen = useStore((s) => s.ui.graphEditor);
+  const selectedId = useStore((s) => s.ui.selectedChannelId);
+  const graphChannel = graphOpen ? channels.find((c) => c.id === selectedId && c.kind !== 'automation') : undefined;
+  const graphNotes = useStore((s) => (graphChannel ? findPattern(s.project, s.ui.selectedPatternId)?.notes[graphChannel.id] : undefined));
 
   // FL Studio channel rack keys: Up/Down select, Alt+Up/Down move, Alt+C clone, Alt+Del delete,
   // Ctrl+L route to a free mixer track, Shift+Ctrl+Left/Right rotate the steps.
@@ -192,6 +197,14 @@ export function ChannelRack() {
         />
         <span className="label">Swing</span>
       </div>
+      <button
+        className={`icon-btn ${graphOpen ? 'active' : ''}`}
+        aria-label="Graph editor"
+        data-hint="Graph editor: pitch, velocity, release, fine pitch, panning, Mod X/Y and shift of the selected channel's steps"
+        onClick={() => setUi((u) => void (u.graphEditor = !u.graphEditor))}
+      >
+        <IconGraph size={13} />
+      </button>
       <div className="tb-group" data-hint="Minimum pattern length in bars">
         <span className="label">Bars</span>
         <DragNumber
@@ -229,6 +242,12 @@ export function ChannelRack() {
             <ChannelRow key={ch.id} channel={ch} index={i} patternId={patternId} stepCount={stepCount} />
           ))}
         </div>
+        {graphOpen &&
+          (graphChannel ? (
+            <GraphEditor channel={graphChannel} patternId={patternId} notes={graphNotes} stepCount={stepCount} stepX={stepX} stepWidth={STEP_W} width={stepsWidth(stepCount)} />
+          ) : (
+            <div className="graph-editor empty faint">Select an instrument channel to edit its steps in the graph editor.</div>
+          ))}
         <div className="rack-footer">
           <button className="btn" data-hint="Add a channel (synth, drum sound, sampler)" onClick={(e) => showMenu(e, addChannelMenu())}>
             <IconPlus size={12} /> Add channel
@@ -464,7 +483,6 @@ function StepArea({ channel, patternId, notes, stepCount }: StepAreaProps) {
     const x = e.clientX - rect.left;
     const i = Array.from({ length: stepCount }, (_, k) => k).find((k) => x >= stepX(k) && x < stepX(k) + STEP_W);
     if (i === undefined || !(view.steps[i] > 0)) return;
-    const key = stepKey(channel);
     const delta = e.deltaY < 0 ? 0.05 : -0.05;
     let vel = 0;
     updateNotes(
@@ -472,7 +490,7 @@ function StepArea({ channel, patternId, notes, stepCount }: StepAreaProps) {
       channel.id,
       (list) => {
         for (const n of list) {
-          if (n.start === i * TICKS_PER_STEP && n.key === key) {
+          if (isStepNote(n) && stepIndex(n) === i) {
             n.velocity = Math.min(1, Math.max(0.05, n.velocity + delta));
             vel = n.velocity;
           }

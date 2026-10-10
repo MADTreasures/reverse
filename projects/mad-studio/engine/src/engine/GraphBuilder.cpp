@@ -122,6 +122,7 @@ bool GraphBuilder::updateChannels()
                 auto* s = static_cast<SynthInstrument*> (node.instrument.get());
                 for (size_t i = 0; i < ch.synthParams.size(); ++i)
                     s->params[i].setBase (ch.synthParams[i]);
+                s->voiceLimit.store (ch.maxVoices, std::memory_order_relaxed);
                 break;
             }
             case ChannelKind::sampler:
@@ -129,6 +130,7 @@ bool GraphBuilder::updateChannels()
                 auto* s = static_cast<SamplerInstrument*> (node.instrument.get());
                 for (size_t i = 0; i < ch.samplerParams.size(); ++i)
                     s->params[i].setBase (ch.samplerParams[i]);
+                s->voiceLimit.store (ch.maxVoices, std::memory_order_relaxed);
                 structural = resolveSamples (entry, ch) || structural;
                 break;
             }
@@ -227,6 +229,38 @@ bool GraphBuilder::updateMixer()
         if (seenEffects.count (it->first) == 0)
         {
             it = effects.erase (it);
+            structural = true;
+        }
+        else
+        {
+            ++it;
+        }
+    }
+
+    // Mixer sends: a node per send, keyed by its tracks, so the level smoothing carries over.
+    std::set<juce::String> seenRoutes;
+    for (size_t i = 1; i < model.mixer.size(); ++i)
+    {
+        for (const auto& r : model.mixer[i].routes)
+        {
+            const auto key = juce::String ((int) i) + ">" + juce::String (r.to);
+            seenRoutes.insert (key);
+            auto& node = routes[key];
+            if (node == nullptr)
+            {
+                node = std::make_shared<RouteNode>();
+                node->level.setBase (r.level);
+                node->prepare (rate);
+                structural = true;
+            }
+            node->level.setBase (r.level);
+        }
+    }
+    for (auto it = routes.begin(); it != routes.end();)
+    {
+        if (seenRoutes.count (it->first) == 0)
+        {
+            it = routes.erase (it);
             structural = true;
         }
         else
@@ -357,6 +391,11 @@ LatencyInput GraphBuilder::latencyInput() const
                 t.effects.push_back (latency);
             }
             t.offset = (int) std::lround (model.mixer[i].latencyOffsetMs * 0.001 * engine.getSampleRate());
+            t.routed = true;
+            if (i > 0)
+                for (const auto& r : model.mixer[i].routes)
+                    if (r.to >= 0 && r.to < (int) tracks.size())
+                        t.routes.push_back ({ r.to, r.sidechain });
         }
         in.tracks.push_back (std::move (t));
     }
@@ -467,6 +506,9 @@ void GraphBuilder::publish()
             if (fx.enabled && it != effects.end())
                 key << pointerKey (it->second.effect.get()) << ",";
         }
+        key << ">";
+        for (const auto& r : model.mixer[i].routes)
+            key << r.to << (r.sidechain ? "s" : "") << ",";
     }
     key << "|pdc" << (planInput.automatic ? 1 : 0) << (model.pdcAutomation ? "a" : "") << ":";
     for (const auto& c : planInput.channels)
@@ -504,16 +546,36 @@ void GraphBuilder::publish()
         if (it->second.slot != nullptr)
             snap->keepAlive.push_back (it->second.slot);
     }
-    std::set<const MixerTrackNode*> liveTracks;
+    std::set<const RouteNode*> liveRoutes;
     for (size_t i = 0; i < tracks.size(); ++i)
     {
         GraphSnapshot::TrackEntry entry;
         entry.node = tracks[i].get();
         snap->keepAlive.push_back (tracks[i]);
-        const MixerTrackNode* trackKey = tracks[i].get();
-        liveTracks.insert (trackKey);
-        entry.delaySamples = i < plan.trackDelay.size() ? plan.trackDelay[i] : 0;
-        entry.delay = delayFor (trackDelays, trackKey, entry.delaySamples, 2, *snap);
+        if (i > 0 && i < model.mixer.size())
+        {
+            // Sends in the same order as the plan's route delays.
+            size_t r = 0;
+            for (const auto& route : model.mixer[i].routes)
+            {
+                if (route.to < 0 || route.to >= (int) tracks.size())
+                    continue;
+                const size_t slot = r++;
+                const auto it = routes.find (juce::String ((int) i) + ">" + juce::String (route.to));
+                if (it == routes.end())
+                    continue;
+                GraphSnapshot::RouteEntry send;
+                send.to = route.to;
+                send.sidechain = route.sidechain;
+                send.node = it->second.get();
+                send.delaySamples = i < plan.routeDelay.size() && slot < plan.routeDelay[i].size() ? plan.routeDelay[i][slot] : 0;
+                const RouteNode* routeKey = send.node;
+                send.delay = delayFor (routeDelays, routeKey, send.delaySamples, 2, *snap);
+                liveRoutes.insert (routeKey);
+                snap->keepAlive.push_back (it->second);
+                entry.routes.push_back (send);
+            }
+        }
         if (i < model.mixer.size())
         {
             for (const auto& fx : model.mixer[i].effects)
@@ -529,6 +591,13 @@ void GraphBuilder::publish()
         }
         snap->tracks.push_back (std::move (entry));
     }
+    for (const auto& t : snap->tracks)
+        for (const auto& r : t.routes)
+            if (r.sidechain)
+                snap->tracks[(size_t) r.to].sidechainFed = true;
+    snap->order = processingOrder (model.mixer);
+    snap->order.erase (std::remove_if (snap->order.begin(), snap->order.end(), [&] (int t) { return t < 0 || t >= (int) snap->tracks.size(); }),
+                       snap->order.end());
     snap->timeline = currentTimeline;
     snap->automation = bindAutomation();
     snap->latency = plan.total;
@@ -546,8 +615,8 @@ void GraphBuilder::publish()
     // Delays of removed nodes (the old snapshot keeps them alive while it is in use).
     for (auto it = channelDelays.begin(); it != channelDelays.end();)
         it = liveChannels.count (it->first) == 0 ? channelDelays.erase (it) : std::next (it);
-    for (auto it = trackDelays.begin(); it != trackDelays.end();)
-        it = liveTracks.count (it->first) == 0 ? trackDelays.erase (it) : std::next (it);
+    for (auto it = routeDelays.begin(); it != routeDelays.end();)
+        it = liveRoutes.count (it->first) == 0 ? routeDelays.erase (it) : std::next (it);
     engine.snapshots.publish (std::move (snap));
 }
 

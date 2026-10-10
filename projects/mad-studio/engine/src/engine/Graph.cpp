@@ -159,14 +159,21 @@ void MixerTrackNode::prepare (double sampleRate, int maxBlock)
         s->prepare (sampleRate, 0.01);
     busL.assign ((size_t) maxBlock, 0.0f);
     busR.assign ((size_t) maxBlock, 0.0f);
+    sidechainL.assign ((size_t) maxBlock, 0.0f);
+    sidechainR.assign ((size_t) maxBlock, 0.0f);
     peakL.reset();
     peakR.reset();
 }
 
-void MixerTrackNode::clearBus (int n) noexcept
+void MixerTrackNode::clearBus (int n, bool sidechain) noexcept
 {
     std::fill (busL.begin(), busL.begin() + n, 0.0f);
     std::fill (busR.begin(), busR.begin() + n, 0.0f);
+    if (sidechain)
+    {
+        std::fill (sidechainL.begin(), sidechainL.begin() + n, 0.0f);
+        std::fill (sidechainR.begin(), sidechainR.begin() + n, 0.0f);
+    }
 }
 
 void MixerTrackNode::addInput (const float* const* inputs, int numInputs, int n) noexcept
@@ -187,14 +194,18 @@ void MixerTrackNode::addInput (const float* const* inputs, int numInputs, int n)
     }
 }
 
-void MixerTrackNode::process (const BlockContext& ctx, const std::vector<Effect*>& chain) noexcept
+void MixerTrackNode::process (const BlockContext& ctx, const std::vector<Effect*>& chain, bool sidechain) noexcept
 {
     const int n = ctx.numSamples;
     float* l = busL.data();
     float* r = busR.data();
 
     for (auto* fx : chain)
+    {
+        fx->sidechainLeft = sidechain ? sidechainL.data() : nullptr;
+        fx->sidechainRight = sidechain ? sidechainR.data() : nullptr;
         fx->process (ctx, l, r);
+    }
 
     const float muteTarget = audible.load (std::memory_order_relaxed);
     double lastPan = panValue.current() + 10.0;
@@ -226,6 +237,32 @@ void MixerTrackNode::process (const BlockContext& ctx, const std::vector<Effect*
 
     peakL.push (l, n);
     peakR.push (r, n);
+}
+
+//==============================================================================
+void RouteNode::prepare (double sampleRate)
+{
+    if (prepared)
+        return;
+    gain.prepare (sampleRate, 0.01);
+    gain.reset (volumeToGain (level.getBase()));
+    prepared = true;
+}
+
+void RouteNode::addTo (const BlockContext& ctx, const float* srcL, const float* srcR, float* destL, float* destR) noexcept
+{
+    const int n = ctx.numSamples;
+    for (int c = 0; c < ctx.numChunks; ++c)
+    {
+        const int c0 = c * chunkSize, c1 = std::min (n, c0 + chunkSize);
+        gain.setTarget (volumeToGain (level.value (ctx, c)));
+        for (int i = c0; i < c1; ++i)
+        {
+            const float g = gain.next();
+            destL[i] += srcL[i] * g;
+            destR[i] += srcR[i] * g;
+        }
+    }
 }
 
 } // namespace mad

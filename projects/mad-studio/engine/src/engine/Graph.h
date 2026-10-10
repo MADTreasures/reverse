@@ -76,11 +76,13 @@ public:
     std::atomic<bool> monitor { false };
 
     std::vector<float> busL, busR;
+    /** Sidechain input (sends marked "sidechain"); only cleared and used when something feeds it. */
+    std::vector<float> sidechainL, sidechainR;
 
     void prepare (double sampleRate, int maxBlock);
-    void clearBus (int n) noexcept;
+    void clearBus (int n, bool sidechain = false) noexcept;
     void addInput (const float* const* inputs, int numInputs, int n) noexcept;
-    void process (const BlockContext& ctx, const std::vector<Effect*>& chain) noexcept;
+    void process (const BlockContext& ctx, const std::vector<Effect*>& chain, bool sidechain = false) noexcept;
 
     float peakLeft() const noexcept { return peakL.peak(); }
     float peakRight() const noexcept { return peakR.peak(); }
@@ -88,6 +90,23 @@ public:
 private:
     dsp::OnePole panValue, faderGain, muteGain;
     PeakWindow peakL, peakR;
+};
+
+//==============================================================================
+/** A mixer send: level (knob position, volumeToGain) with smoothing that survives graph rebuilds. */
+class RouteNode
+{
+public:
+    AutoParam level { 0.8f };
+
+    void prepare (double sampleRate);
+
+    /** Adds `src` × the send gain to `dest` (both stereo, n samples). */
+    void addTo (const BlockContext& ctx, const float* srcL, const float* srcR, float* destL, float* destR) noexcept;
+
+private:
+    dsp::OnePole gain;
+    bool prepared = false;
 };
 
 //==============================================================================
@@ -123,16 +142,26 @@ struct GraphSnapshot
         CompensationDelay* delay = nullptr; // plugin delay compensation before the track bus
         int delaySamples = 0;
     };
+    struct RouteEntry
+    {
+        int to = 0;
+        bool sidechain = false;
+        RouteNode* node = nullptr;
+        CompensationDelay* delay = nullptr; // plugin delay compensation of this send
+        int delaySamples = 0;
+    };
     struct TrackEntry
     {
         MixerTrackNode* node = nullptr;
         std::vector<Effect*> chain;
-        CompensationDelay* delay = nullptr; // plugin delay compensation before the master bus
-        int delaySamples = 0;
+        std::vector<RouteEntry> routes; // sends (the master has none)
+        bool sidechainFed = false;      // something sends sidechain audio to this track
     };
 
     std::vector<ChannelEntry> channels;
     std::vector<TrackEntry> tracks; // index 0 = master
+    /** Track indices in processing order (senders before targets, the master last). */
+    std::vector<int> order;
     std::shared_ptr<const Timeline> timeline;
     std::unique_ptr<AutomationBinding> automation;
     /** How far the output lags behind the transport (plugin delay compensation); the

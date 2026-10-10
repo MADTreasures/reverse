@@ -185,10 +185,12 @@ public:
                 gainBuffer[(size_t) i] = makeup.next();
         }
 
-        compressor.process (left, right, ctx.numSamples,
-                            [&] (int offset) -> const dsp::DynamicsCompressor::Params& {
-                                return chunkParams[(size_t) ctx.chunkOf (offset)];
-                            });
+        // Sidechain (FL Studio: "Sidechain to this track"): the detector hears the sidechain input.
+        const bool keyed = param (6, ctx, 0) >= 0.5f && sidechainLeft != nullptr && sidechainRight != nullptr;
+        compressor.process (
+            left, right, ctx.numSamples,
+            [&] (int offset) -> const dsp::DynamicsCompressor::Params& { return chunkParams[(size_t) ctx.chunkOf (offset)]; },
+            keyed ? sidechainLeft : nullptr, keyed ? sidechainRight : nullptr);
 
         for (int i = 0; i < ctx.numSamples; ++i)
         {

@@ -3,7 +3,8 @@ import { createEmptyProject, createPattern, createSynthChannel } from './default
 import { DEFAULT_GLIDE_TIME, MAX_NOTE_BENDS, minPitch, modXFactor, noteResonance, noteStyle, noteValue, pitchAt, pitchCurve, releaseScale, setNoteValue } from './notes';
 import { parseProject } from './serialization';
 import { patternTimeline, songTimeline } from './timeline';
-import type { Note, Project } from './types';
+import { DEFAULT_CHANNEL_SETTINGS } from './channelSettings';
+import type { ChannelSettings, Note, Project } from './types';
 
 function setup(notes: Omit<Note, 'id'>[]): { project: Project; channelId: string; patternId: string } {
   const project = createEmptyProject();
@@ -146,5 +147,70 @@ describe('note properties in project files', () => {
     expect(notes[1]).toEqual({ id: 'n1', key: 62, start: 24, length: 24, velocity: 0.8, slide: true });
     // Out-of-range values are clamped, the default Mod X is dropped, a note is slide or porta, not both.
     expect(notes[2]).toEqual({ id: 'x', key: 64, start: 48, length: 24, velocity: 0.8, fine: 1200, color: 15, slide: true });
+  });
+});
+
+describe('channel settings in the timeline', () => {
+  const withSettings = (notes: Omit<Note, 'id'>[], settings: Partial<Omit<ChannelSettings, 'arp'>> & { arp?: Partial<ChannelSettings['arp']> }) => {
+    const ctx = setup(notes);
+    const ch = ctx.project.channels[0];
+    ch.settings = { ...DEFAULT_CHANNEL_SETTINGS, ...settings, arp: { ...DEFAULT_CHANNEL_SETTINGS.arp, ...settings.arp } };
+    return patternTimeline(ctx.project, ctx.patternId).events;
+  };
+
+  it('arpeggiates held chords on the arpeggio grid', () => {
+    const chord = [60, 64, 67].map((key) => ({ key, start: 0, length: 96, velocity: 0.8 }));
+    const up = withSettings(chord, { arp: { direction: 'up', time: 24, gate: 0.5 } });
+    expect(up.map((e) => [e.tick, e.key, e.length])).toEqual([
+      [0, 60, 12],
+      [24, 64, 12],
+      [48, 67, 12],
+      [72, 60, 12],
+    ]);
+    const twoOctaves = withSettings(chord, { arp: { direction: 'down', time: 24, range: 2 } }).map((e) => e.key);
+    expect(twoOctaves).toEqual([79, 76, 72, 67]);
+    const repeated = withSettings(chord, { arp: { direction: 'up', time: 24, repeat: 2 } }).map((e) => e.key);
+    expect(repeated).toEqual([60, 60, 64, 64]);
+  });
+
+  it('expands a single note to the arpeggiator chord and restarts with each phrase', () => {
+    const events = withSettings(
+      [
+        { key: 57, start: 0, length: 48, velocity: 0.8 },
+        { key: 60, start: 100, length: 24, velocity: 0.8 },
+      ],
+      { arp: { direction: 'up', time: 24, chord: 'minor' } },
+    );
+    expect(events.map((e) => [e.tick, e.key])).toEqual([
+      [0, 57],
+      [24, 60],
+      [100, 60],
+    ]);
+  });
+
+  it('keeps one note at a time in mono and glides in porta mode', () => {
+    const notes = [
+      { key: 60, start: 0, length: 96, velocity: 0.8 },
+      { key: 64, start: 0, length: 96, velocity: 0.8 },
+      { key: 67, start: 48, length: 96, velocity: 0.8 },
+    ];
+    const mono = withSettings(notes, { mono: true });
+    expect(mono.map((e) => [e.tick, e.key, e.length])).toEqual([
+      [0, 64, 48],
+      [48, 67, 96],
+    ]);
+    const porta = withSettings(notes, { mono: true, porta: true, glide: 0.25 });
+    expect(porta[1]).toMatchObject({ key: 67, glideFrom: -3, glideTime: 0.25 });
+    expect(porta[0].glideFrom).toBeUndefined();
+  });
+
+  it('stores only settings that differ from the defaults', () => {
+    const { project } = setup([]);
+    const json = JSON.parse(JSON.stringify(project)) as { channels: Record<string, unknown>[] };
+    json.channels[0].settings = { polyphony: 99, mono: true, arp: { direction: 'up', range: 9, gate: 2 } };
+    const back = parseProject(json).channels[0];
+    expect(back.settings).toMatchObject({ polyphony: 64, mono: true, porta: false, arp: { direction: 'up', range: 4, gate: 1, repeat: 1 } });
+    json.channels[0].settings = { polyphony: 0 };
+    expect(parseProject(json).channels[0].settings).toBeUndefined();
   });
 });

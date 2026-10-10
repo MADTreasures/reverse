@@ -187,7 +187,7 @@ void DynamicsCompressor::beginDivision (const Params& p) noexcept
     }
 }
 
-void DynamicsCompressor::processFrames (float* left, float* right, int n) noexcept
+void DynamicsCompressor::processFrames (float* left, float* right, int n, const float* keyLeft, const float* keyRight) noexcept
 {
     float* const delayL = preDelay[0].data();
     float* const delayR = preDelay[1].data();
@@ -201,7 +201,8 @@ void DynamicsCompressor::processFrames (float* left, float* right, int n) noexce
         const float inL = left[i], inR = right[i];
         delayL[writeIndex] = inL;
         delayR[writeIndex] = inR;
-        const float absInput = std::max (std::abs (inL), std::abs (inR));
+        const float absInput = keyLeft != nullptr && keyRight != nullptr ? std::max (std::abs (keyLeft[i]), std::abs (keyRight[i]))
+                                                                         : std::max (std::abs (inL), std::abs (inR));
 
         const float shapedInput = saturate (absInput, k);
         const float attenuation = absInput <= 0.0001f ? 1.0f : shapedInput / absInput;

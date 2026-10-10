@@ -25,8 +25,17 @@ export function patternSteps(pattern: Pattern, beatsPerBar: number): number {
   return Math.max(stepsPerBar(beatsPerBar), Math.ceil(steps));
 }
 
-export function isStepNote(note: Note, key: number): boolean {
-  return note.key === key && note.start % TICKS_PER_STEP === 0 && note.length <= TICKS_PER_STEP;
+/**
+ * A note the step sequencer can show as a step: at most one step long. Like FL Studio's steps it may
+ * have its own pitch and a small delay inside its step (the graph editor's "Note pitch" and "Shift").
+ */
+export function isStepNote(note: Note): boolean {
+  return note.length <= TICKS_PER_STEP;
+}
+
+/** Step cell a note belongs to. */
+export function stepIndex(note: Note): number {
+  return Math.floor(note.start / TICKS_PER_STEP);
 }
 
 export interface StepView {
@@ -36,23 +45,32 @@ export interface StepView {
   steps: number[];
 }
 
-export function stepView(notes: Note[] | undefined, channel: Channel, stepCount: number): StepView {
+export function stepView(notes: Note[] | undefined, _channel: Channel, stepCount: number): StepView {
   const steps = new Array<number>(stepCount).fill(0);
   if (!notes || notes.length === 0) return { representable: true, steps };
-  const key = stepKey(channel);
   let representable = true;
   for (const n of notes) {
-    if (!isStepNote(n, key)) {
+    if (!isStepNote(n)) {
       representable = false;
       continue;
     }
-    const idx = n.start / TICKS_PER_STEP;
+    const idx = stepIndex(n);
     if (idx < stepCount) {
       if (steps[idx] > 0) representable = false;
       steps[idx] = Math.max(n.velocity, 0.01);
     }
   }
   return { representable, steps };
+}
+
+/** The notes of each step cell (graph editor), first note per cell. */
+export function stepNotes(notes: Note[] | undefined, stepCount: number): (Note | null)[] {
+  const cells = new Array<Note | null>(stepCount).fill(null);
+  for (const n of notes ?? []) {
+    const idx = stepIndex(n);
+    if (idx >= 0 && idx < stepCount && !cells[idx]) cells[idx] = n;
+  }
+  return cells;
 }
 
 export function songLength(project: Project): number {

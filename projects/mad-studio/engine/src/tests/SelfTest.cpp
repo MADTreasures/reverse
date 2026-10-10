@@ -946,6 +946,22 @@ void testNoteProperties()
         s.near (rms (l, 12000, 36000), 0.0, 1.0e-5, "synth note pan hard right: left silent");
         s.near (rms (r, 12000, 36000), std::sqrt (0.5), 2.0e-3, "synth note pan hard right: full level on the right");
     }
+    // Channel settings: a voice limit of 1 (Mono) ends A4 when A5 starts.
+    {
+        auto p = makeProject();
+        p.channels.push_back (sineSynth ("np_m"));
+        auto a = note ("np_m", 69, 384.0);
+        auto b = note ("np_m", 81, 288.0);
+        b.tick = 96.0;
+        std::vector<float> l, r;
+        renderWith (p, { a, b }, l, r);
+        const double both = rms (l, 28800, 52800);
+        p.channels[0].maxVoices = 1;
+        renderWith (p, { a, b }, l, r);
+        s.near (frequencyOf (l, 28800, 52800, 48000.0), 880.0, 4.0, "voice limit 1: only the newer note sounds");
+        s.check (rms (l, 28800, 52800) < both * 0.8, str ("voice limit 1: the older voice is gone (%g vs %g)", rms (l, 28800, 52800), both));
+        s.near (frequencyOf (l, 2400, 21600, 48000.0), 440.0, 3.0, "voice limit 1: the first note plays until then");
+    }
     // The pitch curve itself (notes.ts pitchCurve()).
     {
         NoteEvent e;
@@ -973,7 +989,7 @@ void testLatencyPlan()
     // 0; insert 2: dry; master insert of 50.
     LatencyInput in;
     in.channels = { { 1, 0 }, { 1, 300 }, { 2, 0 } };
-    in.tracks = { { { 50 }, 0 }, { { 100, 0 }, 0 }, { {}, 0 } };
+    in.tracks = { { { 50 }, 0, false, {} }, { { 100, 0 }, 0, false, {} }, { {}, 0, false, {} } };
     auto p = planCompensation (in);
     s.check (p.channelDelay == std::vector<int> ({ 300, 0, 0 }), "channels wait for the slowest channel of their track");
     s.check (p.trackInput == std::vector<int> ({ 400, 300, 0 }) && p.masterInput == 400, "aligned track and master inputs");
@@ -1017,7 +1033,7 @@ void testLatencyPlan()
     // Out-of-range values are clamped (tracks, latencies, offsets).
     LatencyInput wild;
     wild.channels = { { 99, 1 << 30 }, { -3, -50 } };
-    wild.tracks = { { {}, 0 }, { { -10 }, 0 } };
+    wild.tracks = { { {}, 0, false, {} }, { { -10 }, 0, false, {} } };
     p = planCompensation (wild);
     s.check (p.channelDelay == std::vector<int> ({ 0, maxCompensation }) && p.trackDelay[1] == 0 && p.total == maxCompensation,
              "latencies are clamped");

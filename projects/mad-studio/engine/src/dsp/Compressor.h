@@ -27,9 +27,11 @@ public:
     void reset();
 
     /** Processes stereo audio in place. `paramsForDivision` is called at the start of every
-        32-frame division with the frame offset inside this call. */
+        32-frame division with the frame offset inside this call. With `keyLeft`/`keyRight` the
+        detector listens to that signal instead (sidechain). */
     template <typename ParamSource>
-    void process (float* left, float* right, int numSamples, ParamSource&& paramsForDivision) noexcept
+    void process (float* left, float* right, int numSamples, ParamSource&& paramsForDivision, const float* keyLeft = nullptr,
+                  const float* keyRight = nullptr) noexcept
     {
         int i = 0;
         while (i < numSamples)
@@ -40,7 +42,7 @@ public:
                 divisionRemaining = divisionFrames;
             }
             const int n = std::min (divisionRemaining, numSamples - i);
-            processFrames (left + i, right + i, n);
+            processFrames (left + i, right + i, n, keyLeft != nullptr ? keyLeft + i : nullptr, keyRight != nullptr ? keyRight + i : nullptr);
             divisionRemaining -= n;
             i += n;
         }
@@ -55,7 +57,7 @@ private:
     static constexpr int maxPreDelayMask = maxPreDelayFrames - 1;
 
     void beginDivision (const Params& p) noexcept;
-    void processFrames (float* left, float* right, int n) noexcept;
+    void processFrames (float* left, float* right, int n, const float* keyLeft, const float* keyRight) noexcept;
     void setPreDelayTime (float seconds) noexcept;
 
     float kneeCurve (float x, float k) const noexcept;

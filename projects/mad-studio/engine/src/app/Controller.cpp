@@ -383,6 +383,9 @@ void Controller::handle (const juce::String& type, const juce::var& msg, const j
         c.channel = ids.uidFor (json::string (msg, "channelId"));
         c.key = std::clamp (json::integer (msg, "key", 60), 0, 127);
         c.velocity = (float) std::clamp (json::number (msg, "velocity", 0.8), 0.0, 1.0);
+        // Portamento of live notes (channel settings: Porta), computed by the renderer.
+        c.glideFrom = (float) std::clamp (json::number (msg, "glideFrom", 0.0), -128.0, 128.0);
+        c.glideTime = (float) std::clamp (json::number (msg, "glideTime", 0.1), 0.0, 60.0);
         if (c.handle == 0)
             return fail ("live.noteOn needs a non-zero handle");
         post (c);

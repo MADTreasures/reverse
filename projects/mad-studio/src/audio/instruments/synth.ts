@@ -1,3 +1,4 @@
+import { channelSettings } from '../../model/channelSettings';
 import { modXFactor, noteResonance, releaseScale } from '../../model/notes';
 import { midiToHz } from '../../model/timing';
 import type { SynthChannel, SynthParams } from '../../model/types';
@@ -35,6 +36,8 @@ export class SynthInstrument implements Instrument {
   readonly output: GainNode;
   readonly pannedOutput: GainNode;
   private params: SynthParams;
+  /** Voice limit (channel settings: polyphony, Mono = 1). */
+  private maxVoices = MAX_VOICES;
   private readonly voices = new Set<Voice>();
   /** Filters of sounding voices, so cutoff/resonance changes (automation!) reach held notes too. */
   private readonly voiceFilters = new Map<Voice, { filter: BiquadFilterNode; key: number; modX: number; modY: number | undefined }>();
@@ -60,6 +63,7 @@ export class SynthInstrument implements Instrument {
   update(channel: SynthChannel): void {
     const p = channel.synth;
     this.params = p;
+    this.setVoiceLimit(channel);
     const now = this.ctx.currentTime;
     this.output.gain.setTargetAtTime(p.gain, now, 0.01);
     this.pannedOutput.gain.setTargetAtTime(p.gain, now, 0.01);
@@ -75,6 +79,11 @@ export class SynthInstrument implements Instrument {
         filter.Q.setTargetAtTime(noteResonance(p.filter.resonance, modY), now, 0.01);
       }
     }
+  }
+
+  setVoiceLimit(channel: SynthChannel): void {
+    const st = channelSettings(channel);
+    this.maxVoices = st.mono ? 1 : st.polyphony > 0 ? Math.min(MAX_VOICES, st.polyphony) : MAX_VOICES;
   }
 
   trigger(key: number, velocity: number, t: number, duration: number | null, opts: TriggerOptions = {}): Voice | null {
@@ -221,7 +230,7 @@ export class SynthInstrument implements Instrument {
       this.voiceFilters.delete(voice);
       unlinkLfo();
     });
-    enforcePolyphony(this.voices, MAX_VOICES, t);
+    enforcePolyphony(this.voices, this.maxVoices, t);
     return voice;
   }
 
